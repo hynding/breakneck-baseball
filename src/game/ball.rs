@@ -22,6 +22,14 @@ pub const BALL_MASS: f32 = 0.148;
 /// Aerodynamic drag coefficient × reference area (simplified).
 pub const BALL_DRAG_FACTOR: f32 = 0.0003;
 
+/// Collision group for the ball; [`PLAYER_GROUP`] capsules are excluded from
+/// its filter. Outcomes are analytic, so a ball–player contact adds nothing —
+/// and a pitched ball glancing off the batter's collider would turn a strike
+/// into a wild deflection.
+pub const BALL_GROUP: Group = Group::GROUP_1;
+/// Collision group for player capsules.
+pub const PLAYER_GROUP: Group = Group::GROUP_2;
+
 // ── Marker components ─────────────────────────────────────────────────────────
 /// Marks the active baseball in play.
 #[derive(Component)]
@@ -104,6 +112,7 @@ fn spawn_ball(
             linear_damping: 0.0,
             angular_damping: 0.1,
         },
+        CollisionGroups::new(BALL_GROUP, !PLAYER_GROUP),
         ActiveEvents::COLLISION_EVENTS,
     ));
 }
@@ -120,7 +129,10 @@ fn apply_pitch(
     for event in events.read() {
         for (entity, mut vel) in &mut query {
             vel.linvel = event.velocity;
-            vel.angvel = Vec3::new(0.0, 0.0, -event.velocity.length() * 0.5);
+            // Backspin (about the axis perpendicular to a -Z pitch). Spin
+            // about the travel axis would grind against the mound while still
+            // in contact and kick the release sideways.
+            vel.angvel = Vec3::new(-event.velocity.length() * 0.5, 0.0, 0.0);
             commands.entity(entity).insert(InFlight);
         }
     }

@@ -79,7 +79,17 @@ fn spawn_field(
         }
     }
     spawn_bases(&mut commands, &mut meshes, &mut materials, &field);
-    spawn_lighting(&mut commands);
+    // The yard sun sits behind home plate so the house fronts and street —
+    // everything the batter looks at — are lit; a higher ambient keeps the
+    // small scene readable.
+    match field.scenery {
+        Scenery::Stadium => spawn_lighting(&mut commands, std::f32::consts::FRAC_PI_6, 0.15),
+        Scenery::FrontYard => spawn_lighting(
+            &mut commands,
+            std::f32::consts::PI + std::f32::consts::FRAC_PI_6,
+            0.35,
+        ),
+    }
 }
 
 /// The flat ground slab every scenery stands on (static collider for the ball).
@@ -272,18 +282,20 @@ fn spawn_front_yard(
     };
 
     // Our house behind home plate, with a door and windows facing the yard.
+    // Kept behind z = -12.5 so the broadcast camera (eye z = -12) never looks
+    // through it.
     let siding = Color::srgb(0.78, 0.72, 0.58);
     let roof = Color::srgb(0.35, 0.22, 0.18);
     let trim = Color::srgb(0.30, 0.34, 0.42);
     block(
         Vec3::new(14.0, 5.0, 7.0),
-        Vec3::new(0.0, 2.5, -10.0),
+        Vec3::new(0.0, 2.5, -16.5),
         siding,
     );
-    block(Vec3::new(15.0, 1.2, 8.0), Vec3::new(0.0, 5.6, -10.0), roof);
-    block(Vec3::new(1.4, 2.4, 0.2), Vec3::new(0.0, 1.2, -6.4), trim); // door
-    block(Vec3::new(2.0, 1.4, 0.2), Vec3::new(-4.0, 2.6, -6.4), trim); // window
-    block(Vec3::new(2.0, 1.4, 0.2), Vec3::new(4.0, 2.6, -6.4), trim); // window
+    block(Vec3::new(15.0, 1.2, 8.0), Vec3::new(0.0, 5.6, -16.5), roof);
+    block(Vec3::new(1.4, 2.4, 0.2), Vec3::new(0.0, 1.2, -12.9), trim); // door
+    block(Vec3::new(2.0, 1.4, 0.2), Vec3::new(-4.0, 2.6, -12.9), trim); // window
+    block(Vec3::new(2.0, 1.4, 0.2), Vec3::new(4.0, 2.6, -12.9), trim); // window
 
     // The neighbours' houses across the street — clear those for a home run.
     let neighbour = Color::srgb(0.62, 0.68, 0.74);
@@ -379,8 +391,9 @@ fn spawn_outfield_wall(
 }
 
 // ── Lighting ──────────────────────────────────────────────────────────────────
-fn spawn_lighting(commands: &mut Commands) {
-    // Sunlight — angled to cast dramatic shadows.
+/// Sunlight angled to cast shadows, with the azimuth (`yaw`) chosen per
+/// scenery, plus an ambient fill so shadows aren't pitch-black.
+fn spawn_lighting(commands: &mut Commands, yaw: f32, ambient: f32) {
     commands.spawn((
         GameplayEntity,
         DirectionalLight {
@@ -389,16 +402,15 @@ fn spawn_lighting(commands: &mut Commands) {
             ..default()
         },
         Transform::from_rotation(Quat::from_euler(
-            EulerRot::XYZ,
+            EulerRot::YXZ,
+            yaw,
             -std::f32::consts::FRAC_PI_4,
-            std::f32::consts::FRAC_PI_6,
             0.0,
         )),
     ));
 
-    // Ambient fill so shadows aren't pitch-black.
     commands.insert_resource(AmbientLight {
         color: Color::WHITE,
-        brightness: 0.15,
+        brightness: ambient,
     });
 }

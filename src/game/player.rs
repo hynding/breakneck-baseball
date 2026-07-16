@@ -6,6 +6,7 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
+use crate::game::ball::PLAYER_GROUP;
 use crate::game::variant::FieldSpec;
 use crate::game::{GameState, GameplayEntity};
 
@@ -81,6 +82,7 @@ fn spawn_pitcher(
         Transform::from_xyz(0.0, 0.6 + 0.25, field.pitch_distance),
         RigidBody::KinematicPositionBased,
         Collider::capsule_y(0.6, 0.4),
+        CollisionGroups::new(PLAYER_GROUP, Group::ALL),
     ));
 }
 
@@ -102,6 +104,7 @@ fn spawn_batter(
         Transform::from_xyz(0.7, 0.6, 0.0),
         RigidBody::KinematicPositionBased,
         Collider::capsule_y(0.6, 0.4),
+        CollisionGroups::new(PLAYER_GROUP, Group::ALL),
     ));
 }
 
@@ -124,6 +127,7 @@ fn spawn_fielders(
             Transform::from_translation(*translation + Vec3::Y * 0.6),
             RigidBody::KinematicPositionBased,
             Collider::capsule_y(0.6, 0.4),
+            CollisionGroups::new(PLAYER_GROUP, Group::ALL),
         ));
     }
 }
