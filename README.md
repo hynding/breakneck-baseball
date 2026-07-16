@@ -25,12 +25,39 @@ src/
 
 ## Building
 
+### Desktop (native)
+
 ```sh
 cargo build
 cargo run
 ```
 
 > **Linux prerequisite:** `libasound2-dev` and `libudev-dev` must be installed for Bevy's audio/input backends.
+
+### Web (WASM)
+
+Play the game in a browser — no installation required for end-users.
+
+**One-time setup:**
+
+```sh
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli
+```
+
+**Build and serve:**
+
+```sh
+cargo build --release --target wasm32-unknown-unknown
+wasm-bindgen --out-dir web/out --target web target/wasm32-unknown-unknown/release/breakneck-baseball.wasm
+
+# Serve the web/ directory with any static file server, e.g.:
+python3 -m http.server --directory web 8080
+# Then open http://localhost:8080 in your browser.
+```
+
+> **Tip:** Use the `wasm-release` profile for a smaller download:
+> `cargo build --profile wasm-release --target wasm32-unknown-unknown`
 
 ## Controls (in-game)
 
