@@ -6,8 +6,8 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
-use crate::game::{ball::PitchEvent, GameState};
 use crate::game::field::{BASE_DISTANCE, PITCH_DISTANCE};
+use crate::game::{ball::PitchEvent, GameState};
 
 // ── Player roles ──────────────────────────────────────────────────────────────
 
@@ -122,14 +122,26 @@ fn spawn_fielders(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let positions: &[(FieldPosition, Vec3)] = &[
-        (FieldPosition::Catcher,     Vec3::new( 0.0,          0.0, -1.5)),
-        (FieldPosition::FirstBase,   Vec3::new( BASE_DISTANCE, 0.0, BASE_DISTANCE - 3.0)),
-        (FieldPosition::SecondBase,  Vec3::new( 7.0,          0.0, BASE_DISTANCE * 2.0 - 3.0)),
-        (FieldPosition::ShortStop,   Vec3::new(-7.0,          0.0, BASE_DISTANCE * 2.0 - 3.0)),
-        (FieldPosition::ThirdBase,   Vec3::new(-BASE_DISTANCE, 0.0, BASE_DISTANCE - 3.0)),
-        (FieldPosition::LeftField,   Vec3::new(-40.0,         0.0, 85.0)),
-        (FieldPosition::CenterField, Vec3::new(  0.0,         0.0, 110.0)),
-        (FieldPosition::RightField,  Vec3::new( 40.0,         0.0, 85.0)),
+        (FieldPosition::Catcher, Vec3::new(0.0, 0.0, -1.5)),
+        (
+            FieldPosition::FirstBase,
+            Vec3::new(BASE_DISTANCE, 0.0, BASE_DISTANCE - 3.0),
+        ),
+        (
+            FieldPosition::SecondBase,
+            Vec3::new(7.0, 0.0, BASE_DISTANCE * 2.0 - 3.0),
+        ),
+        (
+            FieldPosition::ShortStop,
+            Vec3::new(-7.0, 0.0, BASE_DISTANCE * 2.0 - 3.0),
+        ),
+        (
+            FieldPosition::ThirdBase,
+            Vec3::new(-BASE_DISTANCE, 0.0, BASE_DISTANCE - 3.0),
+        ),
+        (FieldPosition::LeftField, Vec3::new(-40.0, 0.0, 85.0)),
+        (FieldPosition::CenterField, Vec3::new(0.0, 0.0, 110.0)),
+        (FieldPosition::RightField, Vec3::new(40.0, 0.0, 85.0)),
     ];
 
     for (pos, translation) in positions {

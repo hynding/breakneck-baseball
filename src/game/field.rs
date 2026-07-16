@@ -90,7 +90,11 @@ fn spawn_ground(
 
     commands.spawn((
         GroundPlane,
-        Mesh3d(meshes.add(Cuboid::new(half_size * 2.0, GROUND_HALF_DEPTH * 2.0, half_size * 2.0))),
+        Mesh3d(meshes.add(Cuboid::new(
+            half_size * 2.0,
+            GROUND_HALF_DEPTH * 2.0,
+            half_size * 2.0,
+        ))),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::srgb(0.18, 0.55, 0.18), // outfield green
             perceptual_roughness: 0.9,
@@ -140,10 +144,30 @@ fn spawn_infield(
     // Bases are arranged around the diamond, with home plate at the origin.
     // Z-positive points toward the outfield (centre field).
     let bases = [
-        (BaseLabel::Home,   Vec3::new( 0.0,          0.0, 0.0),           home_mesh.clone(), home_material.clone()),
-        (BaseLabel::First,  Vec3::new( BASE_DISTANCE, 0.0, BASE_DISTANCE), base_mesh.clone(), base_material.clone()),
-        (BaseLabel::Second, Vec3::new( 0.0,          0.0, BASE_DISTANCE * 2.0), base_mesh.clone(), base_material.clone()),
-        (BaseLabel::Third,  Vec3::new(-BASE_DISTANCE, 0.0, BASE_DISTANCE), base_mesh.clone(), base_material.clone()),
+        (
+            BaseLabel::Home,
+            Vec3::new(0.0, 0.0, 0.0),
+            home_mesh.clone(),
+            home_material.clone(),
+        ),
+        (
+            BaseLabel::First,
+            Vec3::new(BASE_DISTANCE, 0.0, BASE_DISTANCE),
+            base_mesh.clone(),
+            base_material.clone(),
+        ),
+        (
+            BaseLabel::Second,
+            Vec3::new(0.0, 0.0, BASE_DISTANCE * 2.0),
+            base_mesh.clone(),
+            base_material.clone(),
+        ),
+        (
+            BaseLabel::Third,
+            Vec3::new(-BASE_DISTANCE, 0.0, BASE_DISTANCE),
+            base_mesh.clone(),
+            base_material.clone(),
+        ),
     ];
 
     for (label, pos, mesh, mat) in bases {

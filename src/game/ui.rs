@@ -82,10 +82,7 @@ fn spawn_hud(mut commands: Commands) {
 }
 
 // ── Update: refresh the score text every frame ────────────────────────────────
-fn update_score_text(
-    score: Res<ScoreBoard>,
-    mut query: Query<&mut Text, With<ScoreText>>,
-) {
+fn update_score_text(score: Res<ScoreBoard>, mut query: Query<&mut Text, With<ScoreText>>) {
     if !score.is_changed() {
         return;
     }
@@ -96,12 +93,7 @@ fn update_score_text(
     for mut text in &mut query {
         **text = format!(
             "Inning: {} {}\nAway: {}   Home: {}\nCount: {}   Outs: {}",
-            score.inning,
-            half,
-            score.away_runs,
-            score.home_runs,
-            count_str,
-            score.outs,
+            score.inning, half, score.away_runs, score.home_runs, count_str, score.outs,
         );
     }
 }

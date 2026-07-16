@@ -55,7 +55,12 @@ impl Plugin for BallPlugin {
             .add_systems(OnEnter(GameState::Playing), spawn_ball)
             .add_systems(
                 Update,
-                (apply_pitch, apply_hit, apply_drag, reset_ball_if_out_of_bounds)
+                (
+                    apply_pitch,
+                    apply_hit,
+                    apply_drag,
+                    reset_ball_if_out_of_bounds,
+                )
                     .run_if(in_state(GameState::Playing)),
             );
     }
@@ -139,10 +144,7 @@ fn apply_hit(
 /// Applies a simplified quadratic aerodynamic drag every physics frame.
 ///
 /// `F_drag = -drag_factor × |v|² × v̂`
-fn apply_drag(
-    mut query: Query<&mut Velocity, (With<Baseball>, With<InFlight>)>,
-    time: Res<Time>,
-) {
+fn apply_drag(mut query: Query<&mut Velocity, (With<Baseball>, With<InFlight>)>, time: Res<Time>) {
     let dt = time.delta_secs();
     for mut vel in &mut query {
         let speed = vel.linvel.length();

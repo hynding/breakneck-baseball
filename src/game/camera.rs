@@ -6,8 +6,8 @@
 //! - **WASD / arrow keys** — orbit horizontally and vertically
 //! - **R** — reset to default position
 
-use bevy::prelude::*;
 use bevy::input::mouse::MouseWheel;
+use bevy::prelude::*;
 
 use crate::game::GameState;
 
@@ -29,8 +29,8 @@ impl Default for OrbitState {
     fn default() -> Self {
         Self {
             yaw: 0.0,
-            pitch: 0.6,        // ≈ 35° above ground
-            distance: 60.0,    // metres from home plate
+            pitch: 0.6,                        // ≈ 35° above ground
+            distance: 60.0,                    // metres from home plate
             target: Vec3::new(0.0, 0.0, 30.0), // look toward centre field
         }
     }
@@ -79,21 +79,21 @@ fn orbit_camera(
     let mut yaw_delta = 0.0_f32;
     let mut pitch_delta = 0.0_f32;
 
-    if keyboard.pressed(KeyCode::ArrowLeft)  || keyboard.pressed(KeyCode::KeyA) {
+    if keyboard.pressed(KeyCode::ArrowLeft) || keyboard.pressed(KeyCode::KeyA) {
         yaw_delta -= yaw_speed * dt;
     }
     if keyboard.pressed(KeyCode::ArrowRight) || keyboard.pressed(KeyCode::KeyD) {
         yaw_delta += yaw_speed * dt;
     }
-    if keyboard.pressed(KeyCode::ArrowUp)    || keyboard.pressed(KeyCode::KeyW) {
+    if keyboard.pressed(KeyCode::ArrowUp) || keyboard.pressed(KeyCode::KeyW) {
         pitch_delta += pitch_speed * dt;
     }
-    if keyboard.pressed(KeyCode::ArrowDown)  || keyboard.pressed(KeyCode::KeyS) {
+    if keyboard.pressed(KeyCode::ArrowDown) || keyboard.pressed(KeyCode::KeyS) {
         pitch_delta -= pitch_speed * dt;
     }
 
-    orbit.yaw   += yaw_delta;
-    orbit.pitch  = (orbit.pitch + pitch_delta).clamp(0.1, std::f32::consts::FRAC_PI_2 - 0.05);
+    orbit.yaw += yaw_delta;
+    orbit.pitch = (orbit.pitch + pitch_delta).clamp(0.1, std::f32::consts::FRAC_PI_2 - 0.05);
 
     // Reset
     if keyboard.just_pressed(KeyCode::KeyR) {

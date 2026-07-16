@@ -73,11 +73,18 @@
 
         async function run() {
             await init();
-            // Bevy creates its own canvas — hide the loading overlay once it starts.
+            // init() only returns on non-throwing runtimes; hide the overlay here too.
             document.getElementById('loading').style.display = 'none';
         }
 
         run().catch((error) => {
+            // On WASM, Bevy's event loop never returns: winit throws a benign
+            // "Using exceptions for control flow" exception to hand control to
+            // the browser. Reaching it means the game started successfully.
+            if (error.message && error.message.includes('Using exceptions for control flow')) {
+                document.getElementById('loading').style.display = 'none';
+                return;
+            }
             const el = document.getElementById('loading');
             el.querySelector('p').textContent =
                 'Failed to start: ' + error.message;
