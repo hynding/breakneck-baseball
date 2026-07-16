@@ -18,6 +18,10 @@ struct MenuUi;
 #[derive(Component)]
 struct ControllerStatus;
 
+/// The line that shows the currently selected field variant.
+#[derive(Component)]
+struct FieldChoice;
+
 /// Marker for game-over UI.
 #[derive(Component)]
 struct GameOverUi;
@@ -30,7 +34,8 @@ impl Plugin for MenuPlugin {
             .add_systems(OnExit(GameState::MainMenu), despawn::<MenuUi>)
             .add_systems(
                 Update,
-                (update_controller_status, menu_select).run_if(in_state(GameState::MainMenu)),
+                (update_controller_status, cycle_field_choice, menu_select)
+                    .run_if(in_state(GameState::MainMenu)),
             )
             .add_systems(OnEnter(GameState::GameOver), spawn_game_over)
             .add_systems(OnExit(GameState::GameOver), despawn::<GameOverUi>)
@@ -81,6 +86,16 @@ fn spawn_menu(mut commands: Commands) {
                 TextLayout::new_with_justify(JustifyText::Center),
             ));
             root.spawn((
+                FieldChoice,
+                Text::new(""),
+                TextFont {
+                    font_size: 20.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(1.0, 0.86, 0.2)),
+                TextLayout::new_with_justify(JustifyText::Center),
+            ));
+            root.spawn((
                 ControllerStatus,
                 Text::new(""),
                 TextFont {
@@ -115,6 +130,28 @@ fn update_controller_status(
     for mut text in &mut query {
         if text.as_str() != msg {
             **text = msg.clone();
+        }
+    }
+}
+
+/// Cycles the field variant with **F** (or a controller's West/X button) and
+/// keeps the menu line in sync.
+fn cycle_field_choice(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    pads: Query<&Gamepad>,
+    mut config: ResMut<GameConfig>,
+    mut query: Query<&mut Text, With<FieldChoice>>,
+) {
+    let pressed = keyboard.just_pressed(KeyCode::KeyF)
+        || pads.iter().any(|p| p.just_pressed(GamepadButton::West));
+    if pressed {
+        config.variant = config.variant.next();
+    }
+
+    let label = format!("Field:  {}     (F / X to change)", config.variant.label());
+    for mut text in &mut query {
+        if text.as_str() != label {
+            **text = label.clone();
         }
     }
 }

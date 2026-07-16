@@ -7,10 +7,6 @@
 //! plate is at the world origin with +Z toward the field in every variant;
 //! all plate-local logic (pitching, swinging, cameras) is shared.
 
-// Consumed progressively while the engine is generalized (rules → world →
-// menu); remove once every field has a reader.
-#![allow(dead_code)]
-
 use bevy::math::Vec3;
 use bevy::prelude::Resource;
 
@@ -35,8 +31,6 @@ pub struct Ruleset {
 /// Field geometry and personnel. Home plate is implicitly at the origin.
 #[derive(Resource, Clone, Debug)]
 pub struct FieldSpec {
-    /// Menu / HUD label.
-    pub name: &'static str,
     /// Bases in running order (first base first); the last base leads home.
     pub base_positions: Vec<Vec3>,
     /// Pitching rubber sits at `(0, h, pitch_distance)`.
@@ -131,7 +125,6 @@ impl VariantId {
     pub fn field(self) -> FieldSpec {
         match self {
             VariantId::Standard => FieldSpec {
-                name: "Classic Stadium",
                 base_positions: vec![
                     Vec3::new(BASE_DISTANCE, 0.0, BASE_DISTANCE),
                     Vec3::new(0.0, 0.0, BASE_DISTANCE * 2.0),
@@ -162,7 +155,6 @@ impl VariantId {
             // strung out over the sidewalks and the neighbours' yards, and a
             // home run means clearing the houses across the street.
             VariantId::FrontYard => FieldSpec {
-                name: "Front Yard",
                 base_positions: vec![
                     Vec3::new(8.0, 0.0, 6.0),
                     Vec3::new(10.0, 0.0, 14.0),
