@@ -12,6 +12,7 @@ use bevy::prelude::Resource;
 
 use crate::game::ball::BALL_RADIUS;
 use crate::game::field::PITCH_DISTANCE;
+use crate::game::variant::Ruleset;
 use crate::game::ScoreBoard;
 
 // ── Tuning constants ──────────────────────────────────────────────────────────
@@ -50,18 +51,56 @@ pub fn mound_reset_pos() -> Vec3 {
 
 // ── Data ──────────────────────────────────────────────────────────────────────
 
-/// Occupancy of the three bases. All runners belong to the batting team, so a
-/// boolean is enough. Used by base-running rules and the HUD diamond.
-#[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
+/// Occupancy of the bases, in running order (index 0 = first base). All
+/// runners belong to the batting team, so a boolean per base is enough. The
+/// base count comes from the field variant. Used by base-running rules and
+/// the HUD diamond.
+#[derive(Resource, Clone, Debug, PartialEq, Eq)]
 pub struct Bases {
-    pub first: bool,
-    pub second: bool,
-    pub third: bool,
+    occupied: Vec<bool>,
+}
+
+impl Default for Bases {
+    /// A standard three-base diamond.
+    fn default() -> Self {
+        Bases::new(3)
+    }
 }
 
 impl Bases {
+    /// Empty bases for a field with `count` bases (excluding home).
+    pub fn new(count: usize) -> Self {
+        Self {
+            occupied: vec![false; count],
+        }
+    }
+
+    /// Number of bases on this field.
+    pub fn count(&self) -> usize {
+        self.occupied.len()
+    }
+
+    /// Is the (0-indexed) base occupied? Out-of-range reads are just empty.
+    pub fn is_occupied(&self, base: usize) -> bool {
+        self.occupied.get(base).copied().unwrap_or(false)
+    }
+
+    /// Sets one base's occupancy. Out-of-range writes are ignored.
+    pub fn set(&mut self, base: usize, occupied: bool) {
+        if let Some(slot) = self.occupied.get_mut(base) {
+            *slot = occupied;
+        }
+    }
+
+    /// Empties every base, keeping the base count.
     pub fn clear(&mut self) {
-        *self = Bases::default();
+        self.occupied.fill(false);
+    }
+
+    /// Empties the bases *and* adopts a (possibly different) base count.
+    pub fn reset_for(&mut self, count: usize) {
+        self.occupied.clear();
+        self.occupied.resize(count, false);
     }
 }
 
@@ -208,51 +247,48 @@ pub fn classify_batted_ball(vel: Vec3) -> Outcome {
 // ── Base running ──────────────────────────────────────────────────────────────
 
 /// Advances runners for a clean hit where everyone moves up `hit_bases`.
-/// Returns the number of runs that scored.
+/// `hit_bases` may exceed the base count by one (a home run clears the field
+/// and scores the batter). Returns the number of runs that scored.
 pub fn advance_hit(bases: &mut Bases, hit_bases: u32) -> u32 {
+    debug_assert!(hit_bases >= 1, "a hit is worth at least one base");
+    let n = bases.count();
+    let step = hit_bases as usize;
     let mut runs = 0;
-    let mut next = Bases::default();
+    let mut next = vec![false; n];
 
-    let place = |base: u32, runs: &mut u32, next: &mut Bases| {
-        let dest = base + hit_bases;
-        match dest {
-            1 => next.first = true,
-            2 => next.second = true,
-            3 => next.third = true,
-            _ => *runs += 1, // dest >= 4 → scored
+    for base in 0..n {
+        if bases.is_occupied(base) {
+            let dest = base + step;
+            if dest >= n {
+                runs += 1; // past the last base → scored
+            } else {
+                next[dest] = true;
+            }
         }
-    };
+    }
+    // The batter reaches base `hit_bases` (1-indexed); one past the last base
+    // means they came all the way around.
+    if step > n {
+        runs += 1;
+    } else {
+        next[step - 1] = true;
+    }
 
-    if bases.third {
-        place(3, &mut runs, &mut next);
-    }
-    if bases.second {
-        place(2, &mut runs, &mut next);
-    }
-    if bases.first {
-        place(1, &mut runs, &mut next);
-    }
-    place(0, &mut runs, &mut next); // the batter
-
-    *bases = next;
+    bases.occupied = next;
     runs
 }
 
-/// Advances only forced runners for a walk. Returns runs scored (a bases-loaded
-/// walk forces in one run).
+/// Advances only forced runners for a walk: the batter takes first and pushes
+/// the chain ahead of them. Returns runs scored (a fully-loaded walk forces in
+/// one run).
 pub fn advance_walk(bases: &mut Bases) -> u32 {
-    if !bases.first {
-        bases.first = true;
-        0
-    } else if !bases.second {
-        bases.second = true;
-        0
-    } else if !bases.third {
-        bases.third = true;
-        0
-    } else {
-        1 // bases loaded: everyone forced up one, runner from third scores
+    for base in 0..bases.count() {
+        if !bases.is_occupied(base) {
+            bases.set(base, true);
+            return 0;
+        }
     }
+    1 // every base occupied: the lead runner is forced home
 }
 
 // ── Count & scoring mutations ─────────────────────────────────────────────────
@@ -266,11 +302,11 @@ pub fn apply_hit(score: &mut ScoreBoard, bases: &mut Bases, hit_bases: u32) -> u
     runs
 }
 
-/// Records a taken ball. Ball four walks the batter (forcing runners) and ends
-/// the at-bat.
-pub fn call_ball(score: &mut ScoreBoard, bases: &mut Bases) -> BallCall {
+/// Records a taken ball. The final ball walks the batter (forcing runners) and
+/// ends the at-bat.
+pub fn call_ball(score: &mut ScoreBoard, bases: &mut Bases, rules: &Ruleset) -> BallCall {
     score.balls += 1;
-    if score.balls >= 4 {
+    if score.balls >= rules.balls_per_walk {
         let runs = advance_walk(bases);
         score.add_runs(runs);
         reset_count(score);
@@ -280,29 +316,30 @@ pub fn call_ball(score: &mut ScoreBoard, bases: &mut Bases) -> BallCall {
     }
 }
 
-/// Records a strike (called or swinging). Strike three is an out.
-pub fn call_strike(score: &mut ScoreBoard, bases: &mut Bases) -> StrikeCall {
+/// Records a strike (called or swinging). The final strike is an out.
+pub fn call_strike(score: &mut ScoreBoard, bases: &mut Bases, rules: &Ruleset) -> StrikeCall {
     score.strikes += 1;
-    if score.strikes >= 3 {
-        record_out(score, bases);
+    if score.strikes >= rules.strikes_per_out {
+        record_out(score, bases, rules);
         StrikeCall::Strikeout
     } else {
         StrikeCall::Strike
     }
 }
 
-/// Records a foul ball: a strike, unless it would be the third.
-pub fn foul(score: &mut ScoreBoard) {
-    if score.strikes < 2 {
+/// Records a foul ball: a strike, unless it would be the last one.
+pub fn foul(score: &mut ScoreBoard, rules: &Ruleset) {
+    if score.strikes + 1 < rules.strikes_per_out {
         score.strikes += 1;
     }
 }
 
-/// Records an out, ends the at-bat, and flips the half-inning after three.
-pub fn record_out(score: &mut ScoreBoard, bases: &mut Bases) {
+/// Records an out, ends the at-bat, and flips the half-inning once the side
+/// is retired.
+pub fn record_out(score: &mut ScoreBoard, bases: &mut Bases, rules: &Ruleset) {
     reset_count(score);
     score.outs += 1;
-    if score.outs >= 3 {
+    if score.outs >= rules.outs_per_half {
         score.outs = 0;
         bases.clear();
         if score.top_of_inning {
@@ -343,16 +380,27 @@ mod tests {
     use super::*;
     use crate::game::ball::BALL_DRAG_FACTOR;
 
+    use crate::game::variant::VariantId;
+
+    fn std_rules() -> Ruleset {
+        VariantId::Standard.rules()
+    }
+
     fn empty() -> Bases {
         Bases::default()
     }
 
-    fn loaded() -> Bases {
-        Bases {
-            first: true,
-            second: true,
-            third: true,
+    /// A standard diamond with the given (0-indexed) bases occupied.
+    fn with(occupied: &[usize]) -> Bases {
+        let mut b = Bases::default();
+        for &base in occupied {
+            b.set(base, true);
         }
+        b
+    }
+
+    fn loaded() -> Bases {
+        with(&[0, 1, 2])
     }
 
     // ── Base running ──────────────────────────────────────────────────────────
@@ -361,33 +409,15 @@ mod tests {
     fn single_puts_batter_on_first() {
         let mut b = empty();
         assert_eq!(advance_hit(&mut b, 1), 0);
-        assert_eq!(
-            b,
-            Bases {
-                first: true,
-                second: false,
-                third: false
-            }
-        );
+        assert_eq!(b, with(&[0]));
     }
 
     #[test]
     fn single_scores_runner_from_third() {
-        let mut b = Bases {
-            first: false,
-            second: false,
-            third: true,
-        };
+        let mut b = with(&[2]);
         // Everyone advances one: third scores, batter to first.
         assert_eq!(advance_hit(&mut b, 1), 1);
-        assert_eq!(
-            b,
-            Bases {
-                first: true,
-                second: false,
-                third: false
-            }
-        );
+        assert_eq!(b, with(&[0]));
     }
 
     #[test]
@@ -399,42 +429,46 @@ mod tests {
 
     #[test]
     fn double_with_runner_on_first() {
-        let mut b = Bases {
-            first: true,
-            second: false,
-            third: false,
-        };
+        let mut b = with(&[0]);
         // Batter to second, runner from first to third.
         assert_eq!(advance_hit(&mut b, 2), 0);
-        assert_eq!(
-            b,
-            Bases {
-                first: false,
-                second: true,
-                third: true
-            }
-        );
+        assert_eq!(b, with(&[1, 2]));
     }
 
     #[test]
     fn walk_forces_only_when_bases_ahead_are_occupied() {
         let mut b = empty();
         assert_eq!(advance_walk(&mut b), 0);
-        assert!(b.first && !b.second && !b.third);
+        assert_eq!(b, with(&[0]));
 
         // Runner on first: batter forces them to second.
-        let mut b = Bases {
-            first: true,
-            second: false,
-            third: false,
-        };
+        let mut b = with(&[0]);
         assert_eq!(advance_walk(&mut b), 0);
-        assert!(b.first && b.second && !b.third);
+        assert_eq!(b, with(&[0, 1]));
 
         // Bases loaded: forces in a run, still loaded.
         let mut b = loaded();
         assert_eq!(advance_walk(&mut b), 1);
         assert_eq!(b, loaded());
+    }
+
+    #[test]
+    fn four_base_walk_chain_only_scores_when_all_full() {
+        let mut b = Bases::new(4);
+        for expected in [0, 0, 0, 0, 1] {
+            assert_eq!(advance_walk(&mut b), expected);
+        }
+    }
+
+    #[test]
+    fn four_base_hit_advancement() {
+        let mut b = Bases::new(4);
+        // Batter reaches the fourth base without scoring.
+        assert_eq!(advance_hit(&mut b, 4), 0);
+        assert!(b.is_occupied(3));
+        // A five-base homer scores that runner and the batter.
+        assert_eq!(advance_hit(&mut b, 5), 2);
+        assert_eq!(b, Bases::new(4));
     }
 
     // ── Count mutations ───────────────────────────────────────────────────────
@@ -447,7 +481,10 @@ mod tests {
             ..Default::default()
         };
         let mut bases = empty();
-        assert_eq!(call_strike(&mut score, &mut bases), StrikeCall::Strikeout);
+        assert_eq!(
+            call_strike(&mut score, &mut bases, &std_rules()),
+            StrikeCall::Strikeout
+        );
         assert_eq!((score.balls, score.strikes), (0, 0)); // fresh count
         assert_eq!(score.outs, 1);
     }
@@ -455,11 +492,11 @@ mod tests {
     #[test]
     fn foul_is_a_strike_but_never_the_third() {
         let mut score = ScoreBoard::default();
-        foul(&mut score);
+        foul(&mut score, &std_rules());
         assert_eq!(score.strikes, 1);
-        foul(&mut score);
+        foul(&mut score, &std_rules());
         assert_eq!(score.strikes, 2);
-        foul(&mut score); // would be strike three — stays at two
+        foul(&mut score, &std_rules()); // would be strike three — stays at two
         assert_eq!(score.strikes, 2);
     }
 
@@ -473,7 +510,7 @@ mod tests {
         };
         let mut bases = loaded();
         assert_eq!(
-            call_ball(&mut score, &mut bases),
+            call_ball(&mut score, &mut bases, &std_rules()),
             BallCall::Walk { runs: 1 }
         );
         assert_eq!(score.away_runs, 1); // forced run credited to batting team
@@ -492,7 +529,7 @@ mod tests {
         let mut bases = loaded();
 
         // Third out of the top: flip to the bottom of the same inning.
-        record_out(&mut score, &mut bases);
+        record_out(&mut score, &mut bases, &std_rules());
         assert_eq!(score.outs, 0);
         assert!(!score.top_of_inning);
         assert_eq!(score.inning, 1);
@@ -500,9 +537,30 @@ mod tests {
 
         // Third out of the bottom: advance to the top of the next inning.
         score.outs = 2;
-        record_out(&mut score, &mut bases);
+        record_out(&mut score, &mut bases, &std_rules());
         assert!(score.top_of_inning);
         assert_eq!(score.inning, 2);
+    }
+
+    #[test]
+    fn custom_out_threshold_flips_half_inning() {
+        let rules = Ruleset {
+            outs_per_half: 4,
+            ..std_rules()
+        };
+        let mut score = ScoreBoard {
+            inning: 1,
+            top_of_inning: true,
+            outs: 2,
+            ..Default::default()
+        };
+        let mut bases = empty();
+        // Out three of four: the half-inning continues.
+        record_out(&mut score, &mut bases, &rules);
+        assert_eq!((score.outs, score.top_of_inning), (3, true));
+        // Out four retires the side.
+        record_out(&mut score, &mut bases, &rules);
+        assert_eq!((score.outs, score.top_of_inning), (0, false));
     }
 
     #[test]
@@ -513,16 +571,12 @@ mod tests {
             top_of_inning: false, // Home bats
             ..Default::default()
         };
-        let mut bases = Bases {
-            first: false,
-            second: true,
-            third: false,
-        };
+        let mut bases = with(&[1]);
         // Double: runner on second scores, batter to second.
         assert_eq!(apply_hit(&mut score, &mut bases, 2), 1);
         assert_eq!(score.home_runs, 1);
         assert_eq!((score.balls, score.strikes), (0, 0));
-        assert!(bases.second && !bases.first && !bases.third);
+        assert_eq!(bases, with(&[1]));
     }
 
     // ── Classification ────────────────────────────────────────────────────────

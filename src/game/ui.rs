@@ -7,6 +7,7 @@ use bevy::prelude::*;
 
 use crate::game::flow::PlayBanner;
 use crate::game::rules::Bases;
+use crate::game::variant::FieldSpec;
 use crate::game::{GameState, GameplayEntity, ScoreBoard};
 
 // ── Markers ───────────────────────────────────────────────────────────────────
@@ -17,9 +18,9 @@ struct ScoreBoardRoot;
 #[derive(Component)]
 struct ScoreText;
 
-/// One of the three base indicators (1 = first, 2 = second, 3 = third).
+/// One base-occupancy pip (0-indexed base number).
 #[derive(Component)]
-struct BaseIndicator(u8);
+struct BaseIndicator(usize);
 
 /// The large transient result text in the centre of the screen.
 #[derive(Component)]
@@ -61,7 +62,7 @@ impl Plugin for UiPlugin {
 
 // ── Build the UI tree ─────────────────────────────────────────────────────────
 
-fn spawn_hud(mut commands: Commands) {
+fn spawn_hud(mut commands: Commands, field: Res<FieldSpec>) {
     // Scoreboard (top-left).
     commands
         .spawn((
@@ -92,7 +93,7 @@ fn spawn_hud(mut commands: Commands) {
         });
 
     // Base-runner diamond (top-right).
-    spawn_base_diamond(&mut commands);
+    spawn_base_diamond(&mut commands, field.base_count());
 
     // Result banner (centre).
     commands.spawn((
@@ -132,8 +133,14 @@ fn spawn_hud(mut commands: Commands) {
     ));
 }
 
-/// Spawns a 90×90 px diamond of three base pips in the top-right corner.
-fn spawn_base_diamond(commands: &mut Commands) {
+/// Spawns a 90×90 px ring of base pips in the top-right corner: one pip per
+/// base, laid out like the field (home at the bottom, first base to the
+/// right, running counter-clockwise).
+fn spawn_base_diamond(commands: &mut Commands, base_count: usize) {
+    const BOX: f32 = 90.0;
+    const RADIUS: f32 = 34.0;
+    const PIP: f32 = 18.0;
+
     commands
         .spawn((
             GameplayEntity,
@@ -141,31 +148,31 @@ fn spawn_base_diamond(commands: &mut Commands) {
                 position_type: PositionType::Absolute,
                 top: Val::Px(14.0),
                 right: Val::Px(18.0),
-                width: Val::Px(90.0),
-                height: Val::Px(90.0),
+                width: Val::Px(BOX),
+                height: Val::Px(BOX),
                 ..default()
             },
         ))
         .with_children(|d| {
-            // (marker, top, left) positions inside the 90px box.
-            let pips = [
-                (2u8, 6.0, 36.0),  // second base — top
-                (3u8, 40.0, 6.0),  // third base — left
-                (1u8, 40.0, 66.0), // first base — right
-            ];
-            for (base, top, left) in pips {
+            // Home sits at the bottom of the ring (angle −90°); base k of n
+            // takes the k-th step around the circle of n + 1 points.
+            let step = std::f32::consts::TAU / (base_count as f32 + 1.0);
+            for base in 0..base_count {
+                let angle = -std::f32::consts::FRAC_PI_2 + step * (base as f32 + 1.0);
+                let left = BOX / 2.0 + RADIUS * angle.cos() - PIP / 2.0;
+                let top = BOX / 2.0 - RADIUS * angle.sin() - PIP / 2.0;
                 d.spawn((
                     BaseIndicator(base),
                     Node {
                         position_type: PositionType::Absolute,
                         top: Val::Px(top),
                         left: Val::Px(left),
-                        width: Val::Px(18.0),
-                        height: Val::Px(18.0),
+                        width: Val::Px(PIP),
+                        height: Val::Px(PIP),
                         ..default()
                     },
                     BackgroundColor(BASE_OFF),
-                    // Rotate 45° so the square reads as a baseball diamond.
+                    // Rotate 45° so the square reads as a base.
                     Transform::from_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_4)),
                 ));
             }
@@ -195,11 +202,7 @@ fn update_base_diamond(
         return;
     }
     for (indicator, mut color) in &mut query {
-        let occupied = match indicator.0 {
-            1 => bases.first,
-            2 => bases.second,
-            _ => bases.third,
-        };
+        let occupied = bases.is_occupied(indicator.0);
         color.0 = if occupied { BASE_ON } else { BASE_OFF };
     }
 }

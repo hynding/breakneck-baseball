@@ -23,7 +23,7 @@ use crate::game::ai::{cpu_defense, cpu_offense, CpuConfig, CpuState};
 use crate::game::ball::{Baseball, HitEvent, InFlight, PitchEvent};
 use crate::game::input::Intents;
 use crate::game::rules::{self, BallCall, Bases, OutKind, Outcome, StrikeCall};
-use crate::game::variant::Ruleset;
+use crate::game::variant::{FieldSpec, Ruleset};
 use crate::game::{GameState, ScoreBoard};
 
 // ── Tuning constants ──────────────────────────────────────────────────────────
@@ -126,10 +126,11 @@ impl Plugin for FlowPlugin {
     }
 }
 
-/// Fresh play + base state whenever a game (re)starts.
-fn reset_flow(mut play: ResMut<Play>, mut bases: ResMut<Bases>) {
+/// Fresh play + base state whenever a game (re)starts. The base count follows
+/// the chosen field.
+fn reset_flow(mut play: ResMut<Play>, mut bases: ResMut<Bases>, field: Res<FieldSpec>) {
     *play = Play::default();
-    bases.clear();
+    bases.reset_for(field.base_count());
 }
 
 // ── PrePitch: defense aims and releases ───────────────────────────────────────
@@ -192,7 +193,7 @@ fn pitch_live(
             let velocity = rules::hit_velocity(pos.z, intent.aim);
             let outcome = rules::classify_batted_ball(velocity);
             hit_ev.send(HitEvent { velocity });
-            resolve_contact(outcome, &mut score, &mut bases, &mut banner);
+            resolve_contact(outcome, &mut score, &mut bases, &rules, &mut banner);
             if outcome == Outcome::Foul {
                 end_pitch(&mut play);
             } else {
@@ -201,7 +202,7 @@ fn pitch_live(
                 play.resolved = true;
             }
         } else {
-            add_strike(&mut score, &mut bases, &mut banner, true);
+            add_strike(&mut score, &mut bases, &rules, &mut banner, true);
             end_pitch(&mut play);
         }
         maybe_end_game(&score, &rules, &mut next_state);
@@ -212,9 +213,9 @@ fn pitch_live(
     if pos.z < SWING_LATE_Z {
         let cross = play.crossing.unwrap_or(Vec2::new(pos.x, pos.y));
         if rules::is_in_zone(cross) {
-            add_strike(&mut score, &mut bases, &mut banner, false);
+            add_strike(&mut score, &mut bases, &rules, &mut banner, false);
         } else {
-            add_ball(&mut score, &mut bases, &mut banner);
+            add_ball(&mut score, &mut bases, &rules, &mut banner);
         }
         end_pitch(&mut play);
         maybe_end_game(&score, &rules, &mut next_state);
@@ -263,11 +264,12 @@ fn resolve_contact(
     outcome: Outcome,
     score: &mut ScoreBoard,
     bases: &mut Bases,
+    ruleset: &Ruleset,
     banner: &mut EventWriter<PlayBanner>,
 ) {
     match outcome {
         Outcome::Foul => {
-            rules::foul(score);
+            rules::foul(score, ruleset);
             banner.send(PlayBanner::new("FOUL", Color::srgb(0.9, 0.9, 0.6)));
         }
         Outcome::Out(kind) => {
@@ -277,7 +279,7 @@ fn resolve_contact(
                 OutKind::Pop => "POP OUT",
             };
             banner.send(PlayBanner::new(text, Color::srgb(1.0, 0.6, 0.4)));
-            rules::record_out(score, bases);
+            rules::record_out(score, bases, ruleset);
         }
         Outcome::Single => hit(
             score,
@@ -331,8 +333,13 @@ fn hit(
     banner.send(PlayBanner::new(text, color));
 }
 
-fn add_ball(score: &mut ScoreBoard, bases: &mut Bases, banner: &mut EventWriter<PlayBanner>) {
-    match rules::call_ball(score, bases) {
+fn add_ball(
+    score: &mut ScoreBoard,
+    bases: &mut Bases,
+    ruleset: &Ruleset,
+    banner: &mut EventWriter<PlayBanner>,
+) {
+    match rules::call_ball(score, bases, ruleset) {
         BallCall::Walk { .. } => {
             banner.send(PlayBanner::new("WALK", Color::srgb(0.6, 0.85, 1.0)));
         }
@@ -345,10 +352,11 @@ fn add_ball(score: &mut ScoreBoard, bases: &mut Bases, banner: &mut EventWriter<
 fn add_strike(
     score: &mut ScoreBoard,
     bases: &mut Bases,
+    ruleset: &Ruleset,
     banner: &mut EventWriter<PlayBanner>,
     swinging: bool,
 ) {
-    match rules::call_strike(score, bases) {
+    match rules::call_strike(score, bases, ruleset) {
         StrikeCall::Strikeout => {
             banner.send(PlayBanner::new("STRIKEOUT!", Color::srgb(1.0, 0.5, 0.35)));
         }
