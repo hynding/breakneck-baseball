@@ -23,7 +23,8 @@ use crate::game::ai::{cpu_defense, cpu_offense, CpuConfig, CpuState};
 use crate::game::ball::{Baseball, HitEvent, InFlight, PitchEvent};
 use crate::game::input::Intents;
 use crate::game::rules::{self, BallCall, Bases, OutKind, Outcome, StrikeCall};
-use crate::game::{GameConfig, GameState, ScoreBoard};
+use crate::game::variant::Ruleset;
+use crate::game::{GameState, ScoreBoard};
 
 // ── Tuning constants ──────────────────────────────────────────────────────────
 
@@ -161,7 +162,7 @@ fn pre_pitch(
 fn pitch_live(
     mut play: ResMut<Play>,
     intents: Res<Intents>,
-    config: Res<GameConfig>,
+    rules: Res<Ruleset>,
     mut score: ResMut<ScoreBoard>,
     mut bases: ResMut<Bases>,
     ball_q: Query<&Transform, With<Baseball>>,
@@ -203,7 +204,7 @@ fn pitch_live(
             add_strike(&mut score, &mut bases, &mut banner, true);
             end_pitch(&mut play);
         }
-        maybe_end_game(&score, &config, &mut next_state);
+        maybe_end_game(&score, &rules, &mut next_state);
         return;
     }
 
@@ -216,7 +217,7 @@ fn pitch_live(
             add_ball(&mut score, &mut bases, &mut banner);
         }
         end_pitch(&mut play);
-        maybe_end_game(&score, &config, &mut next_state);
+        maybe_end_game(&score, &rules, &mut next_state);
     }
 }
 
@@ -360,8 +361,8 @@ fn add_strike(
     }
 }
 
-fn maybe_end_game(score: &ScoreBoard, config: &GameConfig, next_state: &mut NextState<GameState>) {
-    if rules::is_game_over(score, config.innings) {
+fn maybe_end_game(score: &ScoreBoard, rules: &Ruleset, next_state: &mut NextState<GameState>) {
+    if rules::is_game_over(score, rules.innings) {
         next_state.set(GameState::GameOver);
     }
 }

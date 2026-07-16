@@ -13,6 +13,7 @@ pub mod menu;
 pub mod player;
 pub mod rules;
 pub mod ui;
+pub mod variant;
 
 use bevy::prelude::*;
 
@@ -24,6 +25,7 @@ use input::InputPlugin;
 use menu::MenuPlugin;
 use player::PlayerPlugin;
 use ui::UiPlugin;
+use variant::VariantId;
 
 /// The two teams. In 1-player mode the human is always [`Team::Home`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -52,23 +54,13 @@ pub enum GameMode {
     TwoPlayers,
 }
 
-/// Number of regulation innings. Adjust here to shorten a game for testing.
-pub const REGULATION_INNINGS: u32 = 9;
-
 /// Chosen game options, set by the menu before entering [`GameState::Playing`].
-#[derive(Resource, Debug)]
+/// The variant's [`variant::Ruleset`] and [`variant::FieldSpec`] resources are
+/// (re)written from `variant` when a game starts.
+#[derive(Resource, Debug, Default)]
 pub struct GameConfig {
     pub mode: GameMode,
-    pub innings: u32,
-}
-
-impl Default for GameConfig {
-    fn default() -> Self {
-        Self {
-            mode: GameMode::OnePlayer,
-            innings: REGULATION_INNINGS,
-        }
-    }
+    pub variant: VariantId,
 }
 
 /// Global game-state machine.
@@ -156,6 +148,10 @@ impl Plugin for GamePlugin {
             .init_state::<GameState>()
             // Shared resources
             .init_resource::<GameConfig>()
+            // Variant data defaults to standard baseball; the menu overwrites
+            // both resources with the chosen variant before a game starts.
+            .insert_resource(VariantId::Standard.rules())
+            .insert_resource(VariantId::Standard.field())
             .insert_resource(ScoreBoard {
                 inning: 1,
                 top_of_inning: true,

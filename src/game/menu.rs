@@ -7,6 +7,7 @@
 use bevy::prelude::*;
 
 use crate::game::input::{assign_controllers, Controllers};
+use crate::game::variant::{FieldSpec, Ruleset};
 use crate::game::{GameConfig, GameMode, GameState, ScoreBoard};
 
 /// Marker for menu-screen UI so it can be torn down on exit.
@@ -123,6 +124,8 @@ fn menu_select(
     pads: Query<(Entity, &Gamepad)>,
     mut config: ResMut<GameConfig>,
     mut controllers: ResMut<Controllers>,
+    mut rules: ResMut<Ruleset>,
+    mut field: ResMut<FieldSpec>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     // Selection: keyboard digits, or a controller face button (1P) / start (2P).
@@ -148,6 +151,10 @@ fn menu_select(
     let pad_entities: Vec<Entity> = pads.iter().map(|(e, _)| e).collect();
     config.mode = mode;
     *controllers = assign_controllers(mode, &pad_entities);
+    // Materialize the chosen variant so every gameplay system reads this
+    // game's rules and park.
+    *rules = config.variant.rules();
+    *field = config.variant.field();
     next_state.set(GameState::Playing);
 }
 
