@@ -1,0 +1,33 @@
+[package]
+name = "breakneck-baseball"
+version = "0.1.0"
+edition = "2021"
+description = "A 3D baseball game built with Bevy, wgpu, and Rapier"
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "breakneck-baseball"
+path = "src/main.rs"
+
+[dependencies]
+# Game engine — uses wgpu as its rendering backend
+bevy = { version = "0.15", features = ["dynamic_linking"] }
+
+# 3D physics
+bevy_rapier3d = { version = "0.28", features = ["simd-stable", "debug-render-3d"] }
+
+[features]
+default = []
+
+# Enable this for faster iteration in development (loads Bevy as a dynamic library)
+dev = ["bevy/dynamic_linking"]
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+codegen-units = 1
+lto = true
