@@ -5,7 +5,7 @@
 
 use bevy::prelude::*;
 
-use crate::game::{GameState, ScoreBoard};
+use crate::game::{GameState, GameplayEntity, ScoreBoard};
 
 // ── Marker components ─────────────────────────────────────────────────────────
 /// Root node of the score-board UI.
@@ -39,6 +39,7 @@ fn spawn_hud(mut commands: Commands) {
     commands
         .spawn((
             ScoreBoardRoot,
+            GameplayEntity,
             Node {
                 position_type: PositionType::Absolute,
                 top: Val::Px(10.0),
@@ -66,6 +67,7 @@ fn spawn_hud(mut commands: Commands) {
     // ── Controls hint (bottom-centre) ────────────────────────────────────────
     commands.spawn((
         ControlsHint,
+        GameplayEntity,
         Node {
             position_type: PositionType::Absolute,
             bottom: Val::Px(10.0),

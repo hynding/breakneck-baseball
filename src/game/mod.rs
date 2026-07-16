@@ -128,7 +128,21 @@ impl ScoreBoard {
             Team::Away => self.away_runs += runs,
         }
     }
+
+    /// Resets to the start of a brand-new game.
+    pub fn reset(&mut self) {
+        *self = ScoreBoard {
+            inning: 1,
+            top_of_inning: true,
+            ..default()
+        };
+    }
 }
+
+/// Marks every entity spawned for active gameplay (field, ball, players, HUD)
+/// so the whole scene can be torn down when a game ends and rebuilt on restart.
+#[derive(Component)]
+pub struct GameplayEntity;
 
 /// Aggregate plugin that wires every sub-system into the app.
 pub struct GamePlugin;
@@ -155,8 +169,24 @@ impl Plugin for GamePlugin {
                 FlowPlugin,
                 CameraPlugin,
                 UiPlugin,
-            ));
+            ))
+            // Fresh scoreboard each time a game starts; tear the scene down after.
+            .add_systems(OnEnter(GameState::Playing), reset_scoreboard)
+            .add_systems(OnExit(GameState::Playing), cleanup_gameplay);
         // The game now boots to `GameState::MainMenu` (the default) and the menu
         // transitions into `Playing` once a mode is chosen.
+    }
+}
+
+/// Resets the scoreboard to inning 1 whenever a new game begins.
+fn reset_scoreboard(mut score: ResMut<ScoreBoard>) {
+    score.reset();
+}
+
+/// Despawns all gameplay entities when leaving `Playing` so a restart rebuilds
+/// the scene cleanly (each sub-plugin re-spawns on the next `OnEnter`).
+fn cleanup_gameplay(mut commands: Commands, query: Query<Entity, With<GameplayEntity>>) {
+    for entity in &query {
+        commands.entity(entity).despawn_recursive();
     }
 }

@@ -12,7 +12,7 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
-use crate::game::GameState;
+use crate::game::{GameState, GameplayEntity};
 
 /// Official ball radius in metres.
 pub const BALL_RADIUS: f32 = 0.037;
@@ -76,6 +76,7 @@ fn spawn_ball(
 
     commands.spawn((
         Baseball,
+        GameplayEntity,
         Mesh3d(meshes.add(Sphere::new(BALL_RADIUS))),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::WHITE,

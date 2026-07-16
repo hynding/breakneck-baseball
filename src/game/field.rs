@@ -17,7 +17,7 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
-use crate::game::GameState;
+use crate::game::{GameState, GameplayEntity};
 
 // ── Distances in metres ───────────────────────────────────────────────────────
 /// Distance between consecutive bases (90 ft).
@@ -90,6 +90,7 @@ fn spawn_ground(
 
     commands.spawn((
         GroundPlane,
+        GameplayEntity,
         Mesh3d(meshes.add(Cuboid::new(
             half_size * 2.0,
             GROUND_HALF_DEPTH * 2.0,
@@ -109,6 +110,7 @@ fn spawn_ground(
     // A lighter infield-dirt square rotated 45° to form the diamond shape.
     let infield_half = BASE_DISTANCE / std::f32::consts::SQRT_2;
     commands.spawn((
+        GameplayEntity,
         Mesh3d(meshes.add(Cuboid::new(infield_half * 2.0, 0.001, infield_half * 2.0))),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::srgb(0.76, 0.60, 0.42), // dirt brown
@@ -173,6 +175,7 @@ fn spawn_infield(
     for (label, pos, mesh, mat) in bases {
         commands.spawn((
             Base { label },
+            GameplayEntity,
             Mesh3d(mesh),
             MeshMaterial3d(mat),
             Transform::from_translation(pos),
@@ -190,6 +193,7 @@ fn spawn_pitchers_mound(
 ) {
     commands.spawn((
         PitchersMound,
+        GameplayEntity,
         Mesh3d(meshes.add(Cylinder::new(2.74, 0.25))), // 9 ft radius mound
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::srgb(0.76, 0.60, 0.42),
@@ -220,6 +224,7 @@ fn spawn_foul_poles(
     for sign in [-1.0_f32, 1.0_f32] {
         commands.spawn((
             FoulPole,
+            GameplayEntity,
             Mesh3d(meshes.add(Cylinder::new(0.05, 15.0))),
             MeshMaterial3d(pole_material.clone()),
             Transform::from_xyz(sign * foul_line_distance, 7.5, foul_line_distance),
@@ -233,6 +238,7 @@ fn spawn_foul_poles(
 fn spawn_lighting(commands: &mut Commands) {
     // Sunlight — angled to cast dramatic shadows.
     commands.spawn((
+        GameplayEntity,
         DirectionalLight {
             illuminance: 50_000.0,
             shadows_enabled: true,

@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
 use crate::game::field::{BASE_DISTANCE, PITCH_DISTANCE};
-use crate::game::GameState;
+use crate::game::{GameState, GameplayEntity};
 
 // ── Player roles ──────────────────────────────────────────────────────────────
 
@@ -82,6 +82,7 @@ fn spawn_pitcher(
 
     commands.spawn((
         Pitcher,
+        GameplayEntity,
         FacingDirection(Vec3::NEG_Z),
         Mesh3d(mesh),
         MeshMaterial3d(mat),
@@ -103,6 +104,7 @@ fn spawn_batter(
     // Batter stands just beside home plate (offset slightly to the right).
     commands.spawn((
         Batter,
+        GameplayEntity,
         FacingDirection(Vec3::Z),
         Mesh3d(mesh),
         MeshMaterial3d(mat),
@@ -146,6 +148,7 @@ fn spawn_fielders(
 
         commands.spawn((
             Fielder { position: *pos },
+            GameplayEntity,
             FacingDirection(Vec3::NEG_Z),
             Mesh3d(mesh),
             MeshMaterial3d(mat),
