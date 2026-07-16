@@ -227,17 +227,17 @@ pub fn classify_batted_ball(vel: Vec3, field: &FieldSpec, rules: &Ruleset) -> Ou
         return Outcome::HomeRun;
     }
 
-    // Front-yard rules: a low ball landing next to a fielder is played on the
-    // hop and thrown at the runner — pegged out. Hitting it right at someone
-    // is the cardinal sin of street ball.
-    if rules.peg_outs
-        && launch_deg < PEG_MAX_LAUNCH_DEG
-        && field
-            .fielder_positions
-            .iter()
-            .any(|p| Vec2::new(land.x - p.x, land.z - p.z).length() < field.peg_radius)
-    {
-        return Outcome::Out(OutKind::Pegged);
+    // Front-yard rules: a low ball landing next to a defender (the pitcher
+    // counts too) is played on the hop and thrown at the runner — pegged out.
+    // Hitting it right at someone is the cardinal sin of street ball.
+    if rules.peg_outs && launch_deg < PEG_MAX_LAUNCH_DEG {
+        let pitcher = Vec3::new(0.0, 0.0, field.pitch_distance);
+        let pegged = std::iter::once(&pitcher)
+            .chain(field.fielder_positions.iter())
+            .any(|p| Vec2::new(land.x - p.x, land.z - p.z).length() < field.peg_radius);
+        if pegged {
+            return Outcome::Out(OutKind::Pegged);
+        }
     }
 
     let s = field.hit_scale;

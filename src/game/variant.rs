@@ -52,8 +52,8 @@ pub struct FieldSpec {
     /// Peg-out proximity: a low ball landing this close to a fielder beans the
     /// runner. Only consulted when [`Ruleset::peg_outs`] is set.
     pub peg_radius: f32,
-    /// Defensive team spawn spots (the pitcher's spot is separate, at the
-    /// rubber). Length sets the fielder count.
+    /// Defensive spawn spots *excluding* the pitcher, who always stands at
+    /// the rubber. Length sets the fielder count; the team size is this + 1.
     pub fielder_positions: Vec<Vec3>,
     /// Ball-reset radius: past this the ball is considered lost.
     pub bounds: f32,
@@ -176,7 +176,6 @@ impl VariantId {
                 hit_scale: 0.4,
                 peg_radius: 4.5,
                 fielder_positions: vec![
-                    Vec3::new(0.0, 0.0, 10.0),   // pitcher, mid-yard
                     Vec3::new(12.0, 0.0, 20.0),  // right sidewalk
                     Vec3::new(-12.0, 0.0, 20.0), // left sidewalk
                     Vec3::new(0.0, 0.0, 34.0),   // across-the-street yard
@@ -222,7 +221,7 @@ mod tests {
         assert!(r.peg_outs);
         assert_eq!(r.innings, 3);
         assert_eq!(f.base_count(), 4);
-        assert_eq!(f.fielder_positions.len(), 4); // pitcher + 3 = 4-player team
+        assert_eq!(f.fielder_positions.len(), 3); // + the pitcher = 4-player team
         assert!(f.peg_radius > 0.0);
         assert_eq!(f.scenery, Scenery::FrontYard);
     }

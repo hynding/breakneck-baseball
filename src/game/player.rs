@@ -6,7 +6,7 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
-use crate::game::field::{BASE_DISTANCE, PITCH_DISTANCE};
+use crate::game::variant::FieldSpec;
 use crate::game::{GameState, GameplayEntity};
 
 // ── Player roles ──────────────────────────────────────────────────────────────
@@ -19,23 +19,13 @@ pub struct Pitcher;
 #[derive(Component)]
 pub struct Batter;
 
-/// Marker for any defensive fielder (1B, 2B, SS, 3B, LF, CF, RF).
+/// Marker for a defensive fielder: the i-th spot in the field spec's
+/// `fielder_positions` (how many there are — and where — is the variant's
+/// call).
 #[allow(dead_code)]
 #[derive(Component)]
 pub struct Fielder {
-    pub position: FieldPosition,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FieldPosition {
-    FirstBase,
-    SecondBase,
-    ShortStop,
-    ThirdBase,
-    LeftField,
-    CenterField,
-    RightField,
-    Catcher,
+    pub index: usize,
 }
 
 /// Facing direction for the player model (world-space).
@@ -76,6 +66,7 @@ fn spawn_pitcher(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    field: Res<FieldSpec>,
 ) {
     let mesh = player_capsule(&mut meshes);
     let mat = team_material(&mut materials, Color::srgb(0.9, 0.2, 0.2)); // red team
@@ -87,7 +78,7 @@ fn spawn_pitcher(
         Mesh3d(mesh),
         MeshMaterial3d(mat),
         // Pitcher stands 0.6 m above the mound surface (capsule half-height)
-        Transform::from_xyz(0.0, 0.6 + 0.25, PITCH_DISTANCE),
+        Transform::from_xyz(0.0, 0.6 + 0.25, field.pitch_distance),
         RigidBody::KinematicPositionBased,
         Collider::capsule_y(0.6, 0.4),
     ));
@@ -118,36 +109,14 @@ fn spawn_fielders(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    field: Res<FieldSpec>,
 ) {
-    let positions: &[(FieldPosition, Vec3)] = &[
-        (FieldPosition::Catcher, Vec3::new(0.0, 0.0, -1.5)),
-        (
-            FieldPosition::FirstBase,
-            Vec3::new(BASE_DISTANCE, 0.0, BASE_DISTANCE - 3.0),
-        ),
-        (
-            FieldPosition::SecondBase,
-            Vec3::new(7.0, 0.0, BASE_DISTANCE * 2.0 - 3.0),
-        ),
-        (
-            FieldPosition::ShortStop,
-            Vec3::new(-7.0, 0.0, BASE_DISTANCE * 2.0 - 3.0),
-        ),
-        (
-            FieldPosition::ThirdBase,
-            Vec3::new(-BASE_DISTANCE, 0.0, BASE_DISTANCE - 3.0),
-        ),
-        (FieldPosition::LeftField, Vec3::new(-40.0, 0.0, 85.0)),
-        (FieldPosition::CenterField, Vec3::new(0.0, 0.0, 110.0)),
-        (FieldPosition::RightField, Vec3::new(40.0, 0.0, 85.0)),
-    ];
-
-    for (pos, translation) in positions {
+    for (index, translation) in field.fielder_positions.iter().enumerate() {
         let mesh = player_capsule(&mut meshes);
         let mat = team_material(&mut materials, Color::srgb(0.9, 0.2, 0.2));
 
         commands.spawn((
-            Fielder { position: *pos },
+            Fielder { index },
             GameplayEntity,
             FacingDirection(Vec3::NEG_Z),
             Mesh3d(mesh),

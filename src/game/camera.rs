@@ -12,6 +12,7 @@ use bevy::prelude::*;
 
 use crate::game::ball::Baseball;
 use crate::game::flow::{Phase, Play};
+use crate::game::variant::FieldSpec;
 use crate::game::GameState;
 
 // ── Mode ──────────────────────────────────────────────────────────────────────
@@ -30,10 +31,9 @@ fn is_orbit(mode: Res<CameraMode>) -> bool {
     *mode == CameraMode::Orbit
 }
 
-/// Where the broadcast camera looks when nothing special is happening: the
-/// front of the infield, so both batter and pitcher are comfortably in frame.
+/// Fallback broadcast framing used before a field is chosen (initial camera
+/// spawn); once a game is running the framing comes from the [`FieldSpec`].
 const BROADCAST_HOME_TARGET: Vec3 = Vec3::new(0.0, 1.2, 9.0);
-/// Broadcast eye position — up and behind home plate, looking toward centre.
 const BROADCAST_EYE: Vec3 = Vec3::new(0.0, 13.0, -21.0);
 
 // ── Orbit state ───────────────────────────────────────────────────────────────
@@ -131,6 +131,7 @@ fn toggle_camera_mode(
 fn broadcast_camera(
     time: Res<Time>,
     play: Res<Play>,
+    field: Res<FieldSpec>,
     ball_q: Query<&Transform, (With<Baseball>, Without<Camera3d>)>,
     mut target: ResMut<BroadcastTarget>,
     mut cam_q: Query<&mut Transform, With<Camera3d>>,
@@ -145,7 +146,7 @@ fn broadcast_camera(
                 ball.translation.z,
             )
         }
-        _ => BROADCAST_HOME_TARGET,
+        _ => field.broadcast_target,
     };
 
     // Critically-damped-ish smoothing so the camera glides rather than snaps.
@@ -153,8 +154,8 @@ fn broadcast_camera(
     target.0 = target.0.lerp(desired, follow);
 
     // Pull the eye back a little for deep balls so home runs stay in frame.
-    let extra = ((target.0.z - BROADCAST_HOME_TARGET.z) * 0.12).clamp(0.0, 14.0);
-    let eye = BROADCAST_EYE + Vec3::new(0.0, extra * 0.5, -extra);
+    let extra = ((target.0.z - field.broadcast_target.z) * 0.12).clamp(0.0, 14.0);
+    let eye = field.broadcast_eye + Vec3::new(0.0, extra * 0.5, -extra);
 
     if let Ok(mut cam) = cam_q.get_single_mut() {
         *cam = Transform::from_translation(eye).looking_at(target.0, Vec3::Y);

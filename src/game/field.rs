@@ -1,11 +1,11 @@
-//! Baseball field geometry.
+//! Playing-field geometry, spawned from the chosen [`FieldSpec`].
 //!
-//! Spawns the playing surface — infield diamond, bases, pitcher's mound, foul
-//! lines, outfield grass — all as static Rapier colliders so the ball can roll
-//! and bounce on them correctly.
+//! Shared pieces (ground, bases, mound, lighting) are placed wherever the spec
+//! says; the surroundings are dressed by the spec's [`Scenery`] routine —
+//! a classic ballpark or a suburban front yard.
 //!
-//! **Field dimensions** (metric, matching real MLB proportions scaled to Bevy
-//! world units where 1 unit ≈ 1 metre):
+//! **Standard field dimensions** (metric, matching real MLB proportions scaled
+//! to Bevy world units where 1 unit ≈ 1 metre):
 //!
 //! | Feature                     | Real feet | Metres (≈) |
 //! |-----------------------------|-----------|------------|
@@ -17,6 +17,7 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
+use crate::game::variant::{FieldSpec, Scenery};
 use crate::game::{GameState, GameplayEntity};
 
 // ── Distances in metres ───────────────────────────────────────────────────────
@@ -34,19 +35,12 @@ const GROUND_HALF_DEPTH: f32 = 0.1;
 #[derive(Component)]
 pub struct GroundPlane;
 
-/// Marks a base object (first, second, third, or home plate).
+/// Marks a base object: `Some(i)` is the (0-indexed) i-th base in running
+/// order, `None` is home plate.
 #[allow(dead_code)]
 #[derive(Component)]
 pub struct Base {
-    pub label: BaseLabel,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BaseLabel {
-    Home,
-    First,
-    Second,
-    Third,
+    pub index: Option<usize>,
 }
 
 /// Marks the pitcher's mound.
@@ -71,24 +65,31 @@ fn spawn_field(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    field: Res<FieldSpec>,
 ) {
-    spawn_ground(&mut commands, &mut meshes, &mut materials);
-    spawn_infield(&mut commands, &mut meshes, &mut materials);
-    spawn_pitchers_mound(&mut commands, &mut meshes, &mut materials);
-    spawn_foul_poles(&mut commands, &mut meshes, &mut materials);
-    spawn_outfield_wall(&mut commands, &mut meshes, &mut materials);
+    match field.scenery {
+        Scenery::Stadium => {
+            spawn_stadium_ground(&mut commands, &mut meshes, &mut materials);
+            spawn_stadium_mound(&mut commands, &mut meshes, &mut materials, &field);
+            spawn_foul_poles(&mut commands, &mut meshes, &mut materials);
+            spawn_outfield_wall(&mut commands, &mut meshes, &mut materials);
+        }
+        Scenery::FrontYard => {
+            spawn_front_yard(&mut commands, &mut meshes, &mut materials, &field);
+        }
+    }
+    spawn_bases(&mut commands, &mut meshes, &mut materials, &field);
     spawn_lighting(&mut commands);
 }
 
-// ── Ground plane ─────────────────────────────────────────────────────────────
-fn spawn_ground(
+/// The flat ground slab every scenery stands on (static collider for the ball).
+fn spawn_ground_slab(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
+    color: Color,
 ) {
-    // A large flat quad that covers the whole playing area.
     let half_size = 150.0_f32;
-
     commands.spawn((
         GroundPlane,
         GameplayEntity,
@@ -98,15 +99,28 @@ fn spawn_ground(
             half_size * 2.0,
         ))),
         MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.18, 0.55, 0.18), // outfield green
+            base_color: color,
             perceptual_roughness: 0.9,
             ..default()
         })),
         Transform::from_xyz(0.0, -GROUND_HALF_DEPTH, 0.0),
-        // Static physics body so the ball collides with the ground.
         RigidBody::Fixed,
         Collider::cuboid(half_size, GROUND_HALF_DEPTH, half_size),
     ));
+}
+
+// ── Stadium scenery ───────────────────────────────────────────────────────────
+fn spawn_stadium_ground(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+) {
+    spawn_ground_slab(
+        commands,
+        meshes,
+        materials,
+        Color::srgb(0.18, 0.55, 0.18), // outfield green
+    );
 
     // A lighter infield-dirt square rotated 45° to form the diamond shape.
     let infield_half = BASE_DISTANCE / std::f32::consts::SQRT_2;
@@ -127,10 +141,12 @@ fn spawn_ground(
 }
 
 // ── Bases ─────────────────────────────────────────────────────────────────────
-fn spawn_infield(
+/// Home plate at the origin plus one bag per spec base position.
+fn spawn_bases(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
+    field: &FieldSpec,
 ) {
     let base_material = materials.add(StandardMaterial {
         base_color: Color::WHITE,
@@ -144,38 +160,9 @@ fn spawn_infield(
     let base_mesh = meshes.add(Cuboid::new(0.38, 0.05, 0.38));
     let home_mesh = meshes.add(Cuboid::new(0.43, 0.03, 0.43));
 
-    // Bases are arranged around the diamond, with home plate at the origin.
-    // Z-positive points toward the outfield (centre field).
-    let bases = [
-        (
-            BaseLabel::Home,
-            Vec3::new(0.0, 0.0, 0.0),
-            home_mesh.clone(),
-            home_material.clone(),
-        ),
-        (
-            BaseLabel::First,
-            Vec3::new(BASE_DISTANCE, 0.0, BASE_DISTANCE),
-            base_mesh.clone(),
-            base_material.clone(),
-        ),
-        (
-            BaseLabel::Second,
-            Vec3::new(0.0, 0.0, BASE_DISTANCE * 2.0),
-            base_mesh.clone(),
-            base_material.clone(),
-        ),
-        (
-            BaseLabel::Third,
-            Vec3::new(-BASE_DISTANCE, 0.0, BASE_DISTANCE),
-            base_mesh.clone(),
-            base_material.clone(),
-        ),
-    ];
-
-    for (label, pos, mesh, mat) in bases {
+    let mut spawn = |index: Option<usize>, pos: Vec3, mesh: Handle<Mesh>, mat| {
         commands.spawn((
-            Base { label },
+            Base { index },
             GameplayEntity,
             Mesh3d(mesh),
             MeshMaterial3d(mat),
@@ -183,14 +170,20 @@ fn spawn_infield(
             RigidBody::Fixed,
             Collider::cuboid(0.19, 0.025, 0.19),
         ));
+    };
+
+    spawn(None, Vec3::ZERO, home_mesh, home_material);
+    for (i, pos) in field.base_positions.iter().enumerate() {
+        spawn(Some(i), *pos, base_mesh.clone(), base_material.clone());
     }
 }
 
 // ── Pitcher's mound ───────────────────────────────────────────────────────────
-fn spawn_pitchers_mound(
+fn spawn_stadium_mound(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
+    field: &FieldSpec,
 ) {
     commands.spawn((
         PitchersMound,
@@ -201,9 +194,41 @@ fn spawn_pitchers_mound(
             perceptual_roughness: 1.0,
             ..default()
         })),
-        Transform::from_xyz(0.0, 0.125, PITCH_DISTANCE),
+        Transform::from_xyz(0.0, 0.125, field.pitch_distance),
         RigidBody::Fixed,
         Collider::cylinder(0.125, 2.74),
+    ));
+}
+
+// ── Front-yard scenery ────────────────────────────────────────────────────────
+/// Suburban lot scenery. Fleshed out with houses/street/hedges in the
+/// front-yard milestone; the lawn and pitching mat are enough to play on.
+fn spawn_front_yard(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    field: &FieldSpec,
+) {
+    spawn_ground_slab(
+        commands,
+        meshes,
+        materials,
+        Color::srgb(0.24, 0.52, 0.20), // lawn green
+    );
+
+    // A rubber pitching mat instead of a mound.
+    commands.spawn((
+        PitchersMound,
+        GameplayEntity,
+        Mesh3d(meshes.add(Cuboid::new(0.8, 0.04, 0.8))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.25, 0.25, 0.28),
+            perceptual_roughness: 1.0,
+            ..default()
+        })),
+        Transform::from_xyz(0.0, 0.02, field.pitch_distance),
+        RigidBody::Fixed,
+        Collider::cuboid(0.4, 0.02, 0.4),
     ));
 }
 
