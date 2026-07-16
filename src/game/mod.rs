@@ -12,6 +12,7 @@ pub mod input;
 pub mod menu;
 pub mod player;
 pub mod rules;
+pub mod theme;
 pub mod ui;
 pub mod variant;
 
@@ -24,6 +25,7 @@ use flow::FlowPlugin;
 use input::InputPlugin;
 use menu::MenuPlugin;
 use player::PlayerPlugin;
+use theme::ThemeId;
 use ui::UiPlugin;
 use variant::VariantId;
 
@@ -56,11 +58,15 @@ pub enum GameMode {
 
 /// Chosen game options, set by the menu before entering [`GameState::Playing`].
 /// The variant's [`variant::Ruleset`] and [`variant::FieldSpec`] resources are
-/// (re)written from `variant` when a game starts.
+/// (re)written from `variant` when a game starts; the [`theme::Theme`]
+/// resource is rewritten whenever `theme` is cycled on the menu.
 #[derive(Resource, Debug, Default)]
 pub struct GameConfig {
     pub mode: GameMode,
     pub variant: VariantId,
+    // Read by the menu's theme cycle (restyle task); allow until that lands.
+    #[allow(dead_code)]
+    pub theme: ThemeId,
 }
 
 /// Global game-state machine.
@@ -152,6 +158,7 @@ impl Plugin for GamePlugin {
             // both resources with the chosen variant before a game starts.
             .insert_resource(VariantId::Standard.rules())
             .insert_resource(VariantId::Standard.field())
+            .insert_resource(ThemeId::DaylightClassic.build())
             .insert_resource(ScoreBoard {
                 inning: 1,
                 top_of_inning: true,
