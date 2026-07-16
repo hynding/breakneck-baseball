@@ -16,6 +16,7 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
+use crate::game::ai::{cpu_defense, cpu_offense, CpuConfig, CpuState};
 use crate::game::ball::{Baseball, HitEvent, InFlight, PitchEvent, BALL_RADIUS};
 use crate::game::field::PITCH_DISTANCE;
 use crate::game::input::Intents;
@@ -154,11 +155,21 @@ impl Plugin for FlowPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Play>()
             .init_resource::<Bases>()
+            .init_resource::<CpuConfig>()
+            .init_resource::<CpuState>()
             .add_event::<PlayBanner>()
             .add_systems(OnEnter(GameState::Playing), reset_flow)
             .add_systems(
                 Update,
-                (pre_pitch, pitch_live, in_play, result_phase)
+                // CPU intent is written first so pitching/batting see it this frame.
+                (
+                    cpu_defense,
+                    cpu_offense,
+                    pre_pitch,
+                    pitch_live,
+                    in_play,
+                    result_phase,
+                )
                     .chain()
                     .run_if(in_state(GameState::Playing)),
             );

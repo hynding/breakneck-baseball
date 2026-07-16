@@ -76,6 +76,7 @@ fn spawn_field(
     spawn_infield(&mut commands, &mut meshes, &mut materials);
     spawn_pitchers_mound(&mut commands, &mut meshes, &mut materials);
     spawn_foul_poles(&mut commands, &mut meshes, &mut materials);
+    spawn_outfield_wall(&mut commands, &mut meshes, &mut materials);
     spawn_lighting(&mut commands);
 }
 
@@ -230,6 +231,47 @@ fn spawn_foul_poles(
             Transform::from_xyz(sign * foul_line_distance, 7.5, foul_line_distance),
             RigidBody::Fixed,
             Collider::cylinder(7.5, 0.05),
+        ));
+    }
+}
+
+// ── Outfield wall ─────────────────────────────────────────────────────────────
+/// A curved wall of flat panels spanning the fair-territory arc (foul pole to
+/// foul pole), giving the outfield a visible boundary for home runs. Visual
+/// only — no collider, so batted balls fly over it freely.
+fn spawn_outfield_wall(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+) {
+    let wall_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.10, 0.22, 0.14), // dark padded-wall green
+        perceptual_roughness: 0.95,
+        ..default()
+    });
+
+    let radius = 112.0_f32;
+    let height = 3.0_f32;
+    let panels = 17;
+    // Fair territory spans ±45° from the +Z (centre-field) axis.
+    let span = std::f32::consts::FRAC_PI_2; // 90°
+    let seg_angle = span / panels as f32;
+    // Panel width slightly over the chord so neighbours overlap (no gaps).
+    let panel_width = 2.0 * radius * (seg_angle / 2.0).sin() * 1.05;
+    let panel_mesh = meshes.add(Cuboid::new(panel_width, height, 0.4));
+
+    for i in 0..panels {
+        let theta = -span / 2.0 + seg_angle * (i as f32 + 0.5);
+        let pos = Vec3::new(radius * theta.sin(), height / 2.0, radius * theta.cos());
+        commands.spawn((
+            GameplayEntity,
+            Mesh3d(panel_mesh.clone()),
+            MeshMaterial3d(wall_material.clone()),
+            Transform {
+                translation: pos,
+                rotation: Quat::from_rotation_y(theta),
+                ..default()
+            },
         ));
     }
 }

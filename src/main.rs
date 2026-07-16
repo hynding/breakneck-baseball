@@ -15,15 +15,13 @@ fn main() {
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Breakneck Baseball".into(),
-                resolution: (1280.0, 720.0).into(),
+                resolution: (1280.0_f32, 720.0_f32).into(),
                 ..default()
             }),
             ..default()
         }))
         // ── 3-D physics via Rapier ───────────────────────────────────────────────
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
-        // ── Debug collider outlines (disable in release if desired) ──────────────
-        .add_plugins(RapierDebugRenderPlugin::default())
         // ── All game-specific systems ────────────────────────────────────────────
         .add_plugins(GamePlugin)
         .run();

@@ -3,6 +3,7 @@
 //! `GamePlugin` registers every sub-plugin in dependency order and exposes the
 //! shared [`GameState`] state machine to all systems.
 
+pub mod ai;
 pub mod ball;
 pub mod camera;
 pub mod field;
