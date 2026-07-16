@@ -12,6 +12,7 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
+use crate::game::variant::FieldSpec;
 use crate::game::{GameState, GameplayEntity};
 
 /// Official ball radius in metres.
@@ -71,9 +72,8 @@ fn spawn_ball(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    field: Res<FieldSpec>,
 ) {
-    use crate::game::field::PITCH_DISTANCE;
-
     commands.spawn((
         Baseball,
         GameplayEntity,
@@ -83,7 +83,7 @@ fn spawn_ball(
             perceptual_roughness: 0.6,
             ..default()
         })),
-        Transform::from_xyz(0.0, BALL_RADIUS + 0.25, PITCH_DISTANCE),
+        Transform::from_xyz(0.0, BALL_RADIUS + 0.25, field.pitch_distance),
         RigidBody::Dynamic,
         Collider::ball(BALL_RADIUS),
         Velocity::zero(),
@@ -157,19 +157,18 @@ fn apply_drag(mut query: Query<&mut Velocity, (With<Baseball>, With<InFlight>)>,
 }
 
 /// Resets the ball to the pitcher's mound if it falls below the world or flies
-/// far out of the playable area.
+/// beyond the field's playable radius.
 fn reset_ball_if_out_of_bounds(
     mut query: Query<(&mut Transform, &mut Velocity), With<Baseball>>,
     mut commands: Commands,
     entity_query: Query<Entity, (With<Baseball>, With<InFlight>)>,
+    field: Res<FieldSpec>,
 ) {
-    use crate::game::field::PITCH_DISTANCE;
-
     for (mut transform, mut vel) in &mut query {
         let pos = transform.translation;
-        let out = pos.y < -10.0 || pos.x.abs() > 200.0 || pos.z > 200.0 || pos.z < -50.0;
+        let out = pos.y < -10.0 || Vec2::new(pos.x, pos.z).length() > field.bounds;
         if out {
-            transform.translation = Vec3::new(0.0, BALL_RADIUS + 0.25, PITCH_DISTANCE);
+            transform.translation = Vec3::new(0.0, BALL_RADIUS + 0.25, field.pitch_distance);
             vel.linvel = Vec3::ZERO;
             vel.angvel = Vec3::ZERO;
 

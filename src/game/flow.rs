@@ -139,6 +139,7 @@ fn pre_pitch(
     mut play: ResMut<Play>,
     intents: Res<Intents>,
     score: Res<ScoreBoard>,
+    field: Res<FieldSpec>,
     mut pitch_ev: EventWriter<PitchEvent>,
 ) {
     if play.phase != Phase::PrePitch {
@@ -148,7 +149,7 @@ fn pre_pitch(
     let intent = intents.get(score.fielding_team());
     if intent.action {
         pitch_ev.send(PitchEvent {
-            velocity: rules::pitch_velocity(intent.aim),
+            velocity: rules::pitch_velocity(intent.aim, field.pitch_distance),
         });
 
         play.phase = Phase::Pitch;
@@ -164,6 +165,7 @@ fn pitch_live(
     mut play: ResMut<Play>,
     intents: Res<Intents>,
     rules: Res<Ruleset>,
+    field: Res<FieldSpec>,
     mut score: ResMut<ScoreBoard>,
     mut bases: ResMut<Bases>,
     ball_q: Query<&Transform, With<Baseball>>,
@@ -191,7 +193,7 @@ fn pitch_live(
             pos.z >= SWING_LATE_Z && pos.z <= SWING_EARLY_Z && pos.x.abs() <= SWING_REACH_X;
         if reachable {
             let velocity = rules::hit_velocity(pos.z, intent.aim);
-            let outcome = rules::classify_batted_ball(velocity);
+            let outcome = rules::classify_batted_ball(velocity, &field, &rules);
             hit_ev.send(HitEvent { velocity });
             resolve_contact(outcome, &mut score, &mut bases, &rules, &mut banner);
             if outcome == Outcome::Foul {
@@ -239,6 +241,7 @@ fn in_play(mut play: ResMut<Play>, time: Res<Time>) {
 fn result_phase(
     mut play: ResMut<Play>,
     time: Res<Time>,
+    field: Res<FieldSpec>,
     mut ball_q: Query<(Entity, &mut Transform, &mut Velocity), With<Baseball>>,
     mut commands: Commands,
 ) {
@@ -247,7 +250,7 @@ fn result_phase(
     }
     if play.timer.tick(time.delta()).finished() {
         if let Ok((entity, mut transform, mut vel)) = ball_q.get_single_mut() {
-            transform.translation = rules::mound_reset_pos();
+            transform.translation = rules::mound_reset_pos(field.pitch_distance);
             vel.linvel = Vec3::ZERO;
             vel.angvel = Vec3::ZERO;
             commands.entity(entity).remove::<InFlight>();
@@ -277,42 +280,37 @@ fn resolve_contact(
                 OutKind::Ground => "GROUND OUT",
                 OutKind::Fly => "FLY OUT",
                 OutKind::Pop => "POP OUT",
+                OutKind::Pegged => "PEGGED!",
             };
             banner.send(PlayBanner::new(text, Color::srgb(1.0, 0.6, 0.4)));
             rules::record_out(score, bases, ruleset);
         }
-        Outcome::Single => hit(
-            score,
-            bases,
-            banner,
-            1,
-            "SINGLE",
-            Color::srgb(0.7, 1.0, 0.7),
-        ),
-        Outcome::Double => hit(
-            score,
-            bases,
-            banner,
-            2,
-            "DOUBLE",
-            Color::srgb(0.6, 1.0, 0.8),
-        ),
-        Outcome::Triple => hit(
-            score,
-            bases,
-            banner,
-            3,
-            "TRIPLE",
-            Color::srgb(0.5, 1.0, 0.9),
-        ),
-        Outcome::HomeRun => hit(
-            score,
-            bases,
-            banner,
-            4,
-            "HOME RUN!",
-            Color::srgb(1.0, 0.86, 0.2),
-        ),
+        Outcome::Hit(n) => {
+            let label = match n {
+                1 => "SINGLE".to_string(),
+                2 => "DOUBLE".to_string(),
+                3 => "TRIPLE".to_string(),
+                n => format!("{n} BASES!"),
+            };
+            let color = match n {
+                1 => Color::srgb(0.7, 1.0, 0.7),
+                2 => Color::srgb(0.6, 1.0, 0.8),
+                _ => Color::srgb(0.5, 1.0, 0.9),
+            };
+            hit(score, bases, banner, n, &label, color);
+        }
+        // A home run is worth one more base than the field has.
+        Outcome::HomeRun => {
+            let bases_worth = bases.count() as u32 + 1;
+            hit(
+                score,
+                bases,
+                banner,
+                bases_worth,
+                "HOME RUN!",
+                Color::srgb(1.0, 0.86, 0.2),
+            );
+        }
     }
 }
 

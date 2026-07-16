@@ -11,8 +11,7 @@ use bevy::math::{Vec2, Vec3};
 use bevy::prelude::Resource;
 
 use crate::game::ball::BALL_RADIUS;
-use crate::game::field::PITCH_DISTANCE;
-use crate::game::variant::Ruleset;
+use crate::game::variant::{FieldSpec, Ruleset};
 use crate::game::ScoreBoard;
 
 // ── Tuning constants ──────────────────────────────────────────────────────────
@@ -44,9 +43,13 @@ const ZONE_HALF_WIDTH: f32 = 0.34;
 const ZONE_LOW: f32 = 0.5;
 const ZONE_HIGH: f32 = 1.45;
 
-/// Where the ball rests before each pitch (top of the mound).
-pub fn mound_reset_pos() -> Vec3 {
-    Vec3::new(0.0, BALL_RADIUS + 0.25, PITCH_DISTANCE)
+/// Maximum launch angle (degrees) at which a fielder can play a ball on the
+/// hop and peg the runner. Steeper balls are governed by the catch bands.
+const PEG_MAX_LAUNCH_DEG: f32 = 20.0;
+
+/// Where the ball rests before each pitch (top of the mound / rubber).
+pub fn mound_reset_pos(pitch_distance: f32) -> Vec3 {
+    Vec3::new(0.0, BALL_RADIUS + 0.25, pitch_distance)
 }
 
 // ── Data ──────────────────────────────────────────────────────────────────────
@@ -110,6 +113,8 @@ pub enum OutKind {
     Ground,
     Fly,
     Pop,
+    /// The runner was hit with the thrown ball (front-yard rules).
+    Pegged,
 }
 
 /// The result of a batted ball.
@@ -117,9 +122,8 @@ pub enum OutKind {
 pub enum Outcome {
     Foul,
     Out(OutKind),
-    Single,
-    Double,
-    Triple,
+    /// A clean hit worth this many bases (1 = single … up to the base count).
+    Hit(u32),
     HomeRun,
 }
 
@@ -143,14 +147,15 @@ pub enum StrikeCall {
 
 // ── Pitch & contact kinematics ────────────────────────────────────────────────
 
-/// Solves the release velocity for a pitch aimed at plate location
-/// `(aim.x, aim.y)` (both in −1.0..=1.0, zero = middle of the zone).
-pub fn pitch_velocity(aim: Vec2) -> Vec3 {
+/// Solves the release velocity for a pitch from `pitch_distance` aimed at
+/// plate location `(aim.x, aim.y)` (both in −1.0..=1.0, zero = middle of the
+/// zone).
+pub fn pitch_velocity(aim: Vec2, pitch_distance: f32) -> Vec3 {
     let target_x = aim.x * 0.35;
     let target_y = 1.05 + aim.y * 0.5;
 
-    let start = mound_reset_pos();
-    let flight = PITCH_DISTANCE / PITCH_SPEED;
+    let start = mound_reset_pos(pitch_distance);
+    let flight = pitch_distance / PITCH_SPEED;
     let vx = (target_x - start.x) / flight;
     let vy = (target_y - start.y) / flight + 0.5 * GRAVITY * (flight * PITCH_LOFT_BIAS);
 
@@ -193,18 +198,19 @@ pub fn is_in_zone(crossing: Vec2) -> bool {
 // ── Batted-ball classification ────────────────────────────────────────────────
 
 /// Classifies a batted ball from its launch velocity by predicting where it
-/// lands (drag-free projectile range scaled by [`DRAG_RANGE_FACTOR`]).
-pub fn classify_batted_ball(vel: Vec3) -> Outcome {
+/// lands (drag-free projectile range scaled by [`DRAG_RANGE_FACTOR`]) on the
+/// given field. The distance bands that decide out/hit tiers scale with
+/// [`FieldSpec::hit_scale`] so small parks keep the same arcade balance.
+pub fn classify_batted_ball(vel: Vec3, field: &FieldSpec, rules: &Ruleset) -> Outcome {
     // Time to return to ground from the contact height.
     let disc = vel.y * vel.y + 2.0 * GRAVITY * CONTACT_HEIGHT;
     let t = (vel.y + disc.sqrt()) / GRAVITY;
 
     let land = Vec3::new(vel.x, 0.0, vel.z) * t * DRAG_RANGE_FACTOR;
     let dist = land.length();
-    let (x, z) = (land.x, land.z);
 
-    // Fair territory is the 45° wedge opening toward +Z (centre field).
-    let fair = z > 1.0 && x.abs() <= z + 0.01;
+    // Fair territory is the wedge opening toward +Z with the field's half-angle.
+    let fair = land.z > 1.0 && land.x.abs() <= land.z * field.fair_half_angle.tan() + 0.01;
     if !fair {
         return Outcome::Foul;
     }
@@ -212,36 +218,53 @@ pub fn classify_batted_ball(vel: Vec3) -> Outcome {
     let speed = vel.length().max(0.001);
     let launch_deg = (vel.y / speed).asin().to_degrees();
 
-    // Radial fence: down the lines ≈ 100 m, straightaway centre ≈ 122 m.
-    let centeredness = (((z / dist) - 0.707) / (1.0 - 0.707)).clamp(0.0, 1.0);
-    let fence = 100.0 + 22.0 * centeredness;
+    // Radial fence, interpolated from the lines to straightaway centre.
+    let cos_half = field.fair_half_angle.cos();
+    let centeredness = (((land.z / dist) - cos_half) / (1.0 - cos_half)).clamp(0.0, 1.0);
+    let fence = field.fence_line + (field.fence_center - field.fence_line) * centeredness;
 
     if dist > fence {
         return Outcome::HomeRun;
     }
+
+    // Front-yard rules: a low ball landing next to a fielder is played on the
+    // hop and thrown at the runner — pegged out. Hitting it right at someone
+    // is the cardinal sin of street ball.
+    if rules.peg_outs
+        && launch_deg < PEG_MAX_LAUNCH_DEG
+        && field
+            .fielder_positions
+            .iter()
+            .any(|p| Vec2::new(land.x - p.x, land.z - p.z).length() < field.peg_radius)
+    {
+        return Outcome::Out(OutKind::Pegged);
+    }
+
+    let s = field.hit_scale;
     // Infield/short pop-ups are caught.
-    if launch_deg > 50.0 && dist < 55.0 {
+    if launch_deg > 50.0 && dist < 55.0 * s {
         return Outcome::Out(OutKind::Pop);
     }
-    // Most fly balls are run down by the outfield; only the deepest drives to
-    // the gaps fall in for extra bases, and the very deepest clear the wall
+    // Most fly balls are run down by the defense; only the deepest drives to
+    // the gaps fall in for extra bases, and the very deepest clear the fence
     // (handled above). Catching routine flies is what keeps the out-rate — and
     // therefore inning pace — in line with arcade baseball.
-    if launch_deg > 20.0 && dist < 95.0 {
+    if launch_deg > 20.0 && dist < 95.0 * s {
         return Outcome::Out(OutKind::Fly);
     }
     // Weakly-topped balls are fielded in the infield.
-    if dist < 26.0 {
+    if dist < 26.0 * s {
         return Outcome::Out(OutKind::Ground);
     }
-    // Line drives (and deep gap flies) split the field by depth.
-    if dist < 44.0 {
-        Outcome::Single
-    } else if dist < 68.0 {
-        Outcome::Double
-    } else {
-        Outcome::Triple
+    // Line drives (and deep gap flies) split the field by depth; fields with
+    // more bases add a deeper tier per extra base.
+    let mut hit = 1u32;
+    let mut boundary = 44.0 * s;
+    while (hit as usize) < field.base_count() && dist >= boundary {
+        hit += 1;
+        boundary += 24.0 * s;
     }
+    Outcome::Hit(hit)
 }
 
 // ── Base running ──────────────────────────────────────────────────────────────
@@ -581,29 +604,50 @@ mod tests {
 
     // ── Classification ────────────────────────────────────────────────────────
 
+    fn std_field() -> FieldSpec {
+        VariantId::Standard.field()
+    }
+
+    /// Straightaway-centre launch velocity from angle (degrees) and speed.
+    fn vel_at(launch_deg: f32, speed: f32) -> Vec3 {
+        vel_spray(launch_deg, speed, 0.0)
+    }
+
+    /// Launch velocity sprayed `spray_deg` degrees off the centre-field axis.
+    fn vel_spray(launch_deg: f32, speed: f32, spray_deg: f32) -> Vec3 {
+        let launch = launch_deg.to_radians();
+        let spray = spray_deg.to_radians();
+        let horizontal = speed * launch.cos();
+        Vec3::new(
+            horizontal * spray.sin(),
+            speed * launch.sin(),
+            horizontal * spray.cos(),
+        )
+    }
+
     #[test]
     fn home_run_classifies_as_home_run() {
         // Straightaway centre, ~30° launch, high exit speed.
-        let launch = 30.0_f32.to_radians();
-        let speed = 46.0;
-        let vel = Vec3::new(0.0, speed * launch.sin(), speed * launch.cos());
-        assert_eq!(classify_batted_ball(vel), Outcome::HomeRun);
+        assert_eq!(
+            classify_batted_ball(vel_at(30.0, 46.0), &std_field(), &std_rules()),
+            Outcome::HomeRun
+        );
     }
 
     #[test]
     fn straight_up_is_a_pop_out() {
         let vel = Vec3::new(0.0, 20.0, 2.0);
-        assert!(matches!(classify_batted_ball(vel), Outcome::Out(_)));
+        assert!(matches!(
+            classify_batted_ball(vel, &std_field(), &std_rules()),
+            Outcome::Out(_)
+        ));
     }
 
     #[test]
     fn routine_fly_ball_is_caught() {
         // ~30° at a moderate exit speed: a can-of-corn fly, not deep enough to fall.
-        let launch = 30.0_f32.to_radians();
-        let speed = 30.0;
-        let vel = Vec3::new(0.0, speed * launch.sin(), speed * launch.cos());
         assert!(matches!(
-            classify_batted_ball(vel),
+            classify_batted_ball(vel_at(30.0, 30.0), &std_field(), &std_rules()),
             Outcome::Out(OutKind::Fly)
         ));
     }
@@ -611,20 +655,66 @@ mod tests {
     #[test]
     fn solid_line_drive_is_a_hit() {
         // ~15° liner splits the field for a base hit.
-        let launch = 15.0_f32.to_radians();
-        let speed = 34.0;
-        let vel = Vec3::new(0.0, speed * launch.sin(), speed * launch.cos());
         assert!(matches!(
-            classify_batted_ball(vel),
-            Outcome::Single | Outcome::Double | Outcome::Triple
+            classify_batted_ball(vel_at(15.0, 34.0), &std_field(), &std_rules()),
+            Outcome::Hit(1..=3)
         ));
     }
 
     #[test]
     fn pulled_way_foul_is_foul() {
-        // Mostly sideways: |x| > z → outside the fair wedge.
+        // Mostly sideways: |x| > z → outside the standard 45° fair wedge.
         let vel = Vec3::new(30.0, 8.0, 5.0);
-        assert_eq!(classify_batted_ball(vel), Outcome::Foul);
+        assert_eq!(
+            classify_batted_ball(vel, &std_field(), &std_rules()),
+            Outcome::Foul
+        );
+    }
+
+    // ── Front-yard classification ─────────────────────────────────────────────
+
+    fn yard() -> (FieldSpec, Ruleset) {
+        (VariantId::FrontYard.field(), VariantId::FrontYard.rules())
+    }
+
+    #[test]
+    fn peg_out_low_liner_lands_near_fielder() {
+        let (f, r) = yard();
+        // A flat ~10° liner up the middle lands a couple of metres from the
+        // mid-yard pitcher — beaned.
+        assert_eq!(
+            classify_batted_ball(vel_at(10.0, 20.0), &f, &r),
+            Outcome::Out(OutKind::Pegged)
+        );
+    }
+
+    #[test]
+    fn same_ball_without_peg_rule_is_a_hit() {
+        let (f, mut r) = yard();
+        r.peg_outs = false;
+        assert!(matches!(
+            classify_batted_ball(vel_at(10.0, 20.0), &f, &r),
+            Outcome::Hit(_)
+        ));
+    }
+
+    #[test]
+    fn high_fly_over_fielder_is_not_pegged() {
+        let (f, r) = yard();
+        // Steep flies are governed by the catch bands, never the peg rule.
+        let out = classify_batted_ball(vel_at(45.0, 16.0), &f, &r);
+        assert!(!matches!(out, Outcome::Out(OutKind::Pegged)));
+    }
+
+    #[test]
+    fn four_base_field_can_yield_hit_four() {
+        let (f, r) = yard();
+        // A hard low liner into the right-field gap: deep enough for the
+        // fourth tier, far from every fielder, under the fence.
+        assert_eq!(
+            classify_batted_ball(vel_spray(15.0, 33.0, 30.0), &f, &r),
+            Outcome::Hit(4)
+        );
     }
 
     // ── Pitch flight ──────────────────────────────────────────────────────────
@@ -637,8 +727,9 @@ mod tests {
     /// degrading.
     #[test]
     fn centre_aimed_pitch_is_a_strike() {
-        let mut pos = mound_reset_pos();
-        let mut vel = pitch_velocity(Vec2::ZERO);
+        let pitch_distance = std_field().pitch_distance;
+        let mut pos = mound_reset_pos(pitch_distance);
+        let mut vel = pitch_velocity(Vec2::ZERO, pitch_distance);
         let dt = 1.0 / 240.0;
 
         while pos.z > 0.0 {
