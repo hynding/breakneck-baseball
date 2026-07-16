@@ -7,10 +7,6 @@
 //! colours, so a whole new look is a new [`ThemeId`] arm — not new systems.
 //! **T** on the main menu cycles themes.
 
-// Consumed progressively as the HUD, ball, and player rigs move onto the
-// theme (visual-overhaul plan tasks 2-4); remove once every field has a reader.
-#![allow(dead_code)]
-
 use bevy::color::LinearRgba;
 use bevy::prelude::{Color, Resource};
 
