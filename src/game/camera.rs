@@ -57,13 +57,21 @@ impl Default for OrbitState {
     }
 }
 
-/// Smoothed look-at target for the broadcast camera (lerps toward the ball).
+/// Smoothed eye + look-at for the broadcast camera. Both lerp toward the
+/// framing the current play phase wants (tight duel framing for the pitch,
+/// wide ball-following framing in play), so zooms glide instead of cutting.
 #[derive(Resource)]
-struct BroadcastTarget(Vec3);
+struct BroadcastRig {
+    eye: Vec3,
+    target: Vec3,
+}
 
-impl Default for BroadcastTarget {
+impl Default for BroadcastRig {
     fn default() -> Self {
-        Self(BROADCAST_HOME_TARGET)
+        Self {
+            eye: BROADCAST_EYE,
+            target: BROADCAST_HOME_TARGET,
+        }
     }
 }
 
@@ -75,7 +83,7 @@ impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<OrbitState>()
             .init_resource::<CameraMode>()
-            .init_resource::<BroadcastTarget>()
+            .init_resource::<BroadcastRig>()
             .add_systems(Startup, spawn_camera)
             .add_systems(
                 Update,
@@ -133,32 +141,36 @@ fn broadcast_camera(
     play: Res<Play>,
     field: Res<FieldSpec>,
     ball_q: Query<&Transform, (With<Baseball>, Without<Camera3d>)>,
-    mut target: ResMut<BroadcastTarget>,
+    mut rig: ResMut<BroadcastRig>,
     mut cam_q: Query<&mut Transform, With<Camera3d>>,
 ) {
-    // Follow the ball while it is live; otherwise settle back onto home.
-    let desired = match (play.phase, ball_q.get_single()) {
+    // Pick the framing the current phase wants.
+    let (desired_eye, desired_target) = match (play.phase, ball_q.get_single()) {
+        // Ball is live: wide framing following the ball, with the eye pulled
+        // back a little for deep balls so home runs stay in frame.
         (Phase::InPlay, Ok(ball)) => {
-            // Ease toward the ball but keep it a touch above ground for framing.
-            Vec3::new(
+            let target = Vec3::new(
                 ball.translation.x,
                 ball.translation.y.max(1.0),
                 ball.translation.z,
-            )
+            );
+            let extra = ((rig.target.z - field.broadcast_target.z) * 0.12).clamp(0.0, 14.0);
+            let eye = field.broadcast_eye + Vec3::new(0.0, extra * 0.5, -extra);
+            (eye, target)
         }
-        _ => field.broadcast_target,
+        // Result pause: settle on the wide home framing.
+        (Phase::Result, _) => (field.broadcast_eye, field.broadcast_target),
+        // The duel: zoom in tight on batter vs pitcher.
+        _ => (field.duel_eye, field.duel_target),
     };
 
-    // Critically-damped-ish smoothing so the camera glides rather than snaps.
-    let follow = 1.0 - (-6.0 * time.delta_secs()).exp();
-    target.0 = target.0.lerp(desired, follow);
-
-    // Pull the eye back a little for deep balls so home runs stay in frame.
-    let extra = ((target.0.z - field.broadcast_target.z) * 0.12).clamp(0.0, 14.0);
-    let eye = field.broadcast_eye + Vec3::new(0.0, extra * 0.5, -extra);
+    // Critically-damped-ish smoothing so framing changes glide, never cut.
+    let follow = 1.0 - (-5.0 * time.delta_secs()).exp();
+    rig.eye = rig.eye.lerp(desired_eye, follow);
+    rig.target = rig.target.lerp(desired_target, follow);
 
     if let Ok(mut cam) = cam_q.get_single_mut() {
-        *cam = Transform::from_translation(eye).looking_at(target.0, Vec3::Y);
+        *cam = Transform::from_translation(rig.eye).looking_at(rig.target, Vec3::Y);
     }
 }
 

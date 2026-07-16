@@ -51,10 +51,14 @@ pub struct FieldSpec {
     pub fielder_positions: Vec<Vec3>,
     /// Ball-reset radius: past this the ball is considered lost.
     pub bounds: f32,
-    /// Broadcast-camera eye position for this park's size.
+    /// Broadcast-camera eye position for this park's size (wide framing,
+    /// used while the ball is in play).
     pub broadcast_eye: Vec3,
     /// Broadcast-camera resting look-at point.
     pub broadcast_target: Vec3,
+    /// Tight at-bat framing used during the pitch/swing duel.
+    pub duel_eye: Vec3,
+    pub duel_target: Vec3,
     /// Which scenery routine dresses the set.
     pub scenery: Scenery,
 }
@@ -149,6 +153,8 @@ impl VariantId {
                 bounds: 220.0,
                 broadcast_eye: Vec3::new(0.0, 13.0, -21.0),
                 broadcast_target: Vec3::new(0.0, 1.2, 9.0),
+                duel_eye: Vec3::new(-1.6, 2.2, -5.2),
+                duel_target: Vec3::new(0.2, 1.15, 5.0),
                 scenery: Scenery::Stadium,
             },
             // A front lawn: four bases across the lawn corners, the defense
@@ -175,6 +181,8 @@ impl VariantId {
                 bounds: 90.0,
                 broadcast_eye: Vec3::new(0.0, 7.0, -12.0),
                 broadcast_target: Vec3::new(0.0, 1.0, 5.0),
+                duel_eye: Vec3::new(-1.4, 2.0, -4.2),
+                duel_target: Vec3::new(0.2, 1.0, 4.0),
                 scenery: Scenery::FrontYard,
             },
         }
@@ -222,5 +230,17 @@ mod tests {
     fn variant_cycle_visits_all_and_wraps() {
         assert_eq!(VariantId::Standard.next(), VariantId::FrontYard);
         assert_eq!(VariantId::FrontYard.next(), VariantId::Standard);
+    }
+
+    #[test]
+    fn duel_framing_sits_behind_home_looking_out() {
+        for id in [VariantId::Standard, VariantId::FrontYard] {
+            let f = id.field();
+            assert!(f.duel_eye.z < 0.0 && f.duel_target.z > 0.0);
+            assert!(
+                f.duel_eye.z > f.broadcast_eye.z,
+                "duel eye must be closer to the plate than the wide framing"
+            );
+        }
     }
 }
