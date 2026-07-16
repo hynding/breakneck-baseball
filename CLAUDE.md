@@ -31,9 +31,11 @@ The `/run-web` skill packages the web build-and-serve workflow.
 
 Bevy 0.15 ECS app with Rapier 3D physics. `src/main.rs` builds the `App` from `DefaultPlugins` + `RapierPhysicsPlugin` + `GamePlugin`.
 
-`src/game/mod.rs` is the hub: it defines the `GameState` state machine (`MainMenu → Playing → Paused → GameOver`; gameplay systems use `.run_if(in_state(GameState::Playing))`), the `ScoreBoard` resource (innings/balls/strikes/outs shared across systems), and registers the five sub-plugins in dependency order: `FieldPlugin`, `BallPlugin`, `PlayerPlugin`, `CameraPlugin`, `UiPlugin`.
+`src/game/mod.rs` is the hub: it defines the `GameState` state machine (`MainMenu → Playing → Paused → GameOver`; gameplay systems use `.run_if(in_state(GameState::Playing))`), the `ScoreBoard` resource (innings/balls/strikes/outs shared across systems), and registers the sub-plugins in dependency order (`InputPlugin`, `MenuPlugin`, `FieldPlugin`, `BallPlugin`, `PlayerPlugin`, `FlowPlugin`, `CameraPlugin`, `UiPlugin`).
 
-Cross-module communication is event-driven: `ball.rs` defines `PitchEvent` / `HitEvent`, which player and UI systems consume rather than touching ball entities directly. Physics constants use real-world SI units (official MLB ball: 0.037 m radius, 0.148 kg) with a custom drag force applied per physics tick.
+Game variants are data, not code: `variant.rs` defines `Ruleset` (count thresholds, innings, peg-outs) and `FieldSpec` (base positions, pitch distance, fair wedge, fence, fielder spots, scenery, camera framing) as resources the menu writes when a game starts. The pure rules in `rules.rs` (unit-tested, no ECS) take them as parameters; `field.rs`/`player.rs`/`ui.rs`/`camera.rs` spawn from them. Home plate is at the world origin with +Z toward the field in every variant. To add a variant, add a `VariantId` arm — don't hardcode baseball facts in systems.
+
+Cross-module communication is event-driven: `ball.rs` defines `PitchEvent` / `HitEvent`, which player and UI systems consume rather than touching ball entities directly. Physics constants use real-world SI units (official MLB ball: 0.037 m radius, 0.148 kg) with a custom drag force applied per physics tick. The ball ignores player capsules via collision groups (`BALL_GROUP`/`PLAYER_GROUP`) — outcomes are resolved analytically at contact, and a pitch glancing off the batter's collider would corrupt the called count.
 
 ## Dual-target constraints
 
