@@ -22,7 +22,7 @@ pub struct CpuConfig {
 
 impl Default for CpuConfig {
     fn default() -> Self {
-        Self { skill: 0.55 }
+        Self { skill: 0.4 }
     }
 }
 
@@ -130,8 +130,10 @@ pub fn cpu_offense(
     let pos = ball.translation;
 
     let t = time.elapsed_secs();
-    // The AI commits when the ball reaches its (noisy) trigger depth.
-    let trigger_z = 0.45 + noise(t * 3.1) * 0.6 * (1.0 - cfg.skill);
+    // The AI commits when the ball reaches its (noisy) trigger depth. A wider
+    // spread at lower skill means the CPU often mistimes — producing the weak
+    // pop-ups and grounders that make outs, so innings actually end.
+    let trigger_z = 0.45 + noise(t * 3.1) * 1.6 * (1.0 - cfg.skill);
     if pos.z > trigger_z {
         intents.get_mut(team).action = false;
         return;
@@ -143,16 +145,17 @@ pub fn cpu_offense(
     let in_zone = pos.x.abs() < 0.5 && (0.4..=1.6).contains(&pos.y);
     let roll = hash01(t * 5.0);
     let swing = if in_zone {
-        roll < 0.55 + 0.4 * cfg.skill // usually offers at strikes
+        roll < 0.5 + 0.4 * cfg.skill // usually offers at strikes
     } else {
-        roll < 0.22 * (1.0 - cfg.skill) // rarely chases balls
+        roll < 0.28 * (1.0 - cfg.skill) // rarely chases balls
     };
 
     let intent = intents.get_mut(team);
     if swing {
         intent.action = true;
-        // Aim the swing with a little spray so hits aren't all dead-centre.
-        intent.aim = Vec2::new(noise(t * 7.0) * 0.6, 0.15 + hash01(t * 9.0) * 0.5);
+        // Spread the intended launch from low grounders to high flies so batted
+        // balls vary instead of all being squared-up line drives.
+        intent.aim = Vec2::new(noise(t * 7.0) * 0.6, -0.25 + hash01(t * 9.0) * 1.0);
     } else {
         intent.action = false;
     }

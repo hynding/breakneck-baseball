@@ -41,9 +41,9 @@ const SWING_REACH_X: f32 = 1.8;
 /// Nominal pitch speed (m/s) — roughly 85 mph.
 const PITCH_SPEED: f32 = 38.0;
 /// Seconds the result banner lingers before the next pitch.
-const RESULT_SECS: f32 = 1.5;
+const RESULT_SECS: f32 = 1.2;
 /// How long a batted ball stays live (visual) before the field resets.
-const INPLAY_SECS: f32 = 3.0;
+const INPLAY_SECS: f32 = 2.2;
 
 /// Gravity magnitude used for landing-point prediction (matches Rapier default).
 const GRAVITY: f32 = 9.81;
@@ -197,12 +197,16 @@ fn pre_pitch(
     let intent = intents.get(score.fielding_team());
     if intent.action {
         let target_x = intent.aim.x * 0.35;
-        let target_y = 1.0 + intent.aim.y * 0.5;
+        let target_y = 1.05 + intent.aim.y * 0.5;
 
         let start = mound_reset_pos();
         let flight = PITCH_DISTANCE / PITCH_SPEED;
+        // Aerodynamic drag slows the ball, so the real flight is longer than the
+        // drag-free estimate; scale the gravity term up so the pitch still
+        // arrives near `target_y` (a centre-aimed pitch should be a strike).
+        let grav_flight = flight * 1.3;
         let vx = (target_x - start.x) / flight;
-        let vy = (target_y - start.y) / flight + 0.5 * GRAVITY * flight;
+        let vy = (target_y - start.y) / flight + 0.5 * GRAVITY * grav_flight;
 
         pitch_ev.send(PitchEvent {
             velocity: Vec3::new(vx, vy, -PITCH_SPEED),
@@ -320,15 +324,24 @@ fn result_phase(
 // ── Contact → velocity ────────────────────────────────────────────────────────
 
 /// Converts contact timing + aim into a batted-ball velocity.
+///
+/// Timing is everything: `contact_z ≈ 0.4` (ball on the plate) is squared-up
+/// for a hard line drive, while early contact (ball still out front) skies the
+/// ball for a pop-up and late contact tops it for a weak grounder. A tight
+/// window means mistimed swings produce catchable balls, keeping the out-rate
+/// and inning pace in line with arcade baseball.
 fn compute_hit(contact_z: f32, aim: Vec2) -> HitEvent {
     let ideal = 0.4_f32;
-    let window = (SWING_EARLY_Z - SWING_LATE_Z) * 0.5;
-    let quality = (1.0 - (contact_z - ideal).abs() / window).clamp(0.15, 1.0);
+    let timing = contact_z - ideal; // >0 early, <0 late
+    let quality = (1.0 - timing.abs() / 1.1).clamp(0.08, 1.0);
 
-    let speed = 22.0 + 24.0 * quality;
-    let launch = (8.0 + 30.0 * (aim.y * 0.5 + 0.5)).to_radians();
-    let timing_pull = (contact_z - ideal) * 0.06;
-    let spray = (aim.x * 0.6 + timing_pull).clamp(-0.9, 0.9);
+    let speed = 16.0 + 30.0 * quality;
+    // Aim sets the intended launch; mistiming skews it toward pop-up / grounder.
+    // A neutral swing (aim.y = 0) is a ~19° line drive — the base hit angle;
+    // aiming up trades hittability for home-run power.
+    let launch_deg = (6.0 + 26.0 * (aim.y * 0.5 + 0.5) + timing * 8.0).clamp(-8.0, 72.0);
+    let launch = launch_deg.to_radians();
+    let spray = (aim.x * 0.6 + timing * 0.05).clamp(-0.95, 0.95);
 
     let horizontal = speed * launch.cos();
     let velocity = Vec3::new(
@@ -368,18 +381,25 @@ pub fn classify_batted_ball(vel: Vec3) -> Outcome {
     if dist > fence {
         return Outcome::HomeRun;
     }
-    if launch_deg > 55.0 && dist < 50.0 {
+    // Infield/short pop-ups are caught.
+    if launch_deg > 50.0 && dist < 55.0 {
         return Outcome::Out(OutKind::Pop);
     }
-    if launch_deg > 45.0 && dist < 82.0 {
+    // Most fly balls are run down by the outfield; only the deepest drives to
+    // the gaps fall in for extra bases, and the very deepest clear the wall
+    // (handled above). Catching routine flies is what keeps the out-rate — and
+    // therefore inning pace — in line with arcade baseball.
+    if launch_deg > 20.0 && dist < 95.0 {
         return Outcome::Out(OutKind::Fly);
     }
-    if dist < 18.0 {
+    // Weakly-topped balls are fielded in the infield.
+    if dist < 26.0 {
         return Outcome::Out(OutKind::Ground);
     }
-    if dist < 40.0 {
+    // Line drives (and deep gap flies) split the field by depth.
+    if dist < 44.0 {
         Outcome::Single
-    } else if dist < 62.0 {
+    } else if dist < 68.0 {
         Outcome::Double
     } else {
         Outcome::Triple
@@ -702,6 +722,30 @@ mod tests {
     fn straight_up_is_a_pop_out() {
         let vel = Vec3::new(0.0, 20.0, 2.0);
         assert!(matches!(classify_batted_ball(vel), Outcome::Out(_)));
+    }
+
+    #[test]
+    fn routine_fly_ball_is_caught() {
+        // ~30° at a moderate exit speed: a can-of-corn fly, not deep enough to fall.
+        let launch = 30.0_f32.to_radians();
+        let speed = 30.0;
+        let vel = Vec3::new(0.0, speed * launch.sin(), speed * launch.cos());
+        assert!(matches!(
+            classify_batted_ball(vel),
+            Outcome::Out(OutKind::Fly)
+        ));
+    }
+
+    #[test]
+    fn solid_line_drive_is_a_hit() {
+        // ~15° liner splits the field for a base hit.
+        let launch = 15.0_f32.to_radians();
+        let speed = 34.0;
+        let vel = Vec3::new(0.0, speed * launch.sin(), speed * launch.cos());
+        assert!(matches!(
+            classify_batted_ball(vel),
+            Outcome::Single | Outcome::Double | Outcome::Triple
+        ));
     }
 
     #[test]

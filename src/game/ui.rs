@@ -35,7 +35,7 @@ impl Default for BannerTimer {
 }
 
 const BASE_ON: Color = Color::srgb(1.0, 0.86, 0.2);
-const BASE_OFF: Color = Color::srgba(1.0, 1.0, 1.0, 0.18);
+const BASE_OFF: Color = Color::srgba(1.0, 1.0, 1.0, 0.32);
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
@@ -122,7 +122,7 @@ fn spawn_hud(mut commands: Commands) {
             justify_content: JustifyContent::Center,
             ..default()
         },
-        Text::new("Aim: Stick / WASD·Arrows    A / Space: Pitch & Swing    C: Camera"),
+        Text::new("Aim: Stick / WASD / Arrows     A / Space: Pitch & Swing     C: Camera"),
         TextFont {
             font_size: 15.0,
             ..default()
@@ -177,11 +177,7 @@ fn update_score_text(score: Res<ScoreBoard>, mut query: Query<&mut Text, With<Sc
     if !score.is_changed() {
         return;
     }
-    let half = if score.top_of_inning {
-        "▲ Top"
-    } else {
-        "▼ Bot"
-    };
+    let half = if score.top_of_inning { "TOP" } else { "BOT" };
     for mut text in &mut query {
         **text = format!(
             "{half} {}\nAWAY {}   HOME {}\nB {}   S {}   O {}",

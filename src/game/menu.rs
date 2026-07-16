@@ -47,49 +47,56 @@ fn spawn_menu(mut commands: Commands) {
         .spawn((
             MenuUi,
             Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(0.0),
+                left: Val::Px(0.0),
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
-                row_gap: Val::Px(16.0),
+                row_gap: Val::Px(18.0),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.02, 0.06, 0.12, 0.92)),
+            BackgroundColor(Color::srgba(0.02, 0.06, 0.12, 0.94)),
         ))
         .with_children(|root| {
             root.spawn((
                 Text::new("BREAKNECK BASEBALL"),
                 TextFont {
-                    font_size: 56.0,
+                    font_size: 44.0,
                     ..default()
                 },
                 TextColor(Color::srgb(1.0, 0.86, 0.2)),
+                TextLayout::new_with_justify(JustifyText::Center),
             ));
             root.spawn((
-                Text::new("Press  1  —  One Player (vs CPU)\nPress  2  —  Two Players"),
+                Text::new("Press  1   -   One Player (vs CPU)\nPress  2   -   Two Players"),
                 TextFont {
-                    font_size: 26.0,
+                    font_size: 24.0,
                     ..default()
                 },
                 TextColor(Color::WHITE),
+                TextLayout::new_with_justify(JustifyText::Center),
             ));
             root.spawn((
                 ControllerStatus,
                 Text::new(""),
                 TextFont {
-                    font_size: 18.0,
+                    font_size: 17.0,
                     ..default()
                 },
                 TextColor(Color::srgb(0.6, 0.85, 0.6)),
+                TextLayout::new_with_justify(JustifyText::Center),
             ));
             root.spawn((
-                Text::new("Controller: A = pitch/swing · X = pitch type · Left stick = aim\nKeyboard: WASD + Space (P1) · Arrows + Right-Ctrl (P2)"),
+                Text::new("Controller: A pitch/swing, X pitch type, stick to aim\nKeyboard: WASD + Space (P1), Arrows + Right-Ctrl (P2)"),
                 TextFont {
                     font_size: 15.0,
                     ..default()
                 },
-                TextColor(Color::srgba(1.0, 1.0, 1.0, 0.65)),
+                TextColor(Color::srgba(1.0, 1.0, 1.0, 0.7)),
+                TextLayout::new_with_justify(JustifyText::Center),
             ));
         });
 }
@@ -100,7 +107,7 @@ fn update_controller_status(
 ) {
     let count = pads.iter().count();
     let msg = match count {
-        0 => "No controllers detected — keyboard fallback active".to_string(),
+        0 => "No controllers detected - keyboard fallback active".to_string(),
         1 => "1 controller connected".to_string(),
         n => format!("{n} controllers connected"),
     };
@@ -159,6 +166,9 @@ fn spawn_game_over(mut commands: Commands, score: Res<ScoreBoard>) {
         .spawn((
             GameOverUi,
             Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(0.0),
+                left: Val::Px(0.0),
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
@@ -167,7 +177,7 @@ fn spawn_game_over(mut commands: Commands, score: Res<ScoreBoard>) {
                 row_gap: Val::Px(18.0),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.02, 0.06, 0.12, 0.92)),
+            BackgroundColor(Color::srgba(0.02, 0.06, 0.12, 0.94)),
         ))
         .with_children(|root| {
             root.spawn((

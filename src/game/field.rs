@@ -245,8 +245,11 @@ fn spawn_outfield_wall(
     materials: &mut ResMut<Assets<StandardMaterial>>,
 ) {
     let wall_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.10, 0.22, 0.14), // dark padded-wall green
-        perceptual_roughness: 0.95,
+        base_color: Color::srgb(0.13, 0.30, 0.55), // padded outfield-wall blue
+        perceptual_roughness: 0.9,
+        // A little self-illumination so the shadowed side still reads as a wall
+        // rather than a black void.
+        emissive: LinearRgba::rgb(0.02, 0.05, 0.10),
         ..default()
     });
 
