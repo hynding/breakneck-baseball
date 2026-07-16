@@ -57,6 +57,10 @@ const TRAIL_INTERVAL: f32 = 0.025;
 /// Below this speed (m/s) the ball is rolling, not flying — no trail.
 const TRAIL_MIN_SPEED: f32 = 8.0;
 
+/// Query alias for "the flying ball" (keeps clippy's type-complexity happy).
+type FlyingBall<'w, 's> =
+    Query<'w, 's, (&'static Transform, &'static Velocity), (With<Baseball>, With<InFlight>)>;
+
 // ── Events ────────────────────────────────────────────────────────────────────
 /// Fired when a pitch is thrown. Carries the initial world-space velocity.
 #[derive(Event)]
@@ -211,7 +215,7 @@ fn spawn_trail(
     time: Res<Time>,
     mut since_last: Local<f32>,
     assets: Option<Res<TrailAssets>>,
-    ball_q: Query<(&Transform, &Velocity), (With<Baseball>, With<InFlight>)>,
+    ball_q: FlyingBall,
     mut commands: Commands,
 ) {
     let Some(assets) = assets else {
