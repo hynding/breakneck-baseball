@@ -81,18 +81,32 @@ impl Default for Play {
 
 // ── Events ────────────────────────────────────────────────────────────────────
 
+/// The emotional register of a banner. Flow decides *what happened*; the UI
+/// maps the tone onto the active theme's palette — flow knows no colours.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BannerTone {
+    /// The batter came out ahead (hits).
+    Good,
+    /// The batter was retired (outs, strikeouts).
+    Bad,
+    /// Routine count traffic (balls, strikes, fouls).
+    Info,
+    /// The big moments (home runs, walks forced in).
+    Epic,
+}
+
 /// A transient on-screen message (e.g. "STRIKE!", "BALL", "HOME RUN!").
 #[derive(Event, Clone)]
 pub struct PlayBanner {
     pub text: String,
-    pub color: Color,
+    pub tone: BannerTone,
 }
 
 impl PlayBanner {
-    fn new(text: impl Into<String>, color: Color) -> Self {
+    fn new(text: impl Into<String>, tone: BannerTone) -> Self {
         Self {
             text: text.into(),
-            color,
+            tone,
         }
     }
 }
@@ -273,7 +287,7 @@ fn resolve_contact(
     match outcome {
         Outcome::Foul => {
             rules::foul(score, ruleset);
-            banner.send(PlayBanner::new("FOUL", Color::srgb(0.9, 0.9, 0.6)));
+            banner.send(PlayBanner::new("FOUL", BannerTone::Info));
         }
         Outcome::Out(kind) => {
             let text = match kind {
@@ -282,7 +296,7 @@ fn resolve_contact(
                 OutKind::Pop => "POP OUT",
                 OutKind::Pegged => "PEGGED!",
             };
-            banner.send(PlayBanner::new(text, Color::srgb(1.0, 0.6, 0.4)));
+            banner.send(PlayBanner::new(text, BannerTone::Bad));
             rules::record_out(score, bases, ruleset);
         }
         Outcome::Hit(n) => {
@@ -292,12 +306,7 @@ fn resolve_contact(
                 3 => "TRIPLE".to_string(),
                 n => format!("{n} BASES!"),
             };
-            let color = match n {
-                1 => Color::srgb(0.7, 1.0, 0.7),
-                2 => Color::srgb(0.6, 1.0, 0.8),
-                _ => Color::srgb(0.5, 1.0, 0.9),
-            };
-            hit(score, bases, banner, n, &label, color);
+            hit(score, bases, banner, n, &label, BannerTone::Good);
         }
         // A home run is worth one more base than the field has.
         Outcome::HomeRun => {
@@ -308,7 +317,7 @@ fn resolve_contact(
                 banner,
                 bases_worth,
                 "HOME RUN!",
-                Color::srgb(1.0, 0.86, 0.2),
+                BannerTone::Epic,
             );
         }
     }
@@ -320,7 +329,7 @@ fn hit(
     banner: &mut EventWriter<PlayBanner>,
     hit_bases: u32,
     label: &str,
-    color: Color,
+    tone: BannerTone,
 ) {
     let runs = rules::apply_hit(score, bases, hit_bases);
     let text = if runs > 0 {
@@ -328,7 +337,7 @@ fn hit(
     } else {
         label.to_string()
     };
-    banner.send(PlayBanner::new(text, color));
+    banner.send(PlayBanner::new(text, tone));
 }
 
 fn add_ball(
@@ -339,10 +348,10 @@ fn add_ball(
 ) {
     match rules::call_ball(score, bases, ruleset) {
         BallCall::Walk { .. } => {
-            banner.send(PlayBanner::new("WALK", Color::srgb(0.6, 0.85, 1.0)));
+            banner.send(PlayBanner::new("WALK", BannerTone::Epic));
         }
         BallCall::Ball => {
-            banner.send(PlayBanner::new("BALL", Color::srgb(0.7, 0.9, 0.7)));
+            banner.send(PlayBanner::new("BALL", BannerTone::Info));
         }
     }
 }
@@ -356,13 +365,13 @@ fn add_strike(
 ) {
     match rules::call_strike(score, bases, ruleset) {
         StrikeCall::Strikeout => {
-            banner.send(PlayBanner::new("STRIKEOUT!", Color::srgb(1.0, 0.5, 0.35)));
+            banner.send(PlayBanner::new("STRIKEOUT!", BannerTone::Bad));
         }
         StrikeCall::Strike if swinging => {
-            banner.send(PlayBanner::new("SWING & MISS", Color::srgb(1.0, 0.7, 0.4)));
+            banner.send(PlayBanner::new("SWING & MISS", BannerTone::Info));
         }
         StrikeCall::Strike => {
-            banner.send(PlayBanner::new("STRIKE", Color::srgb(1.0, 0.8, 0.4)));
+            banner.send(PlayBanner::new("STRIKE", BannerTone::Info));
         }
     }
 }

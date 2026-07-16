@@ -64,8 +64,6 @@ pub enum GameMode {
 pub struct GameConfig {
     pub mode: GameMode,
     pub variant: VariantId,
-    // Read by the menu's theme cycle (restyle task); allow until that lands.
-    #[allow(dead_code)]
     pub theme: ThemeId,
 }
 

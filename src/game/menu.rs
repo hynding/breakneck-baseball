@@ -1,26 +1,25 @@
 //! Main menu and game-over screens.
 //!
 //! The menu gates entry into [`GameState::Playing`]: the player picks a mode
-//! (1 player vs CPU, or 2 players) and this module builds the [`Controllers`]
-//! assignment from the connected gamepads before starting the game.
+//! (1 player vs CPU, or 2 players), a field variant (**F**), and a theme
+//! (**T**). Styling comes entirely from the active [`Theme`]; cycling either
+//! option rebuilds the menu so the new look/labels show immediately.
 
+use bevy::color::Alpha;
 use bevy::prelude::*;
 
 use crate::game::input::{assign_controllers, Controllers};
+use crate::game::theme::Theme;
 use crate::game::variant::{FieldSpec, Ruleset};
 use crate::game::{GameConfig, GameMode, GameState, ScoreBoard};
 
-/// Marker for menu-screen UI so it can be torn down on exit.
+/// Marker for menu-screen UI so it can be torn down on exit or rebuild.
 #[derive(Component)]
 struct MenuUi;
 
 /// The line that shows how many controllers are connected.
 #[derive(Component)]
 struct ControllerStatus;
-
-/// The line that shows the currently selected field variant.
-#[derive(Component)]
-struct FieldChoice;
 
 /// Marker for game-over UI.
 #[derive(Component)]
@@ -34,7 +33,7 @@ impl Plugin for MenuPlugin {
             .add_systems(OnExit(GameState::MainMenu), despawn::<MenuUi>)
             .add_systems(
                 Update,
-                (update_controller_status, cycle_field_choice, menu_select)
+                (update_controller_status, cycle_options, menu_select)
                     .run_if(in_state(GameState::MainMenu)),
             )
             .add_systems(OnEnter(GameState::GameOver), spawn_game_over)
@@ -48,7 +47,15 @@ impl Plugin for MenuPlugin {
 
 // ── Main menu ─────────────────────────────────────────────────────────────────
 
-fn spawn_menu(mut commands: Commands) {
+fn spawn_menu(mut commands: Commands, config: Res<GameConfig>, theme: Res<Theme>) {
+    build_menu(&mut commands, &config, &theme);
+}
+
+/// Builds the full menu tree. Called on entering the menu and again whenever
+/// an option cycles (the old tree is despawned first).
+fn build_menu(commands: &mut Commands, config: &GameConfig, theme: &Theme) {
+    let ui = &theme.ui;
+
     commands
         .spawn((
             MenuUi,
@@ -58,62 +65,111 @@ fn spawn_menu(mut commands: Commands) {
                 left: Val::Px(0.0),
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
-                row_gap: Val::Px(18.0),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.02, 0.06, 0.12, 0.94)),
+            BackgroundColor(ui.panel_bg.with_alpha(0.97)),
         ))
-        .with_children(|root| {
-            root.spawn((
-                Text::new("BREAKNECK BASEBALL"),
-                TextFont {
-                    font_size: 44.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(1.0, 0.86, 0.2)),
-                TextLayout::new_with_justify(JustifyText::Center),
-            ));
-            root.spawn((
-                Text::new("Press  1   -   One Player (vs CPU)\nPress  2   -   Two Players"),
-                TextFont {
-                    font_size: 24.0,
-                    ..default()
-                },
-                TextColor(Color::WHITE),
-                TextLayout::new_with_justify(JustifyText::Center),
-            ));
-            root.spawn((
-                FieldChoice,
-                Text::new(""),
-                TextFont {
-                    font_size: 20.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(1.0, 0.86, 0.2)),
-                TextLayout::new_with_justify(JustifyText::Center),
-            ));
-            root.spawn((
-                ControllerStatus,
-                Text::new(""),
-                TextFont {
-                    font_size: 17.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.6, 0.85, 0.6)),
-                TextLayout::new_with_justify(JustifyText::Center),
-            ));
-            root.spawn((
-                Text::new("Controller: A pitch/swing, stick to aim\nKeyboard: WASD + Space (P1), Arrows + Right-Ctrl (P2)"),
-                TextFont {
-                    font_size: 15.0,
-                    ..default()
-                },
-                TextColor(Color::srgba(1.0, 1.0, 1.0, 0.7)),
-                TextLayout::new_with_justify(JustifyText::Center),
-            ));
+        .with_children(|screen| {
+            screen
+                .spawn((
+                    Node {
+                        padding: UiRect::axes(Val::Px(44.0), Val::Px(30.0)),
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        row_gap: Val::Px(13.0),
+                        border: UiRect::all(Val::Px(1.5)),
+                        ..default()
+                    },
+                    BackgroundColor(ui.panel_bg),
+                    BorderColor(ui.panel_border),
+                    BorderRadius::all(Val::Px(16.0)),
+                ))
+                .with_children(|card| {
+                    card.spawn((
+                        Text::new("BREAKNECK BASEBALL"),
+                        TextFont {
+                            font_size: 48.0,
+                            ..default()
+                        },
+                        TextColor(ui.accent),
+                    ));
+                    card.spawn((
+                        Text::new("backyard arcade baseball"),
+                        TextFont {
+                            font_size: 15.0,
+                            ..default()
+                        },
+                        TextColor(ui.text_dim),
+                        Node {
+                            margin: UiRect::bottom(Val::Px(10.0)),
+                            ..default()
+                        },
+                    ));
+
+                    for line in [
+                        "1   One Player  (vs CPU)".to_string(),
+                        "2   Two Players".to_string(),
+                    ] {
+                        card.spawn((
+                            Text::new(line),
+                            TextFont {
+                                font_size: 23.0,
+                                ..default()
+                            },
+                            TextColor(ui.text_primary),
+                        ));
+                    }
+
+                    // Option lines: dim key/label, accent value.
+                    for (label, value) in [
+                        ("F   Field", config.variant.label()),
+                        ("T   Theme", config.theme.label()),
+                    ] {
+                        card.spawn((
+                            Text::new(format!("{label}   ")),
+                            TextFont {
+                                font_size: 19.0,
+                                ..default()
+                            },
+                            TextColor(ui.text_dim),
+                        ))
+                        .with_child((
+                            TextSpan::new(value),
+                            TextFont {
+                                font_size: 19.0,
+                                ..default()
+                            },
+                            TextColor(ui.accent),
+                        ));
+                    }
+
+                    card.spawn((
+                        ControllerStatus,
+                        Text::new(""),
+                        TextFont {
+                            font_size: 15.0,
+                            ..default()
+                        },
+                        TextColor(ui.count_ball),
+                        Node {
+                            margin: UiRect::top(Val::Px(10.0)),
+                            ..default()
+                        },
+                    ));
+                    card.spawn((
+                        Text::new(
+                            "Controller: A pitch/swing, stick to aim\nKeyboard: WASD + Space (P1), Arrows + Right-Ctrl (P2)",
+                        ),
+                        TextFont {
+                            font_size: 13.0,
+                            ..default()
+                        },
+                        TextColor(ui.text_dim),
+                        TextLayout::new_with_justify(JustifyText::Center),
+                    ));
+                });
         });
 }
 
@@ -134,26 +190,36 @@ fn update_controller_status(
     }
 }
 
-/// Cycles the field variant with **F** (or a controller's West/X button) and
-/// keeps the menu line in sync.
-fn cycle_field_choice(
+/// Cycles the field (**F** / gamepad West) and theme (**T** / gamepad North),
+/// then rebuilds the menu so labels and palette refresh together.
+fn cycle_options(
     keyboard: Res<ButtonInput<KeyCode>>,
     pads: Query<&Gamepad>,
     mut config: ResMut<GameConfig>,
-    mut query: Query<&mut Text, With<FieldChoice>>,
+    mut theme: ResMut<Theme>,
+    menu_q: Query<Entity, With<MenuUi>>,
+    mut commands: Commands,
 ) {
-    let pressed = keyboard.just_pressed(KeyCode::KeyF)
+    let field_pressed = keyboard.just_pressed(KeyCode::KeyF)
         || pads.iter().any(|p| p.just_pressed(GamepadButton::West));
-    if pressed {
+    let theme_pressed = keyboard.just_pressed(KeyCode::KeyT)
+        || pads.iter().any(|p| p.just_pressed(GamepadButton::North));
+
+    if !field_pressed && !theme_pressed {
+        return;
+    }
+    if field_pressed {
         config.variant = config.variant.next();
     }
-
-    let label = format!("Field:  {}     (F / X to change)", config.variant.label());
-    for mut text in &mut query {
-        if text.as_str() != label {
-            **text = label.clone();
-        }
+    if theme_pressed {
+        config.theme = config.theme.next();
+        *theme = config.theme.build();
     }
+
+    for entity in &menu_q {
+        commands.entity(entity).despawn_recursive();
+    }
+    build_menu(&mut commands, &config, &theme);
 }
 
 fn menu_select(
@@ -197,13 +263,14 @@ fn menu_select(
 
 // ── Game over ─────────────────────────────────────────────────────────────────
 
-fn spawn_game_over(mut commands: Commands, score: Res<ScoreBoard>) {
+fn spawn_game_over(mut commands: Commands, score: Res<ScoreBoard>, theme: Res<Theme>) {
+    let ui = &theme.ui;
     let (winner, color) = if score.home_runs > score.away_runs {
-        ("HOME WINS", Color::srgb(0.4, 0.6, 1.0))
+        ("HOME WINS", theme.home.jersey)
     } else if score.away_runs > score.home_runs {
-        ("AWAY WINS", Color::srgb(1.0, 0.45, 0.35))
+        ("AWAY WINS", theme.away.jersey)
     } else {
-        ("TIE GAME", Color::WHITE)
+        ("TIE GAME", ui.text_primary)
     };
 
     commands
@@ -215,42 +282,56 @@ fn spawn_game_over(mut commands: Commands, score: Res<ScoreBoard>) {
                 left: Val::Px(0.0),
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
-                row_gap: Val::Px(18.0),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.02, 0.06, 0.12, 0.94)),
+            BackgroundColor(ui.panel_bg.with_alpha(0.92)),
         ))
-        .with_children(|root| {
-            root.spawn((
-                Text::new(winner),
-                TextFont {
-                    font_size: 52.0,
-                    ..default()
-                },
-                TextColor(color),
-            ));
-            root.spawn((
-                Text::new(format!(
-                    "Final — Away {}   Home {}",
-                    score.away_runs, score.home_runs
-                )),
-                TextFont {
-                    font_size: 30.0,
-                    ..default()
-                },
-                TextColor(Color::WHITE),
-            ));
-            root.spawn((
-                Text::new("Press  Enter  or  A  to return to the menu"),
-                TextFont {
-                    font_size: 20.0,
-                    ..default()
-                },
-                TextColor(Color::srgba(1.0, 1.0, 1.0, 0.8)),
-            ));
+        .with_children(|screen| {
+            screen
+                .spawn((
+                    Node {
+                        padding: UiRect::axes(Val::Px(50.0), Val::Px(34.0)),
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        row_gap: Val::Px(14.0),
+                        border: UiRect::all(Val::Px(1.5)),
+                        ..default()
+                    },
+                    BackgroundColor(ui.panel_bg),
+                    BorderColor(ui.panel_border),
+                    BorderRadius::all(Val::Px(16.0)),
+                ))
+                .with_children(|card| {
+                    card.spawn((
+                        Text::new(winner),
+                        TextFont {
+                            font_size: 52.0,
+                            ..default()
+                        },
+                        TextColor(color),
+                    ));
+                    card.spawn((
+                        Text::new(format!(
+                            "Final   AWAY {}  -  HOME {}",
+                            score.away_runs, score.home_runs
+                        )),
+                        TextFont {
+                            font_size: 28.0,
+                            ..default()
+                        },
+                        TextColor(ui.text_primary),
+                    ));
+                    card.spawn((
+                        Text::new("Enter / A  -  back to the menu"),
+                        TextFont {
+                            font_size: 17.0,
+                            ..default()
+                        },
+                        TextColor(ui.text_dim),
+                    ));
+                });
         });
 }
 

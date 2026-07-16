@@ -1,32 +1,53 @@
-//! Heads-up display — scoreboard, base-runner diamond, and result banners.
+//! Heads-up display — scoreboard card, count dots, base ring, and banners.
 //!
-//! All live game data comes from the [`ScoreBoard`] and [`Bases`] resources and
-//! from [`PlayBanner`] events fired by `flow.rs`.
+//! All live game data comes from the [`ScoreBoard`] and [`Bases`] resources
+//! and from [`PlayBanner`] events fired by `flow.rs`. Every colour and
+//! styling knob comes from the active [`Theme`] — the HUD owns layout only.
 
 use bevy::prelude::*;
 
-use crate::game::flow::PlayBanner;
+use crate::game::flow::{BannerTone, PlayBanner};
 use crate::game::rules::Bases;
-use crate::game::variant::FieldSpec;
+use crate::game::theme::Theme;
+use crate::game::variant::{FieldSpec, Ruleset};
 use crate::game::{GameState, GameplayEntity, ScoreBoard};
 
 // ── Markers ───────────────────────────────────────────────────────────────────
 
 #[derive(Component)]
-struct ScoreBoardRoot;
+struct InningText;
 
 #[derive(Component)]
 struct ScoreText;
+
+/// Which at-bat counter a dot belongs to.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CountKind {
+    Ball,
+    Strike,
+    Out,
+}
+
+/// One indicator dot: lights up while `index <` the current count.
+#[derive(Component)]
+struct CountDot {
+    kind: CountKind,
+    index: u32,
+}
 
 /// One base-occupancy pip (0-indexed base number).
 #[derive(Component)]
 struct BaseIndicator(usize);
 
-/// The large transient result text in the centre of the screen.
+/// The banner pill container (hidden when nothing is being announced).
+#[derive(Component)]
+struct BannerPill;
+
+/// The banner text inside the pill.
 #[derive(Component)]
 struct BannerText;
 
-/// How long the current banner stays fully visible before clearing.
+/// How long the current banner stays visible before clearing.
 #[derive(Resource)]
 struct BannerTimer(Timer);
 
@@ -35,9 +56,6 @@ impl Default for BannerTimer {
         Self(Timer::from_seconds(1.6, TimerMode::Once))
     }
 }
-
-const BASE_ON: Color = Color::srgb(1.0, 0.86, 0.2);
-const BASE_OFF: Color = Color::srgba(1.0, 1.0, 1.0, 0.32);
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
@@ -50,8 +68,10 @@ impl Plugin for UiPlugin {
             .add_systems(
                 Update,
                 (
+                    update_inning_text,
                     update_score_text,
-                    update_base_diamond,
+                    update_count_dots,
+                    update_base_ring,
                     show_banner,
                     fade_banner,
                 )
@@ -62,57 +82,139 @@ impl Plugin for UiPlugin {
 
 // ── Build the UI tree ─────────────────────────────────────────────────────────
 
-fn spawn_hud(mut commands: Commands, field: Res<FieldSpec>) {
-    // Scoreboard (top-left).
+fn spawn_hud(
+    mut commands: Commands,
+    field: Res<FieldSpec>,
+    rules: Res<Ruleset>,
+    theme: Res<Theme>,
+) {
+    let ui = &theme.ui;
+
+    // Scoreboard card (top-left).
     commands
         .spawn((
-            ScoreBoardRoot,
             GameplayEntity,
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Px(12.0),
-                left: Val::Px(12.0),
-                padding: UiRect::all(Val::Px(10.0)),
+                top: Val::Px(14.0),
+                left: Val::Px(14.0),
+                padding: UiRect::axes(Val::Px(16.0), Val::Px(12.0)),
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(4.0),
+                row_gap: Val::Px(6.0),
+                border: UiRect::all(Val::Px(1.5)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.65)),
-            BorderRadius::all(Val::Px(6.0)),
+            BackgroundColor(ui.panel_bg),
+            BorderColor(ui.panel_border),
+            BorderRadius::all(Val::Px(12.0)),
         ))
-        .with_children(|parent| {
-            parent.spawn((
+        .with_children(|card| {
+            card.spawn((
+                InningText,
+                Text::new(""),
+                TextFont {
+                    font_size: 16.0,
+                    ..default()
+                },
+                TextColor(ui.accent),
+            ));
+            card.spawn((
                 ScoreText,
                 Text::new(""),
                 TextFont {
-                    font_size: 20.0,
+                    font_size: 22.0,
                     ..default()
                 },
-                TextColor(Color::WHITE),
+                TextColor(ui.text_primary),
             ));
+
+            // Count row: classic B / S / O indicator lights. The dot counts
+            // follow the active ruleset, so custom thresholds render right.
+            card.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                column_gap: Val::Px(12.0),
+                align_items: AlignItems::Center,
+                margin: UiRect::top(Val::Px(2.0)),
+                ..default()
+            })
+            .with_children(|row| {
+                let groups = [
+                    (CountKind::Ball, "B", rules.balls_per_walk - 1),
+                    (CountKind::Strike, "S", rules.strikes_per_out - 1),
+                    (CountKind::Out, "O", rules.outs_per_half - 1),
+                ];
+                for (kind, label, dots) in groups {
+                    row.spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        column_gap: Val::Px(4.0),
+                        align_items: AlignItems::Center,
+                        ..default()
+                    })
+                    .with_children(|group| {
+                        group.spawn((
+                            Text::new(label),
+                            TextFont {
+                                font_size: 14.0,
+                                ..default()
+                            },
+                            TextColor(ui.text_dim),
+                        ));
+                        for index in 0..dots {
+                            group.spawn((
+                                CountDot { kind, index },
+                                Node {
+                                    width: Val::Px(10.0),
+                                    height: Val::Px(10.0),
+                                    ..default()
+                                },
+                                BackgroundColor(ui.pip_off),
+                                BorderRadius::MAX,
+                            ));
+                        }
+                    });
+                }
+            });
         });
 
-    // Base-runner diamond (top-right).
-    spawn_base_diamond(&mut commands, field.base_count());
+    spawn_base_ring(&mut commands, field.base_count(), &theme);
 
-    // Result banner (centre).
-    commands.spawn((
-        BannerText,
-        GameplayEntity,
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Percent(30.0),
-            width: Val::Percent(100.0),
-            justify_content: JustifyContent::Center,
-            ..default()
-        },
-        Text::new(""),
-        TextFont {
-            font_size: 52.0,
-            ..default()
-        },
-        TextColor(Color::NONE),
-    ));
+    // Banner: a centred pill that appears only while announcing a result.
+    commands
+        .spawn((
+            GameplayEntity,
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Percent(26.0),
+                width: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+        ))
+        .with_children(|wrap| {
+            wrap.spawn((
+                BannerPill,
+                Node {
+                    padding: UiRect::axes(Val::Px(30.0), Val::Px(10.0)),
+                    border: UiRect::all(Val::Px(1.5)),
+                    ..default()
+                },
+                BackgroundColor(ui.panel_bg),
+                BorderColor(ui.panel_border),
+                BorderRadius::all(Val::Px(26.0)),
+                Visibility::Hidden,
+            ))
+            .with_children(|pill| {
+                pill.spawn((
+                    BannerText,
+                    Text::new(""),
+                    TextFont {
+                        font_size: 46.0,
+                        ..default()
+                    },
+                    TextColor(ui.text_primary),
+                ));
+            });
+        });
 
     // Controls hint (bottom-centre).
     commands.spawn((
@@ -124,22 +226,22 @@ fn spawn_hud(mut commands: Commands, field: Res<FieldSpec>) {
             justify_content: JustifyContent::Center,
             ..default()
         },
-        Text::new("Aim: Stick / WASD / Arrows     A / Space: Pitch & Swing     C: Camera"),
+        Text::new("Aim: Stick / WASD / Arrows      A / Space: Pitch & Swing      C: Camera"),
         TextFont {
-            font_size: 15.0,
+            font_size: 13.0,
             ..default()
         },
-        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.75)),
+        TextColor(ui.text_dim),
+        TextLayout::new_with_justify(JustifyText::Center),
     ));
 }
 
-/// Spawns a 90×90 px ring of base pips in the top-right corner: one pip per
-/// base, laid out like the field (home at the bottom, first base to the
-/// right, running counter-clockwise).
-fn spawn_base_diamond(commands: &mut Commands, base_count: usize) {
-    const BOX: f32 = 90.0;
+/// A 96×96 px ring of base pips (top-right): one pip per base, laid out like
+/// the field — home at the bottom, first base to the right, counter-clockwise.
+fn spawn_base_ring(commands: &mut Commands, base_count: usize, theme: &Theme) {
+    const BOX: f32 = 96.0;
     const RADIUS: f32 = 34.0;
-    const PIP: f32 = 18.0;
+    const PIP: f32 = 17.0;
 
     commands
         .spawn((
@@ -147,21 +249,23 @@ fn spawn_base_diamond(commands: &mut Commands, base_count: usize) {
             Node {
                 position_type: PositionType::Absolute,
                 top: Val::Px(14.0),
-                right: Val::Px(18.0),
+                right: Val::Px(14.0),
                 width: Val::Px(BOX),
                 height: Val::Px(BOX),
+                border: UiRect::all(Val::Px(1.5)),
                 ..default()
             },
+            BackgroundColor(theme.ui.panel_bg),
+            BorderColor(theme.ui.panel_border),
+            BorderRadius::all(Val::Px(12.0)),
         ))
-        .with_children(|d| {
-            // Home sits at the bottom of the ring (angle −90°); base k of n
-            // takes the k-th step around the circle of n + 1 points.
+        .with_children(|ring| {
             let step = std::f32::consts::TAU / (base_count as f32 + 1.0);
             for base in 0..base_count {
                 let angle = -std::f32::consts::FRAC_PI_2 + step * (base as f32 + 1.0);
                 let left = BOX / 2.0 + RADIUS * angle.cos() - PIP / 2.0;
                 let top = BOX / 2.0 - RADIUS * angle.sin() - PIP / 2.0;
-                d.spawn((
+                ring.spawn((
                     BaseIndicator(base),
                     Node {
                         position_type: PositionType::Absolute,
@@ -171,7 +275,8 @@ fn spawn_base_diamond(commands: &mut Commands, base_count: usize) {
                         height: Val::Px(PIP),
                         ..default()
                     },
-                    BackgroundColor(BASE_OFF),
+                    BackgroundColor(theme.ui.pip_off),
+                    BorderRadius::all(Val::Px(4.0)),
                     // Rotate 45° so the square reads as a base.
                     Transform::from_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_4)),
                 ));
@@ -181,42 +286,85 @@ fn spawn_base_diamond(commands: &mut Commands, base_count: usize) {
 
 // ── Update systems ────────────────────────────────────────────────────────────
 
-fn update_score_text(score: Res<ScoreBoard>, mut query: Query<&mut Text, With<ScoreText>>) {
+fn update_inning_text(score: Res<ScoreBoard>, mut query: Query<&mut Text, With<InningText>>) {
     if !score.is_changed() {
         return;
     }
     let half = if score.top_of_inning { "TOP" } else { "BOT" };
     for mut text in &mut query {
-        **text = format!(
-            "{half} {}\nAWAY {}   HOME {}\nB {}   S {}   O {}",
-            score.inning, score.away_runs, score.home_runs, score.balls, score.strikes, score.outs,
-        );
+        **text = format!("{half} {}", score.inning);
     }
 }
 
-fn update_base_diamond(
+fn update_score_text(score: Res<ScoreBoard>, mut query: Query<&mut Text, With<ScoreText>>) {
+    if !score.is_changed() {
+        return;
+    }
+    for mut text in &mut query {
+        **text = format!("AWAY {}   HOME {}", score.away_runs, score.home_runs);
+    }
+}
+
+fn update_count_dots(
+    score: Res<ScoreBoard>,
+    theme: Res<Theme>,
+    mut query: Query<(&CountDot, &mut BackgroundColor)>,
+) {
+    if !score.is_changed() {
+        return;
+    }
+    for (dot, mut color) in &mut query {
+        let (value, on_color) = match dot.kind {
+            CountKind::Ball => (score.balls, theme.ui.count_ball),
+            CountKind::Strike => (score.strikes, theme.ui.count_strike),
+            CountKind::Out => (score.outs, theme.ui.count_out),
+        };
+        color.0 = if dot.index < value {
+            on_color
+        } else {
+            theme.ui.pip_off
+        };
+    }
+}
+
+fn update_base_ring(
     bases: Res<Bases>,
+    theme: Res<Theme>,
     mut query: Query<(&BaseIndicator, &mut BackgroundColor)>,
 ) {
     if !bases.is_changed() {
         return;
     }
     for (indicator, mut color) in &mut query {
-        let occupied = bases.is_occupied(indicator.0);
-        color.0 = if occupied { BASE_ON } else { BASE_OFF };
+        color.0 = if bases.is_occupied(indicator.0) {
+            theme.ui.accent
+        } else {
+            theme.ui.pip_off
+        };
     }
 }
 
 fn show_banner(
     mut events: EventReader<PlayBanner>,
+    theme: Res<Theme>,
     mut timer: ResMut<BannerTimer>,
-    mut query: Query<(&mut Text, &mut TextColor), With<BannerText>>,
+    mut pill_q: Query<&mut Visibility, With<BannerPill>>,
+    mut text_q: Query<(&mut Text, &mut TextColor), With<BannerText>>,
 ) {
     // Show only the latest banner this frame.
     if let Some(banner) = events.read().last() {
-        for (mut text, mut color) in &mut query {
+        let tone_color = match banner.tone {
+            BannerTone::Good => theme.ui.tone_good,
+            BannerTone::Bad => theme.ui.tone_bad,
+            BannerTone::Info => theme.ui.tone_info,
+            BannerTone::Epic => theme.ui.tone_epic,
+        };
+        for (mut text, mut color) in &mut text_q {
             **text = banner.text.clone();
-            color.0 = banner.color;
+            color.0 = tone_color;
+        }
+        for mut visibility in &mut pill_q {
+            *visibility = Visibility::Inherited;
         }
         timer.0 = Timer::from_seconds(1.6, TimerMode::Once);
     }
@@ -225,15 +373,14 @@ fn show_banner(
 fn fade_banner(
     time: Res<Time>,
     mut timer: ResMut<BannerTimer>,
-    mut query: Query<(&mut Text, &mut TextColor), With<BannerText>>,
+    mut pill_q: Query<&mut Visibility, With<BannerPill>>,
 ) {
     if timer.0.finished() {
         return;
     }
     if timer.0.tick(time.delta()).just_finished() {
-        for (mut text, mut color) in &mut query {
-            **text = String::new();
-            color.0 = Color::NONE;
+        for mut visibility in &mut pill_q {
+            *visibility = Visibility::Hidden;
         }
     }
 }
