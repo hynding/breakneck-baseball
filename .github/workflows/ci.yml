@@ -1,0 +1,64 @@
+# Quality gate: unit tests, dual-target compilation, and lints.
+#
+# Runs on every feature-branch push and every pull request, and is also called
+# by the Pages workflow (see pages.yml) so nothing deploys without passing it.
+name: CI
+
+on:
+  push:
+    # Pushes to main run this via the Pages workflow's `quality` job instead,
+    # so a single push doesn't trigger two identical runs.
+    branches-ignore: [main]
+  pull_request:
+  workflow_call:
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Tests, dual-target checks & lints
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Bevy's native audio/input backends probe these at build-script time,
+      # so even `cargo check`/`clippy` need them on Linux.
+      - name: Install Bevy system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy, rustfmt
+
+      - name: Cache Cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-ci-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-ci-
+
+      - name: Format check
+        run: cargo fmt --check
+
+      - name: Unit tests
+        run: cargo test
+
+      # `--all-targets` lints test code too; `-D warnings` keeps the tree
+      # warning-free on both compilation targets (the project norm in CLAUDE.md).
+      - name: Clippy (native)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Clippy (wasm)
+        run: cargo clippy --target wasm32-unknown-unknown -- -D warnings

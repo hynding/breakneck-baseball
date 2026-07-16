@@ -20,7 +20,7 @@ use crate::game::Team;
 ///
 /// Meaning depends on whether the team is on offense or defense:
 /// - **Defense (pitching):** `aim` steers where the pitch crosses the plate,
-///   `action` releases the pitch, `secondary` cycles pitch type.
+///   `action` releases the pitch.
 /// - **Offense (batting):** `aim` steers the swing direction (pull/center/oppo),
 ///   `action` swings.
 #[derive(Clone, Copy, Default, Debug)]
@@ -29,10 +29,6 @@ pub struct TeamIntent {
     pub aim: Vec2,
     /// Primary button was pressed this frame (pitch release / swing).
     pub action: bool,
-    /// Primary button is currently held.
-    pub action_held: bool,
-    /// Secondary button was pressed this frame (pitch-type cycle / bunt).
-    pub secondary: bool,
 }
 
 /// Normalized intent for both teams, rebuilt every frame.
@@ -66,9 +62,9 @@ impl Intents {
 /// are unavailable.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KeyScheme {
-    /// WASD + Space + Left-Shift.
+    /// WASD + Space.
     Primary,
-    /// Arrow keys + Right-Control + Right-Shift.
+    /// Arrow keys + Right-Control.
     Secondary,
 }
 
@@ -165,20 +161,17 @@ fn gamepad_intent(pad: &Gamepad) -> TeamIntent {
     TeamIntent {
         aim,
         action: pad.just_pressed(GamepadButton::South),
-        action_held: pad.pressed(GamepadButton::South),
-        secondary: pad.just_pressed(GamepadButton::West),
     }
 }
 
 fn keyboard_intent(keyboard: &ButtonInput<KeyCode>, scheme: KeyScheme) -> TeamIntent {
-    let (up, down, left, right, action, secondary) = match scheme {
+    let (up, down, left, right, action) = match scheme {
         KeyScheme::Primary => (
             KeyCode::KeyW,
             KeyCode::KeyS,
             KeyCode::KeyA,
             KeyCode::KeyD,
             KeyCode::Space,
-            KeyCode::ShiftLeft,
         ),
         KeyScheme::Secondary => (
             KeyCode::ArrowUp,
@@ -186,7 +179,6 @@ fn keyboard_intent(keyboard: &ButtonInput<KeyCode>, scheme: KeyScheme) -> TeamIn
             KeyCode::ArrowLeft,
             KeyCode::ArrowRight,
             KeyCode::ControlRight,
-            KeyCode::ShiftRight,
         ),
     };
 
@@ -207,8 +199,6 @@ fn keyboard_intent(keyboard: &ButtonInput<KeyCode>, scheme: KeyScheme) -> TeamIn
     TeamIntent {
         aim,
         action: keyboard.just_pressed(action),
-        action_held: keyboard.pressed(action),
-        secondary: keyboard.just_pressed(secondary),
     }
 }
 
@@ -261,5 +251,52 @@ pub fn assign_controllers(mode: crate::game::GameMode, pads: &[Entity]) -> Contr
                 .map(InputSource::Gamepad)
                 .unwrap_or(InputSource::Keyboard(KeyScheme::Secondary)),
         },
+    }
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::GameMode;
+
+    fn pad(index: u32) -> Entity {
+        Entity::from_raw(index)
+    }
+
+    #[test]
+    fn one_player_no_pads_is_keyboard_vs_cpu() {
+        let c = assign_controllers(GameMode::OnePlayer, &[]);
+        assert_eq!(c.home, InputSource::Keyboard(KeyScheme::Primary));
+        assert_eq!(c.away, InputSource::Cpu);
+    }
+
+    #[test]
+    fn one_player_with_pad_uses_it_for_the_human() {
+        let c = assign_controllers(GameMode::OnePlayer, &[pad(0)]);
+        assert_eq!(c.home, InputSource::Gamepad(pad(0)));
+        assert_eq!(c.away, InputSource::Cpu);
+    }
+
+    #[test]
+    fn two_players_no_pads_split_the_keyboard() {
+        let c = assign_controllers(GameMode::TwoPlayers, &[]);
+        assert_eq!(c.home, InputSource::Keyboard(KeyScheme::Primary));
+        assert_eq!(c.away, InputSource::Keyboard(KeyScheme::Secondary));
+    }
+
+    #[test]
+    fn two_players_one_pad_gives_p2_the_keyboard() {
+        let c = assign_controllers(GameMode::TwoPlayers, &[pad(0)]);
+        assert_eq!(c.home, InputSource::Gamepad(pad(0)));
+        assert_eq!(c.away, InputSource::Keyboard(KeyScheme::Secondary));
+    }
+
+    #[test]
+    fn two_players_two_pads_assigns_in_order() {
+        let c = assign_controllers(GameMode::TwoPlayers, &[pad(0), pad(1)]);
+        assert_eq!(c.home, InputSource::Gamepad(pad(0)));
+        assert_eq!(c.away, InputSource::Gamepad(pad(1)));
     }
 }

@@ -99,6 +99,8 @@ pub fn cpu_defense(
 
 // ── Offense: the AI bats ──────────────────────────────────────────────────────
 
+// Bevy systems take their dependencies as parameters; the count is inherent.
+#[allow(clippy::too_many_arguments)]
 pub fn cpu_offense(
     time: Res<Time>,
     controllers: Res<Controllers>,

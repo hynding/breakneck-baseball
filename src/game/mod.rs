@@ -11,6 +11,7 @@ pub mod flow;
 pub mod input;
 pub mod menu;
 pub mod player;
+pub mod rules;
 pub mod ui;
 
 use bevy::prelude::*;

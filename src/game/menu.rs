@@ -90,7 +90,7 @@ fn spawn_menu(mut commands: Commands) {
                 TextLayout::new_with_justify(JustifyText::Center),
             ));
             root.spawn((
-                Text::new("Controller: A pitch/swing, X pitch type, stick to aim\nKeyboard: WASD + Space (P1), Arrows + Right-Ctrl (P2)"),
+                Text::new("Controller: A pitch/swing, stick to aim\nKeyboard: WASD + Space (P1), Arrows + Right-Ctrl (P2)"),
                 TextFont {
                     font_size: 15.0,
                     ..default()

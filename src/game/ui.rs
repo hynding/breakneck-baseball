@@ -5,7 +5,8 @@
 
 use bevy::prelude::*;
 
-use crate::game::flow::{Bases, PlayBanner};
+use crate::game::flow::PlayBanner;
+use crate::game::rules::Bases;
 use crate::game::{GameState, GameplayEntity, ScoreBoard};
 
 // ── Markers ───────────────────────────────────────────────────────────────────
