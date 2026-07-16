@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
 use crate::game::field::{BASE_DISTANCE, PITCH_DISTANCE};
-use crate::game::{ball::PitchEvent, GameState};
+use crate::game::GameState;
 
 // ── Player roles ──────────────────────────────────────────────────────────────
 
@@ -51,10 +51,6 @@ impl Plugin for PlayerPlugin {
         app.add_systems(
             OnEnter(GameState::Playing),
             (spawn_pitcher, spawn_batter, spawn_fielders),
-        )
-        .add_systems(
-            Update,
-            pitcher_pitch_system.run_if(in_state(GameState::Playing)),
         );
     }
 }
@@ -157,18 +153,5 @@ fn spawn_fielders(
             RigidBody::KinematicPositionBased,
             Collider::capsule_y(0.6, 0.4),
         ));
-    }
-}
-
-// ── Pitcher AI — throw a pitch when the space bar is pressed ─────────────────
-fn pitcher_pitch_system(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut pitch_events: EventWriter<PitchEvent>,
-) {
-    if keyboard.just_pressed(KeyCode::Space) {
-        // Fastball at ~40 m/s (≈ 90 mph) directed toward home plate (−Z axis).
-        pitch_events.send(PitchEvent {
-            velocity: Vec3::new(0.0, 0.5, -40.0),
-        });
     }
 }

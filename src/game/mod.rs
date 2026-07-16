@@ -6,6 +6,9 @@
 pub mod ball;
 pub mod camera;
 pub mod field;
+pub mod flow;
+pub mod input;
+pub mod menu;
 pub mod player;
 pub mod ui;
 
@@ -14,8 +17,57 @@ use bevy::prelude::*;
 use ball::BallPlugin;
 use camera::CameraPlugin;
 use field::FieldPlugin;
+use flow::FlowPlugin;
+use input::InputPlugin;
+use menu::MenuPlugin;
 use player::PlayerPlugin;
 use ui::UiPlugin;
+
+/// The two teams. In 1-player mode the human is always [`Team::Home`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Team {
+    Home,
+    Away,
+}
+
+impl Team {
+    /// The opposing team.
+    pub fn other(self) -> Team {
+        match self {
+            Team::Home => Team::Away,
+            Team::Away => Team::Home,
+        }
+    }
+}
+
+/// How many humans are playing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GameMode {
+    /// Human = Home, CPU = Away.
+    #[default]
+    OnePlayer,
+    /// Human P1 = Home, human P2 = Away.
+    TwoPlayers,
+}
+
+/// Number of regulation innings. Adjust here to shorten a game for testing.
+pub const REGULATION_INNINGS: u32 = 9;
+
+/// Chosen game options, set by the menu before entering [`GameState::Playing`].
+#[derive(Resource, Debug)]
+pub struct GameConfig {
+    pub mode: GameMode,
+    pub innings: u32,
+}
+
+impl Default for GameConfig {
+    fn default() -> Self {
+        Self {
+            mode: GameMode::OnePlayer,
+            innings: REGULATION_INNINGS,
+        }
+    }
+}
 
 /// Global game-state machine.
 ///
@@ -54,6 +106,30 @@ pub struct ScoreBoard {
     pub outs: u32,
 }
 
+impl ScoreBoard {
+    /// The team currently at bat. Away hits in the top half, Home in the bottom.
+    pub fn batting_team(&self) -> Team {
+        if self.top_of_inning {
+            Team::Away
+        } else {
+            Team::Home
+        }
+    }
+
+    /// The team currently in the field.
+    pub fn fielding_team(&self) -> Team {
+        self.batting_team().other()
+    }
+
+    /// Adds `runs` to the batting team's total.
+    pub fn add_runs(&mut self, runs: u32) {
+        match self.batting_team() {
+            Team::Home => self.home_runs += runs,
+            Team::Away => self.away_runs += runs,
+        }
+    }
+}
+
 /// Aggregate plugin that wires every sub-system into the app.
 pub struct GamePlugin;
 
@@ -63,24 +139,24 @@ impl Plugin for GamePlugin {
             // State machine
             .init_state::<GameState>()
             // Shared resources
+            .init_resource::<GameConfig>()
             .insert_resource(ScoreBoard {
                 inning: 1,
                 top_of_inning: true,
                 ..default()
             })
-            // Sub-plugins
+            // Sub-plugins (input/menu first so their resources exist for the rest)
             .add_plugins((
+                InputPlugin,
+                MenuPlugin,
                 FieldPlugin,
                 BallPlugin,
                 PlayerPlugin,
+                FlowPlugin,
                 CameraPlugin,
                 UiPlugin,
-            ))
-            // Start playing immediately for now; a proper menu can gate this later.
-            .add_systems(Startup, enter_playing_state);
+            ));
+        // The game now boots to `GameState::MainMenu` (the default) and the menu
+        // transitions into `Playing` once a mode is chosen.
     }
-}
-
-fn enter_playing_state(mut next_state: ResMut<NextState<GameState>>) {
-    next_state.set(GameState::Playing);
 }
