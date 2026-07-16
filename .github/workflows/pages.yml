@@ -32,14 +32,19 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cargo/bin/wasm-bindgen
+            ~/.cargo/bin/.crates.toml
+            ~/.cargo/bin/.crates2.json
             target
           key: ${{ runner.os }}-wasm-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-wasm-
 
       - name: Install wasm-bindgen-cli
         run: |
-          if ! command -v wasm-bindgen &>/dev/null; then
-            cargo install wasm-bindgen-cli --locked
+          WB_VERSION=$(cargo metadata --format-version 1 \
+            | jq -r 'first(.packages[] | select(.name == "wasm-bindgen") | .version)')
+          INSTALLED_VERSION=$(wasm-bindgen --version 2>/dev/null | awk '{print $2}' || echo "")
+          if [ "$WB_VERSION" != "$INSTALLED_VERSION" ]; then
+            cargo install wasm-bindgen-cli --version "$WB_VERSION" --locked
           fi
 
       - name: Build WASM
@@ -48,10 +53,12 @@ jobs:
       - name: Run wasm-bindgen
         run: |
           BIN_NAME=$(cargo metadata --no-deps --format-version 1 \
-            | python3 -c "import json,sys; \
-              pkgs=json.load(sys.stdin)['packages']; \
-              bins=[t['name'] for p in pkgs for t in p['targets'] if 'bin' in t['kind']]; \
-              print(bins[0])")
+            | jq -r --arg manifest "$GITHUB_WORKSPACE/Cargo.toml" \
+              'first(.packages[] | select(.manifest_path == $manifest) | .targets[] | select(.kind[] == "bin") | .name)')
+          if [ -z "$BIN_NAME" ]; then
+            echo "Error: no binary target found in Cargo.toml" >&2
+            exit 1
+          fi
           wasm-bindgen \
             --out-dir web/out \
             --target web \
