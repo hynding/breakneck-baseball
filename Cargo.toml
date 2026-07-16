@@ -11,10 +11,19 @@ path = "src/main.rs"
 
 [dependencies]
 # Game engine — uses wgpu as its rendering backend
-bevy = { version = "0.15", features = ["dynamic_linking"] }
+bevy = { version = "0.15" }
 
-# 3D physics
+# 3D physics (features are target-specific, see below)
+bevy_rapier3d = { version = "0.28", features = ["debug-render-3d"] }
+
+# ── Native-only: enable SIMD acceleration for Rapier ──────────────────────────
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 bevy_rapier3d = { version = "0.28", features = ["simd-stable", "debug-render-3d"] }
+
+# ── WASM-only: pull in wasm-bindgen for the web target ────────────────────────
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+getrandom = { version = "0.3", features = ["wasm_js"] }
 
 [features]
 default = []
@@ -31,3 +40,11 @@ opt-level = 3
 [profile.release]
 codegen-units = 1
 lto = true
+
+# ── WASM release profile — smaller binary, faster load ────────────────────────
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"          # optimise for binary size
+strip = "debuginfo"
+lto = true
+codegen-units = 1

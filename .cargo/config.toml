@@ -1,0 +1,5 @@
+# Configuration for cross-compilation targets.
+
+[target.wasm32-unknown-unknown]
+# getrandom ≥ 0.3 requires an explicit backend selection for WASM.
+rustflags = ["--cfg", "getrandom_backend=\"wasm_js\""]
