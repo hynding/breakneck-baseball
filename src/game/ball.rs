@@ -22,6 +22,9 @@ pub const BALL_RADIUS: f32 = 0.037;
 pub const BALL_MASS: f32 = 0.148;
 /// Aerodynamic drag coefficient × reference area (simplified).
 pub const BALL_DRAG_FACTOR: f32 = 0.0003;
+/// Magnus coefficient: acceleration = `MAGNUS_FACTOR · (ω × v)`. Tuned so a
+/// max-backspin fastball rises ~0.25 m over its flight — readable, not silly.
+pub const MAGNUS_FACTOR: f32 = 0.0028;
 
 /// Collision group for the ball; [`PLAYER_GROUP`] capsules are excluded from
 /// its filter. Outcomes are analytic, so a ball–player contact adds nothing —
@@ -62,11 +65,14 @@ type FlyingBall<'w, 's> =
     Query<'w, 's, (&'static Transform, &'static Velocity), (With<Baseball>, With<InFlight>)>;
 
 // ── Events ────────────────────────────────────────────────────────────────────
-/// Fired when a pitch is thrown. Carries the initial world-space velocity.
+/// Fired when a pitch is thrown. Carries the initial world-space velocity and
+/// the spin that will Magnus-bend the flight.
 #[derive(Event)]
 pub struct PitchEvent {
     /// Velocity vector in world space (m/s).
     pub velocity: Vec3,
+    /// Angular velocity in world space (rad/s).
+    pub spin: Vec3,
 }
 
 /// Fired when the ball is hit by the batter.
@@ -90,6 +96,7 @@ impl Plugin for BallPlugin {
                     apply_pitch,
                     apply_hit,
                     apply_drag,
+                    apply_magnus,
                     reset_ball_if_out_of_bounds,
                     spawn_trail,
                     fade_trail,
@@ -170,10 +177,7 @@ fn apply_pitch(
     for event in events.read() {
         for (entity, mut vel) in &mut query {
             vel.linvel = event.velocity;
-            // Backspin (about the axis perpendicular to a -Z pitch). Spin
-            // about the travel axis would grind against the mound while still
-            // in contact and kick the release sideways.
-            vel.angvel = Vec3::new(-event.velocity.length() * 0.5, 0.0, 0.0);
+            vel.angvel = event.spin;
             commands.entity(entity).insert(InFlight);
         }
     }
@@ -189,7 +193,7 @@ fn apply_hit(
     for event in events.read() {
         for (entity, mut vel) in &mut query {
             vel.linvel = event.velocity;
-            vel.angvel = Vec3::new(0.0, event.velocity.length() * 0.3, 0.0);
+            vel.angvel = crate::game::rules::hit_spin(event.velocity);
             commands.entity(entity).insert(InFlight);
         }
     }
@@ -216,6 +220,20 @@ fn apply_drag(
             vel.linvel.x *= f;
             vel.linvel.z *= f;
         }
+    }
+}
+
+/// Magnus effect: spin bends flight. Backspin rides, topspin dives, sidespin
+/// tails — this is what makes a curveball a curveball.
+fn apply_magnus(
+    mut query: Query<&mut Velocity, (With<Baseball>, With<InFlight>)>,
+    time: Res<Time>,
+) {
+    let dt = time.delta_secs();
+    for mut vel in &mut query {
+        let angvel = vel.angvel;
+        let lift = MAGNUS_FACTOR * angvel.cross(vel.linvel);
+        vel.linvel += lift * dt;
     }
 }
 

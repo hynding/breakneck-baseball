@@ -210,6 +210,7 @@ fn wind_up(
         let aim = play.pending_pitch.take().unwrap_or(Vec2::ZERO);
         pitch_ev.send(PitchEvent {
             velocity: rules::pitch_velocity(aim, field.pitch_distance),
+            spin: rules::PitchKind::Fastball.spin(),
         });
         play.phase = Phase::Pitch;
     }

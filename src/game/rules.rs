@@ -28,14 +28,8 @@ const CONTACT_HEIGHT: f32 = 0.6;
 /// classifier tests below lock in the resulting bands — retune them together.
 const DRAG_RANGE_FACTOR: f32 = 0.73;
 
-/// Nominal pitch speed (m/s) — roughly 85 mph.
+/// Nominal fastball speed (m/s) — roughly 85 mph.
 pub const PITCH_SPEED: f32 = 38.0;
-/// Bias applied to the ballistic gravity-compensation term of a pitch. Values
-/// above 1.0 make the pitch arrive *higher* than the drag-free solution — this
-/// keeps a centre-aimed pitch comfortably inside the strike zone (verified by
-/// `centre_aimed_pitch_is_a_strike` below, which simulates the full flight with
-/// the same drag model the live ball uses). Pure balance tuning, not physics.
-const PITCH_LOFT_BIAS: f32 = 1.3;
 
 /// Horizontal half-width of the called strike zone (metres from plate centre).
 const ZONE_HALF_WIDTH: f32 = 0.34;
@@ -147,19 +141,74 @@ pub enum StrikeCall {
 
 // ── Pitch & contact kinematics ────────────────────────────────────────────────
 
-/// Solves the release velocity for a pitch from `pitch_distance` aimed at
-/// plate location `(aim.x, aim.y)` (both in −1.0..=1.0, zero = middle of the
-/// zone).
-pub fn pitch_velocity(aim: Vec2, pitch_distance: f32) -> Vec3 {
+/// The pitcher's arsenal. Speeds in m/s; spin in rad/s about world axes for a
+/// −Z pitch: +X is backspin (Magnus lift), −X topspin (dive), ±Y sweep.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PitchKind {
+    Fastball,
+    Curveball,
+    Changeup,
+}
+
+impl PitchKind {
+    pub fn speed(self) -> f32 {
+        match self {
+            PitchKind::Fastball => PITCH_SPEED,
+            PitchKind::Curveball => 31.0,
+            PitchKind::Changeup => 29.0,
+        }
+    }
+
+    pub fn spin(self) -> Vec3 {
+        match self {
+            PitchKind::Fastball => Vec3::new(20.0, 0.0, 0.0),
+            PitchKind::Curveball => Vec3::new(-18.0, 6.0, 0.0),
+            PitchKind::Changeup => Vec3::new(6.0, 0.0, 0.0),
+        }
+    }
+
+    /// Held aim at release selects the pitch (up = fastball, down = curveball,
+    /// neutral = changeup). Aim keeps steering location too — aiming high
+    /// *means* throwing the heater upstairs.
+    pub fn from_aim(aim: Vec2) -> PitchKind {
+        if aim.y > 0.35 {
+            PitchKind::Fastball
+        } else if aim.y < -0.35 {
+            PitchKind::Curveball
+        } else {
+            PitchKind::Changeup
+        }
+    }
+}
+
+/// Solves the ballistic release velocity for a pitch of `kind` from
+/// `pitch_distance` aimed at plate location `(aim.x, aim.y)` (both in
+/// −1.0..=1.0, zero = middle of the zone). Deliberately gravity-only: the
+/// kind's spin then bends the flight (fastballs ride, curveballs dive), so a
+/// pitch's character *is* its physics.
+pub fn pitch_velocity_kind(kind: PitchKind, aim: Vec2, pitch_distance: f32) -> Vec3 {
     let target_x = aim.x * 0.35;
     let target_y = 1.05 + aim.y * 0.5;
+    let speed = kind.speed();
 
     let start = mound_reset_pos(pitch_distance);
-    let flight = pitch_distance / PITCH_SPEED;
+    let flight = pitch_distance / speed;
     let vx = (target_x - start.x) / flight;
-    let vy = (target_y - start.y) / flight + 0.5 * GRAVITY * (flight * PITCH_LOFT_BIAS);
+    let vy = (target_y - start.y) / flight + 0.5 * GRAVITY * flight;
 
-    Vec3::new(vx, vy, -PITCH_SPEED)
+    Vec3::new(vx, vy, -speed)
+}
+
+/// A fastball with the given aim (legacy call shape; flow selects kinds).
+pub fn pitch_velocity(aim: Vec2, pitch_distance: f32) -> Vec3 {
+    pitch_velocity_kind(PitchKind::Fastball, aim, pitch_distance)
+}
+
+/// Spin imparted by the bat: sidespin toward the spray side plus mild
+/// backspin (−X lifts a +Z batted ball). Single source of truth — the live
+/// ball and the landing predictor both use it.
+pub fn hit_spin(vel: Vec3) -> Vec3 {
+    Vec3::new(-6.0, vel.x.signum() * vel.length() * 0.25, 0.0)
 }
 
 /// Converts contact timing + aim into a batted-ball velocity.
@@ -767,33 +816,74 @@ mod tests {
 
     // ── Pitch flight ──────────────────────────────────────────────────────────
 
-    /// Locks [`PITCH_LOFT_BIAS`] to observable behaviour: simulate the full
-    /// pitch flight with the same gravity + quadratic-drag model the live ball
-    /// uses (`ball::apply_drag`), and require a centre-aimed pitch to cross the
-    /// plate inside the strike zone. If the drag model or the bias changes and
-    /// centre pitches become balls, this fails instead of the gameplay quietly
-    /// degrading.
-    #[test]
-    fn centre_aimed_pitch_is_a_strike() {
+    /// Simulates a full pitch flight with the same gravity + drag + Magnus
+    /// model the live ball uses (`ball::apply_drag` / `ball::apply_magnus`),
+    /// returning the plate-crossing point. Locks the balance constants to
+    /// observable behaviour: if a model change makes centre pitches become
+    /// balls, these fail instead of the gameplay quietly degrading.
+    fn simulate_pitch(kind: PitchKind, aim: Vec2) -> Vec2 {
         let pitch_distance = std_field().pitch_distance;
         let mut pos = mound_reset_pos(pitch_distance);
-        let mut vel = pitch_velocity(Vec2::ZERO, pitch_distance);
+        let mut vel = pitch_velocity_kind(kind, aim, pitch_distance);
+        let spin = kind.spin();
         let dt = 1.0 / 240.0;
 
         while pos.z > 0.0 {
             let speed = vel.length();
-            vel += -BALL_DRAG_FACTOR * speed * vel * dt; // same form as apply_drag
+            vel += -BALL_DRAG_FACTOR * speed * vel * dt;
+            vel += crate::game::ball::MAGNUS_FACTOR * spin.cross(vel) * dt;
             vel.y -= GRAVITY * dt;
             pos += vel * dt;
             assert!(pos.y > 0.0, "pitch hit the ground before the plate");
         }
+        Vec2::new(pos.x, pos.y)
+    }
 
+    #[test]
+    fn every_kind_centre_aimed_is_a_strike() {
+        for kind in [
+            PitchKind::Fastball,
+            PitchKind::Curveball,
+            PitchKind::Changeup,
+        ] {
+            let cross = simulate_pitch(kind, Vec2::ZERO);
+            assert!(
+                is_in_zone(cross),
+                "{kind:?} crossed at ({:.2}, {:.2}) — outside the zone",
+                cross.x,
+                cross.y
+            );
+        }
+    }
+
+    #[test]
+    fn backspin_rides_and_topspin_dives() {
+        let fast = simulate_pitch(PitchKind::Fastball, Vec2::ZERO);
+        let curve = simulate_pitch(PitchKind::Curveball, Vec2::ZERO);
         assert!(
-            is_in_zone(Vec2::new(pos.x, pos.y)),
-            "centre-aimed pitch crossed at ({:.2}, {:.2}) — outside the zone",
-            pos.x,
-            pos.y,
+            fast.y > curve.y + 0.15,
+            "fastball {fast:?} vs curveball {curve:?}"
         );
+    }
+
+    #[test]
+    fn aim_maps_to_kinds_per_spec() {
+        assert_eq!(
+            PitchKind::from_aim(Vec2::new(0.0, 1.0)),
+            PitchKind::Fastball
+        );
+        assert_eq!(
+            PitchKind::from_aim(Vec2::new(0.0, -1.0)),
+            PitchKind::Curveball
+        );
+        assert_eq!(PitchKind::from_aim(Vec2::ZERO), PitchKind::Changeup);
+    }
+
+    #[test]
+    fn hit_spin_pulls_toward_the_spray_side() {
+        let pulled = hit_spin(Vec3::new(10.0, 8.0, 20.0));
+        let oppo = hit_spin(Vec3::new(-10.0, 8.0, 20.0));
+        assert!(pulled.y * oppo.y < 0.0, "sidespin should flip with spray");
     }
 
     // ── Game end ──────────────────────────────────────────────────────────────
