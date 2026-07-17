@@ -4,8 +4,9 @@
 use bevy::prelude::*;
 
 use crate::game::animation::MoveIntent;
-use crate::game::player::{spawn_rig, RigMeshes, RigUnit, TeamPalette};
-use crate::game::rules::Bases;
+use crate::game::flow::{BallInPlayEvent, Phase, Play};
+use crate::game::player::{spawn_rig, Batter, RigMeshes, RigUnit, TeamPalette};
+use crate::game::rules::{Bases, Outcome};
 use crate::game::variant::FieldSpec;
 use crate::game::{GameState, ScoreBoard};
 
@@ -153,13 +154,78 @@ fn sync_runners(
     }
 }
 
+/// On fair contact the batter always runs — like real baseball, even on outs.
+/// Hits and walks get their runner from [`sync_runners`]; outs get a ghost
+/// run to first and home runs a full trot, both despawning at path end. The
+/// real batter rig hides for the duration and "steps back in" at PrePitch.
+fn batter_runs(
+    mut events: EventReader<BallInPlayEvent>,
+    field: Res<FieldSpec>,
+    score: Res<ScoreBoard>,
+    rig_meshes: Option<Res<RigMeshes>>,
+    palette: Option<Res<TeamPalette>>,
+    mut batter_q: Query<&mut Visibility, With<Batter>>,
+    mut commands: Commands,
+) {
+    for ev in events.read() {
+        let (Some(rig_meshes), Some(palette)) = (&rig_meshes, &palette) else {
+            return;
+        };
+
+        // The batter leaves the box on every fair ball; on hits the runner
+        // spawned by sync_runners is the batter, visually.
+        for mut visibility in &mut batter_q {
+            *visibility = Visibility::Hidden;
+        }
+
+        let waypoints = match ev.outcome {
+            // Run through first, then peel off.
+            Outcome::Out(_) => path_between(&field, None, 0),
+            // The trot: every base, then home.
+            Outcome::HomeRun => {
+                let mut wp: Vec<Vec3> = (0..field.base_count())
+                    .map(|b| base_pos(&field, b))
+                    .collect();
+                wp.push(Vec3::new(0.0, RIG_Y, 0.0));
+                wp
+            }
+            _ => continue,
+        };
+
+        let mats = palette.for_team(score.batting_team());
+        let entity = spawn_rig(
+            &mut commands,
+            rig_meshes,
+            RigUnit::Batter,
+            mats,
+            PLATE_START,
+            1.0,
+        );
+        commands
+            .entity(entity)
+            .insert((BasePath { waypoints, next: 0 }, DespawnAtPathEnd));
+    }
+}
+
+/// The next at-bat begins: the batter steps back into the box.
+fn batter_returns(play: Res<Play>, mut batter_q: Query<&mut Visibility, With<Batter>>) {
+    if play.phase != Phase::PrePitch {
+        return;
+    }
+    for mut visibility in &mut batter_q {
+        if *visibility != Visibility::Inherited {
+            *visibility = Visibility::Inherited;
+        }
+    }
+}
+
 pub struct RunnerPlugin;
 
 impl Plugin for RunnerPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (sync_runners, advance_paths)
+            (batter_runs, sync_runners, advance_paths, batter_returns)
                 .chain()
                 .run_if(in_state(GameState::Playing)),
         );
