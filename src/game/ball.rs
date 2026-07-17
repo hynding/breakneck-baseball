@@ -198,13 +198,23 @@ fn apply_hit(
 /// Applies a simplified quadratic aerodynamic drag every physics frame.
 ///
 /// `F_drag = -drag_factor × |v|² × v̂`
-fn apply_drag(mut query: Query<&mut Velocity, (With<Baseball>, With<InFlight>)>, time: Res<Time>) {
+fn apply_drag(
+    mut query: Query<(&Transform, &mut Velocity), (With<Baseball>, With<InFlight>)>,
+    time: Res<Time>,
+) {
     let dt = time.delta_secs();
-    for mut vel in &mut query {
+    for (transform, mut vel) in &mut query {
         let speed = vel.linvel.length();
         if speed > 0.0 {
             let drag = -BALL_DRAG_FACTOR * speed * speed * vel.linvel / speed;
             vel.linvel += drag * dt;
+        }
+        // Rolling resistance: once the ball is down and barely bouncing,
+        // bleed horizontal speed so grounders die instead of rolling forever.
+        if transform.translation.y < BALL_RADIUS * 3.0 && vel.linvel.y.abs() < 1.0 {
+            let f = (1.0 - 1.6 * dt).max(0.0);
+            vel.linvel.x *= f;
+            vel.linvel.z *= f;
         }
     }
 }

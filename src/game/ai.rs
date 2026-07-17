@@ -46,13 +46,13 @@ impl Default for CpuState {
 
 /// Cheap deterministic noise in 0.0..1.0 from a float seed (no `rand` dep, and
 /// wasm-safe). Good enough to give pitch location and swing timing some variety.
-fn hash01(seed: f32) -> f32 {
+pub(crate) fn hash01(seed: f32) -> f32 {
     let v = (seed * 12.9898).sin() * 43758.547;
     v - v.floor()
 }
 
 /// Noise in −1.0..1.0.
-fn noise(seed: f32) -> f32 {
+pub(crate) fn noise(seed: f32) -> f32 {
     hash01(seed) * 2.0 - 1.0
 }
 
@@ -117,7 +117,7 @@ pub fn cpu_offense(
     }
 
     // Reset the per-pitch decision at the start of each pitch.
-    if play.phase == Phase::PrePitch {
+    if matches!(play.phase, Phase::PrePitch | Phase::WindUp) {
         cpu.decided_swing = false;
         intents.get_mut(team).action = false;
         return;

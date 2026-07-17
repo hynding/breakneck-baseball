@@ -10,7 +10,7 @@
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 
-use crate::game::ball::Baseball;
+use crate::game::ball::{Baseball, HitEvent};
 use crate::game::flow::{Phase, Play};
 use crate::game::variant::FieldSpec;
 use crate::game::GameState;
@@ -75,6 +75,21 @@ impl Default for BroadcastRig {
     }
 }
 
+/// Impulse added to the broadcast eye on contact; decays on real time so the
+/// kick rides through the hit-stop.
+#[derive(Resource, Default)]
+struct CameraKick(Vec3);
+
+fn kick_on_hit(mut hits: EventReader<HitEvent>, mut kick: ResMut<CameraKick>) {
+    for _ in hits.read() {
+        kick.0 += Vec3::new(0.0, 0.18, -0.35);
+    }
+}
+
+fn decay_kick(real: Res<Time<Real>>, mut kick: ResMut<CameraKick>) {
+    kick.0 *= (-14.0 * real.delta_secs()).exp();
+}
+
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
 pub struct CameraPlugin;
@@ -84,10 +99,11 @@ impl Plugin for CameraPlugin {
         app.init_resource::<OrbitState>()
             .init_resource::<CameraMode>()
             .init_resource::<BroadcastRig>()
+            .init_resource::<CameraKick>()
             .add_systems(Startup, spawn_camera)
             .add_systems(
                 Update,
-                toggle_camera_mode.run_if(in_state(GameState::Playing)),
+                (toggle_camera_mode, kick_on_hit, decay_kick).run_if(in_state(GameState::Playing)),
             )
             .add_systems(
                 Update,
@@ -140,6 +156,7 @@ fn broadcast_camera(
     time: Res<Time>,
     play: Res<Play>,
     field: Res<FieldSpec>,
+    kick: Res<CameraKick>,
     ball_q: Query<&Transform, (With<Baseball>, Without<Camera3d>)>,
     mut rig: ResMut<BroadcastRig>,
     mut cam_q: Query<&mut Transform, With<Camera3d>>,
@@ -170,7 +187,7 @@ fn broadcast_camera(
     rig.target = rig.target.lerp(desired_target, follow);
 
     if let Ok(mut cam) = cam_q.get_single_mut() {
-        *cam = Transform::from_translation(rig.eye).looking_at(rig.target, Vec3::Y);
+        *cam = Transform::from_translation(rig.eye + kick.0).looking_at(rig.target, Vec3::Y);
     }
 }
 

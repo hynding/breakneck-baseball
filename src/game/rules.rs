@@ -267,6 +267,26 @@ pub fn classify_batted_ball(vel: Vec3, field: &FieldSpec, rules: &Ruleset) -> Ou
     Outcome::Hit(hit)
 }
 
+/// Numerically integrates a batted ball's flight from contact height with the
+/// same gravity + quadratic-drag model the live ball uses (`ball::apply_drag`),
+/// returning the landing point (y = 0) and hang time. This is what fielder
+/// choreography chases — the *visual* ball's touchdown, not the balance-tuned
+/// range in [`classify_batted_ball`].
+pub fn predict_landing(vel: Vec3, drag_factor: f32) -> (Vec3, f32) {
+    let mut pos = Vec3::new(0.0, CONTACT_HEIGHT, 0.0);
+    let mut v = vel;
+    let dt = 1.0 / 120.0;
+    let mut t = 0.0;
+    while pos.y > 0.0 && t < 15.0 {
+        let speed = v.length();
+        v += -drag_factor * speed * v * dt;
+        v.y -= GRAVITY * dt;
+        pos += v * dt;
+        t += dt;
+    }
+    (Vec3::new(pos.x, 0.0, pos.z), t)
+}
+
 // ── Base running ──────────────────────────────────────────────────────────────
 
 /// Advances runners for a clean hit where everyone moves up `hit_bases`.
@@ -715,6 +735,34 @@ mod tests {
             classify_batted_ball(vel_spray(15.0, 33.0, 30.0), &f, &r),
             Outcome::Hit(4)
         );
+    }
+
+    // ── Landing prediction ────────────────────────────────────────────────────
+
+    #[test]
+    fn dragless_landing_matches_closed_form() {
+        let vel = vel_at(30.0, 30.0);
+        let (land, t) = predict_landing(vel, 0.0);
+        let disc = vel.y * vel.y + 2.0 * GRAVITY * 0.6; // CONTACT_HEIGHT
+        let t_expect = (vel.y + disc.sqrt()) / GRAVITY;
+        assert!((t - t_expect).abs() < 0.05, "hang time {t} vs {t_expect}");
+        let range_expect = Vec2::new(vel.x, vel.z).length() * t_expect;
+        let range = Vec2::new(land.x, land.z).length();
+        assert!(
+            (range - range_expect).abs() < 1.5,
+            "range {range} vs {range_expect}"
+        );
+    }
+
+    #[test]
+    fn drag_shortens_flight() {
+        let vel = vel_at(30.0, 40.0);
+        let (with_drag, t_drag) = predict_landing(vel, BALL_DRAG_FACTOR);
+        let (no_drag, _) = predict_landing(vel, 0.0);
+        assert!(
+            Vec2::new(with_drag.x, with_drag.z).length() < Vec2::new(no_drag.x, no_drag.z).length()
+        );
+        assert!(t_drag > 0.5);
     }
 
     // ── Pitch flight ──────────────────────────────────────────────────────────

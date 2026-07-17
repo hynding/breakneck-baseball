@@ -20,8 +20,10 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
 use crate::game::ai::{cpu_defense, cpu_offense, CpuConfig, CpuState};
+use crate::game::animation::{AnimClip, Playing};
 use crate::game::ball::{Baseball, HitEvent, InFlight, PitchEvent};
 use crate::game::input::Intents;
+use crate::game::player::Pitcher;
 use crate::game::rules::{self, BallCall, Bases, OutKind, Outcome, StrikeCall};
 use crate::game::variant::{FieldSpec, Ruleset};
 use crate::game::{GameState, ScoreBoard};
@@ -39,8 +41,11 @@ const SWING_REACH_X: f32 = 1.8;
 
 /// Seconds the result banner lingers before the next pitch.
 const RESULT_SECS: f32 = 1.2;
-/// How long a batted ball stays live (visual) before the field resets.
-const INPLAY_SECS: f32 = 2.2;
+/// The live-ball window: hang time plus room for the fielding choreography,
+/// clamped so grounders don't dawdle and moonshots don't stall the game.
+const INPLAY_BUFFER: f32 = 1.2;
+const INPLAY_MIN: f32 = 2.2;
+const INPLAY_MAX: f32 = 6.5;
 
 // ── Phase state ───────────────────────────────────────────────────────────────
 
@@ -50,6 +55,8 @@ pub enum Phase {
     /// Waiting for the defense to throw a pitch.
     #[default]
     PrePitch,
+    /// The pitcher's delivery is playing out; the ball hasn't left the hand.
+    WindUp,
     /// Ball is travelling to the plate; the batter may swing.
     Pitch,
     /// The ball has been hit and is live.
@@ -66,6 +73,8 @@ pub struct Play {
     /// Plate-crossing point (x, y), recorded once as the pitch passes the plate.
     crossing: Option<Vec2>,
     resolved: bool,
+    /// Aim stored at windup start, released as the pitch when the delivery ends.
+    pending_pitch: Option<Vec2>,
 }
 
 impl Default for Play {
@@ -75,6 +84,7 @@ impl Default for Play {
             timer: Timer::from_seconds(RESULT_SECS, TimerMode::Once),
             crossing: None,
             resolved: false,
+            pending_pitch: None,
         }
     }
 }
@@ -93,6 +103,15 @@ pub enum BannerTone {
     Info,
     /// The big moments (home runs, walks forced in).
     Epic,
+}
+
+/// Fired once per fair contact: the already-decided outcome plus where the
+/// live ball will come down. Fielder and runner choreography key off this.
+#[derive(Event, Clone, Copy)]
+pub struct BallInPlayEvent {
+    pub outcome: Outcome,
+    pub landing: Vec3,
+    pub hang_time: f32,
 }
 
 /// A transient on-screen message (e.g. "STRIKE!", "BALL", "HOME RUN!").
@@ -121,6 +140,7 @@ impl Plugin for FlowPlugin {
             .init_resource::<Bases>()
             .init_resource::<CpuConfig>()
             .init_resource::<CpuState>()
+            .add_event::<BallInPlayEvent>()
             .add_event::<PlayBanner>()
             .add_systems(OnEnter(GameState::Playing), reset_flow)
             .add_systems(
@@ -130,6 +150,7 @@ impl Plugin for FlowPlugin {
                     cpu_defense,
                     cpu_offense,
                     pre_pitch,
+                    wind_up,
                     pitch_live,
                     in_play,
                     result_phase,
@@ -153,8 +174,8 @@ fn pre_pitch(
     mut play: ResMut<Play>,
     intents: Res<Intents>,
     score: Res<ScoreBoard>,
-    field: Res<FieldSpec>,
-    mut pitch_ev: EventWriter<PitchEvent>,
+    pitcher_q: Query<Entity, With<Pitcher>>,
+    mut commands: Commands,
 ) {
     if play.phase != Phase::PrePitch {
         return;
@@ -162,13 +183,36 @@ fn pre_pitch(
 
     let intent = intents.get(score.fielding_team());
     if intent.action {
-        pitch_ev.send(PitchEvent {
-            velocity: rules::pitch_velocity(intent.aim, field.pitch_distance),
-        });
-
-        play.phase = Phase::Pitch;
+        play.pending_pitch = Some(intent.aim);
+        play.phase = Phase::WindUp;
+        play.timer = Timer::from_seconds(AnimClip::WindUp.duration(), TimerMode::Once);
         play.crossing = None;
         play.resolved = false;
+        for pitcher in &pitcher_q {
+            commands
+                .entity(pitcher)
+                .insert(Playing::then(AnimClip::WindUp, AnimClip::ThrowRelease));
+        }
+    }
+}
+
+// ── WindUp: the delivery plays out, then the ball leaves the hand ─────────────
+
+fn wind_up(
+    time: Res<Time>,
+    mut play: ResMut<Play>,
+    field: Res<FieldSpec>,
+    mut pitch_ev: EventWriter<PitchEvent>,
+) {
+    if play.phase != Phase::WindUp {
+        return;
+    }
+    if play.timer.tick(time.delta()).finished() {
+        let aim = play.pending_pitch.take().unwrap_or(Vec2::ZERO);
+        pitch_ev.send(PitchEvent {
+            velocity: rules::pitch_velocity(aim, field.pitch_distance),
+        });
+        play.phase = Phase::Pitch;
     }
 }
 
@@ -184,6 +228,7 @@ fn pitch_live(
     mut bases: ResMut<Bases>,
     ball_q: Query<&Transform, With<Baseball>>,
     mut hit_ev: EventWriter<HitEvent>,
+    mut in_play_ev: EventWriter<BallInPlayEvent>,
     mut banner: EventWriter<PlayBanner>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
@@ -213,8 +258,18 @@ fn pitch_live(
             if outcome == Outcome::Foul {
                 end_pitch(&mut play);
             } else {
+                let (landing, hang_time) =
+                    rules::predict_landing(velocity, crate::game::ball::BALL_DRAG_FACTOR);
+                in_play_ev.send(BallInPlayEvent {
+                    outcome,
+                    landing,
+                    hang_time,
+                });
                 play.phase = Phase::InPlay;
-                play.timer = Timer::from_seconds(INPLAY_SECS, TimerMode::Once);
+                play.timer = Timer::from_seconds(
+                    (hang_time + INPLAY_BUFFER).clamp(INPLAY_MIN, INPLAY_MAX),
+                    TimerMode::Once,
+                );
                 play.resolved = true;
             }
         } else {
@@ -272,6 +327,7 @@ fn result_phase(
         play.phase = Phase::PrePitch;
         play.crossing = None;
         play.resolved = false;
+        play.pending_pitch = None;
     }
 }
 

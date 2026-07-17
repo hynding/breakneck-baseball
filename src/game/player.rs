@@ -11,6 +11,7 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
+use crate::game::animation::{bat_idle_rotation, AnimClip, LimbKind, MoveIntent, Playing, RigLimb};
 use crate::game::ball::PLAYER_GROUP;
 use crate::game::flow::{Phase, Play};
 use crate::game::input::Intents;
@@ -112,31 +113,9 @@ fn build_materials(
 
 // ── Bat swing ─────────────────────────────────────────────────────────────────
 
-/// Animation state for the bat pivot.
-#[derive(Component, Default)]
-enum Swing {
-    #[default]
-    Idle,
-    Swinging(Timer),
-    Recovering(Timer),
-}
-
-const SWING_SECS: f32 = 0.16;
-const RECOVER_SECS: f32 = 0.25;
-/// Horizontal sweep range (radians about Y): cocked toward the catcher,
-/// through the plate, to a follow-through toward the pitcher.
-const SWEEP_FROM: f32 = -1.7;
-const SWEEP_TO: f32 = 1.7;
-
-/// Bat resting over the shoulder.
-fn idle_rotation() -> Quat {
-    Quat::from_euler(EulerRot::ZXY, -0.5, 0.35, 0.0)
-}
-
-/// Bat laid horizontal (pointing at the plate), swept `angle` around Y.
-fn sweep_rotation(angle: f32) -> Quat {
-    Quat::from_rotation_y(angle) * Quat::from_rotation_z(1.45)
-}
+/// Marks the batter's bat pivot — the entity the swing clips rotate.
+#[derive(Component)]
+pub(crate) struct BatPivot;
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
@@ -147,7 +126,7 @@ impl Plugin for PlayerPlugin {
         app.add_systems(OnEnter(GameState::Playing), spawn_players)
             .add_systems(
                 Update,
-                (recolor_teams, trigger_swing, animate_swing).run_if(in_state(GameState::Playing)),
+                (recolor_teams, trigger_swing).run_if(in_state(GameState::Playing)),
             );
     }
 }
@@ -161,6 +140,7 @@ struct RigMeshes {
     cap: Handle<Mesh>,
     brim: Handle<Mesh>,
     bat: Handle<Mesh>,
+    limb: Handle<Mesh>,
 }
 
 /// Builds the team palette and every player rig for the current field.
@@ -181,6 +161,7 @@ fn spawn_players(
         cap: meshes.add(Cylinder::new(0.19, 0.09)),
         brim: meshes.add(Cuboid::new(0.26, 0.03, 0.16)),
         bat: meshes.add(Cylinder::new(0.032, 0.84)),
+        limb: meshes.add(Cylinder::new(0.055, 0.5)),
     };
 
     // Top of the 1st: Away bats, Home fields.
@@ -222,8 +203,9 @@ fn spawn_players(
     );
     commands.entity(batter).insert(Batter).with_children(|rig| {
         rig.spawn((
-            Swing::default(),
-            Transform::from_translation(Vec3::new(-0.25, 0.45, 0.0)).with_rotation(idle_rotation()),
+            BatPivot,
+            Transform::from_translation(Vec3::new(-0.25, 0.45, 0.0))
+                .with_rotation(bat_idle_rotation()),
             Visibility::default(),
         ))
         .with_children(|pivot| {
@@ -256,11 +238,18 @@ fn spawn_rig(
         .spawn((
             GameplayEntity,
             FacingDirection(Vec3::Z * facing),
-            Transform::from_translation(position),
+            Transform::from_translation(position).with_rotation(Quat::from_rotation_y(
+                if facing < 0.0 {
+                    std::f32::consts::PI
+                } else {
+                    0.0
+                },
+            )),
             Visibility::default(),
             RigidBody::KinematicPositionBased,
             Collider::capsule_y(0.6, 0.4),
             CollisionGroups::new(PLAYER_GROUP, Group::ALL),
+            MoveIntent::default(),
         ))
         .with_children(|rig| {
             rig.spawn((
@@ -297,8 +286,31 @@ fn spawn_rig(
                 },
                 Mesh3d(meshes.brim.clone()),
                 MeshMaterial3d(mats.cap.clone()),
-                Transform::from_xyz(0.0, 0.9, 0.19 * facing),
+                Transform::from_xyz(0.0, 0.9, 0.19),
             ));
+            for (kind, x, y) in [
+                (LimbKind::ArmL, 0.36, 0.30),
+                (LimbKind::ArmR, -0.36, 0.30),
+                (LimbKind::LegL, 0.14, -0.40),
+                (LimbKind::LegR, -0.14, -0.40),
+            ] {
+                rig.spawn((
+                    RigLimb { kind },
+                    Transform::from_xyz(x, y, 0.0),
+                    Visibility::default(),
+                ))
+                .with_children(|joint| {
+                    joint.spawn((
+                        RigPart {
+                            unit,
+                            part: PartKind::Jersey,
+                        },
+                        Mesh3d(meshes.limb.clone()),
+                        MeshMaterial3d(mats.jersey.clone()),
+                        Transform::from_xyz(0.0, -0.26, 0.0),
+                    ));
+                });
+            }
         })
         .id()
 }
@@ -340,46 +352,20 @@ fn trigger_swing(
     intents: Res<Intents>,
     score: Res<ScoreBoard>,
     play: Res<Play>,
-    mut swings: Query<&mut Swing>,
+    pivots: Query<(Entity, Option<&Playing>), With<BatPivot>>,
+    mut commands: Commands,
 ) {
-    if !matches!(play.phase, Phase::PrePitch | Phase::Pitch) {
+    if !matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch) {
         return;
     }
     if !intents.get(score.batting_team()).action {
         return;
     }
-    for mut swing in &mut swings {
-        if matches!(*swing, Swing::Idle) {
-            *swing = Swing::Swinging(Timer::from_seconds(SWING_SECS, TimerMode::Once));
-        }
-    }
-}
-
-/// Drives the bat pivot through swing → follow-through → back to rest.
-fn animate_swing(time: Res<Time>, mut swings: Query<(&mut Swing, &mut Transform)>) {
-    for (mut swing, mut transform) in &mut swings {
-        match &mut *swing {
-            Swing::Idle => {}
-            Swing::Swinging(timer) => {
-                let done = timer.tick(time.delta()).finished();
-                let f = timer.fraction();
-                // Cubic ease-out: fast through the zone, soft at the end.
-                let ease = 1.0 - (1.0 - f).powi(3);
-                let angle = SWEEP_FROM + (SWEEP_TO - SWEEP_FROM) * ease;
-                transform.rotation = sweep_rotation(angle);
-                if done {
-                    *swing = Swing::Recovering(Timer::from_seconds(RECOVER_SECS, TimerMode::Once));
-                }
-            }
-            Swing::Recovering(timer) => {
-                let done = timer.tick(time.delta()).finished();
-                let f = timer.fraction();
-                transform.rotation = sweep_rotation(SWEEP_TO).slerp(idle_rotation(), f);
-                if done {
-                    transform.rotation = idle_rotation();
-                    *swing = Swing::Idle;
-                }
-            }
+    for (entity, playing) in &pivots {
+        if playing.is_none() {
+            commands
+                .entity(entity)
+                .insert(Playing::then(AnimClip::SwingBat, AnimClip::RecoverSwing));
         }
     }
 }

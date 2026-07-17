@@ -4,10 +4,12 @@
 //! shared [`GameState`] state machine to all systems.
 
 pub mod ai;
+pub mod animation;
 pub mod ball;
 pub mod camera;
 pub mod field;
 pub mod flow;
+pub mod fx;
 pub mod input;
 pub mod menu;
 pub mod player;
@@ -18,10 +20,12 @@ pub mod variant;
 
 use bevy::prelude::*;
 
+use animation::AnimationPlugin;
 use ball::BallPlugin;
 use camera::CameraPlugin;
 use field::FieldPlugin;
 use flow::FlowPlugin;
+use fx::FxPlugin;
 use input::InputPlugin;
 use menu::MenuPlugin;
 use player::PlayerPlugin;
@@ -169,7 +173,9 @@ impl Plugin for GamePlugin {
                 FieldPlugin,
                 BallPlugin,
                 PlayerPlugin,
+                AnimationPlugin,
                 FlowPlugin,
+                FxPlugin,
                 CameraPlugin,
                 UiPlugin,
             ))
