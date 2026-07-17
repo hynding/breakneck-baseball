@@ -111,7 +111,6 @@ pub enum BannerTone {
 pub struct BallInPlayEvent {
     pub outcome: Outcome,
     pub landing: Vec3,
-    pub hang_time: f32,
 }
 
 /// A transient on-screen message (e.g. "STRIKE!", "BALL", "HOME RUN!").
@@ -260,11 +259,7 @@ fn pitch_live(
             } else {
                 let (landing, hang_time) =
                     rules::predict_landing(velocity, crate::game::ball::BALL_DRAG_FACTOR);
-                in_play_ev.send(BallInPlayEvent {
-                    outcome,
-                    landing,
-                    hang_time,
-                });
+                in_play_ev.send(BallInPlayEvent { outcome, landing });
                 play.phase = Phase::InPlay;
                 play.timer = Timer::from_seconds(
                     (hang_time + INPLAY_BUFFER).clamp(INPLAY_MIN, INPLAY_MAX),

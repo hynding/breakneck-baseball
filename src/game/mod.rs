@@ -8,6 +8,7 @@ pub mod animation;
 pub mod ball;
 pub mod camera;
 pub mod field;
+pub mod fielding;
 pub mod flow;
 pub mod fx;
 pub mod input;
@@ -24,6 +25,7 @@ use animation::AnimationPlugin;
 use ball::BallPlugin;
 use camera::CameraPlugin;
 use field::FieldPlugin;
+use fielding::FieldingPlugin;
 use flow::FlowPlugin;
 use fx::FxPlugin;
 use input::InputPlugin;
@@ -176,6 +178,7 @@ impl Plugin for GamePlugin {
                 AnimationPlugin,
                 FlowPlugin,
                 FxPlugin,
+                FieldingPlugin,
                 CameraPlugin,
                 UiPlugin,
             ))

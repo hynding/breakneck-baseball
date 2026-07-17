@@ -31,7 +31,6 @@ pub struct Batter;
 
 /// Marker for a defensive fielder: the i-th spot in the field spec's
 /// `fielder_positions`.
-#[allow(dead_code)]
 #[derive(Component)]
 pub struct Fielder {
     pub index: usize,
