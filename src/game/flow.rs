@@ -73,8 +73,9 @@ pub struct Play {
     /// Plate-crossing point (x, y), recorded once as the pitch passes the plate.
     crossing: Option<Vec2>,
     resolved: bool,
-    /// Aim stored at windup start, released as the pitch when the delivery ends.
-    pending_pitch: Option<Vec2>,
+    /// Aim + selected kind stored at windup start, released as the pitch when
+    /// the delivery ends.
+    pending_pitch: Option<(Vec2, rules::PitchKind)>,
 }
 
 impl Default for Play {
@@ -182,7 +183,7 @@ fn pre_pitch(
 
     let intent = intents.get(score.fielding_team());
     if intent.action {
-        play.pending_pitch = Some(intent.aim);
+        play.pending_pitch = Some((intent.aim, rules::PitchKind::from_aim(intent.aim)));
         play.phase = Phase::WindUp;
         play.timer = Timer::from_seconds(AnimClip::WindUp.duration(), TimerMode::Once);
         play.crossing = None;
@@ -207,10 +208,13 @@ fn wind_up(
         return;
     }
     if play.timer.tick(time.delta()).finished() {
-        let aim = play.pending_pitch.take().unwrap_or(Vec2::ZERO);
+        let (aim, kind) = play
+            .pending_pitch
+            .take()
+            .unwrap_or((Vec2::ZERO, rules::PitchKind::Changeup));
         pitch_ev.send(PitchEvent {
-            velocity: rules::pitch_velocity(aim, field.pitch_distance),
-            spin: rules::PitchKind::Fastball.spin(),
+            velocity: rules::pitch_velocity_kind(kind, aim, field.pitch_distance),
+            spin: kind.spin(),
         });
         play.phase = Phase::Pitch;
     }
@@ -258,8 +262,12 @@ fn pitch_live(
             if outcome == Outcome::Foul {
                 end_pitch(&mut play);
             } else {
-                let (landing, hang_time) =
-                    rules::predict_landing(velocity, crate::game::ball::BALL_DRAG_FACTOR);
+                let (landing, hang_time) = rules::predict_landing(
+                    velocity,
+                    rules::hit_spin(velocity),
+                    crate::game::ball::BALL_DRAG_FACTOR,
+                    crate::game::ball::MAGNUS_FACTOR,
+                );
                 in_play_ev.send(BallInPlayEvent { outcome, landing });
                 play.phase = Phase::InPlay;
                 play.timer = Timer::from_seconds(

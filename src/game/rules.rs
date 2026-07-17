@@ -199,11 +199,6 @@ pub fn pitch_velocity_kind(kind: PitchKind, aim: Vec2, pitch_distance: f32) -> V
     Vec3::new(vx, vy, -speed)
 }
 
-/// A fastball with the given aim (legacy call shape; flow selects kinds).
-pub fn pitch_velocity(aim: Vec2, pitch_distance: f32) -> Vec3 {
-    pitch_velocity_kind(PitchKind::Fastball, aim, pitch_distance)
-}
-
 /// Spin imparted by the bat: sidespin toward the spray side plus mild
 /// backspin (−X lifts a +Z batted ball). Single source of truth — the live
 /// ball and the landing predictor both use it.
@@ -317,11 +312,11 @@ pub fn classify_batted_ball(vel: Vec3, field: &FieldSpec, rules: &Ruleset) -> Ou
 }
 
 /// Numerically integrates a batted ball's flight from contact height with the
-/// same gravity + quadratic-drag model the live ball uses (`ball::apply_drag`),
-/// returning the landing point (y = 0) and hang time. This is what fielder
-/// choreography chases — the *visual* ball's touchdown, not the balance-tuned
-/// range in [`classify_batted_ball`].
-pub fn predict_landing(vel: Vec3, drag_factor: f32) -> (Vec3, f32) {
+/// same gravity + drag + Magnus model the live ball uses (`ball::apply_drag`,
+/// `ball::apply_magnus`), returning the landing point (y = 0) and hang time.
+/// This is what fielder choreography chases — the *visual* ball's touchdown,
+/// not the balance-tuned range in [`classify_batted_ball`].
+pub fn predict_landing(vel: Vec3, spin: Vec3, drag_factor: f32, magnus_factor: f32) -> (Vec3, f32) {
     let mut pos = Vec3::new(0.0, CONTACT_HEIGHT, 0.0);
     let mut v = vel;
     let dt = 1.0 / 120.0;
@@ -329,6 +324,7 @@ pub fn predict_landing(vel: Vec3, drag_factor: f32) -> (Vec3, f32) {
     while pos.y > 0.0 && t < 15.0 {
         let speed = v.length();
         v += -drag_factor * speed * v * dt;
+        v += magnus_factor * spin.cross(v) * dt;
         v.y -= GRAVITY * dt;
         pos += v * dt;
         t += dt;
@@ -791,7 +787,7 @@ mod tests {
     #[test]
     fn dragless_landing_matches_closed_form() {
         let vel = vel_at(30.0, 30.0);
-        let (land, t) = predict_landing(vel, 0.0);
+        let (land, t) = predict_landing(vel, Vec3::ZERO, 0.0, 0.0);
         let disc = vel.y * vel.y + 2.0 * GRAVITY * 0.6; // CONTACT_HEIGHT
         let t_expect = (vel.y + disc.sqrt()) / GRAVITY;
         assert!((t - t_expect).abs() < 0.05, "hang time {t} vs {t_expect}");
@@ -806,12 +802,28 @@ mod tests {
     #[test]
     fn drag_shortens_flight() {
         let vel = vel_at(30.0, 40.0);
-        let (with_drag, t_drag) = predict_landing(vel, BALL_DRAG_FACTOR);
-        let (no_drag, _) = predict_landing(vel, 0.0);
+        let (with_drag, t_drag) = predict_landing(vel, Vec3::ZERO, BALL_DRAG_FACTOR, 0.0);
+        let (no_drag, _) = predict_landing(vel, Vec3::ZERO, 0.0, 0.0);
         assert!(
             Vec2::new(with_drag.x, with_drag.z).length() < Vec2::new(no_drag.x, no_drag.z).length()
         );
         assert!(t_drag > 0.5);
+    }
+
+    #[test]
+    fn sidespin_bends_the_landing_point() {
+        let vel = vel_at(25.0, 35.0);
+        let (straight, _) = predict_landing(vel, Vec3::ZERO, BALL_DRAG_FACTOR, 0.0);
+        let (bent, _) = predict_landing(
+            vel,
+            hit_spin(Vec3::new(10.0, 8.0, 20.0)),
+            BALL_DRAG_FACTOR,
+            crate::game::ball::MAGNUS_FACTOR,
+        );
+        assert!(
+            (bent.x - straight.x).abs() > 0.5,
+            "Magnus should bend the carry"
+        );
     }
 
     // ── Pitch flight ──────────────────────────────────────────────────────────

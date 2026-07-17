@@ -81,9 +81,21 @@ pub fn cpu_defense(
 
     if cpu.pitch_delay.tick(time.delta()).finished() {
         let t = time.elapsed_secs();
-        // Better skill → tighter aim around the strike zone.
+        // Better skill → tighter aim around the strike zone. The vertical
+        // component then gets a pitch-selection bias: held-aim direction is
+        // what picks the kind (see `PitchKind::from_aim`), so shifting aim.y
+        // is how the CPU "calls" its pitch.
         let spread = 0.55 * (1.0 - cfg.skill) + 0.12;
-        let aim = Vec2::new(noise(t * 1.7) * spread, noise(t * 2.3) * spread);
+        let mut aim = Vec2::new(noise(t * 1.7) * spread, noise(t * 2.3) * spread * 0.5);
+        let roll = hash01(t * 4.3);
+        aim.y += if roll < 0.45 {
+            0.55 // fastball
+        } else if roll < 0.75 {
+            0.0 // changeup
+        } else {
+            -0.55 // curveball
+        };
+        aim = aim.clamp(Vec2::splat(-1.0), Vec2::splat(1.0));
 
         let intent = intents.get_mut(team);
         intent.action = true;
