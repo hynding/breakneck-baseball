@@ -64,6 +64,10 @@ const TRAIL_MIN_SPEED: f32 = 8.0;
 type FlyingBall<'w, 's> =
     Query<'w, 's, (&'static Transform, &'static Velocity), (With<Baseball>, With<InFlight>)>;
 
+/// Same, mutable — used by the per-tick aerodynamics systems.
+type FlyingBallMut<'w, 's> =
+    Query<'w, 's, (&'static Transform, &'static mut Velocity), (With<Baseball>, With<InFlight>)>;
+
 // ── Events ────────────────────────────────────────────────────────────────────
 /// Fired when a pitch is thrown. Carries the initial world-space velocity and
 /// the spin that will Magnus-bend the flight.
@@ -202,10 +206,7 @@ fn apply_hit(
 /// Applies a simplified quadratic aerodynamic drag every physics frame.
 ///
 /// `F_drag = -drag_factor × |v|² × v̂`
-fn apply_drag(
-    mut query: Query<(&Transform, &mut Velocity), (With<Baseball>, With<InFlight>)>,
-    time: Res<Time>,
-) {
+fn apply_drag(mut query: FlyingBallMut, time: Res<Time>) {
     let dt = time.delta_secs();
     for (transform, mut vel) in &mut query {
         let speed = vel.linvel.length();

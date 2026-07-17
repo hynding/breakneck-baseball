@@ -97,7 +97,7 @@ fn sync_runners(
 
     // Existing runners, most advanced first.
     let mut pool: Vec<(Entity, usize)> = runners.iter().map(|(e, r)| (e, r.base)).collect();
-    pool.sort_by(|a, b| b.1.cmp(&a.1));
+    pool.sort_by_key(|&(_, base)| std::cmp::Reverse(base));
 
     let occupied: Vec<usize> = (0..bases.count())
         .filter(|&b| bases.is_occupied(b))
