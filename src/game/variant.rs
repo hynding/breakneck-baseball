@@ -153,8 +153,8 @@ impl VariantId {
                 bounds: 220.0,
                 broadcast_eye: Vec3::new(0.0, 13.0, -21.0),
                 broadcast_target: Vec3::new(0.0, 1.2, 9.0),
-                duel_eye: Vec3::new(-1.6, 2.2, -5.2),
-                duel_target: Vec3::new(0.2, 1.15, 5.0),
+                duel_eye: Vec3::new(-2.8, 3.2, -7.5),
+                duel_target: Vec3::new(0.3, 1.1, 4.0),
                 scenery: Scenery::Stadium,
             },
             // A front lawn: four bases across the lawn corners, the defense
@@ -181,8 +181,8 @@ impl VariantId {
                 bounds: 90.0,
                 broadcast_eye: Vec3::new(0.0, 7.0, -12.0),
                 broadcast_target: Vec3::new(0.0, 1.0, 5.0),
-                duel_eye: Vec3::new(-1.4, 2.0, -4.2),
-                duel_target: Vec3::new(0.2, 1.0, 4.0),
+                duel_eye: Vec3::new(-2.4, 2.8, -6.0),
+                duel_target: Vec3::new(0.3, 1.0, 3.5),
                 scenery: Scenery::FrontYard,
             },
         }

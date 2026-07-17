@@ -79,11 +79,16 @@ fn spawn_field(
         }
     }
     spawn_bases(&mut commands, &mut meshes, &mut materials, &field);
-    // The yard sun sits behind home plate so the house fronts and street —
-    // everything the batter looks at — are lit; a higher ambient keeps the
-    // small scene readable.
+    // The sun sits behind home plate in both parks so everything the
+    // broadcast and duel cameras look at — players' backs, house fronts, the
+    // outfield — is lit rather than silhouetted; ambient keeps shadow sides
+    // readable up close.
     match field.scenery {
-        Scenery::Stadium => spawn_lighting(&mut commands, std::f32::consts::FRAC_PI_6, 0.15),
+        Scenery::Stadium => spawn_lighting(
+            &mut commands,
+            std::f32::consts::PI - std::f32::consts::FRAC_PI_6,
+            0.25,
+        ),
         Scenery::FrontYard => spawn_lighting(
             &mut commands,
             std::f32::consts::PI + std::f32::consts::FRAC_PI_6,

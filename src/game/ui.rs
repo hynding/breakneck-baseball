@@ -39,13 +39,19 @@ struct CountDot {
 #[derive(Component)]
 struct BaseIndicator(usize);
 
-/// The banner pill container (hidden when nothing is being announced).
+/// The banner pill chrome (persistent; painted/cleared via child mutations).
 #[derive(Component)]
 struct BannerPill;
 
 /// The banner text inside the pill.
 #[derive(Component)]
 struct BannerText;
+
+/// A colour reduced to near-invisibility. Never fully transparent: on the
+/// wasm target an element extracted with alpha 0 is culled for good.
+fn hidden_tint(color: Color) -> Color {
+    color.with_alpha(0.004)
+}
 
 /// How long the current banner stays visible before clearing.
 #[derive(Resource)]
@@ -178,17 +184,25 @@ fn spawn_hud(
 
     spawn_base_ring(&mut commands, field.base_count(), &theme);
 
-    // Banner: a centred pill that appears only while announcing a result.
+    // Banner: persistent wrapper root + pill child + text grandchild.
+    // wasm/WebGL2 dictates the structure: an element that is fully
+    // transparent (or has no renderable at all) when first extracted is
+    // never rendered again, even after its colors change. So every banner
+    // element keeps a nonzero alpha at all times — "hidden" is a near-zero
+    // alpha and an empty string, and show/fade only mutate children of this
+    // painted root.
     commands
         .spawn((
             GameplayEntity,
             Node {
                 position_type: PositionType::Absolute,
                 top: Val::Percent(26.0),
+                left: Val::Px(0.0),
                 width: Val::Percent(100.0),
                 justify_content: JustifyContent::Center,
                 ..default()
             },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.01)),
         ))
         .with_children(|wrap| {
             wrap.spawn((
@@ -198,10 +212,9 @@ fn spawn_hud(
                     border: UiRect::all(Val::Px(1.5)),
                     ..default()
                 },
-                BackgroundColor(ui.panel_bg),
-                BorderColor(ui.panel_border),
+                BackgroundColor(hidden_tint(ui.panel_bg)),
+                BorderColor(hidden_tint(ui.panel_border)),
                 BorderRadius::all(Val::Px(26.0)),
-                Visibility::Hidden,
             ))
             .with_children(|pill| {
                 pill.spawn((
@@ -344,43 +357,53 @@ fn update_base_ring(
     }
 }
 
+/// Paints the pill and its text for the latest banner event.
 fn show_banner(
     mut events: EventReader<PlayBanner>,
     theme: Res<Theme>,
     mut timer: ResMut<BannerTimer>,
-    mut pill_q: Query<&mut Visibility, With<BannerPill>>,
+    mut pill_q: Query<(&mut BackgroundColor, &mut BorderColor), With<BannerPill>>,
     mut text_q: Query<(&mut Text, &mut TextColor), With<BannerText>>,
 ) {
     // Show only the latest banner this frame.
-    if let Some(banner) = events.read().last() {
-        let tone_color = match banner.tone {
-            BannerTone::Good => theme.ui.tone_good,
-            BannerTone::Bad => theme.ui.tone_bad,
-            BannerTone::Info => theme.ui.tone_info,
-            BannerTone::Epic => theme.ui.tone_epic,
-        };
-        for (mut text, mut color) in &mut text_q {
-            **text = banner.text.clone();
-            color.0 = tone_color;
-        }
-        for mut visibility in &mut pill_q {
-            *visibility = Visibility::Inherited;
-        }
-        timer.0 = Timer::from_seconds(1.6, TimerMode::Once);
+    let Some(banner) = events.read().last() else {
+        return;
+    };
+    let ui = &theme.ui;
+    let tone_color = match banner.tone {
+        BannerTone::Good => ui.tone_good,
+        BannerTone::Bad => ui.tone_bad,
+        BannerTone::Info => ui.tone_info,
+        BannerTone::Epic => ui.tone_epic,
+    };
+    for (mut text, mut color) in &mut text_q {
+        **text = banner.text.clone();
+        color.0 = tone_color;
     }
+    for (mut bg, mut border) in &mut pill_q {
+        bg.0 = ui.panel_bg;
+        border.0 = ui.panel_border;
+    }
+    timer.0 = Timer::from_seconds(1.6, TimerMode::Once);
 }
 
+/// Clears the pill once its display time is up.
 fn fade_banner(
     time: Res<Time>,
     mut timer: ResMut<BannerTimer>,
-    mut pill_q: Query<&mut Visibility, With<BannerPill>>,
+    mut pill_q: Query<(&mut BackgroundColor, &mut BorderColor), With<BannerPill>>,
+    mut text_q: Query<(&mut Text, &mut TextColor), With<BannerText>>,
 ) {
     if timer.0.finished() {
         return;
     }
     if timer.0.tick(time.delta()).just_finished() {
-        for mut visibility in &mut pill_q {
-            *visibility = Visibility::Hidden;
+        for (mut bg, mut border) in &mut pill_q {
+            bg.0 = hidden_tint(bg.0);
+            border.0 = hidden_tint(border.0);
+        }
+        for (mut text, _color) in &mut text_q {
+            **text = String::new();
         }
     }
 }
