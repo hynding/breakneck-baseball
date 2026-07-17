@@ -15,6 +15,7 @@ pub mod input;
 pub mod menu;
 pub mod player;
 pub mod rules;
+pub mod runner;
 pub mod theme;
 pub mod ui;
 pub mod variant;
@@ -31,6 +32,7 @@ use fx::FxPlugin;
 use input::InputPlugin;
 use menu::MenuPlugin;
 use player::PlayerPlugin;
+use runner::RunnerPlugin;
 use theme::ThemeId;
 use ui::UiPlugin;
 use variant::VariantId;
@@ -179,6 +181,7 @@ impl Plugin for GamePlugin {
                 FlowPlugin,
                 FxPlugin,
                 FieldingPlugin,
+                RunnerPlugin,
                 CameraPlugin,
                 UiPlugin,
             ))

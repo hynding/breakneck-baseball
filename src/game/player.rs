@@ -41,10 +41,11 @@ pub struct Fielder {
 #[derive(Component, Default)]
 pub struct FacingDirection(pub Vec3);
 
-/// Whether a rig belongs to the defense (pitcher + fielders) or the batter —
-/// decides which team's colours it wears as innings flip.
+/// Whether a rig belongs to the defense (pitcher + fielders) or the batting
+/// side (batter, runners) — decides which team's colours it wears as innings
+/// flip.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum RigUnit {
+pub(crate) enum RigUnit {
     Defense,
     Batter,
 }
@@ -68,7 +69,7 @@ struct RigPart {
 // ── Team palette ──────────────────────────────────────────────────────────────
 
 /// Shared material handles for one team's template.
-struct RigMaterials {
+pub(crate) struct RigMaterials {
     jersey: Handle<StandardMaterial>,
     cap: Handle<StandardMaterial>,
     skin: Handle<StandardMaterial>,
@@ -77,13 +78,13 @@ struct RigMaterials {
 
 /// Both teams' rig materials, built once per game from the theme.
 #[derive(Resource)]
-struct TeamPalette {
+pub(crate) struct TeamPalette {
     home: RigMaterials,
     away: RigMaterials,
 }
 
 impl TeamPalette {
-    fn for_team(&self, team: Team) -> &RigMaterials {
+    pub(crate) fn for_team(&self, team: Team) -> &RigMaterials {
         match team {
             Team::Home => &self.home,
             Team::Away => &self.away,
@@ -132,8 +133,10 @@ impl Plugin for PlayerPlugin {
 
 // ── Spawning ──────────────────────────────────────────────────────────────────
 
-/// Shared mesh handles for every rig.
-struct RigMeshes {
+/// Shared mesh handles for every rig, kept as a resource so other modules
+/// (runners) can spawn rigs too.
+#[derive(Resource)]
+pub(crate) struct RigMeshes {
     torso: Handle<Mesh>,
     head: Handle<Mesh>,
     cap: Handle<Mesh>,
@@ -221,11 +224,12 @@ fn spawn_players(
     });
 
     commands.insert_resource(palette);
+    commands.insert_resource(rig_meshes);
 }
 
-/// Spawns one player rig (body + head + cap + brim) and returns the parent
-/// entity so the caller can attach role markers or extras.
-fn spawn_rig(
+/// Spawns one player rig (body + head + cap + brim + limbs) and returns the
+/// parent entity so the caller can attach role markers or extras.
+pub(crate) fn spawn_rig(
     commands: &mut Commands,
     meshes: &RigMeshes,
     unit: RigUnit,
