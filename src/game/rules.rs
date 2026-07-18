@@ -12,7 +12,7 @@ use bevy::prelude::Resource;
 
 use crate::game::ball::BALL_RADIUS;
 use crate::game::variant::{FieldSpec, Ruleset};
-use crate::game::ScoreBoard;
+use crate::game::{ScoreBoard, Team};
 
 // ── Tuning constants ──────────────────────────────────────────────────────────
 
@@ -102,6 +102,38 @@ impl Bases {
     pub fn reset_for(&mut self, count: usize) {
         self.occupied.clear();
         self.occupied.resize(count, false);
+    }
+}
+
+/// Batters per lineup (regulation nine).
+pub const LINEUP_SIZE: u32 = 9;
+
+/// Each team's place in its batting order. The order itself is implicit
+/// (slots 1..=9 rotate); what the rules require is that it always rotates —
+/// every completed plate appearance brings up the next batter.
+#[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
+pub struct BattingOrder {
+    home: u32,
+    away: u32,
+}
+
+impl BattingOrder {
+    /// 1-based lineup slot of the batter currently due up for `team`.
+    pub fn current(&self, team: Team) -> u32 {
+        let slot = match team {
+            Team::Home => self.home,
+            Team::Away => self.away,
+        };
+        slot + 1
+    }
+
+    /// The plate appearance ended; the next batter steps in.
+    pub fn advance(&mut self, team: Team) {
+        let slot = match team {
+            Team::Home => &mut self.home,
+            Team::Away => &mut self.away,
+        };
+        *slot = (*slot + 1) % LINEUP_SIZE;
     }
 }
 
@@ -1431,6 +1463,22 @@ mod tests {
         let pulled = hit_spin(Vec3::new(10.0, 8.0, 20.0));
         let oppo = hit_spin(Vec3::new(-10.0, 8.0, 20.0));
         assert!(pulled.y * oppo.y < 0.0, "sidespin should flip with spray");
+    }
+
+    // ── Batting order ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn batting_order_rotates_nine_and_wraps() {
+        let mut order = BattingOrder::default();
+        assert_eq!(order.current(Team::Home), 1);
+        for _ in 0..8 {
+            order.advance(Team::Home);
+        }
+        assert_eq!(order.current(Team::Home), 9);
+        order.advance(Team::Home);
+        assert_eq!(order.current(Team::Home), 1);
+        // Teams rotate independently.
+        assert_eq!(order.current(Team::Away), 1);
     }
 
     // ── Game end ──────────────────────────────────────────────────────────────

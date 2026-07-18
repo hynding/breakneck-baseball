@@ -24,7 +24,9 @@ use crate::game::animation::{AnimClip, Playing};
 use crate::game::ball::{Baseball, HitEvent, InFlight, PitchEvent};
 use crate::game::input::Intents;
 use crate::game::player::Pitcher;
-use crate::game::rules::{self, BallCall, Bases, OutKind, Outcome, StealResult, StrikeCall};
+use crate::game::rules::{
+    self, BallCall, Bases, BattingOrder, OutKind, Outcome, StealResult, StrikeCall,
+};
 use crate::game::variant::{FieldSpec, Ruleset};
 use crate::game::{GameState, ScoreBoard};
 
@@ -146,6 +148,7 @@ impl Plugin for FlowPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Play>()
             .init_resource::<Bases>()
+            .init_resource::<BattingOrder>()
             .init_resource::<CpuConfig>()
             .init_resource::<CpuState>()
             .add_event::<BallInPlayEvent>()
@@ -171,9 +174,15 @@ impl Plugin for FlowPlugin {
 
 /// Fresh play + base state whenever a game (re)starts. The base count follows
 /// the chosen field.
-fn reset_flow(mut play: ResMut<Play>, mut bases: ResMut<Bases>, field: Res<FieldSpec>) {
+fn reset_flow(
+    mut play: ResMut<Play>,
+    mut bases: ResMut<Bases>,
+    mut order: ResMut<BattingOrder>,
+    field: Res<FieldSpec>,
+) {
     *play = Play::default();
     bases.reset_for(field.base_count());
+    *order = BattingOrder::default();
 }
 
 // ── PrePitch: defense aims and releases ───────────────────────────────────────
@@ -249,6 +258,7 @@ fn pitch_live(
     mut hit_ev: EventWriter<HitEvent>,
     mut in_play_ev: EventWriter<BallInPlayEvent>,
     mut banner: EventWriter<PlayBanner>,
+    mut order: ResMut<BattingOrder>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     if play.phase != Phase::Pitch || play.resolved {
@@ -264,7 +274,11 @@ fn pitch_live(
         play.crossing = Some(Vec2::new(pos.x, pos.y));
     }
 
-    let intent = intents.get(score.batting_team());
+    // Captured before any resolution can flip the half-inning: the batting
+    // order advances for the team whose batter just finished, not whoever
+    // bats next.
+    let batter = score.batting_team();
+    let intent = intents.get(batter);
 
     if intent.action {
         let reachable =
@@ -278,6 +292,7 @@ fn pitch_live(
             if outcome == Outcome::Foul {
                 end_pitch(&mut play);
             } else {
+                order.advance(batter);
                 let (landing, hang_time) = rules::predict_landing(
                     velocity,
                     rules::hit_spin(velocity),
@@ -297,7 +312,10 @@ fn pitch_live(
             // the catcher can't hold strike three and the batter runs.
             let dropped =
                 play.live_kind == Some(rules::PitchKind::Curveball) && !bases.is_occupied(0);
-            add_strike(&mut score, &mut bases, &rules, &mut banner, true, dropped);
+            let call = add_strike(&mut score, &mut bases, &rules, &mut banner, true, dropped);
+            if call != StrikeCall::Strike {
+                order.advance(batter);
+            }
             // The catcher has the ball: a sent runner must survive the throw.
             if play.steal_armed {
                 resolve_steal(&play, &mut score, &mut bases, &rules, &mut banner);
@@ -320,13 +338,18 @@ fn pitch_live(
                 BannerTone::Good
             };
             banner.send(PlayBanner::new("HIT BY PITCH", tone));
+            order.advance(batter);
         } else {
-            let walked = if rules::is_in_zone(cross) {
-                add_strike(&mut score, &mut bases, &rules, &mut banner, false, false);
-                false
+            let (pa_over, walked) = if rules::is_in_zone(cross) {
+                let call = add_strike(&mut score, &mut bases, &rules, &mut banner, false, false);
+                (call != StrikeCall::Strike, false)
             } else {
-                add_ball(&mut score, &mut bases, &rules, &mut banner)
+                let walked = add_ball(&mut score, &mut bases, &rules, &mut banner);
+                (walked, walked)
             };
+            if pa_over {
+                order.advance(batter);
+            }
             // A walk is a dead ball (runners advance freely); otherwise a
             // sent runner has to beat the catcher's throw.
             if play.steal_armed && !walked {
@@ -517,8 +540,9 @@ fn add_strike(
     banner: &mut EventWriter<PlayBanner>,
     swinging: bool,
     dropped_third: bool,
-) {
-    match rules::call_strike(score, bases, ruleset, dropped_third) {
+) -> StrikeCall {
+    let call = rules::call_strike(score, bases, ruleset, dropped_third);
+    match call {
         StrikeCall::DroppedThird => {
             banner.send(PlayBanner::new("DROPPED 3RD STRIKE!", BannerTone::Good));
         }
@@ -532,6 +556,7 @@ fn add_strike(
             banner.send(PlayBanner::new("STRIKE", BannerTone::Info));
         }
     }
+    call
 }
 
 fn maybe_end_game(score: &ScoreBoard, rules: &Ruleset, next_state: &mut NextState<GameState>) {

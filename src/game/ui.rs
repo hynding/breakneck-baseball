@@ -7,7 +7,7 @@
 use bevy::prelude::*;
 
 use crate::game::flow::{BannerTone, PlayBanner};
-use crate::game::rules::Bases;
+use crate::game::rules::{Bases, BattingOrder, LINEUP_SIZE};
 use crate::game::theme::Theme;
 use crate::game::variant::{FieldSpec, Ruleset};
 use crate::game::{GameState, GameplayEntity, ScoreBoard};
@@ -299,13 +299,18 @@ fn spawn_base_ring(commands: &mut Commands, base_count: usize, theme: &Theme) {
 
 // ── Update systems ────────────────────────────────────────────────────────────
 
-fn update_inning_text(score: Res<ScoreBoard>, mut query: Query<&mut Text, With<InningText>>) {
-    if !score.is_changed() {
+fn update_inning_text(
+    score: Res<ScoreBoard>,
+    order: Res<BattingOrder>,
+    mut query: Query<&mut Text, With<InningText>>,
+) {
+    if !score.is_changed() && !order.is_changed() {
         return;
     }
     let half = if score.top_of_inning { "TOP" } else { "BOT" };
+    let slot = order.current(score.batting_team());
     for mut text in &mut query {
-        **text = format!("{half} {}", score.inning);
+        **text = format!("{half} {}  AB {slot}/{LINEUP_SIZE}", score.inning);
     }
 }
 
