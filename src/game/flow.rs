@@ -352,8 +352,9 @@ fn resolve_contact(
         Outcome::Out(kind) => {
             let text = match kind {
                 OutKind::Ground => "GROUND OUT",
-                OutKind::Fly => "FLY OUT",
+                OutKind::Fly { .. } => "FLY OUT",
                 OutKind::Pop => "POP OUT",
+                OutKind::FoulPop => "FOUL POP OUT",
                 OutKind::Pegged => "PEGGED!",
             };
             banner.send(PlayBanner::new(text, BannerTone::Bad));

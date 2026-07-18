@@ -41,6 +41,10 @@ const ZONE_HIGH: f32 = 1.45;
 /// hop and peg the runner. Steeper balls are governed by the catch bands.
 const PEG_MAX_LAUNCH_DEG: f32 = 20.0;
 
+/// A caught fly at least this far out (scaled by [`FieldSpec::hit_scale`])
+/// gives runners time to tag up and advance.
+const TAG_UP_MIN_DIST: f32 = 65.0;
+
 /// Where the ball rests before each pitch (top of the mound / rubber).
 pub fn mound_reset_pos(pitch_distance: f32) -> Vec3 {
     Vec3::new(0.0, BALL_RADIUS + 0.25, pitch_distance)
@@ -101,12 +105,17 @@ impl Bases {
     }
 }
 
-/// Flavour of an out, used only for the on-screen banner.
+/// Flavour of an out. `Fly::deep` also drives the tag-up rule.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutKind {
     Ground,
-    Fly,
+    Fly {
+        /// Deep enough for runners to tag up (see [`TAG_UP_MIN_DIST`]).
+        deep: bool,
+    },
     Pop,
+    /// A pop-up caught in foul territory.
+    FoulPop,
     /// The runner was hit with the thrown ball (front-yard rules).
     Pegged,
 }
@@ -255,12 +264,18 @@ pub fn classify_batted_ball(vel: Vec3, field: &FieldSpec, rules: &Ruleset) -> Ou
 
     // Fair territory is the wedge opening toward +Z with the field's half-angle.
     let fair = land.z > 1.0 && land.x.abs() <= land.z * field.fair_half_angle.tan() + 0.01;
-    if !fair {
-        return Outcome::Foul;
-    }
 
     let speed = vel.length().max(0.001);
     let launch_deg = (vel.y / speed).asin().to_degrees();
+    let s = field.hit_scale;
+
+    // Towering infield pop-ups are caught, fair or foul.
+    if launch_deg > 50.0 && dist < 55.0 * s {
+        return Outcome::Out(if fair { OutKind::Pop } else { OutKind::FoulPop });
+    }
+    if !fair {
+        return Outcome::Foul;
+    }
 
     // Radial fence, interpolated from the lines to straightaway centre.
     let cos_half = field.fair_half_angle.cos();
@@ -284,17 +299,14 @@ pub fn classify_batted_ball(vel: Vec3, field: &FieldSpec, rules: &Ruleset) -> Ou
         }
     }
 
-    let s = field.hit_scale;
-    // Infield/short pop-ups are caught.
-    if launch_deg > 50.0 && dist < 55.0 * s {
-        return Outcome::Out(OutKind::Pop);
-    }
     // Most fly balls are run down by the defense; only the deepest drives to
     // the gaps fall in for extra bases, and the very deepest clear the fence
     // (handled above). Catching routine flies is what keeps the out-rate — and
     // therefore inning pace — in line with arcade baseball.
     if launch_deg > 20.0 && dist < 95.0 * s {
-        return Outcome::Out(OutKind::Fly);
+        return Outcome::Out(OutKind::Fly {
+            deep: dist >= TAG_UP_MIN_DIST * s,
+        });
     }
     // Weakly-topped balls are fielded in the infield.
     if dist < 26.0 * s {
@@ -713,7 +725,7 @@ mod tests {
         // ~30° at a moderate exit speed: a can-of-corn fly, not deep enough to fall.
         assert!(matches!(
             classify_batted_ball(vel_at(30.0, 30.0), &std_field(), &std_rules()),
-            Outcome::Out(OutKind::Fly)
+            Outcome::Out(OutKind::Fly { .. })
         ));
     }
 
@@ -724,6 +736,15 @@ mod tests {
             classify_batted_ball(vel_at(15.0, 34.0), &std_field(), &std_rules()),
             Outcome::Hit(1..=3)
         ));
+    }
+
+    #[test]
+    fn steep_foul_pop_is_caught() {
+        // A towering pop sprayed well outside the wedge: caught anyway.
+        assert_eq!(
+            classify_batted_ball(vel_spray(60.0, 14.0, 60.0), &std_field(), &std_rules()),
+            Outcome::Out(OutKind::FoulPop)
+        );
     }
 
     #[test]

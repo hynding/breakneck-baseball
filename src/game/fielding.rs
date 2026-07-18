@@ -90,7 +90,10 @@ fn assign_on_contact(
         active.0 = PlayState::Chasing {
             chaser,
             outcome: ev.outcome,
-            airborne: matches!(ev.outcome, Outcome::Out(OutKind::Fly | OutKind::Pop)),
+            airborne: matches!(
+                ev.outcome,
+                Outcome::Out(OutKind::Fly { .. } | OutKind::Pop | OutKind::FoulPop)
+            ),
         };
     }
 }
