@@ -115,13 +115,11 @@ fn drive(
                 // Away never swings (strikes out); Home swings just before
                 // the ideal contact point (contact_z ≈ 0.4) with full
                 // uppercut aim — a deterministic home run.
-                Phase::Pitch => {
-                    if score.batting_team() == Team::Home {
-                        if let Ok(t) = ball.get_single() {
-                            intents.home.aim = Vec2::new(0.0, 1.0);
-                            if t.translation.z <= 0.45 && t.translation.z >= 0.0 {
-                                intents.home.action = true;
-                            }
+                Phase::Pitch if score.batting_team() == Team::Home => {
+                    if let Ok(t) = ball.get_single() {
+                        intents.home.aim = Vec2::new(0.0, 1.0);
+                        if t.translation.z <= 0.45 && t.translation.z >= 0.0 {
+                            intents.home.action = true;
                         }
                     }
                 }

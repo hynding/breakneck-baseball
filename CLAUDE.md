@@ -23,7 +23,9 @@ wasm-bindgen --out-dir web/out --target web target/wasm32-unknown-unknown/debug/
 python3 -m http.server --directory web 8080   # serve, then open http://localhost:8080
 ```
 
-There is no test suite yet. For the release web build, use `--profile wasm-release` (size-optimized) and adjust the wasm-bindgen input path to `target/wasm32-unknown-unknown/wasm-release/`.
+`cargo test` runs the unit tests (rules/variant/input/theme, in the bin+lib targets) plus a headless e2e (`tests/e2e_full_game.rs`) that boots the real app windowless and plays a scripted 1-inning game to GAME OVER — run it after touching flow/rules/menu/input. The crate has both a lib target (`src/lib.rs`, exposes `game` for tests) and the bin. On the menu, **I** cycles game length (1/3/6/9 innings).
+
+For the release web build, use `--profile wasm-release` (size-optimized) and adjust the wasm-bindgen input path to `target/wasm32-unknown-unknown/wasm-release/`.
 
 The `/run-web` skill packages the web build-and-serve workflow.
 
