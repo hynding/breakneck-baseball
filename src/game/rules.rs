@@ -146,6 +146,9 @@ pub enum StrikeCall {
     Strike,
     /// Strike three — the batter is out.
     Strikeout,
+    /// Strike three got away from the catcher and the batter beat the play
+    /// to first: no out, fresh count for the next batter.
+    DroppedThird,
 }
 
 // ── Pitch & contact kinematics ────────────────────────────────────────────────
@@ -439,12 +442,25 @@ pub fn call_ball(score: &mut ScoreBoard, bases: &mut Bases, rules: &Ruleset) -> 
     }
 }
 
-/// Records a strike (called or swinging). The final strike is an out.
-pub fn call_strike(score: &mut ScoreBoard, bases: &mut Bases, rules: &Ruleset) -> StrikeCall {
+/// Records a strike (called or swinging). The final strike is an out —
+/// unless `dropped_third` (the ball got away and first base was open), in
+/// which case the batter reaches and no out is recorded.
+pub fn call_strike(
+    score: &mut ScoreBoard,
+    bases: &mut Bases,
+    rules: &Ruleset,
+    dropped_third: bool,
+) -> StrikeCall {
     score.strikes += 1;
     if score.strikes >= rules.strikes_per_out {
-        record_out(score, bases, rules);
-        StrikeCall::Strikeout
+        if dropped_third {
+            reset_count(score);
+            bases.set(0, true);
+            StrikeCall::DroppedThird
+        } else {
+            record_out(score, bases, rules);
+            StrikeCall::Strikeout
+        }
     } else {
         StrikeCall::Strike
     }
@@ -737,11 +753,39 @@ mod tests {
         };
         let mut bases = empty();
         assert_eq!(
-            call_strike(&mut score, &mut bases, &std_rules()),
+            call_strike(&mut score, &mut bases, &std_rules(), false),
             StrikeCall::Strikeout
         );
         assert_eq!((score.balls, score.strikes), (0, 0)); // fresh count
         assert_eq!(score.outs, 1);
+    }
+
+    #[test]
+    fn dropped_third_strike_puts_the_batter_on_first() {
+        let mut score = ScoreBoard {
+            strikes: 2,
+            ..Default::default()
+        };
+        let mut bases = empty();
+        assert_eq!(
+            call_strike(&mut score, &mut bases, &std_rules(), true),
+            StrikeCall::DroppedThird
+        );
+        assert_eq!(score.outs, 0); // the batter reached — no out
+        assert_eq!((score.balls, score.strikes), (0, 0));
+        assert_eq!(bases, with(&[0]));
+    }
+
+    #[test]
+    fn dropped_flag_before_strike_three_is_a_plain_strike() {
+        let mut score = ScoreBoard::default();
+        let mut bases = empty();
+        assert_eq!(
+            call_strike(&mut score, &mut bases, &std_rules(), true),
+            StrikeCall::Strike
+        );
+        assert_eq!(score.strikes, 1);
+        assert_eq!(bases, empty());
     }
 
     #[test]

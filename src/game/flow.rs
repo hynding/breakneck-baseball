@@ -76,6 +76,9 @@ pub struct Play {
     /// Aim + selected kind stored at windup start, released as the pitch when
     /// the delivery ends.
     pending_pitch: Option<(Vec2, rules::PitchKind)>,
+    /// The kind of the pitch currently in flight (set at release). Drives the
+    /// dropped-third-strike and steal resolutions.
+    live_kind: Option<rules::PitchKind>,
 }
 
 impl Default for Play {
@@ -86,6 +89,7 @@ impl Default for Play {
             crossing: None,
             resolved: false,
             pending_pitch: None,
+            live_kind: None,
         }
     }
 }
@@ -216,6 +220,7 @@ fn wind_up(
             velocity: rules::pitch_velocity_kind(kind, aim, field.pitch_distance),
             spin: kind.spin(),
         });
+        play.live_kind = Some(kind);
         play.phase = Phase::Pitch;
     }
 }
@@ -277,7 +282,11 @@ fn pitch_live(
                 play.resolved = true;
             }
         } else {
-            add_strike(&mut score, &mut bases, &rules, &mut banner, true);
+            // Swinging through a curveball in the dirt with first base open:
+            // the catcher can't hold strike three and the batter runs.
+            let dropped =
+                play.live_kind == Some(rules::PitchKind::Curveball) && !bases.is_occupied(0);
+            add_strike(&mut score, &mut bases, &rules, &mut banner, true, dropped);
             end_pitch(&mut play);
         }
         maybe_end_game(&score, &rules, &mut next_state);
@@ -297,7 +306,7 @@ fn pitch_live(
             };
             banner.send(PlayBanner::new("HIT BY PITCH", tone));
         } else if rules::is_in_zone(cross) {
-            add_strike(&mut score, &mut bases, &rules, &mut banner, false);
+            add_strike(&mut score, &mut bases, &rules, &mut banner, false, false);
         } else {
             add_ball(&mut score, &mut bases, &rules, &mut banner);
         }
@@ -341,6 +350,7 @@ fn result_phase(
         play.crossing = None;
         play.resolved = false;
         play.pending_pitch = None;
+        play.live_kind = None;
     }
 }
 
@@ -446,8 +456,12 @@ fn add_strike(
     ruleset: &Ruleset,
     banner: &mut EventWriter<PlayBanner>,
     swinging: bool,
+    dropped_third: bool,
 ) {
-    match rules::call_strike(score, bases, ruleset) {
+    match rules::call_strike(score, bases, ruleset, dropped_third) {
+        StrikeCall::DroppedThird => {
+            banner.send(PlayBanner::new("DROPPED 3RD STRIKE!", BannerTone::Good));
+        }
         StrikeCall::Strikeout => {
             banner.send(PlayBanner::new("STRIKEOUT!", BannerTone::Bad));
         }
