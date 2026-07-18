@@ -31,9 +31,17 @@ The `/run-web` skill packages the web build-and-serve workflow.
 
 Bevy 0.15 ECS app with Rapier 3D physics. `src/main.rs` builds the `App` from `DefaultPlugins` + `RapierPhysicsPlugin` + `GamePlugin`.
 
-`src/game/mod.rs` is the hub: it defines the `GameState` state machine (`MainMenu → Playing → Paused → GameOver`; gameplay systems use `.run_if(in_state(GameState::Playing))`), the `ScoreBoard` resource (innings/balls/strikes/outs shared across systems), and registers the five sub-plugins in dependency order: `FieldPlugin`, `BallPlugin`, `PlayerPlugin`, `CameraPlugin`, `UiPlugin`.
+`src/game/mod.rs` is the hub: it defines the `GameState` state machine (`MainMenu → Playing → Paused → GameOver`; gameplay systems use `.run_if(in_state(GameState::Playing))`), the `ScoreBoard` resource (innings/balls/strikes/outs shared across systems), and registers the sub-plugins in dependency order (`InputPlugin`, `MenuPlugin`, `FieldPlugin`, `BallPlugin`, `PlayerPlugin`, `AnimationPlugin`, `FlowPlugin`, `FxPlugin`, `FieldingPlugin`, `RunnerPlugin`, `CameraPlugin`, `UiPlugin`).
 
-Cross-module communication is event-driven: `ball.rs` defines `PitchEvent` / `HitEvent`, which player and UI systems consume rather than touching ball entities directly. Physics constants use real-world SI units (official MLB ball: 0.037 m radius, 0.148 kg) with a custom drag force applied per physics tick.
+Game variants are data, not code: `variant.rs` defines `Ruleset` (count thresholds, innings, peg-outs) and `FieldSpec` (base positions, pitch distance, fair wedge, fence, fielder spots, scenery, duel + broadcast camera framing) as resources the menu writes when a game starts. The pure rules in `rules.rs` (unit-tested, no ECS) take them as parameters; `field.rs`/`player.rs`/`ui.rs`/`camera.rs` spawn from them. Home plate is at the world origin with +Z toward the field in every variant. To add a variant, add a `VariantId` arm — don't hardcode baseball facts in systems.
+
+Presentation is equally data-driven: `theme.rs` defines `Theme` (UI palette, per-team `PlayerTemplate`s, ball styling) with built-ins behind `ThemeId`, cycled on the menu with T. UI reads `Res<Theme>`; `flow.rs` emits `BannerTone`s and never colours. Players are multi-part rigs recoloured to the fielding/batting team on scoreboard changes.
+
+All rig motion flows through `animation.rs`: systems insert a named `Playing` clip (`AnimClip`) or write a `MoveIntent` — never rotate rig parts or step transforms directly. The clip sampler is the seam for a future `AnimationGraph` backend, and `MoveIntent` is the seam for future player-controlled fielding (CPU choreography writes the same component a controller would). `fx.rs` (hit-stop, particles, camera-kick source), `fielding.rs` (chase/catch/scoop/throw), and `runner.rs` (runner rigs mirroring `Bases`) are cosmetic choreography of outcomes `rules.rs` already decided at contact — they must never mutate `ScoreBoard` or `Bases`.
+
+**wasm/WebGL2 UI gotcha:** a UI element that is fully transparent (alpha 0, or a bare container root with no renderable component) when first extracted is never rendered again, even after its colours change or children are added — and UI roots spawned mid-`Playing` don't render at all. Keep every element's alpha nonzero (see `ui::hidden_tint`), give container roots a `BackgroundColor`, and show/hide by mutating children of roots that were painted at spawn.
+
+Cross-module communication is event-driven: `ball.rs` defines `PitchEvent` / `HitEvent`, which player and UI systems consume rather than touching ball entities directly. Physics constants use real-world SI units (official MLB ball: 0.037 m radius, 0.148 kg) with a custom drag force applied per physics tick. The ball ignores player capsules via collision groups (`BALL_GROUP`/`PLAYER_GROUP`) — outcomes are resolved analytically at contact, and a pitch glancing off the batter's collider would corrupt the called count.
 
 ## Dual-target constraints
 

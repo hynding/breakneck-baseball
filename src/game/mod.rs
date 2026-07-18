@@ -3,19 +3,77 @@
 //! `GamePlugin` registers every sub-plugin in dependency order and exposes the
 //! shared [`GameState`] state machine to all systems.
 
+pub mod ai;
+pub mod animation;
 pub mod ball;
 pub mod camera;
 pub mod field;
+pub mod fielding;
+pub mod flow;
+pub mod fx;
+pub mod input;
+pub mod menu;
 pub mod player;
+pub mod rules;
+pub mod runner;
+pub mod theme;
 pub mod ui;
+pub mod variant;
 
 use bevy::prelude::*;
 
+use animation::AnimationPlugin;
 use ball::BallPlugin;
 use camera::CameraPlugin;
 use field::FieldPlugin;
+use fielding::FieldingPlugin;
+use flow::FlowPlugin;
+use fx::FxPlugin;
+use input::InputPlugin;
+use menu::MenuPlugin;
 use player::PlayerPlugin;
+use runner::RunnerPlugin;
+use theme::ThemeId;
 use ui::UiPlugin;
+use variant::VariantId;
+
+/// The two teams. In 1-player mode the human is always [`Team::Home`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Team {
+    Home,
+    Away,
+}
+
+impl Team {
+    /// The opposing team.
+    pub fn other(self) -> Team {
+        match self {
+            Team::Home => Team::Away,
+            Team::Away => Team::Home,
+        }
+    }
+}
+
+/// How many humans are playing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GameMode {
+    /// Human = Home, CPU = Away.
+    #[default]
+    OnePlayer,
+    /// Human P1 = Home, human P2 = Away.
+    TwoPlayers,
+}
+
+/// Chosen game options, set by the menu before entering [`GameState::Playing`].
+/// The variant's [`variant::Ruleset`] and [`variant::FieldSpec`] resources are
+/// (re)written from `variant` when a game starts; the [`theme::Theme`]
+/// resource is rewritten whenever `theme` is cycled on the menu.
+#[derive(Resource, Debug, Default)]
+pub struct GameConfig {
+    pub mode: GameMode,
+    pub variant: VariantId,
+    pub theme: ThemeId,
+}
 
 /// Global game-state machine.
 ///
@@ -54,6 +112,44 @@ pub struct ScoreBoard {
     pub outs: u32,
 }
 
+impl ScoreBoard {
+    /// The team currently at bat. Away hits in the top half, Home in the bottom.
+    pub fn batting_team(&self) -> Team {
+        if self.top_of_inning {
+            Team::Away
+        } else {
+            Team::Home
+        }
+    }
+
+    /// The team currently in the field.
+    pub fn fielding_team(&self) -> Team {
+        self.batting_team().other()
+    }
+
+    /// Adds `runs` to the batting team's total.
+    pub fn add_runs(&mut self, runs: u32) {
+        match self.batting_team() {
+            Team::Home => self.home_runs += runs,
+            Team::Away => self.away_runs += runs,
+        }
+    }
+
+    /// Resets to the start of a brand-new game.
+    pub fn reset(&mut self) {
+        *self = ScoreBoard {
+            inning: 1,
+            top_of_inning: true,
+            ..default()
+        };
+    }
+}
+
+/// Marks every entity spawned for active gameplay (field, ball, players, HUD)
+/// so the whole scene can be torn down when a game ends and rebuilt on restart.
+#[derive(Component)]
+pub struct GameplayEntity;
+
 /// Aggregate plugin that wires every sub-system into the app.
 pub struct GamePlugin;
 
@@ -63,24 +159,49 @@ impl Plugin for GamePlugin {
             // State machine
             .init_state::<GameState>()
             // Shared resources
+            .init_resource::<GameConfig>()
+            // Variant data defaults to standard baseball; the menu overwrites
+            // both resources with the chosen variant before a game starts.
+            .insert_resource(VariantId::Standard.rules())
+            .insert_resource(VariantId::Standard.field())
+            .insert_resource(ThemeId::DaylightClassic.build())
             .insert_resource(ScoreBoard {
                 inning: 1,
                 top_of_inning: true,
                 ..default()
             })
-            // Sub-plugins
+            // Sub-plugins (input/menu first so their resources exist for the rest)
             .add_plugins((
+                InputPlugin,
+                MenuPlugin,
                 FieldPlugin,
                 BallPlugin,
                 PlayerPlugin,
+                AnimationPlugin,
+                FlowPlugin,
+                FxPlugin,
+                FieldingPlugin,
+                RunnerPlugin,
                 CameraPlugin,
                 UiPlugin,
             ))
-            // Start playing immediately for now; a proper menu can gate this later.
-            .add_systems(Startup, enter_playing_state);
+            // Fresh scoreboard each time a game starts; tear the scene down after.
+            .add_systems(OnEnter(GameState::Playing), reset_scoreboard)
+            .add_systems(OnExit(GameState::Playing), cleanup_gameplay);
+        // The game now boots to `GameState::MainMenu` (the default) and the menu
+        // transitions into `Playing` once a mode is chosen.
     }
 }
 
-fn enter_playing_state(mut next_state: ResMut<NextState<GameState>>) {
-    next_state.set(GameState::Playing);
+/// Resets the scoreboard to inning 1 whenever a new game begins.
+fn reset_scoreboard(mut score: ResMut<ScoreBoard>) {
+    score.reset();
+}
+
+/// Despawns all gameplay entities when leaving `Playing` so a restart rebuilds
+/// the scene cleanly (each sub-plugin re-spawns on the next `OnEnter`).
+fn cleanup_gameplay(mut commands: Commands, query: Query<Entity, With<GameplayEntity>>) {
+    for entity in &query {
+        commands.entity(entity).despawn_recursive();
+    }
 }
