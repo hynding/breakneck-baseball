@@ -258,7 +258,7 @@ fn pitch_live(
             let velocity = rules::hit_velocity(pos.z, intent.aim);
             let outcome = rules::classify_batted_ball(velocity, &field, &rules);
             hit_ev.send(HitEvent { velocity });
-            resolve_contact(outcome, &mut score, &mut bases, &rules, &mut banner);
+            resolve_contact(outcome, &mut score, &mut bases, &rules, &mut banner, false);
             if outcome == Outcome::Foul {
                 end_pitch(&mut play);
             } else {
@@ -343,6 +343,7 @@ fn resolve_contact(
     bases: &mut Bases,
     ruleset: &Ruleset,
     banner: &mut EventWriter<PlayBanner>,
+    runners_going: bool,
 ) {
     match outcome {
         Outcome::Foul => {
@@ -350,15 +351,28 @@ fn resolve_contact(
             banner.send(PlayBanner::new("FOUL", BannerTone::Info));
         }
         Outcome::Out(kind) => {
-            let text = match kind {
-                OutKind::Ground => "GROUND OUT",
-                OutKind::Fly { .. } => "FLY OUT",
-                OutKind::Pop => "POP OUT",
-                OutKind::FoulPop => "FOUL POP OUT",
-                OutKind::Pegged => "PEGGED!",
+            let play = rules::apply_batted_out(score, bases, ruleset, kind, runners_going);
+            let base_text = if play.double_play {
+                "DOUBLE PLAY!"
+            } else if play.doubled_off {
+                "DOUBLED OFF!"
+            } else if play.runs > 0 && matches!(kind, OutKind::Fly { .. }) {
+                "SAC FLY"
+            } else {
+                match kind {
+                    OutKind::Ground => "GROUND OUT",
+                    OutKind::Fly { .. } => "FLY OUT",
+                    OutKind::Pop => "POP OUT",
+                    OutKind::FoulPop => "FOUL POP OUT",
+                    OutKind::Pegged => "PEGGED!",
+                }
+            };
+            let text = if play.runs > 0 {
+                format!("{base_text}  +{}", play.runs)
+            } else {
+                base_text.to_string()
             };
             banner.send(PlayBanner::new(text, BannerTone::Bad));
-            rules::record_out(score, bases, ruleset);
         }
         Outcome::Hit(n) => {
             let label = match n {

@@ -434,13 +434,14 @@ pub fn foul(score: &mut ScoreBoard, rules: &Ruleset) {
     }
 }
 
-/// Records an out, ends the at-bat, and flips the half-inning once the side
-/// is retired.
-pub fn record_out(score: &mut ScoreBoard, bases: &mut Bases, rules: &Ruleset) {
-    reset_count(score);
+/// Charges one out *without* ending the at-bat (a runner retired on the
+/// bases). Flips the half-inning once the side is retired — which also wipes
+/// the count, since the interrupted batter starts over next half.
+pub fn charge_out(score: &mut ScoreBoard, bases: &mut Bases, rules: &Ruleset) {
     score.outs += 1;
     if score.outs >= rules.outs_per_half {
         score.outs = 0;
+        reset_count(score);
         bases.clear();
         if score.top_of_inning {
             score.top_of_inning = false;
@@ -448,6 +449,137 @@ pub fn record_out(score: &mut ScoreBoard, bases: &mut Bases, rules: &Ruleset) {
             score.top_of_inning = true;
             score.inning += 1;
         }
+    }
+}
+
+/// Records an out that ends the at-bat, flipping the half-inning once the
+/// side is retired.
+pub fn record_out(score: &mut ScoreBoard, bases: &mut Bases, rules: &Ruleset) {
+    reset_count(score);
+    charge_out(score, bases, rules);
+}
+
+/// The base-running consequences of a batted-ball out.
+pub struct OutPlay {
+    /// Outs recorded on the play (1, or 2 for double plays / doubled-off).
+    pub outs: u32,
+    /// Runs that scored (sacrifice flies, runs crossing on a non-ending play).
+    pub runs: u32,
+    /// The classic force-and-relay two outs.
+    pub double_play: bool,
+    /// A sent runner was caught off base when the ball was caught.
+    pub doubled_off: bool,
+}
+
+/// Applies a batted-ball out with its base-running consequences.
+/// `runners_going` is the hit-and-run flag: runners broke with the pitch, so
+/// grounders can't be turned two, but a caught ball doubles the runner off
+/// and nobody tags up.
+pub fn apply_batted_out(
+    score: &mut ScoreBoard,
+    bases: &mut Bases,
+    rules: &Ruleset,
+    kind: OutKind,
+    runners_going: bool,
+) -> OutPlay {
+    let outs_left = rules.outs_per_half.saturating_sub(score.outs);
+    let mut play = OutPlay {
+        outs: 1,
+        runs: 0,
+        double_play: false,
+        doubled_off: false,
+    };
+    match kind {
+        OutKind::Ground => {
+            if !runners_going && bases.is_occupied(0) && outs_left >= 2 {
+                // The force at second plus the relay to first: two outs.
+                bases.set(0, false);
+                play.outs = 2;
+                play.double_play = true;
+            }
+            // Unless the play ends the inning, the defense took the sure
+            // out(s) and everyone else moved up a base.
+            if play.outs < outs_left {
+                play.runs = advance_trailing(bases);
+            }
+        }
+        OutKind::Fly { deep } => {
+            if runners_going {
+                play.doubled_off = double_off_lead_runner(bases);
+            } else if deep && outs_left > 1 {
+                play.runs = tag_up(bases);
+            }
+        }
+        OutKind::Pop | OutKind::FoulPop => {
+            if runners_going {
+                play.doubled_off = double_off_lead_runner(bases);
+            }
+        }
+        OutKind::Pegged => {}
+    }
+    if play.doubled_off {
+        play.outs += 1;
+    }
+    score.add_runs(play.runs);
+    reset_count(score);
+    for _ in 0..play.outs {
+        charge_out(score, bases, rules);
+    }
+    play
+}
+
+/// After the batter is retired on the ground, every runner advances one base
+/// (the defense takes the sure out at first). Returns runs forced across.
+fn advance_trailing(bases: &mut Bases) -> u32 {
+    let n = bases.count();
+    let mut runs = 0;
+    // Walk from the lead base down so nobody leapfrogs.
+    for base in (0..n).rev() {
+        if bases.is_occupied(base) {
+            bases.set(base, false);
+            if base + 1 >= n {
+                runs += 1;
+            } else {
+                bases.set(base + 1, true);
+            }
+        }
+    }
+    runs
+}
+
+/// Tag-up on a deep fly: the runner on the last base scores and the runner
+/// one behind moves up. Trailing runners hold. Returns runs scored.
+fn tag_up(bases: &mut Bases) -> u32 {
+    let n = bases.count();
+    let mut runs = 0;
+    if n >= 1 && bases.is_occupied(n - 1) {
+        bases.set(n - 1, false);
+        runs += 1;
+    }
+    if n >= 2 && bases.is_occupied(n - 2) {
+        bases.set(n - 2, false);
+        bases.set(n - 1, true);
+    }
+    runs
+}
+
+/// The runner who breaks on a steal or hit-and-run: the lead runner whose
+/// next base is open (home can never be stolen here).
+pub fn steal_candidate(bases: &Bases) -> Option<usize> {
+    let n = bases.count();
+    (0..n.saturating_sub(1))
+        .rev()
+        .find(|&b| bases.is_occupied(b) && !bases.is_occupied(b + 1))
+}
+
+/// Removes the runner who was sent, caught off base when the ball was
+/// caught. Returns whether anyone was actually going.
+fn double_off_lead_runner(bases: &mut Bases) -> bool {
+    if let Some(runner) = steal_candidate(bases) {
+        bases.set(runner, false);
+        true
+    } else {
+        false
     }
 }
 
@@ -661,6 +793,167 @@ mod tests {
         // Out four retires the side.
         record_out(&mut score, &mut bases, &rules);
         assert_eq!((score.outs, score.top_of_inning), (0, false));
+    }
+
+    // ── Batted-ball outs with base-running consequences ───────────────────────
+
+    /// A fresh bottom-half scoreboard with the given outs.
+    fn batting_home(outs: u32) -> ScoreBoard {
+        ScoreBoard {
+            inning: 1,
+            top_of_inning: false,
+            outs,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn ground_ball_with_runner_on_first_turns_two() {
+        let mut score = batting_home(0);
+        let mut bases = with(&[0]);
+        let play = apply_batted_out(&mut score, &mut bases, &std_rules(), OutKind::Ground, false);
+        assert!(play.double_play);
+        assert_eq!(play.outs, 2);
+        assert_eq!(score.outs, 2);
+        assert_eq!(bases, empty()); // both the batter and the forced runner are gone
+    }
+
+    #[test]
+    fn double_play_still_scores_the_runner_from_third() {
+        // 6-4-3 with runners on the corners and nobody out: the run counts
+        // because the inning does not end on the play.
+        let mut score = batting_home(0);
+        let mut bases = with(&[0, 2]);
+        let play = apply_batted_out(&mut score, &mut bases, &std_rules(), OutKind::Ground, false);
+        assert!(play.double_play);
+        assert_eq!(play.runs, 1);
+        assert_eq!(score.home_runs, 1);
+        assert_eq!(bases, empty());
+    }
+
+    #[test]
+    fn inning_ending_double_play_scores_nothing() {
+        // One out, runners on the corners: the DP is outs two and three — the
+        // force ends the inning and the run never counts.
+        let mut score = batting_home(1);
+        let mut bases = with(&[0, 2]);
+        let play = apply_batted_out(&mut score, &mut bases, &std_rules(), OutKind::Ground, false);
+        assert!(play.double_play);
+        assert_eq!(play.runs, 0);
+        assert_eq!(score.home_runs, 0);
+        assert!(score.top_of_inning); // half flipped
+        assert_eq!(score.inning, 2);
+    }
+
+    #[test]
+    fn no_double_play_with_two_outs() {
+        let mut score = batting_home(2);
+        let mut bases = with(&[0]);
+        let play = apply_batted_out(&mut score, &mut bases, &std_rules(), OutKind::Ground, false);
+        assert!(!play.double_play);
+        assert_eq!(play.outs, 1);
+        assert!(score.top_of_inning); // routine third out retires the side
+    }
+
+    #[test]
+    fn routine_ground_out_advances_the_runners() {
+        // Runner on second, nobody out: the defense takes the out at first
+        // and the runner moves up to third.
+        let mut score = batting_home(0);
+        let mut bases = with(&[1]);
+        let play = apply_batted_out(&mut score, &mut bases, &std_rules(), OutKind::Ground, false);
+        assert_eq!((play.outs, play.runs), (1, 0));
+        assert_eq!(bases, with(&[2]));
+    }
+
+    #[test]
+    fn deep_fly_is_a_sacrifice() {
+        // Runners on second and third, nobody out: both tag up — third
+        // scores, second takes third.
+        let mut score = batting_home(0);
+        let mut bases = with(&[1, 2]);
+        let play = apply_batted_out(
+            &mut score,
+            &mut bases,
+            &std_rules(),
+            OutKind::Fly { deep: true },
+            false,
+        );
+        assert_eq!((play.outs, play.runs), (1, 1));
+        assert_eq!(score.home_runs, 1);
+        assert_eq!(bases, with(&[2]));
+    }
+
+    #[test]
+    fn shallow_fly_holds_the_runners() {
+        let mut score = batting_home(0);
+        let mut bases = with(&[2]);
+        let play = apply_batted_out(
+            &mut score,
+            &mut bases,
+            &std_rules(),
+            OutKind::Fly { deep: false },
+            false,
+        );
+        assert_eq!((play.outs, play.runs), (1, 0));
+        assert_eq!(bases, with(&[2]));
+    }
+
+    #[test]
+    fn two_out_deep_fly_ends_the_half_scoreless() {
+        let mut score = batting_home(2);
+        let mut bases = with(&[2]);
+        let play = apply_batted_out(
+            &mut score,
+            &mut bases,
+            &std_rules(),
+            OutKind::Fly { deep: true },
+            false,
+        );
+        assert_eq!(play.runs, 0);
+        assert_eq!(score.home_runs, 0);
+        assert!(score.top_of_inning);
+    }
+
+    #[test]
+    fn charge_out_keeps_the_count_mid_at_bat() {
+        // A runner thrown out on the bases is not the batter's at-bat ending.
+        let mut score = ScoreBoard {
+            balls: 2,
+            strikes: 1,
+            ..batting_home(0)
+        };
+        let mut bases = empty();
+        charge_out(&mut score, &mut bases, &std_rules());
+        assert_eq!((score.balls, score.strikes, score.outs), (2, 1, 1));
+    }
+
+    #[test]
+    fn runner_going_on_a_caught_fly_is_doubled_off() {
+        let mut score = batting_home(0);
+        let mut bases = with(&[0]);
+        let play = apply_batted_out(
+            &mut score,
+            &mut bases,
+            &std_rules(),
+            OutKind::Fly { deep: false },
+            true,
+        );
+        assert!(play.doubled_off);
+        assert_eq!(play.outs, 2);
+        assert_eq!(bases, empty());
+    }
+
+    #[test]
+    fn runners_going_beat_the_double_play() {
+        // The point of the hit-and-run: the grounder can't be turned two,
+        // and the runner moves up.
+        let mut score = batting_home(0);
+        let mut bases = with(&[0]);
+        let play = apply_batted_out(&mut score, &mut bases, &std_rules(), OutKind::Ground, true);
+        assert!(!play.double_play);
+        assert_eq!(play.outs, 1);
+        assert_eq!(bases, with(&[1]));
     }
 
     #[test]
