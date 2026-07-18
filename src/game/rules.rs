@@ -925,6 +925,49 @@ mod tests {
     }
 
     #[test]
+    fn one_inning_walkoff_ends_immediately() {
+        let score = ScoreBoard {
+            home_runs: 1,
+            away_runs: 0,
+            inning: 1,
+            top_of_inning: false,
+            ..Default::default()
+        };
+        assert!(is_game_over(&score, 1));
+    }
+
+    #[test]
+    fn one_inning_tie_goes_to_extras() {
+        // Still tied in the bottom of the 1st: play on.
+        let bottom = ScoreBoard {
+            inning: 1,
+            top_of_inning: false,
+            ..Default::default()
+        };
+        assert!(!is_game_over(&bottom, 1));
+        // Tied after a full inning: extras.
+        let extras = ScoreBoard {
+            inning: 2,
+            top_of_inning: true,
+            ..Default::default()
+        };
+        assert!(!is_game_over(&extras, 1));
+    }
+
+    #[test]
+    fn home_lead_entering_bottom_of_final_skips_the_half() {
+        // Home led 2-0 when the top of the 6th ended: the bottom is never played.
+        let score = ScoreBoard {
+            home_runs: 2,
+            away_runs: 0,
+            inning: 6,
+            top_of_inning: false,
+            ..Default::default()
+        };
+        assert!(is_game_over(&score, 6));
+    }
+
+    #[test]
     fn away_leads_after_bottom_nine_ends_game() {
         let score = ScoreBoard {
             home_runs: 1,
