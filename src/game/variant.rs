@@ -28,6 +28,18 @@ pub struct Ruleset {
     pub peg_outs: bool,
 }
 
+/// Menu-selectable regulation game lengths.
+pub const INNINGS_OPTIONS: [u32; 4] = [1, 3, 6, 9];
+
+/// The next game-length option in the menu cycle (wraps; values not in the
+/// list restart it).
+pub fn next_innings(current: u32) -> u32 {
+    match INNINGS_OPTIONS.iter().position(|&n| n == current) {
+        Some(i) => INNINGS_OPTIONS[(i + 1) % INNINGS_OPTIONS.len()],
+        None => INNINGS_OPTIONS[0],
+    }
+}
+
 /// Field geometry and personnel. Home plate is implicitly at the origin.
 #[derive(Resource, Clone, Debug)]
 pub struct FieldSpec {
@@ -234,6 +246,19 @@ mod tests {
         assert_eq!(f.fielder_positions.len(), 3); // + the pitcher = 4-player team
         assert!(f.peg_radius > 0.0);
         assert_eq!(f.scenery, Scenery::FrontYard);
+    }
+
+    #[test]
+    fn innings_options_cycle_and_wrap() {
+        assert_eq!(next_innings(1), 3);
+        assert_eq!(next_innings(3), 6);
+        assert_eq!(next_innings(6), 9);
+        assert_eq!(next_innings(9), 1);
+    }
+
+    #[test]
+    fn unknown_innings_value_restarts_the_cycle() {
+        assert_eq!(next_innings(2), 1);
     }
 
     #[test]

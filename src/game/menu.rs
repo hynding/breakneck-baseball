@@ -10,7 +10,7 @@ use bevy::prelude::*;
 
 use crate::game::input::{assign_controllers, Controllers};
 use crate::game::theme::Theme;
-use crate::game::variant::{FieldSpec, Ruleset};
+use crate::game::variant::{self, FieldSpec, Ruleset};
 use crate::game::{GameConfig, GameMode, GameState, ScoreBoard};
 
 /// Marker for menu-screen UI so it can be torn down on exit or rebuild.
@@ -124,8 +124,9 @@ fn build_menu(commands: &mut Commands, config: &GameConfig, theme: &Theme) {
 
                     // Option lines: dim key/label, accent value.
                     for (label, value) in [
-                        ("F   Field", config.variant.label()),
-                        ("T   Theme", config.theme.label()),
+                        ("F   Field", config.variant.label().to_string()),
+                        ("I   Innings", config.innings.to_string()),
+                        ("T   Theme", config.theme.label().to_string()),
                     ] {
                         card.spawn((
                             Text::new(format!("{label}   ")),
@@ -190,8 +191,9 @@ fn update_controller_status(
     }
 }
 
-/// Cycles the field (**F** / gamepad West) and theme (**T** / gamepad North),
-/// then rebuilds the menu so labels and palette refresh together.
+/// Cycles the field (**F** / gamepad West), innings (**I** / gamepad East),
+/// and theme (**T** / gamepad North), then rebuilds the menu so labels and
+/// palette refresh together.
 fn cycle_options(
     keyboard: Res<ButtonInput<KeyCode>>,
     pads: Query<&Gamepad>,
@@ -204,12 +206,19 @@ fn cycle_options(
         || pads.iter().any(|p| p.just_pressed(GamepadButton::West));
     let theme_pressed = keyboard.just_pressed(KeyCode::KeyT)
         || pads.iter().any(|p| p.just_pressed(GamepadButton::North));
+    let innings_pressed = keyboard.just_pressed(KeyCode::KeyI)
+        || pads.iter().any(|p| p.just_pressed(GamepadButton::East));
 
-    if !field_pressed && !theme_pressed {
+    if !field_pressed && !theme_pressed && !innings_pressed {
         return;
     }
     if field_pressed {
         config.variant = config.variant.next();
+        // A new park brings its own regulation length; I re-cycles from there.
+        config.innings = config.variant.rules().innings;
+    }
+    if innings_pressed {
+        config.innings = variant::next_innings(config.innings);
     }
     if theme_pressed {
         config.theme = config.theme.next();
@@ -255,8 +264,10 @@ fn menu_select(
     config.mode = mode;
     *controllers = assign_controllers(mode, &pad_entities);
     // Materialize the chosen variant so every gameplay system reads this
-    // game's rules and park.
+    // game's rules and park; the menu's game-length choice overrides the
+    // variant's default.
     *rules = config.variant.rules();
+    rules.innings = config.innings;
     *field = config.variant.field();
     next_state.set(GameState::Playing);
 }
