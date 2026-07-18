@@ -27,9 +27,9 @@ inning when leading, ties go to extra innings, pitch distance 18.44 m, fences 10
 Defects: (1) base bags placed √2 too far (base paths 127 ft instead of 90 ft, bags off the
 dirt); (2) game length hardcoded per variant, no player setting.
 
-Backlog (needs live base-running, out of scope for the analytic at-contact model):
-tag-ups/sacrifice flies, double plays, hit-by-pitch, caught foul pops, dropped third
-strike, steals/pickoffs, batting lineups.
+Backlog — since implemented (see `2026-07-18-advanced-baseball-rules.md`): tag-ups/
+sacrifice flies, double plays, hit-by-pitch, caught foul pops, dropped third strike,
+steals (pickoffs N/A — the analytic model has no leadoffs), batting lineups.
 
 ---
 
