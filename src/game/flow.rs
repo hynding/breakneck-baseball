@@ -287,7 +287,16 @@ fn pitch_live(
     // No swing: once the ball is well past the plate, judge the take.
     if pos.z < SWING_LATE_Z {
         let cross = play.crossing.unwrap_or(Vec2::new(pos.x, pos.y));
-        if rules::is_in_zone(cross) {
+        if rules::hits_batter(cross) {
+            // Dead ball: the batter takes first, forced runners move.
+            let runs = rules::hit_by_pitch(&mut score, &mut bases);
+            let tone = if runs > 0 {
+                BannerTone::Epic
+            } else {
+                BannerTone::Good
+            };
+            banner.send(PlayBanner::new("HIT BY PITCH", tone));
+        } else if rules::is_in_zone(cross) {
             add_strike(&mut score, &mut bases, &rules, &mut banner, false);
         } else {
             add_ball(&mut score, &mut bases, &rules, &mut banner);

@@ -196,7 +196,9 @@ impl PitchKind {
 /// kind's spin then bends the flight (fastballs ride, curveballs dive), so a
 /// pitch's character *is* its physics.
 pub fn pitch_velocity_kind(kind: PitchKind, aim: Vec2, pitch_distance: f32) -> Vec3 {
-    let target_x = aim.x * 0.35;
+    // Wide enough that a full-inside aim reaches the batter's body — painting
+    // the inside corner risks a hit-by-pitch.
+    let target_x = aim.x * 0.6;
     let target_y = 1.05 + aim.y * 0.5;
     let speed = kind.speed();
 
@@ -246,6 +248,27 @@ pub fn hit_velocity(contact_z: f32, aim: Vec2) -> Vec3 {
 /// Is a plate-crossing point (x = horizontal, y = height) a called strike?
 pub fn is_in_zone(crossing: Vec2) -> bool {
     crossing.x.abs() <= ZONE_HALF_WIDTH && crossing.y >= ZONE_LOW && crossing.y <= ZONE_HIGH
+}
+
+/// Inner edge of the batter's body window; he stands at x ≈ +0.7 (see
+/// `player.rs`).
+const BATTER_X_MIN: f32 = 0.52;
+/// Above this the pitch sails over the batter's head.
+const BATTER_Y_MAX: f32 = 1.7;
+
+/// Does a plate-crossing point plunk the batter? Only meaningful on a take —
+/// swinging at the pitch negates a hit-by-pitch, as in the rulebook.
+pub fn hits_batter(crossing: Vec2) -> bool {
+    crossing.x >= BATTER_X_MIN && crossing.y > 0.0 && crossing.y <= BATTER_Y_MAX
+}
+
+/// Awards first base after a hit-by-pitch: dead ball, forced runners only.
+/// Returns runs forced in.
+pub fn hit_by_pitch(score: &mut ScoreBoard, bases: &mut Bases) -> u32 {
+    let runs = advance_walk(bases);
+    score.add_runs(runs);
+    reset_count(score);
+    runs
 }
 
 // ── Batted-ball classification ────────────────────────────────────────────────
@@ -1203,6 +1226,43 @@ mod tests {
             PitchKind::Curveball
         );
         assert_eq!(PitchKind::from_aim(Vec2::ZERO), PitchKind::Changeup);
+    }
+
+    #[test]
+    fn full_inside_fastball_plunks_the_batter() {
+        // Max inside aim crosses inside the batter's body window; the batter
+        // stands at x ≈ +0.7.
+        let cross = simulate_pitch(PitchKind::Fastball, Vec2::new(1.0, 0.0));
+        assert!(
+            hits_batter(cross),
+            "crossing ({:.2}, {:.2}) should hit the batter",
+            cross.x,
+            cross.y
+        );
+        assert!(!is_in_zone(cross));
+    }
+
+    #[test]
+    fn batter_window_boundaries() {
+        assert!(hits_batter(Vec2::new(0.6, 1.0)));
+        assert!(!hits_batter(Vec2::new(0.4, 1.0))); // inside pitch, no contact
+        assert!(!hits_batter(Vec2::new(-0.6, 1.0))); // away side — no batter there
+        assert!(!hits_batter(Vec2::new(0.6, 2.2))); // sails over his head
+    }
+
+    #[test]
+    fn hit_by_pitch_forces_like_a_walk() {
+        let mut score = ScoreBoard {
+            balls: 1,
+            strikes: 2,
+            top_of_inning: true,
+            ..Default::default()
+        };
+        let mut bases = loaded();
+        assert_eq!(hit_by_pitch(&mut score, &mut bases), 1);
+        assert_eq!(score.away_runs, 1);
+        assert_eq!((score.balls, score.strikes), (0, 0));
+        assert_eq!(bases, loaded());
     }
 
     #[test]
