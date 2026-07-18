@@ -10,7 +10,7 @@
 use bevy::math::Vec3;
 use bevy::prelude::Resource;
 
-use crate::game::field::{BASE_DISTANCE, PITCH_DISTANCE};
+use crate::game::field::{HALF_DIAGONAL, PITCH_DISTANCE};
 
 /// Countable-rule knobs read by the rules engine and game flow.
 #[derive(Resource, Clone, Debug)]
@@ -129,10 +129,13 @@ impl VariantId {
     pub fn field(self) -> FieldSpec {
         match self {
             VariantId::Standard => FieldSpec {
+                // Regulation diamond: 90 ft base paths mean each bag sits
+                // HALF_DIAGONAL (27.43/√2 m) off-axis — matching the dirt
+                // infield drawn in `field.rs`.
                 base_positions: vec![
-                    Vec3::new(BASE_DISTANCE, 0.0, BASE_DISTANCE),
-                    Vec3::new(0.0, 0.0, BASE_DISTANCE * 2.0),
-                    Vec3::new(-BASE_DISTANCE, 0.0, BASE_DISTANCE),
+                    Vec3::new(HALF_DIAGONAL, 0.0, HALF_DIAGONAL),
+                    Vec3::new(0.0, 0.0, HALF_DIAGONAL * 2.0),
+                    Vec3::new(-HALF_DIAGONAL, 0.0, HALF_DIAGONAL),
                 ],
                 pitch_distance: PITCH_DISTANCE,
                 fair_half_angle: std::f32::consts::FRAC_PI_4,
@@ -142,10 +145,10 @@ impl VariantId {
                 peg_radius: 0.0,
                 fielder_positions: vec![
                     Vec3::new(0.0, 0.0, -1.5), // catcher
-                    Vec3::new(BASE_DISTANCE, 0.0, BASE_DISTANCE - 3.0),
-                    Vec3::new(7.0, 0.0, BASE_DISTANCE * 2.0 - 3.0),
-                    Vec3::new(-7.0, 0.0, BASE_DISTANCE * 2.0 - 3.0),
-                    Vec3::new(-BASE_DISTANCE, 0.0, BASE_DISTANCE - 3.0),
+                    Vec3::new(HALF_DIAGONAL, 0.0, HALF_DIAGONAL - 3.0),
+                    Vec3::new(7.0, 0.0, HALF_DIAGONAL * 2.0 - 3.0),
+                    Vec3::new(-7.0, 0.0, HALF_DIAGONAL * 2.0 - 3.0),
+                    Vec3::new(-HALF_DIAGONAL, 0.0, HALF_DIAGONAL - 3.0),
                     Vec3::new(-40.0, 0.0, 85.0), // left field
                     Vec3::new(0.0, 0.0, 110.0),  // centre field
                     Vec3::new(40.0, 0.0, 85.0),  // right field
@@ -194,6 +197,7 @@ impl VariantId {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::field::BASE_DISTANCE;
 
     #[test]
     fn standard_matches_regulation_baseball() {
@@ -211,8 +215,14 @@ mod tests {
         assert_eq!(f.base_count(), 3);
         assert_eq!(f.pitch_distance, 18.44);
         assert_eq!(f.scenery, Scenery::Stadium);
-        // Second base straight out along +Z at the diamond diagonal.
-        assert!((f.base_positions[1] - Vec3::new(0.0, 0.0, 54.86)).length() < 0.01);
+        // First base is 90 ft (27.43 m) from home, and every base path is 90 ft.
+        assert!((f.base_positions[0].length() - BASE_DISTANCE).abs() < 0.01);
+        for pair in f.base_positions.windows(2) {
+            assert!(((pair[1] - pair[0]).length() - BASE_DISTANCE).abs() < 0.01);
+        }
+        // Second base straight out along +Z at the full diamond diagonal
+        // (127 ft 3 3/8 in ≈ 38.79 m).
+        assert!((f.base_positions[1] - Vec3::new(0.0, 0.0, 38.79)).length() < 0.01);
     }
 
     #[test]
