@@ -161,7 +161,7 @@ fn build_menu(commands: &mut Commands, config: &GameConfig, theme: &Theme) {
                     ));
                     card.spawn((
                         Text::new(
-                            "Controller: A pitch/swing, stick to aim\nKeyboard: WASD + Space (P1), Arrows + Right-Ctrl (P2)",
+                            "Controller: A pitch/swing, stick to aim\nKeyboard: WASD + Space (P1), Arrows + Right-Ctrl (P2)\nBatting: hold Down through the windup to send the runner",
                         ),
                         TextFont {
                             font_size: 13.0,

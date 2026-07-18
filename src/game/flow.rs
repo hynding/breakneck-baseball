@@ -24,7 +24,7 @@ use crate::game::animation::{AnimClip, Playing};
 use crate::game::ball::{Baseball, HitEvent, InFlight, PitchEvent};
 use crate::game::input::Intents;
 use crate::game::player::Pitcher;
-use crate::game::rules::{self, BallCall, Bases, OutKind, Outcome, StrikeCall};
+use crate::game::rules::{self, BallCall, Bases, OutKind, Outcome, StealResult, StrikeCall};
 use crate::game::variant::{FieldSpec, Ruleset};
 use crate::game::{GameState, ScoreBoard};
 
@@ -79,6 +79,9 @@ pub struct Play {
     /// The kind of the pitch currently in flight (set at release). Drives the
     /// dropped-third-strike and steal resolutions.
     live_kind: Option<rules::PitchKind>,
+    /// The batting side sent the lead runner as the delivery started
+    /// (aim held down through the windup).
+    steal_armed: bool,
 }
 
 impl Default for Play {
@@ -90,6 +93,7 @@ impl Default for Play {
             resolved: false,
             pending_pitch: None,
             live_kind: None,
+            steal_armed: false,
         }
     }
 }
@@ -206,10 +210,16 @@ fn wind_up(
     time: Res<Time>,
     mut play: ResMut<Play>,
     field: Res<FieldSpec>,
+    intents: Res<Intents>,
+    score: Res<ScoreBoard>,
     mut pitch_ev: EventWriter<PitchEvent>,
 ) {
     if play.phase != Phase::WindUp {
         return;
+    }
+    // Holding the stick down through the delivery sends the lead runner.
+    if intents.get(score.batting_team()).aim.y < -0.7 {
+        play.steal_armed = true;
     }
     if play.timer.tick(time.delta()).finished() {
         let (aim, kind) = play
@@ -263,7 +273,8 @@ fn pitch_live(
             let velocity = rules::hit_velocity(pos.z, intent.aim);
             let outcome = rules::classify_batted_ball(velocity, &field, &rules);
             hit_ev.send(HitEvent { velocity });
-            resolve_contact(outcome, &mut score, &mut bases, &rules, &mut banner, false);
+            let going = play.steal_armed;
+            resolve_contact(outcome, &mut score, &mut bases, &rules, &mut banner, going);
             if outcome == Outcome::Foul {
                 end_pitch(&mut play);
             } else {
@@ -287,6 +298,10 @@ fn pitch_live(
             let dropped =
                 play.live_kind == Some(rules::PitchKind::Curveball) && !bases.is_occupied(0);
             add_strike(&mut score, &mut bases, &rules, &mut banner, true, dropped);
+            // The catcher has the ball: a sent runner must survive the throw.
+            if play.steal_armed {
+                resolve_steal(&play, &mut score, &mut bases, &rules, &mut banner);
+            }
             end_pitch(&mut play);
         }
         maybe_end_game(&score, &rules, &mut next_state);
@@ -305,10 +320,18 @@ fn pitch_live(
                 BannerTone::Good
             };
             banner.send(PlayBanner::new("HIT BY PITCH", tone));
-        } else if rules::is_in_zone(cross) {
-            add_strike(&mut score, &mut bases, &rules, &mut banner, false, false);
         } else {
-            add_ball(&mut score, &mut bases, &rules, &mut banner);
+            let walked = if rules::is_in_zone(cross) {
+                add_strike(&mut score, &mut bases, &rules, &mut banner, false, false);
+                false
+            } else {
+                add_ball(&mut score, &mut bases, &rules, &mut banner)
+            };
+            // A walk is a dead ball (runners advance freely); otherwise a
+            // sent runner has to beat the catcher's throw.
+            if play.steal_armed && !walked {
+                resolve_steal(&play, &mut score, &mut bases, &rules, &mut banner);
+            }
         }
         end_pitch(&mut play);
         maybe_end_game(&score, &rules, &mut next_state);
@@ -351,6 +374,7 @@ fn result_phase(
         play.resolved = false;
         play.pending_pitch = None;
         play.live_kind = None;
+        play.steal_armed = false;
     }
 }
 
@@ -400,7 +424,15 @@ fn resolve_contact(
                 3 => "TRIPLE".to_string(),
                 n => format!("{n} BASES!"),
             };
-            hit(score, bases, banner, n, &label, BannerTone::Good);
+            hit(
+                score,
+                bases,
+                banner,
+                n,
+                &label,
+                BannerTone::Good,
+                runners_going,
+            );
         }
         // A home run is worth one more base than the field has.
         Outcome::HomeRun => {
@@ -412,11 +444,13 @@ fn resolve_contact(
                 bases_worth,
                 "HOME RUN!",
                 BannerTone::Epic,
+                runners_going,
             );
         }
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn hit(
     score: &mut ScoreBoard,
     bases: &mut Bases,
@@ -424,8 +458,9 @@ fn hit(
     hit_bases: u32,
     label: &str,
     tone: BannerTone,
+    jump: bool,
 ) {
-    let runs = rules::apply_hit(score, bases, hit_bases);
+    let runs = rules::apply_hit(score, bases, hit_bases, jump);
     let text = if runs > 0 {
         format!("{label}  +{runs}")
     } else {
@@ -434,19 +469,44 @@ fn hit(
     banner.send(PlayBanner::new(text, tone));
 }
 
+/// Records a taken ball. Returns whether it was ball four (a dead-ball walk,
+/// which pre-empts any steal attempt).
 fn add_ball(
     score: &mut ScoreBoard,
     bases: &mut Bases,
     ruleset: &Ruleset,
     banner: &mut EventWriter<PlayBanner>,
-) {
+) -> bool {
     match rules::call_ball(score, bases, ruleset) {
         BallCall::Walk { .. } => {
             banner.send(PlayBanner::new("WALK", BannerTone::Epic));
+            true
         }
         BallCall::Ball => {
             banner.send(PlayBanner::new("BALL", BannerTone::Info));
+            false
         }
+    }
+}
+
+/// Resolves a sent runner once the catcher has the ball: the jump beats the
+/// throw on off-speed pitches, a fastball cuts the runner down.
+fn resolve_steal(
+    play: &Play,
+    score: &mut ScoreBoard,
+    bases: &mut Bases,
+    ruleset: &Ruleset,
+    banner: &mut EventWriter<PlayBanner>,
+) {
+    let off_speed = play.live_kind != Some(rules::PitchKind::Fastball);
+    match rules::attempt_steal(score, bases, ruleset, off_speed) {
+        StealResult::Stolen { .. } => {
+            banner.send(PlayBanner::new("STOLEN BASE!", BannerTone::Good));
+        }
+        StealResult::Caught => {
+            banner.send(PlayBanner::new("CAUGHT STEALING", BannerTone::Bad));
+        }
+        StealResult::NoRunner => {}
     }
 }
 

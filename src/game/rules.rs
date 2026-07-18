@@ -376,15 +376,23 @@ pub fn predict_landing(vel: Vec3, spin: Vec3, drag_factor: f32, magnus_factor: f
 /// `hit_bases` may exceed the base count by one (a home run clears the field
 /// and scores the batter). Returns the number of runs that scored.
 pub fn advance_hit(bases: &mut Bases, hit_bases: u32) -> u32 {
+    advance_hit_with_jump(bases, hit_bases, false)
+}
+
+/// [`advance_hit`], but `jump` gives every *existing* runner one extra base —
+/// the hit-and-run reward for breaking with the pitch (first-to-third on a
+/// single). The batter still takes exactly `hit_bases`.
+pub fn advance_hit_with_jump(bases: &mut Bases, hit_bases: u32, jump: bool) -> u32 {
     debug_assert!(hit_bases >= 1, "a hit is worth at least one base");
     let n = bases.count();
-    let step = hit_bases as usize;
+    let runner_step = hit_bases as usize + jump as usize;
+    let batter_step = hit_bases as usize;
     let mut runs = 0;
     let mut next = vec![false; n];
 
     for base in 0..n {
         if bases.is_occupied(base) {
-            let dest = base + step;
+            let dest = base + runner_step;
             if dest >= n {
                 runs += 1; // past the last base → scored
             } else {
@@ -394,10 +402,10 @@ pub fn advance_hit(bases: &mut Bases, hit_bases: u32) -> u32 {
     }
     // The batter reaches base `hit_bases` (1-indexed); one past the last base
     // means they came all the way around.
-    if step > n {
+    if batter_step > n {
         runs += 1;
     } else {
-        next[step - 1] = true;
+        next[batter_step - 1] = true;
     }
 
     bases.occupied = next;
@@ -419,10 +427,11 @@ pub fn advance_walk(bases: &mut Bases) -> u32 {
 
 // ── Count & scoring mutations ─────────────────────────────────────────────────
 
-/// Applies a hit worth `hit_bases` bases: advances runners, credits runs to the
-/// batting team, and ends the at-bat. Returns the runs scored.
-pub fn apply_hit(score: &mut ScoreBoard, bases: &mut Bases, hit_bases: u32) -> u32 {
-    let runs = advance_hit(bases, hit_bases);
+/// Applies a hit worth `hit_bases` bases: advances runners (with the
+/// hit-and-run `jump` when runners were going), credits runs to the batting
+/// team, and ends the at-bat. Returns the runs scored.
+pub fn apply_hit(score: &mut ScoreBoard, bases: &mut Bases, hit_bases: u32, jump: bool) -> u32 {
+    let runs = advance_hit_with_jump(bases, hit_bases, jump);
     score.add_runs(runs);
     reset_count(score);
     runs
@@ -611,6 +620,40 @@ pub fn steal_candidate(bases: &Bases) -> Option<usize> {
         .find(|&b| bases.is_occupied(b) && !bases.is_occupied(b + 1))
 }
 
+/// What sending the runner produced once the pitch reached the catcher.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StealResult {
+    /// Safe — the runner now stands on `base` (0-indexed).
+    Stolen { base: usize },
+    /// Thrown out; the out is charged but the batter's count stands.
+    Caught,
+    /// Nobody was in a position to steal.
+    NoRunner,
+}
+
+/// Resolves a straight steal on a pitch the batter didn't put in play: the
+/// jump beats the throw on off-speed stuff, but a fastball gets there in
+/// time. One runner (the lead eligible one) goes per pitch.
+pub fn attempt_steal(
+    score: &mut ScoreBoard,
+    bases: &mut Bases,
+    rules: &Ruleset,
+    off_speed: bool,
+) -> StealResult {
+    let Some(runner) = steal_candidate(bases) else {
+        return StealResult::NoRunner;
+    };
+    if off_speed {
+        bases.set(runner, false);
+        bases.set(runner + 1, true);
+        StealResult::Stolen { base: runner + 1 }
+    } else {
+        bases.set(runner, false);
+        charge_out(score, bases, rules);
+        StealResult::Caught
+    }
+}
+
 /// Removes the runner who was sent, caught off base when the ball was
 /// caught. Returns whether anyone was actually going.
 fn double_off_lead_runner(bases: &mut Bases) -> bool {
@@ -740,6 +783,80 @@ mod tests {
         // A five-base homer scores that runner and the batter.
         assert_eq!(advance_hit(&mut b, 5), 2);
         assert_eq!(b, Bases::new(4));
+    }
+
+    // ── Steals ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn steal_succeeds_against_offspeed() {
+        let mut score = ScoreBoard::default();
+        let mut bases = with(&[0]);
+        assert_eq!(
+            attempt_steal(&mut score, &mut bases, &std_rules(), true),
+            StealResult::Stolen { base: 1 }
+        );
+        assert_eq!(bases, with(&[1]));
+        assert_eq!(score.outs, 0);
+    }
+
+    #[test]
+    fn steal_is_caught_against_a_fastball() {
+        let mut score = ScoreBoard {
+            balls: 2,
+            strikes: 1,
+            ..Default::default()
+        };
+        let mut bases = with(&[0]);
+        assert_eq!(
+            attempt_steal(&mut score, &mut bases, &std_rules(), false),
+            StealResult::Caught
+        );
+        assert_eq!(bases, empty());
+        assert_eq!(score.outs, 1);
+        // The at-bat continues with the count intact.
+        assert_eq!((score.balls, score.strikes), (2, 1));
+    }
+
+    #[test]
+    fn only_the_lead_eligible_runner_steals() {
+        // Runners on first and second: second steals third; first stays put
+        // (his target is now... still second — one steal per pitch).
+        let mut score = ScoreBoard::default();
+        let mut bases = with(&[0, 1]);
+        assert_eq!(
+            attempt_steal(&mut score, &mut bases, &std_rules(), true),
+            StealResult::Stolen { base: 2 }
+        );
+        assert_eq!(bases, with(&[0, 2]));
+    }
+
+    #[test]
+    fn home_cannot_be_stolen() {
+        let mut score = ScoreBoard::default();
+        let mut bases = with(&[2]);
+        assert_eq!(
+            attempt_steal(&mut score, &mut bases, &std_rules(), true),
+            StealResult::NoRunner
+        );
+        assert_eq!(bases, with(&[2]));
+    }
+
+    #[test]
+    fn empty_bases_cannot_steal() {
+        let mut score = ScoreBoard::default();
+        let mut bases = empty();
+        assert_eq!(
+            attempt_steal(&mut score, &mut bases, &std_rules(), true),
+            StealResult::NoRunner
+        );
+    }
+
+    #[test]
+    fn hit_and_run_sends_first_to_third_on_a_single() {
+        let mut b = with(&[0]);
+        // Runner takes two (the jump), batter takes one.
+        assert_eq!(advance_hit_with_jump(&mut b, 1, true), 0);
+        assert_eq!(b, with(&[0, 2]));
     }
 
     // ── Count mutations ───────────────────────────────────────────────────────
@@ -1033,7 +1150,7 @@ mod tests {
         };
         let mut bases = with(&[1]);
         // Double: runner on second scores, batter to second.
-        assert_eq!(apply_hit(&mut score, &mut bases, 2), 1);
+        assert_eq!(apply_hit(&mut score, &mut bases, 2, false), 1);
         assert_eq!(score.home_runs, 1);
         assert_eq!((score.balls, score.strikes), (0, 0));
         assert_eq!(bases, with(&[1]));
