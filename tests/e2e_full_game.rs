@@ -9,73 +9,24 @@
 //! swings dead-red at the ideal contact point with full uppercut aim — a
 //! deterministic home run and an immediate walk-off in the bottom of the 1st.
 
-use std::time::Duration;
+mod common;
 
-use bevy::app::{MainScheduleOrder, PluginsState};
-use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::*;
-use bevy::time::TimeUpdateStrategy;
-use bevy::winit::WinitPlugin;
-use bevy_rapier3d::prelude::{NoUserData, RapierPhysicsPlugin};
 
 use breakneck_baseball::game::ball::Baseball;
 use breakneck_baseball::game::flow::{Phase, Play};
 use breakneck_baseball::game::input::Intents;
 use breakneck_baseball::game::variant::Ruleset;
-use breakneck_baseball::game::{GamePlugin, GameState, ScoreBoard, Team};
+use breakneck_baseball::game::{GameState, ScoreBoard, Team};
 
-/// Simulation step: 240 Hz keeps the swing-timing window (~0.12 m of ball
-/// travel per frame) tight enough for a deterministic home-run swing.
-const DT: f64 = 1.0 / 240.0;
+use common::{headless_app, run_until, DriveGame};
+
 /// Hard cap ≈ 5 sim-minutes; the scripted game needs ~10 pitches (~40 s).
 const MAX_FRAMES: u64 = 72_000;
-
-/// Runs after `PreUpdate` (so `gather_intents` has refreshed keyboard-driven
-/// intents) and before `Update` (so the flow systems read what we wrote) —
-/// the same [`Intents`] seam the CPU AI uses.
-#[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
-struct DriveGame;
 
 #[derive(Resource, Default)]
 struct Driver {
     frame: u64,
-}
-
-fn headless_app() -> App {
-    let mut app = App::new();
-    app.add_plugins(
-        DefaultPlugins
-            // No window and no winit event loop; the GPU adapter still
-            // initializes (surface-less) so the render app and its resources
-            // exist, but nothing is ever presented.
-            .set(WindowPlugin {
-                primary_window: None,
-                exit_condition: bevy::window::ExitCondition::DontExit,
-                close_when_requested: false,
-            })
-            .disable::<WinitPlugin>(),
-    )
-    .add_plugins((RapierPhysicsPlugin::<NoUserData>::default(), GamePlugin))
-    .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
-        DT,
-    )))
-    .init_resource::<Driver>();
-
-    app.init_schedule(DriveGame);
-    app.world_mut()
-        .resource_mut::<MainScheduleOrder>()
-        .insert_after(PreUpdate, DriveGame);
-    app.add_systems(DriveGame, drive);
-
-    // Driving `app.update()` by hand skips what `App::run` would do: wait out
-    // async plugin setup (the wgpu adapter request), then run `finish` /
-    // `cleanup`, which insert late resources like `CapturedScreenshots`.
-    while app.plugins_state() == PluginsState::Adding {
-        bevy::tasks::tick_global_task_pools_on_main_thread();
-    }
-    app.finish();
-    app.cleanup();
-    app
 }
 
 fn drive(
@@ -133,24 +84,19 @@ fn drive(
 #[test]
 fn one_inning_game_plays_to_completion() {
     let mut app = headless_app();
+    app.init_resource::<Driver>();
+    app.add_systems(DriveGame, drive);
 
-    let mut frames: u64 = 0;
-    while frames < MAX_FRAMES {
-        app.update();
-        frames += 1;
-        if *app.world().resource::<State<GameState>>().get() == GameState::GameOver {
-            break;
-        }
-    }
+    let finished = run_until(&mut app, MAX_FRAMES, |app| {
+        *app.world().resource::<State<GameState>>().get() == GameState::GameOver
+    });
 
-    let state = app.world().resource::<State<GameState>>().get().clone();
     let score = app.world().resource::<ScoreBoard>();
     let rules = app.world().resource::<Ruleset>();
 
-    assert_eq!(
-        state,
-        GameState::GameOver,
-        "game never finished ({frames} frames; inning {} top={} {}-{} outs={} balls={} strikes={})",
+    assert!(
+        finished.is_some(),
+        "game never finished (inning {} top={} {}-{} outs={} balls={} strikes={})",
         score.inning,
         score.top_of_inning,
         score.away_runs,
