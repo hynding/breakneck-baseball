@@ -5,9 +5,7 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
-mod game;
-
-use game::GamePlugin;
+use breakneck_baseball::game::GamePlugin;
 
 fn main() {
     App::new()

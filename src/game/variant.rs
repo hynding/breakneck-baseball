@@ -10,7 +10,7 @@
 use bevy::math::Vec3;
 use bevy::prelude::Resource;
 
-use crate::game::field::{BASE_DISTANCE, PITCH_DISTANCE};
+use crate::game::field::{HALF_DIAGONAL, PITCH_DISTANCE};
 
 /// Countable-rule knobs read by the rules engine and game flow.
 #[derive(Resource, Clone, Debug)]
@@ -26,6 +26,18 @@ pub struct Ruleset {
     /// Whether a batted ball landing near a fielder pegs the runner out
     /// (front-yard rules: outs by hitting the runner with the ball).
     pub peg_outs: bool,
+}
+
+/// Menu-selectable regulation game lengths.
+pub const INNINGS_OPTIONS: [u32; 4] = [1, 3, 6, 9];
+
+/// The next game-length option in the menu cycle (wraps; values not in the
+/// list restart it).
+pub fn next_innings(current: u32) -> u32 {
+    match INNINGS_OPTIONS.iter().position(|&n| n == current) {
+        Some(i) => INNINGS_OPTIONS[(i + 1) % INNINGS_OPTIONS.len()],
+        None => INNINGS_OPTIONS[0],
+    }
 }
 
 /// Field geometry and personnel. Home plate is implicitly at the origin.
@@ -129,10 +141,13 @@ impl VariantId {
     pub fn field(self) -> FieldSpec {
         match self {
             VariantId::Standard => FieldSpec {
+                // Regulation diamond: 90 ft base paths mean each bag sits
+                // HALF_DIAGONAL (27.43/√2 m) off-axis — matching the dirt
+                // infield drawn in `field.rs`.
                 base_positions: vec![
-                    Vec3::new(BASE_DISTANCE, 0.0, BASE_DISTANCE),
-                    Vec3::new(0.0, 0.0, BASE_DISTANCE * 2.0),
-                    Vec3::new(-BASE_DISTANCE, 0.0, BASE_DISTANCE),
+                    Vec3::new(HALF_DIAGONAL, 0.0, HALF_DIAGONAL),
+                    Vec3::new(0.0, 0.0, HALF_DIAGONAL * 2.0),
+                    Vec3::new(-HALF_DIAGONAL, 0.0, HALF_DIAGONAL),
                 ],
                 pitch_distance: PITCH_DISTANCE,
                 fair_half_angle: std::f32::consts::FRAC_PI_4,
@@ -142,10 +157,10 @@ impl VariantId {
                 peg_radius: 0.0,
                 fielder_positions: vec![
                     Vec3::new(0.0, 0.0, -1.5), // catcher
-                    Vec3::new(BASE_DISTANCE, 0.0, BASE_DISTANCE - 3.0),
-                    Vec3::new(7.0, 0.0, BASE_DISTANCE * 2.0 - 3.0),
-                    Vec3::new(-7.0, 0.0, BASE_DISTANCE * 2.0 - 3.0),
-                    Vec3::new(-BASE_DISTANCE, 0.0, BASE_DISTANCE - 3.0),
+                    Vec3::new(HALF_DIAGONAL, 0.0, HALF_DIAGONAL - 3.0),
+                    Vec3::new(7.0, 0.0, HALF_DIAGONAL * 2.0 - 3.0),
+                    Vec3::new(-7.0, 0.0, HALF_DIAGONAL * 2.0 - 3.0),
+                    Vec3::new(-HALF_DIAGONAL, 0.0, HALF_DIAGONAL - 3.0),
                     Vec3::new(-40.0, 0.0, 85.0), // left field
                     Vec3::new(0.0, 0.0, 110.0),  // centre field
                     Vec3::new(40.0, 0.0, 85.0),  // right field
@@ -194,6 +209,7 @@ impl VariantId {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::field::BASE_DISTANCE;
 
     #[test]
     fn standard_matches_regulation_baseball() {
@@ -211,8 +227,14 @@ mod tests {
         assert_eq!(f.base_count(), 3);
         assert_eq!(f.pitch_distance, 18.44);
         assert_eq!(f.scenery, Scenery::Stadium);
-        // Second base straight out along +Z at the diamond diagonal.
-        assert!((f.base_positions[1] - Vec3::new(0.0, 0.0, 54.86)).length() < 0.01);
+        // First base is 90 ft (27.43 m) from home, and every base path is 90 ft.
+        assert!((f.base_positions[0].length() - BASE_DISTANCE).abs() < 0.01);
+        for pair in f.base_positions.windows(2) {
+            assert!(((pair[1] - pair[0]).length() - BASE_DISTANCE).abs() < 0.01);
+        }
+        // Second base straight out along +Z at the full diamond diagonal
+        // (127 ft 3 3/8 in ≈ 38.79 m).
+        assert!((f.base_positions[1] - Vec3::new(0.0, 0.0, 38.79)).length() < 0.01);
     }
 
     #[test]
@@ -224,6 +246,19 @@ mod tests {
         assert_eq!(f.fielder_positions.len(), 3); // + the pitcher = 4-player team
         assert!(f.peg_radius > 0.0);
         assert_eq!(f.scenery, Scenery::FrontYard);
+    }
+
+    #[test]
+    fn innings_options_cycle_and_wrap() {
+        assert_eq!(next_innings(1), 3);
+        assert_eq!(next_innings(3), 6);
+        assert_eq!(next_innings(6), 9);
+        assert_eq!(next_innings(9), 1);
+    }
+
+    #[test]
+    fn unknown_innings_value_restarts_the_cycle() {
+        assert_eq!(next_innings(2), 1);
     }
 
     #[test]

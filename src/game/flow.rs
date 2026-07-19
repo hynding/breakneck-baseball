@@ -24,7 +24,9 @@ use crate::game::animation::{AnimClip, Playing};
 use crate::game::ball::{Baseball, HitEvent, InFlight, PitchEvent};
 use crate::game::input::Intents;
 use crate::game::player::Pitcher;
-use crate::game::rules::{self, BallCall, Bases, OutKind, Outcome, StrikeCall};
+use crate::game::rules::{
+    self, BallCall, Bases, BattingOrder, OutKind, Outcome, StealResult, StrikeCall,
+};
 use crate::game::variant::{FieldSpec, Ruleset};
 use crate::game::{GameState, ScoreBoard};
 
@@ -76,6 +78,12 @@ pub struct Play {
     /// Aim + selected kind stored at windup start, released as the pitch when
     /// the delivery ends.
     pending_pitch: Option<(Vec2, rules::PitchKind)>,
+    /// The kind of the pitch currently in flight (set at release). Drives the
+    /// dropped-third-strike and steal resolutions.
+    live_kind: Option<rules::PitchKind>,
+    /// The batting side sent the lead runner as the delivery started
+    /// (aim held down through the windup).
+    steal_armed: bool,
 }
 
 impl Default for Play {
@@ -86,6 +94,8 @@ impl Default for Play {
             crossing: None,
             resolved: false,
             pending_pitch: None,
+            live_kind: None,
+            steal_armed: false,
         }
     }
 }
@@ -138,6 +148,7 @@ impl Plugin for FlowPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Play>()
             .init_resource::<Bases>()
+            .init_resource::<BattingOrder>()
             .init_resource::<CpuConfig>()
             .init_resource::<CpuState>()
             .add_event::<BallInPlayEvent>()
@@ -163,9 +174,15 @@ impl Plugin for FlowPlugin {
 
 /// Fresh play + base state whenever a game (re)starts. The base count follows
 /// the chosen field.
-fn reset_flow(mut play: ResMut<Play>, mut bases: ResMut<Bases>, field: Res<FieldSpec>) {
+fn reset_flow(
+    mut play: ResMut<Play>,
+    mut bases: ResMut<Bases>,
+    mut order: ResMut<BattingOrder>,
+    field: Res<FieldSpec>,
+) {
     *play = Play::default();
     bases.reset_for(field.base_count());
+    *order = BattingOrder::default();
 }
 
 // ── PrePitch: defense aims and releases ───────────────────────────────────────
@@ -202,10 +219,16 @@ fn wind_up(
     time: Res<Time>,
     mut play: ResMut<Play>,
     field: Res<FieldSpec>,
+    intents: Res<Intents>,
+    score: Res<ScoreBoard>,
     mut pitch_ev: EventWriter<PitchEvent>,
 ) {
     if play.phase != Phase::WindUp {
         return;
+    }
+    // Holding the stick down through the delivery sends the lead runner.
+    if intents.get(score.batting_team()).aim.y < -0.7 {
+        play.steal_armed = true;
     }
     if play.timer.tick(time.delta()).finished() {
         let (aim, kind) = play
@@ -216,6 +239,7 @@ fn wind_up(
             velocity: rules::pitch_velocity_kind(kind, aim, field.pitch_distance),
             spin: kind.spin(),
         });
+        play.live_kind = Some(kind);
         play.phase = Phase::Pitch;
     }
 }
@@ -234,6 +258,7 @@ fn pitch_live(
     mut hit_ev: EventWriter<HitEvent>,
     mut in_play_ev: EventWriter<BallInPlayEvent>,
     mut banner: EventWriter<PlayBanner>,
+    mut order: ResMut<BattingOrder>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     if play.phase != Phase::Pitch || play.resolved {
@@ -249,7 +274,11 @@ fn pitch_live(
         play.crossing = Some(Vec2::new(pos.x, pos.y));
     }
 
-    let intent = intents.get(score.batting_team());
+    // Captured before any resolution can flip the half-inning: the batting
+    // order advances for the team whose batter just finished, not whoever
+    // bats next.
+    let batter = score.batting_team();
+    let intent = intents.get(batter);
 
     if intent.action {
         let reachable =
@@ -258,10 +287,12 @@ fn pitch_live(
             let velocity = rules::hit_velocity(pos.z, intent.aim);
             let outcome = rules::classify_batted_ball(velocity, &field, &rules);
             hit_ev.send(HitEvent { velocity });
-            resolve_contact(outcome, &mut score, &mut bases, &rules, &mut banner);
+            let going = play.steal_armed;
+            resolve_contact(outcome, &mut score, &mut bases, &rules, &mut banner, going);
             if outcome == Outcome::Foul {
                 end_pitch(&mut play);
             } else {
+                order.advance(batter);
                 let (landing, hang_time) = rules::predict_landing(
                     velocity,
                     rules::hit_spin(velocity),
@@ -277,7 +308,18 @@ fn pitch_live(
                 play.resolved = true;
             }
         } else {
-            add_strike(&mut score, &mut bases, &rules, &mut banner, true);
+            // Swinging through a curveball in the dirt with first base open:
+            // the catcher can't hold strike three and the batter runs.
+            let dropped =
+                play.live_kind == Some(rules::PitchKind::Curveball) && !bases.is_occupied(0);
+            let call = add_strike(&mut score, &mut bases, &rules, &mut banner, true, dropped);
+            if call != StrikeCall::Strike {
+                order.advance(batter);
+            }
+            // The catcher has the ball: a sent runner must survive the throw.
+            if play.steal_armed {
+                resolve_steal(&play, &mut score, &mut bases, &rules, &mut banner);
+            }
             end_pitch(&mut play);
         }
         maybe_end_game(&score, &rules, &mut next_state);
@@ -287,10 +329,32 @@ fn pitch_live(
     // No swing: once the ball is well past the plate, judge the take.
     if pos.z < SWING_LATE_Z {
         let cross = play.crossing.unwrap_or(Vec2::new(pos.x, pos.y));
-        if rules::is_in_zone(cross) {
-            add_strike(&mut score, &mut bases, &rules, &mut banner, false);
+        if rules::hits_batter(cross) {
+            // Dead ball: the batter takes first, forced runners move.
+            let runs = rules::hit_by_pitch(&mut score, &mut bases);
+            let tone = if runs > 0 {
+                BannerTone::Epic
+            } else {
+                BannerTone::Good
+            };
+            banner.send(PlayBanner::new("HIT BY PITCH", tone));
+            order.advance(batter);
         } else {
-            add_ball(&mut score, &mut bases, &rules, &mut banner);
+            let (pa_over, walked) = if rules::is_in_zone(cross) {
+                let call = add_strike(&mut score, &mut bases, &rules, &mut banner, false, false);
+                (call != StrikeCall::Strike, false)
+            } else {
+                let walked = add_ball(&mut score, &mut bases, &rules, &mut banner);
+                (walked, walked)
+            };
+            if pa_over {
+                order.advance(batter);
+            }
+            // A walk is a dead ball (runners advance freely); otherwise a
+            // sent runner has to beat the catcher's throw.
+            if play.steal_armed && !walked {
+                resolve_steal(&play, &mut score, &mut bases, &rules, &mut banner);
+            }
         }
         end_pitch(&mut play);
         maybe_end_game(&score, &rules, &mut next_state);
@@ -332,6 +396,8 @@ fn result_phase(
         play.crossing = None;
         play.resolved = false;
         play.pending_pitch = None;
+        play.live_kind = None;
+        play.steal_armed = false;
     }
 }
 
@@ -343,6 +409,7 @@ fn resolve_contact(
     bases: &mut Bases,
     ruleset: &Ruleset,
     banner: &mut EventWriter<PlayBanner>,
+    runners_going: bool,
 ) {
     match outcome {
         Outcome::Foul => {
@@ -350,14 +417,28 @@ fn resolve_contact(
             banner.send(PlayBanner::new("FOUL", BannerTone::Info));
         }
         Outcome::Out(kind) => {
-            let text = match kind {
-                OutKind::Ground => "GROUND OUT",
-                OutKind::Fly => "FLY OUT",
-                OutKind::Pop => "POP OUT",
-                OutKind::Pegged => "PEGGED!",
+            let play = rules::apply_batted_out(score, bases, ruleset, kind, runners_going);
+            let base_text = if play.double_play {
+                "DOUBLE PLAY!"
+            } else if play.doubled_off {
+                "DOUBLED OFF!"
+            } else if play.runs > 0 && matches!(kind, OutKind::Fly { .. }) {
+                "SAC FLY"
+            } else {
+                match kind {
+                    OutKind::Ground => "GROUND OUT",
+                    OutKind::Fly { .. } => "FLY OUT",
+                    OutKind::Pop => "POP OUT",
+                    OutKind::FoulPop => "FOUL POP OUT",
+                    OutKind::Pegged => "PEGGED!",
+                }
+            };
+            let text = if play.runs > 0 {
+                format!("{base_text}  +{}", play.runs)
+            } else {
+                base_text.to_string()
             };
             banner.send(PlayBanner::new(text, BannerTone::Bad));
-            rules::record_out(score, bases, ruleset);
         }
         Outcome::Hit(n) => {
             let label = match n {
@@ -366,7 +447,15 @@ fn resolve_contact(
                 3 => "TRIPLE".to_string(),
                 n => format!("{n} BASES!"),
             };
-            hit(score, bases, banner, n, &label, BannerTone::Good);
+            hit(
+                score,
+                bases,
+                banner,
+                n,
+                &label,
+                BannerTone::Good,
+                runners_going,
+            );
         }
         // A home run is worth one more base than the field has.
         Outcome::HomeRun => {
@@ -378,11 +467,13 @@ fn resolve_contact(
                 bases_worth,
                 "HOME RUN!",
                 BannerTone::Epic,
+                runners_going,
             );
         }
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn hit(
     score: &mut ScoreBoard,
     bases: &mut Bases,
@@ -390,8 +481,9 @@ fn hit(
     hit_bases: u32,
     label: &str,
     tone: BannerTone,
+    jump: bool,
 ) {
-    let runs = rules::apply_hit(score, bases, hit_bases);
+    let runs = rules::apply_hit(score, bases, hit_bases, jump);
     let text = if runs > 0 {
         format!("{label}  +{runs}")
     } else {
@@ -400,19 +492,44 @@ fn hit(
     banner.send(PlayBanner::new(text, tone));
 }
 
+/// Records a taken ball. Returns whether it was ball four (a dead-ball walk,
+/// which pre-empts any steal attempt).
 fn add_ball(
     score: &mut ScoreBoard,
     bases: &mut Bases,
     ruleset: &Ruleset,
     banner: &mut EventWriter<PlayBanner>,
-) {
+) -> bool {
     match rules::call_ball(score, bases, ruleset) {
         BallCall::Walk { .. } => {
             banner.send(PlayBanner::new("WALK", BannerTone::Epic));
+            true
         }
         BallCall::Ball => {
             banner.send(PlayBanner::new("BALL", BannerTone::Info));
+            false
         }
+    }
+}
+
+/// Resolves a sent runner once the catcher has the ball: the jump beats the
+/// throw on off-speed pitches, a fastball cuts the runner down.
+fn resolve_steal(
+    play: &Play,
+    score: &mut ScoreBoard,
+    bases: &mut Bases,
+    ruleset: &Ruleset,
+    banner: &mut EventWriter<PlayBanner>,
+) {
+    let off_speed = play.live_kind != Some(rules::PitchKind::Fastball);
+    match rules::attempt_steal(score, bases, ruleset, off_speed) {
+        StealResult::Stolen { .. } => {
+            banner.send(PlayBanner::new("STOLEN BASE!", BannerTone::Good));
+        }
+        StealResult::Caught => {
+            banner.send(PlayBanner::new("CAUGHT STEALING", BannerTone::Bad));
+        }
+        StealResult::NoRunner => {}
     }
 }
 
@@ -422,8 +539,13 @@ fn add_strike(
     ruleset: &Ruleset,
     banner: &mut EventWriter<PlayBanner>,
     swinging: bool,
-) {
-    match rules::call_strike(score, bases, ruleset) {
+    dropped_third: bool,
+) -> StrikeCall {
+    let call = rules::call_strike(score, bases, ruleset, dropped_third);
+    match call {
+        StrikeCall::DroppedThird => {
+            banner.send(PlayBanner::new("DROPPED 3RD STRIKE!", BannerTone::Good));
+        }
         StrikeCall::Strikeout => {
             banner.send(PlayBanner::new("STRIKEOUT!", BannerTone::Bad));
         }
@@ -434,6 +556,7 @@ fn add_strike(
             banner.send(PlayBanner::new("STRIKE", BannerTone::Info));
         }
     }
+    call
 }
 
 fn maybe_end_game(score: &ScoreBoard, rules: &Ruleset, next_state: &mut NextState<GameState>) {

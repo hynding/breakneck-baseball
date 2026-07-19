@@ -23,7 +23,9 @@ wasm-bindgen --out-dir web/out --target web target/wasm32-unknown-unknown/debug/
 python3 -m http.server --directory web 8080   # serve, then open http://localhost:8080
 ```
 
-There is no test suite yet. For the release web build, use `--profile wasm-release` (size-optimized) and adjust the wasm-bindgen input path to `target/wasm32-unknown-unknown/wasm-release/`.
+`cargo test` runs the unit tests (rules/variant/input/theme, in the lib target) plus headless e2e tests — a scripted 1-inning game to GAME OVER (`tests/e2e_full_game.rs`), staged rule scenarios for HBP/steals/double plays/hit-and-run/dropped third (`tests/e2e_advanced_rules.rs`), and a CPU-driven half-inning (`tests/e2e_cpu.rs`), all sharing the harness in `tests/common/mod.rs` (windowless boot, 240 Hz virtual time, a `DriveGame` schedule that writes `Intents` after `PreUpdate`). Run them after touching flow/rules/menu/input/ai. The crate has both a lib target (`src/lib.rs`, exposes `game` for tests) and the bin. On the menu, **I** cycles game length (1/3/6/9 innings).
+
+For the release web build, use `--profile wasm-release` (size-optimized) and adjust the wasm-bindgen input path to `target/wasm32-unknown-unknown/wasm-release/`.
 
 The `/run-web` skill packages the web build-and-serve workflow.
 
@@ -34,6 +36,8 @@ Bevy 0.15 ECS app with Rapier 3D physics. `src/main.rs` builds the `App` from `D
 `src/game/mod.rs` is the hub: it defines the `GameState` state machine (`MainMenu → Playing → Paused → GameOver`; gameplay systems use `.run_if(in_state(GameState::Playing))`), the `ScoreBoard` resource (innings/balls/strikes/outs shared across systems), and registers the sub-plugins in dependency order (`InputPlugin`, `MenuPlugin`, `FieldPlugin`, `BallPlugin`, `PlayerPlugin`, `AnimationPlugin`, `FlowPlugin`, `FxPlugin`, `FieldingPlugin`, `RunnerPlugin`, `CameraPlugin`, `UiPlugin`).
 
 Game variants are data, not code: `variant.rs` defines `Ruleset` (count thresholds, innings, peg-outs) and `FieldSpec` (base positions, pitch distance, fair wedge, fence, fielder spots, scenery, duel + broadcast camera framing) as resources the menu writes when a game starts. The pure rules in `rules.rs` (unit-tested, no ECS) take them as parameters; `field.rs`/`player.rs`/`ui.rs`/`camera.rs` spawn from them. Home plate is at the world origin with +Z toward the field in every variant. To add a variant, add a `VariantId` arm — don't hardcode baseball facts in systems.
+
+Advanced rules are deterministic (no RNG anywhere in `rules.rs`), keyed off data the engine already computes: tag-ups/sac flies off the fly's `deep` flag, double plays off base state and outs remaining, hit-by-pitch off the plate-crossing point, dropped third strike and steal outcomes off the pitch kind (curveball = in the dirt; fastball = catcher's throw wins), hit-and-run off the windup-held steal flag, and a nine-slot `BattingOrder` per team. The CPU offense calls steals too (one hash-noise decision per windup in `ai.rs`, held through the delivery). Pickoffs are deliberately absent: the analytic model has no leadoffs — runners sit on the bag until the pitch — so there is nothing to pick off.
 
 Presentation is equally data-driven: `theme.rs` defines `Theme` (UI palette, per-team `PlayerTemplate`s, ball styling) with built-ins behind `ThemeId`, cycled on the menu with T. UI reads `Res<Theme>`; `flow.rs` emits `BannerTone`s and never colours. Players are multi-part rigs recoloured to the fielding/batting team on scoreboard changes.
 

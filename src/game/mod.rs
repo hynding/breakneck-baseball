@@ -68,11 +68,27 @@ pub enum GameMode {
 /// The variant's [`variant::Ruleset`] and [`variant::FieldSpec`] resources are
 /// (re)written from `variant` when a game starts; the [`theme::Theme`]
 /// resource is rewritten whenever `theme` is cycled on the menu.
-#[derive(Resource, Debug, Default)]
+#[derive(Resource, Debug)]
 pub struct GameConfig {
     pub mode: GameMode,
     pub variant: VariantId,
     pub theme: ThemeId,
+    /// Regulation innings for the next game; menu-cycled through
+    /// [`variant::INNINGS_OPTIONS`], seeded from the variant's default
+    /// whenever the variant changes.
+    pub innings: u32,
+}
+
+impl Default for GameConfig {
+    fn default() -> Self {
+        let variant = VariantId::default();
+        Self {
+            mode: GameMode::default(),
+            innings: variant.rules().innings,
+            variant,
+            theme: ThemeId::default(),
+        }
+    }
 }
 
 /// Global game-state machine.
@@ -203,5 +219,17 @@ fn reset_scoreboard(mut score: ResMut<ScoreBoard>) {
 fn cleanup_gameplay(mut commands: Commands, query: Query<Entity, With<GameplayEntity>>) {
     for entity in &query {
         commands.entity(entity).despawn_recursive();
+    }
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_innings_follow_the_default_variant() {
+        assert_eq!(GameConfig::default().innings, 9);
     }
 }

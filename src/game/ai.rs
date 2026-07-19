@@ -12,6 +12,7 @@ use crate::game::ball::Baseball;
 use crate::game::flow::Phase;
 use crate::game::flow::Play;
 use crate::game::input::{Controllers, InputSource, Intents};
+use crate::game::rules::{steal_candidate, Bases};
 use crate::game::ScoreBoard;
 
 /// A single knob for opponent difficulty (0.0 = easy, 1.0 = tough).
@@ -33,6 +34,9 @@ pub struct CpuState {
     pitch_delay: Timer,
     /// True once the AI batter has already committed a swing decision this pitch.
     decided_swing: bool,
+    /// Whether the AI offense sends the runner this pitch — decided once at
+    /// the start of the windup and held for the whole delivery.
+    steal_call: Option<bool>,
 }
 
 impl Default for CpuState {
@@ -40,6 +44,7 @@ impl Default for CpuState {
         Self {
             pitch_delay: Timer::from_seconds(0.9, TimerMode::Once),
             decided_swing: false,
+            steal_call: None,
         }
     }
 }
@@ -119,6 +124,7 @@ pub fn cpu_offense(
     cfg: Res<CpuConfig>,
     score: Res<ScoreBoard>,
     play: Res<Play>,
+    bases: Res<Bases>,
     mut cpu: ResMut<CpuState>,
     ball_q: Query<&Transform, With<Baseball>>,
     mut intents: ResMut<Intents>,
@@ -128,10 +134,26 @@ pub fn cpu_offense(
         return;
     }
 
-    // Reset the per-pitch decision at the start of each pitch.
-    if matches!(play.phase, Phase::PrePitch | Phase::WindUp) {
+    // Reset the per-pitch decisions before each delivery.
+    if play.phase == Phase::PrePitch {
         cpu.decided_swing = false;
+        cpu.steal_call = None;
         intents.get_mut(team).action = false;
+        return;
+    }
+    // During the windup the AI occasionally sends the runner — decided once,
+    // then the aim is held down so flow sees the steal armed all delivery.
+    if play.phase == Phase::WindUp {
+        cpu.decided_swing = false;
+        let elapsed = time.elapsed_secs();
+        let send = *cpu.steal_call.get_or_insert_with(|| {
+            steal_candidate(&bases).is_some() && hash01(elapsed * 6.1) < 0.2 + 0.2 * cfg.skill
+        });
+        let intent = intents.get_mut(team);
+        intent.action = false;
+        if send {
+            intent.aim = Vec2::new(0.0, -1.0);
+        }
         return;
     }
     if play.phase != Phase::Pitch || cpu.decided_swing {
