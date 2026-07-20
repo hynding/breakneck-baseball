@@ -7,6 +7,8 @@ use std::time::Duration;
 use bevy::app::{MainScheduleOrder, PluginsState};
 use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::*;
+use bevy::render::settings::{RenderCreation, WgpuSettings};
+use bevy::render::RenderPlugin;
 use bevy::time::TimeUpdateStrategy;
 use bevy::winit::WinitPlugin;
 use bevy_rapier3d::prelude::{NoUserData, RapierPhysicsPlugin};
@@ -30,13 +32,22 @@ pub fn headless_app() -> App {
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
-            // No window and no winit event loop; the GPU adapter still
-            // initializes (surface-less) so the render app and its resources
-            // exist, but nothing is ever presented.
+            // No window, no winit event loop, and no GPU at all: CI runners
+            // have no adapter, so rendering is disabled outright. The
+            // finish()/cleanup() below still runs every plugin's late setup
+            // (e.g. CapturedScreenshots), which is what the main-app render
+            // systems need to no-op safely.
             .set(WindowPlugin {
                 primary_window: None,
                 exit_condition: bevy::window::ExitCondition::DontExit,
                 close_when_requested: false,
+            })
+            .set(RenderPlugin {
+                render_creation: RenderCreation::Automatic(WgpuSettings {
+                    backends: None,
+                    ..default()
+                }),
+                ..default()
             })
             .disable::<WinitPlugin>(),
     )
