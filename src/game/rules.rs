@@ -232,8 +232,9 @@ impl PitchKind {
 /// pitch's character *is* its physics.
 pub fn pitch_velocity_kind(kind: PitchKind, aim: Vec2, pitch_distance: f32) -> Vec3 {
     // Wide enough that a full-inside aim reaches the batter's body — painting
-    // the inside corner risks a hit-by-pitch.
-    let target_x = aim.x * 0.6;
+    // the inside corner risks a hit-by-pitch. Negated: stick-right means
+    // screen-right, which the behind-home camera renders as world −X.
+    let target_x = -aim.x * 0.6;
     let target_y = 1.05 + aim.y * 0.5;
     let speed = kind.speed();
 
@@ -267,10 +268,11 @@ pub fn hit_velocity(contact_z: f32, aim: Vec2) -> Vec3 {
     let speed = 16.0 + 30.0 * quality;
     // Aim sets the intended launch; mistiming skews it toward pop-up / grounder.
     // A neutral swing (aim.y = 0) is a ~19° line drive — the base hit angle;
-    // aiming up trades hittability for home-run power.
+    // aiming up trades hittability for home-run power. Spray is negated so
+    // stick-right pulls toward screen-right (world −X).
     let launch_deg = (6.0 + 26.0 * (aim.y * 0.5 + 0.5) + timing * 8.0).clamp(-8.0, 72.0);
     let launch = launch_deg.to_radians();
-    let spray = (aim.x * 0.6 + timing * 0.05).clamp(-0.95, 0.95);
+    let spray = (-aim.x * 0.6 + timing * 0.05).clamp(-0.95, 0.95);
 
     let horizontal = speed * launch.cos();
     Vec3::new(
@@ -1423,9 +1425,9 @@ mod tests {
 
     #[test]
     fn full_inside_fastball_plunks_the_batter() {
-        // Max inside aim crosses inside the batter's body window; the batter
-        // stands at x ≈ +0.7.
-        let cross = simulate_pitch(PitchKind::Fastball, Vec2::new(1.0, 0.0));
+        // Max inside aim (stick-left: the batter's box is on the +X /
+        // screen-left side) crosses inside the batter's body window.
+        let cross = simulate_pitch(PitchKind::Fastball, Vec2::new(-1.0, 0.0));
         assert!(
             hits_batter(cross),
             "crossing ({:.2}, {:.2}) should hit the batter",

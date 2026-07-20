@@ -143,11 +143,13 @@ impl VariantId {
             VariantId::Standard => FieldSpec {
                 // Regulation diamond: 90 ft base paths mean each bag sits
                 // HALF_DIAGONAL (27.43/√2 m) off-axis — matching the dirt
-                // infield drawn in `field.rs`.
+                // infield drawn in `field.rs`. The behind-home cameras render
+                // world −X on screen-right, so first base lives at −X (the
+                // right-field line as the viewer sees it).
                 base_positions: vec![
-                    Vec3::new(HALF_DIAGONAL, 0.0, HALF_DIAGONAL),
-                    Vec3::new(0.0, 0.0, HALF_DIAGONAL * 2.0),
                     Vec3::new(-HALF_DIAGONAL, 0.0, HALF_DIAGONAL),
+                    Vec3::new(0.0, 0.0, HALF_DIAGONAL * 2.0),
+                    Vec3::new(HALF_DIAGONAL, 0.0, HALF_DIAGONAL),
                 ],
                 pitch_distance: PITCH_DISTANCE,
                 fair_half_angle: std::f32::consts::FRAC_PI_4,
@@ -156,14 +158,14 @@ impl VariantId {
                 hit_scale: 1.0,
                 peg_radius: 0.0,
                 fielder_positions: vec![
-                    Vec3::new(0.0, 0.0, -1.5), // catcher
-                    Vec3::new(HALF_DIAGONAL, 0.0, HALF_DIAGONAL - 3.0),
-                    Vec3::new(7.0, 0.0, HALF_DIAGONAL * 2.0 - 3.0),
-                    Vec3::new(-7.0, 0.0, HALF_DIAGONAL * 2.0 - 3.0),
-                    Vec3::new(-HALF_DIAGONAL, 0.0, HALF_DIAGONAL - 3.0),
-                    Vec3::new(-40.0, 0.0, 85.0), // left field
-                    Vec3::new(0.0, 0.0, 110.0),  // centre field
-                    Vec3::new(40.0, 0.0, 85.0),  // right field
+                    Vec3::new(0.0, 0.0, -1.5),                           // catcher
+                    Vec3::new(-HALF_DIAGONAL, 0.0, HALF_DIAGONAL - 3.0), // first base
+                    Vec3::new(-7.0, 0.0, HALF_DIAGONAL * 2.0 - 3.0),     // second base
+                    Vec3::new(7.0, 0.0, HALF_DIAGONAL * 2.0 - 3.0),      // shortstop
+                    Vec3::new(HALF_DIAGONAL, 0.0, HALF_DIAGONAL - 3.0),  // third base
+                    Vec3::new(40.0, 0.0, 85.0), // left field (screen left = +X)
+                    Vec3::new(0.0, 0.0, 110.0), // centre field
+                    Vec3::new(-40.0, 0.0, 85.0), // right field
                 ],
                 bounds: 220.0,
                 broadcast_eye: Vec3::new(0.0, 13.0, -21.0),
@@ -176,11 +178,13 @@ impl VariantId {
             // strung out over the sidewalks and the neighbours' yards, and a
             // home run means clearing the houses across the street.
             VariantId::FrontYard => FieldSpec {
+                // Running order sweeps screen-right (−X) to screen-left (+X),
+                // mirroring the stadium's first-base-at-−X convention.
                 base_positions: vec![
-                    Vec3::new(8.0, 0.0, 6.0),
-                    Vec3::new(10.0, 0.0, 14.0),
-                    Vec3::new(-10.0, 0.0, 14.0),
                     Vec3::new(-8.0, 0.0, 6.0),
+                    Vec3::new(-10.0, 0.0, 14.0),
+                    Vec3::new(10.0, 0.0, 14.0),
+                    Vec3::new(8.0, 0.0, 6.0),
                 ],
                 pitch_distance: 10.0,
                 fair_half_angle: 55.0_f32.to_radians(),
@@ -235,6 +239,9 @@ mod tests {
         // Second base straight out along +Z at the full diamond diagonal
         // (127 ft 3 3/8 in ≈ 38.79 m).
         assert!((f.base_positions[1] - Vec3::new(0.0, 0.0, 38.79)).length() < 0.01);
+        // Screen convention: the behind-home camera renders −X on screen
+        // right, so first base is at −X and third at +X.
+        assert!(f.base_positions[0].x < 0.0 && f.base_positions[2].x > 0.0);
     }
 
     #[test]

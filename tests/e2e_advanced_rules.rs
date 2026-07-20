@@ -111,19 +111,19 @@ fn drive_scenario(
     let (pitch_aim, arm_steal, swing) = match stage.0 {
         // Top of the 1st: Home pitches to Away.
         // S0: full-inside changeup plunks the batter.
-        0 => (Vec2::new(1.0, 0.0), false, None),
+        0 => (Vec2::new(-1.0, 0.0), false, None),
         // S1: centre changeup; runner sent — off-speed → stolen base.
         1 => (Vec2::ZERO, true, None),
         // S2: high fastball; runner sent — caught stealing.
         2 => (Vec2::new(0.0, 0.6), true, None),
         // S3: plunk the next batter to restock first base.
-        3 => (Vec2::new(1.0, 0.0), false, None),
+        3 => (Vec2::new(-1.0, 0.0), false, None),
         // S4: centre changeup, batter tops a very late weak grounder with a
         // runner on first → inning-ending 6-4-3.
         4 => (Vec2::ZERO, false, Some((-1.2, -0.95, Vec2::ZERO))),
         // Bottom of the 1st: Away pitches to Home.
         // S5: plunk the Home batter.
-        5 => (Vec2::new(1.0, 0.0), false, None),
+        5 => (Vec2::new(-1.0, 0.0), false, None),
         // S6: hit-and-run — runner goes, batter slaps a low single;
         // the jump sends him first-to-third.
         6 => (Vec2::ZERO, true, Some((0.3, 0.8, Vec2::new(0.0, -1.0)))),
