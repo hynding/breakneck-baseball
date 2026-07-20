@@ -9,9 +9,11 @@
 
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
+use bevy_rapier3d::prelude::Velocity;
 
-use crate::game::ball::{Baseball, HitEvent};
+use crate::game::ball::{Baseball, HitEvent, BALL_DRAG_FACTOR, MAGNUS_FACTOR};
 use crate::game::flow::{Phase, Play};
+use crate::game::rules;
 use crate::game::variant::FieldSpec;
 use crate::game::GameState;
 
@@ -79,6 +81,10 @@ impl Default for BroadcastRig {
 /// kick rides through the hit-stop.
 #[derive(Resource, Default)]
 struct CameraKick(Vec3);
+
+/// The live ball as the broadcast camera reads it.
+type BallQuery<'w, 's> =
+    Query<'w, 's, (&'static Transform, &'static Velocity), (With<Baseball>, Without<Camera3d>)>;
 
 fn kick_on_hit(mut hits: EventReader<HitEvent>, mut kick: ResMut<CameraKick>) {
     for _ in hits.read() {
@@ -157,16 +163,43 @@ fn broadcast_camera(
     play: Res<Play>,
     field: Res<FieldSpec>,
     kick: Res<CameraKick>,
-    ball_q: Query<&Transform, (With<Baseball>, Without<Camera3d>)>,
+    ball_q: BallQuery,
     mut rig: ResMut<BroadcastRig>,
     mut cam_q: Query<&mut Transform, With<Camera3d>>,
 ) {
     // Pick the framing the current phase wants.
     let (desired_eye, desired_target) = match (play.phase, ball_q.get_single()) {
-        // Ball is live: the camera chases the ball — the eye slides laterally
-        // with it and pulls up and back as the ball travels deep, so the
-        // whole play (ball, chasing fielder, runners) stays in frame.
-        (Phase::InPlay, Ok(ball)) => {
+        // A live, uncalled play: cut to where the ball is coming down. The
+        // eye stations itself between home and the predicted landing spot —
+        // a medium shot of the drop zone, so the chasing fielder and the
+        // play about to happen are what's framed, not just the ball.
+        (Phase::InPlay, Ok((ball, vel))) if !play.is_resolved() => {
+            // Re-predict from the live ball; as the ball settles this
+            // converges to the ball itself, so the shot lands with the play.
+            let (landing, _) = rules::predict_landing_from(
+                ball.translation,
+                vel.linvel,
+                vel.angvel,
+                BALL_DRAG_FACTOR,
+                MAGNUS_FACTOR,
+            );
+            let focus = Vec3::new(landing.x, 1.0, landing.z);
+            // Keep the ball's flight in the corner of the eye.
+            let target = focus.lerp(ball.translation, 0.3);
+
+            let flat = Vec2::new(focus.x, focus.z);
+            let depth = flat.length();
+            // Not too close: back off along the home→landing line, higher
+            // and further for deeper plays.
+            let back = (depth * 0.45).clamp(12.0, 30.0);
+            let height = (depth * 0.30).clamp(8.0, 18.0);
+            let toward_home = -flat.normalize_or_zero();
+            let eye = focus + Vec3::new(toward_home.x * back, height, toward_home.y * back);
+            (eye, target)
+        }
+        // Called plays (home-run trots): sweep with the ball — the eye
+        // slides laterally and pulls up and back as it travels deep.
+        (Phase::InPlay, Ok((ball, _))) => {
             let target = Vec3::new(
                 ball.translation.x,
                 ball.translation.y.max(1.0),

@@ -94,6 +94,15 @@ pub struct Play {
     contact_at: f32,
 }
 
+impl Play {
+    /// Whether the current play's call has already been made (home runs at
+    /// contact; live balls once [`resolve_live_play`] rules). The camera uses
+    /// this to pick between play-framing and trot-following shots.
+    pub fn is_resolved(&self) -> bool {
+        self.resolved
+    }
+}
+
 impl Default for Play {
     fn default() -> Self {
         Self {
