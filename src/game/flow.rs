@@ -8,13 +8,14 @@
 //!                          \--take/miss--> (count) --> Result --> PrePitch
 //! ```
 //!
-//! All baseball *rules* (batted-ball classification, base running, the count,
-//! game-over) live in [`crate::game::rules`] as pure, unit-tested functions;
-//! this module reads input, drives the phases and timers, and translates rule
-//! results into banners and state transitions. Ball-in-play outcomes are
-//! decided **analytically** at contact (see [`rules::classify_batted_ball`])
-//! rather than by simulating fielders — the arcade convention. The physics
-//! ball still flies for feel, but the box score is deterministic.
+//! All baseball *rules* (base running, the count, game-over, the live-play
+//! races) live in [`crate::game::rules`] as pure, unit-tested functions; this
+//! module reads input, drives the phases and timers, and translates rule
+//! results into banners and state transitions. Contact settles only what
+//! physics settles (a ball over the fence — see [`rules::classify_contact`]);
+//! everything else stays **live**: the fielding simulation reports what
+//! happens on the grass ([`LiveBallEvent`]) and [`resolve_live_play`] turns
+//! those reports into the call via kinematic runner-vs-throw races.
 
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
@@ -43,11 +44,16 @@ const SWING_REACH_X: f32 = 1.8;
 
 /// Seconds the result banner lingers before the next pitch.
 const RESULT_SECS: f32 = 1.2;
-/// The live-ball window: hang time plus room for the fielding choreography,
-/// clamped so grounders don't dawdle and moonshots don't stall the game.
+/// Home-run trot window: hang time plus a little air, clamped.
 const INPLAY_BUFFER: f32 = 1.2;
 const INPLAY_MIN: f32 = 2.2;
 const INPLAY_MAX: f32 = 6.5;
+/// Hard cap on an unresolved live play: hang time plus chase-and-throw room.
+/// If nothing has resolved by then, the play is called from the current ball
+/// state so the game can never stall.
+const LIVE_PLAY_BUFFER: f32 = 5.0;
+const LIVE_PLAY_MIN: f32 = 4.0;
+const LIVE_PLAY_MAX: f32 = 11.0;
 
 // ── Phase state ───────────────────────────────────────────────────────────────
 
@@ -84,6 +90,8 @@ pub struct Play {
     /// The batting side sent the lead runner as the delivery started
     /// (aim held down through the windup).
     steal_armed: bool,
+    /// `Time::elapsed_secs` at contact — the live-play race clock's zero.
+    contact_at: f32,
 }
 
 impl Default for Play {
@@ -96,6 +104,7 @@ impl Default for Play {
             pending_pitch: None,
             live_kind: None,
             steal_armed: false,
+            contact_at: 0.0,
         }
     }
 }
@@ -116,12 +125,26 @@ pub enum BannerTone {
     Epic,
 }
 
-/// Fired once per fair contact: the already-decided outcome plus where the
-/// live ball will come down. Fielder and runner choreography key off this.
+/// Fired once per contact put in play: what physics alone settled (home run
+/// or live ball) plus the predicted landing point. Fielder and runner
+/// choreography key off this — the *call* comes later, from the live play.
 #[derive(Event, Clone, Copy)]
 pub struct BallInPlayEvent {
-    pub outcome: Outcome,
+    pub kind: rules::ContactKind,
     pub landing: Vec3,
+}
+
+/// Physical reports from the fielding simulation. Fielding never touches the
+/// score or bases — it says what happened on the grass, and the rules decide
+/// what it means.
+#[derive(Event, Clone, Copy)]
+pub enum LiveBallEvent {
+    /// Gloved on the fly at `pos` (before the first bounce).
+    Caught { pos: Vec3 },
+    /// First bounce at `pos` — the fair/foul call point.
+    Landed { pos: Vec3 },
+    /// Picked up off the ground at `pos`; the throw races begin.
+    Gathered { pos: Vec3 },
 }
 
 /// A transient on-screen message (e.g. "STRIKE!", "BALL", "HOME RUN!").
@@ -152,6 +175,7 @@ impl Plugin for FlowPlugin {
             .init_resource::<CpuConfig>()
             .init_resource::<CpuState>()
             .add_event::<BallInPlayEvent>()
+            .add_event::<LiveBallEvent>()
             .add_event::<PlayBanner>()
             .add_systems(OnEnter(GameState::Playing), reset_flow)
             .add_systems(
@@ -164,6 +188,7 @@ impl Plugin for FlowPlugin {
                     wind_up,
                     pitch_live,
                     in_play,
+                    resolve_live_play,
                     result_phase,
                 )
                     .chain()
@@ -248,6 +273,7 @@ fn wind_up(
 
 #[allow(clippy::too_many_arguments)]
 fn pitch_live(
+    time: Res<Time>,
     mut play: ResMut<Play>,
     intents: Res<Intents>,
     rules: Res<Ruleset>,
@@ -285,27 +311,45 @@ fn pitch_live(
             pos.z >= SWING_LATE_Z && pos.z <= SWING_EARLY_Z && pos.x.abs() <= SWING_REACH_X;
         if reachable {
             let velocity = rules::hit_velocity(pos.z, intent.aim);
-            let outcome = rules::classify_batted_ball(velocity, &field, &rules);
             hit_ev.send(HitEvent { velocity });
-            let going = play.steal_armed;
-            resolve_contact(outcome, &mut score, &mut bases, &rules, &mut banner, going);
-            if outcome == Outcome::Foul {
-                end_pitch(&mut play);
-            } else {
-                order.advance(batter);
-                let (landing, hang_time) = rules::predict_landing(
-                    velocity,
-                    rules::hit_spin(velocity),
-                    crate::game::ball::BALL_DRAG_FACTOR,
-                    crate::game::ball::MAGNUS_FACTOR,
-                );
-                in_play_ev.send(BallInPlayEvent { outcome, landing });
-                play.phase = Phase::InPlay;
-                play.timer = Timer::from_seconds(
-                    (hang_time + INPLAY_BUFFER).clamp(INPLAY_MIN, INPLAY_MAX),
-                    TimerMode::Once,
-                );
-                play.resolved = true;
+            let (landing, hang_time) = rules::predict_landing(
+                velocity,
+                rules::hit_spin(velocity),
+                crate::game::ball::BALL_DRAG_FACTOR,
+                crate::game::ball::MAGNUS_FACTOR,
+            );
+            let kind = rules::classify_contact(landing, &field);
+            in_play_ev.send(BallInPlayEvent { kind, landing });
+            play.contact_at = time.elapsed_secs();
+            play.phase = Phase::InPlay;
+            match kind {
+                // Only a ball over the fence is settled at contact.
+                rules::ContactKind::HomeRun => {
+                    let going = play.steal_armed;
+                    resolve_contact(
+                        Outcome::HomeRun,
+                        &mut score,
+                        &mut bases,
+                        &rules,
+                        &mut banner,
+                        going,
+                    );
+                    order.advance(batter);
+                    play.timer = Timer::from_seconds(
+                        (hang_time + INPLAY_BUFFER).clamp(INPLAY_MIN, INPLAY_MAX),
+                        TimerMode::Once,
+                    );
+                    play.resolved = true;
+                }
+                // Everything else stays live: the fielders' chase and the
+                // runner races decide the call in `resolve_live_play`.
+                rules::ContactKind::Live { .. } => {
+                    play.timer = Timer::from_seconds(
+                        (hang_time + LIVE_PLAY_BUFFER).clamp(LIVE_PLAY_MIN, LIVE_PLAY_MAX),
+                        TimerMode::Once,
+                    );
+                    play.resolved = false;
+                }
             }
         } else {
             // Swinging through a curveball in the dirt with first base open:
@@ -361,16 +405,97 @@ fn pitch_live(
     }
 }
 
-// ── InPlay: ball flies for feel; outcome was already resolved at contact ──────
+// ── InPlay: the ball is live ──────────────────────────────────────────────────
 
+/// Ticks the play clock. Resolved plays (home runs, or anything already
+/// called by [`resolve_live_play`]) move on to the result pause when the
+/// timer runs out; unresolved plays are force-called by `resolve_live_play`.
 fn in_play(mut play: ResMut<Play>, time: Res<Time>) {
     if play.phase != Phase::InPlay {
         return;
     }
-    if play.timer.tick(time.delta()).finished() {
+    play.timer.tick(time.delta());
+    if play.resolved && play.timer.finished() {
         play.phase = Phase::Result;
         play.timer = Timer::from_seconds(RESULT_SECS, TimerMode::Once);
     }
+}
+
+/// Turns the fielding simulation's physical reports into the umpire's call.
+/// This is where a live ball actually becomes an out, a hit, or a foul —
+/// seconds after contact, from what really happened on the grass.
+#[allow(clippy::too_many_arguments)]
+fn resolve_live_play(
+    time: Res<Time>,
+    mut events: EventReader<LiveBallEvent>,
+    mut play: ResMut<Play>,
+    rules_res: Res<Ruleset>,
+    field: Res<FieldSpec>,
+    mut score: ResMut<ScoreBoard>,
+    mut bases: ResMut<Bases>,
+    mut order: ResMut<BattingOrder>,
+    mut banner: EventWriter<PlayBanner>,
+    ball_q: Query<&Transform, With<Baseball>>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    if play.phase != Phase::InPlay || play.resolved {
+        events.clear();
+        return;
+    }
+
+    // `None` = foul ball; `Some(outcome)` = a completed play.
+    let mut resolution: Option<Option<Outcome>> = None;
+    for ev in events.read() {
+        resolution = match *ev {
+            LiveBallEvent::Caught { pos } => {
+                Some(Some(Outcome::Out(rules::resolve_catch(pos, &field))))
+            }
+            LiveBallEvent::Landed { pos } if !rules::is_fair(pos, &field) => Some(None),
+            // A fair bounce just keeps the play alive.
+            LiveBallEvent::Landed { .. } => continue,
+            LiveBallEvent::Gathered { pos } => {
+                let t = time.elapsed_secs() - play.contact_at;
+                Some(Some(rules::resolve_gathered(pos, t, &field, &rules_res)))
+            }
+        };
+        break;
+    }
+    // Play clock expired with the ball still loose: call it from where the
+    // ball is right now.
+    if resolution.is_none() && play.timer.finished() {
+        let pos = ball_q
+            .get_single()
+            .map(|t| t.translation)
+            .unwrap_or(Vec3::ZERO);
+        let t = time.elapsed_secs() - play.contact_at;
+        resolution = Some(if rules::is_fair(pos, &field) {
+            Some(rules::resolve_gathered(pos, t, &field, &rules_res))
+        } else {
+            None
+        });
+    }
+    let Some(resolved) = resolution else {
+        return;
+    };
+
+    let batter = score.batting_team();
+    let going = play.steal_armed;
+    let outcome = resolved.unwrap_or(Outcome::Foul);
+    resolve_contact(
+        outcome,
+        &mut score,
+        &mut bases,
+        &rules_res,
+        &mut banner,
+        going,
+    );
+    if outcome != Outcome::Foul {
+        order.advance(batter);
+    }
+    play.resolved = true;
+    play.phase = Phase::Result;
+    play.timer = Timer::from_seconds(RESULT_SECS, TimerMode::Once);
+    maybe_end_game(&score, &rules_res, &mut next_state);
 }
 
 // ── Result: brief pause, then reset for the next pitch ────────────────────────

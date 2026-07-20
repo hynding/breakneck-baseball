@@ -6,11 +6,12 @@ use bevy::prelude::*;
 use crate::game::animation::MoveIntent;
 use crate::game::flow::{BallInPlayEvent, Phase, Play};
 use crate::game::player::{spawn_rig, Batter, RigMeshes, RigUnit, TeamPalette};
-use crate::game::rules::{Bases, Outcome};
+use crate::game::rules::{Bases, ContactKind};
 use crate::game::variant::FieldSpec;
 use crate::game::{GameState, ScoreBoard};
 
-const RUN_SPEED: f32 = 6.0;
+/// Matches `rules::RUNNER_SPEED` so the rigs arrive when the umpire says.
+const RUN_SPEED: f32 = crate::game::rules::RUNNER_SPEED;
 /// Rig-root height above the base pad.
 const RIG_Y: f32 = 0.6;
 /// Where a new runner starts (the batter's box).
@@ -32,6 +33,12 @@ struct BasePath {
 /// Despawn the rig when its path is exhausted (scored / cleared / ghost run).
 #[derive(Component)]
 struct DespawnAtPathEnd;
+
+/// The batter running out a live ball whose call hasn't come yet. If the
+/// resolution puts the batter on base, [`sync_runners`] adopts this rig's
+/// position so the runner doesn't teleport back to the plate.
+#[derive(Component)]
+struct BatterGhost;
 
 fn base_pos(field: &FieldSpec, base: usize) -> Vec3 {
     field.base_positions[base] + Vec3::Y * RIG_Y
@@ -79,6 +86,7 @@ fn advance_paths(
 /// Mirrors `Bases` after every change: existing runners advance (greedy,
 /// most-advanced first), a new runner appears for the batter's base, and
 /// leftovers (scored, or wiped by a half-inning flip) run home and leave.
+#[allow(clippy::too_many_arguments)]
 fn sync_runners(
     bases: Res<Bases>,
     field: Res<FieldSpec>,
@@ -86,6 +94,7 @@ fn sync_runners(
     rig_meshes: Option<Res<RigMeshes>>,
     palette: Option<Res<TeamPalette>>,
     mut runners: Query<(Entity, &mut Runner)>,
+    ghosts: Query<(Entity, &Transform), With<BatterGhost>>,
     mut commands: Commands,
 ) {
     if !bases.is_changed() {
@@ -121,15 +130,20 @@ fn sync_runners(
         }
     }
 
-    // The batter reaching base: spawn a fresh runner at the plate.
+    // The batter reaching base: spawn a fresh runner — from wherever the
+    // run-out ghost already got to, if one is still on the basepath.
     for target in unmatched {
+        let start = ghosts.iter().next().map_or(PLATE_START, |(ghost, tf)| {
+            commands.entity(ghost).despawn_recursive();
+            tf.translation
+        });
         let mats = palette.for_team(score.batting_team());
         let entity = spawn_rig(
             &mut commands,
             &rig_meshes,
             RigUnit::Batter,
             mats,
-            PLATE_START,
+            start,
             1.0,
         );
         commands.entity(entity).insert((
@@ -178,18 +192,18 @@ fn batter_runs(
             *visibility = Visibility::Hidden;
         }
 
-        let waypoints = match ev.outcome {
-            // Run through first, then peel off.
-            Outcome::Out(_) => path_between(&field, None, 0),
+        let (waypoints, ghost) = match ev.kind {
             // The trot: every base, then home.
-            Outcome::HomeRun => {
+            ContactKind::HomeRun => {
                 let mut wp: Vec<Vec3> = (0..field.base_count())
                     .map(|b| base_pos(&field, b))
                     .collect();
                 wp.push(Vec3::new(0.0, RIG_Y, 0.0));
-                wp
+                (wp, false)
             }
-            _ => continue,
+            // A live fair ball: run it out — nobody knows the call yet.
+            ContactKind::Live { fair: true } => (path_between(&field, None, 0), true),
+            ContactKind::Live { fair: false } => continue,
         };
 
         let mats = palette.for_team(score.batting_team());
@@ -204,6 +218,9 @@ fn batter_runs(
         commands
             .entity(entity)
             .insert((BasePath { waypoints, next: 0 }, DespawnAtPathEnd));
+        if ghost {
+            commands.entity(entity).insert(BatterGhost);
+        }
     }
 }
 

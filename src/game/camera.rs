@@ -163,16 +163,22 @@ fn broadcast_camera(
 ) {
     // Pick the framing the current phase wants.
     let (desired_eye, desired_target) = match (play.phase, ball_q.get_single()) {
-        // Ball is live: wide framing following the ball, with the eye pulled
-        // back a little for deep balls so home runs stay in frame.
+        // Ball is live: the camera chases the ball — the eye slides laterally
+        // with it and pulls up and back as the ball travels deep, so the
+        // whole play (ball, chasing fielder, runners) stays in frame.
         (Phase::InPlay, Ok(ball)) => {
             let target = Vec3::new(
                 ball.translation.x,
                 ball.translation.y.max(1.0),
                 ball.translation.z,
             );
-            let extra = ((rig.target.z - field.broadcast_target.z) * 0.12).clamp(0.0, 14.0);
-            let eye = field.broadcast_eye + Vec3::new(0.0, extra * 0.5, -extra);
+            let depth = (ball.translation.z * 0.18).clamp(0.0, 22.0);
+            let eye = field.broadcast_eye
+                + Vec3::new(
+                    ball.translation.x * 0.4,
+                    depth * 0.6 + ball.translation.y * 0.15,
+                    -depth,
+                );
             (eye, target)
         }
         // Result pause: settle on the wide home framing.

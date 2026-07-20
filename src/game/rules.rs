@@ -20,13 +20,6 @@ use crate::game::{ScoreBoard, Team};
 pub const GRAVITY: f32 = 9.81;
 /// Approximate batted-ball contact height (metres).
 const CONTACT_HEIGHT: f32 = 0.6;
-/// Scale applied to the drag-free projectile range when predicting where a
-/// batted ball lands. Aerodynamic drag accounts for only part of this (at
-/// arcade exit speeds `ball::BALL_DRAG_FACTOR` costs ~5-10% of range); the rest
-/// is deliberate balance tuning so the hit/out distance bands in
-/// [`classify_batted_ball`] produce an arcade-appropriate out-rate. The
-/// classifier tests below lock in the resulting bands — retune them together.
-const DRAG_RANGE_FACTOR: f32 = 0.73;
 
 /// Nominal fastball speed (m/s) — roughly 85 mph.
 pub const PITCH_SPEED: f32 = 38.0;
@@ -37,13 +30,31 @@ const ZONE_HALF_WIDTH: f32 = 0.34;
 const ZONE_LOW: f32 = 0.5;
 const ZONE_HIGH: f32 = 1.45;
 
-/// Maximum launch angle (degrees) at which a fielder can play a ball on the
-/// hop and peg the runner. Steeper balls are governed by the catch bands.
-const PEG_MAX_LAUNCH_DEG: f32 = 20.0;
-
 /// A caught fly at least this far out (scaled by [`FieldSpec::hit_scale`])
 /// gives runners time to tag up and advance.
 const TAG_UP_MIN_DIST: f32 = 65.0;
+
+// ── Live-play race constants ──────────────────────────────────────────────────
+// The outcome of a ball in play is decided *during* the play by kinematic
+// races between the live simulation and these speeds — never at contact.
+
+/// Base-runner sprint speed (m/s) — shared with the runner rigs so the
+/// animation and the umpire agree.
+pub const RUNNER_SPEED: f32 = 7.5;
+/// Fielder sprint speed — matches the fielding choreography's chase speed.
+pub const FIELDER_SPEED: f32 = 7.0;
+/// First-step reaction delay for fielders and runners alike.
+const REACTION: f32 = 0.35;
+/// Throw flight speed and glove-to-hand transfer time.
+const THROW_FLIGHT_SPEED: f32 = 27.0;
+const THROW_TRANSFER: f32 = 0.5;
+/// Bang-bang margin: ties and near-ties go to the runner.
+const RUNNER_MARGIN: f32 = 0.35;
+/// Gathers beyond this radius (scaled by hit_scale) concede first base — the
+/// out at first is only contested on infield balls.
+const INFIELD_GATHER_RADIUS: f32 = 30.0;
+/// A catch closer to home than this (scaled) is an infield pop.
+const POP_RADIUS: f32 = 30.0;
 
 /// Where the ball rests before each pitch (top of the mound / rubber).
 pub fn mound_reset_pos(pitch_distance: f32) -> Vec3 {
@@ -308,79 +319,116 @@ pub fn hit_by_pitch(score: &mut ScoreBoard, bases: &mut Bases) -> u32 {
     runs
 }
 
-// ── Batted-ball classification ────────────────────────────────────────────────
+// ── Live-play resolution ──────────────────────────────────────────────────────
 
-/// Classifies a batted ball from its launch velocity by predicting where it
-/// lands (drag-free projectile range scaled by [`DRAG_RANGE_FACTOR`]) on the
-/// given field. The distance bands that decide out/hit tiers scale with
-/// [`FieldSpec::hit_scale`] so small parks keep the same arcade balance.
-pub fn classify_batted_ball(vel: Vec3, field: &FieldSpec, rules: &Ruleset) -> Outcome {
-    // Time to return to ground from the contact height.
-    let disc = vel.y * vel.y + 2.0 * GRAVITY * CONTACT_HEIGHT;
-    let t = (vel.y + disc.sqrt()) / GRAVITY;
+/// Is a ground position in fair territory (the wedge opening toward +Z)?
+pub fn is_fair(pos: Vec3, field: &FieldSpec) -> bool {
+    pos.z > 1.0 && pos.x.abs() <= pos.z * field.fair_half_angle.tan() + 0.01
+}
 
-    let land = Vec3::new(vel.x, 0.0, vel.z) * t * DRAG_RANGE_FACTOR;
-    let dist = land.length();
+/// What contact alone settles. Everything except a ball over the fence stays
+/// live: the fielders' chase and the runner races decide the rest during the
+/// play, not at the crack of the bat.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ContactKind {
+    HomeRun,
+    Live {
+        /// Whether the *predicted* landing is fair — cosmetic hint only; the
+        /// actual call comes from where the ball really comes down.
+        fair: bool,
+    },
+}
 
-    // Fair territory is the wedge opening toward +Z with the field's half-angle.
-    let fair = land.z > 1.0 && land.x.abs() <= land.z * field.fair_half_angle.tan() + 0.01;
-
-    let speed = vel.length().max(0.001);
-    let launch_deg = (vel.y / speed).asin().to_degrees();
-    let s = field.hit_scale;
-
-    // Towering infield pop-ups are caught, fair or foul.
-    if launch_deg > 50.0 && dist < 55.0 * s {
-        return Outcome::Out(if fair { OutKind::Pop } else { OutKind::FoulPop });
+/// Classifies contact from the live-model predicted `landing` point (see
+/// [`predict_landing`]).
+pub fn classify_contact(landing: Vec3, field: &FieldSpec) -> ContactKind {
+    let fair = is_fair(landing, field);
+    let dist = Vec2::new(landing.x, landing.z).length();
+    if fair && dist > fence_at(landing, dist, field) {
+        return ContactKind::HomeRun;
     }
-    if !fair {
-        return Outcome::Foul;
-    }
+    ContactKind::Live { fair }
+}
 
-    // Radial fence, interpolated from the lines to straightaway centre.
+/// Radial fence distance in the direction of `pos`, interpolated from the
+/// foul lines to straightaway centre.
+fn fence_at(pos: Vec3, dist: f32, field: &FieldSpec) -> f32 {
     let cos_half = field.fair_half_angle.cos();
-    let centeredness = (((land.z / dist) - cos_half) / (1.0 - cos_half)).clamp(0.0, 1.0);
-    let fence = field.fence_line + (field.fence_center - field.fence_line) * centeredness;
+    let centeredness = (((pos.z / dist.max(0.001)) - cos_half) / (1.0 - cos_half)).clamp(0.0, 1.0);
+    field.fence_line + (field.fence_center - field.fence_line) * centeredness
+}
 
-    if dist > fence {
-        return Outcome::HomeRun;
+/// Time for a fielder at `from` to reach `landing`, first step included.
+pub fn catch_time(from: Vec3, landing: Vec3) -> f32 {
+    REACTION + Vec2::new(landing.x - from.x, landing.z - from.z).length() / FIELDER_SPEED
+}
+
+/// The fielder (index into `fielders`) best placed to catch a ball landing at
+/// `landing` after `hang` seconds — `None` if nobody can make it.
+pub fn best_catcher(fielders: &[Vec3], landing: Vec3, hang: f32) -> Option<usize> {
+    fielders
+        .iter()
+        .enumerate()
+        .map(|(i, f)| (i, catch_time(*f, landing)))
+        .filter(|(_, t)| *t <= hang)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(i, _)| i)
+}
+
+/// The out recorded when the ball is caught on the fly at `pos`.
+pub fn resolve_catch(pos: Vec3, field: &FieldSpec) -> OutKind {
+    if !is_fair(pos, field) {
+        return OutKind::FoulPop;
     }
-
-    // Front-yard rules: a low ball landing next to a defender (the pitcher
-    // counts too) is played on the hop and thrown at the runner — pegged out.
-    // Hitting it right at someone is the cardinal sin of street ball.
-    if rules.peg_outs && launch_deg < PEG_MAX_LAUNCH_DEG {
-        let pitcher = Vec3::new(0.0, 0.0, field.pitch_distance);
-        let pegged = std::iter::once(&pitcher)
-            .chain(field.fielder_positions.iter())
-            .any(|p| Vec2::new(land.x - p.x, land.z - p.z).length() < field.peg_radius);
-        if pegged {
-            return Outcome::Out(OutKind::Pegged);
+    let dist = Vec2::new(pos.x, pos.z).length();
+    let s = field.hit_scale;
+    if dist < POP_RADIUS * s {
+        OutKind::Pop
+    } else {
+        OutKind::Fly {
+            deep: dist >= TAG_UP_MIN_DIST * s,
         }
     }
+}
 
-    // Most fly balls are run down by the defense; only the deepest drives to
-    // the gaps fall in for extra bases, and the very deepest clear the fence
-    // (handled above). Catching routine flies is what keeps the out-rate — and
-    // therefore inning pace — in line with arcade baseball.
-    if launch_deg > 20.0 && dist < 95.0 * s {
-        return Outcome::Out(OutKind::Fly {
-            deep: dist >= TAG_UP_MIN_DIST * s,
+/// The batter-vs-throw race once a fair ball is gathered at `pos`,
+/// `gather_time` seconds after contact. Infield gathers contest the out at
+/// first; deeper gathers concede it (nobody throws a clean outfield single to
+/// first) and the batter stretches for every extra base the throw can't beat.
+pub fn resolve_gathered(
+    pos: Vec3,
+    gather_time: f32,
+    field: &FieldSpec,
+    rules: &Ruleset,
+) -> Outcome {
+    let leg = field.base_positions.first().map_or(27.43, |b| b.length());
+    let runner_at = |base: usize| REACTION + leg * base as f32 / RUNNER_SPEED;
+    let throw_at = |target: Vec3| {
+        gather_time
+            + THROW_TRANSFER
+            + Vec2::new(target.x - pos.x, target.z - pos.z).length() / THROW_FLIGHT_SPEED
+    };
+    let safe = |base: usize| {
+        field
+            .base_positions
+            .get(base - 1)
+            .is_some_and(|bp| runner_at(base) <= throw_at(*bp) + RUNNER_MARGIN)
+    };
+
+    let from_home = Vec2::new(pos.x, pos.z).length();
+    if from_home < INFIELD_GATHER_RADIUS * field.hit_scale && !safe(1) {
+        // Beaten to the bag (or, on the front lawn, beaned on the way).
+        return Outcome::Out(if rules.peg_outs {
+            OutKind::Pegged
+        } else {
+            OutKind::Ground
         });
     }
-    // Weakly-topped balls are fielded in the infield.
-    if dist < 26.0 * s {
-        return Outcome::Out(OutKind::Ground);
+    let mut bases = 1;
+    while bases < field.base_count() && safe(bases + 1) {
+        bases += 1;
     }
-    // Line drives (and deep gap flies) split the field by depth; fields with
-    // more bases add a deeper tier per extra base.
-    let mut hit = 1u32;
-    let mut boundary = 44.0 * s;
-    while (hit as usize) < field.base_count() && dist >= boundary {
-        hit += 1;
-        boundary += 24.0 * s;
-    }
-    Outcome::Hit(hit)
+    Outcome::Hit(bases as u32)
 }
 
 /// Numerically integrates a batted ball's flight from contact height with the
@@ -389,7 +437,25 @@ pub fn classify_batted_ball(vel: Vec3, field: &FieldSpec, rules: &Ruleset) -> Ou
 /// This is what fielder choreography chases — the *visual* ball's touchdown,
 /// not the balance-tuned range in [`classify_batted_ball`].
 pub fn predict_landing(vel: Vec3, spin: Vec3, drag_factor: f32, magnus_factor: f32) -> (Vec3, f32) {
-    let mut pos = Vec3::new(0.0, CONTACT_HEIGHT, 0.0);
+    predict_landing_from(
+        Vec3::new(0.0, CONTACT_HEIGHT, 0.0),
+        vel,
+        spin,
+        drag_factor,
+        magnus_factor,
+    )
+}
+
+/// [`predict_landing`] from an arbitrary mid-flight state — what a chasing
+/// fielder re-plans against every frame as the live ball bends.
+pub fn predict_landing_from(
+    start: Vec3,
+    vel: Vec3,
+    spin: Vec3,
+    drag_factor: f32,
+    magnus_factor: f32,
+) -> (Vec3, f32) {
+    let mut pos = start;
     let mut v = vel;
     let dt = 1.0 / 120.0;
     let mut t = 0.0;
@@ -1214,103 +1280,132 @@ mod tests {
     }
 
     #[test]
-    fn home_run_classifies_as_home_run() {
-        // Straightaway centre, ~30° launch, high exit speed.
+    fn deep_drive_over_the_fence_is_a_home_run() {
+        let vel = vel_at(32.0, 50.0);
+        let (landing, _) = predict_landing(
+            vel,
+            hit_spin(vel),
+            BALL_DRAG_FACTOR,
+            crate::game::ball::MAGNUS_FACTOR,
+        );
         assert_eq!(
-            classify_batted_ball(vel_at(30.0, 46.0), &std_field(), &std_rules()),
-            Outcome::HomeRun
+            classify_contact(landing, &std_field()),
+            ContactKind::HomeRun
         );
     }
 
     #[test]
-    fn straight_up_is_a_pop_out() {
-        let vel = Vec3::new(0.0, 20.0, 2.0);
-        assert!(matches!(
-            classify_batted_ball(vel, &std_field(), &std_rules()),
-            Outcome::Out(_)
-        ));
-    }
-
-    #[test]
-    fn routine_fly_ball_is_caught() {
-        // ~30° at a moderate exit speed: a can-of-corn fly, not deep enough to fall.
-        assert!(matches!(
-            classify_batted_ball(vel_at(30.0, 30.0), &std_field(), &std_rules()),
-            Outcome::Out(OutKind::Fly { .. })
-        ));
-    }
-
-    #[test]
-    fn solid_line_drive_is_a_hit() {
-        // ~15° liner splits the field for a base hit.
-        assert!(matches!(
-            classify_batted_ball(vel_at(15.0, 34.0), &std_field(), &std_rules()),
-            Outcome::Hit(1..=3)
-        ));
-    }
-
-    #[test]
-    fn steep_foul_pop_is_caught() {
-        // A towering pop sprayed well outside the wedge: caught anyway.
+    fn balls_short_of_the_fence_stay_live() {
+        let vel = vel_at(30.0, 30.0);
+        let (landing, _) = predict_landing(
+            vel,
+            hit_spin(vel),
+            BALL_DRAG_FACTOR,
+            crate::game::ball::MAGNUS_FACTOR,
+        );
         assert_eq!(
-            classify_batted_ball(vel_spray(60.0, 14.0, 60.0), &std_field(), &std_rules()),
-            Outcome::Out(OutKind::FoulPop)
+            classify_contact(landing, &std_field()),
+            ContactKind::Live { fair: true }
         );
     }
 
     #[test]
-    fn pulled_way_foul_is_foul() {
+    fn pulled_way_foul_projects_foul() {
         // Mostly sideways: |x| > z → outside the standard 45° fair wedge.
-        let vel = Vec3::new(30.0, 8.0, 5.0);
+        let (landing, _) = predict_landing(Vec3::new(30.0, 8.0, 5.0), Vec3::ZERO, 0.0, 0.0);
         assert_eq!(
-            classify_batted_ball(vel, &std_field(), &std_rules()),
-            Outcome::Foul
+            classify_contact(landing, &std_field()),
+            ContactKind::Live { fair: false }
         );
     }
 
-    // ── Front-yard classification ─────────────────────────────────────────────
+    // ── Live-play races ───────────────────────────────────────────────────────
+
+    #[test]
+    fn routine_fly_gets_run_down() {
+        // A can-of-corn to shallow centre hangs ~3 s; the middle infield
+        // reaches it with time to spare.
+        let f = std_field();
+        assert!(best_catcher(&f.fielder_positions, Vec3::new(0.0, 0.0, 44.0), 3.0).is_some());
+    }
+
+    #[test]
+    fn sinking_liner_falls_in() {
+        // A liner dying at 55 m hangs ~1.5 s: nobody can get there.
+        let f = std_field();
+        assert!(best_catcher(&f.fielder_positions, Vec3::new(0.0, 0.0, 55.0), 1.5).is_none());
+    }
+
+    #[test]
+    fn catches_map_to_pop_fly_and_foul_pop() {
+        let f = std_field();
+        assert_eq!(resolve_catch(Vec3::new(0.0, 0.0, 12.0), &f), OutKind::Pop);
+        assert_eq!(
+            resolve_catch(Vec3::new(0.0, 0.0, 50.0), &f),
+            OutKind::Fly { deep: false }
+        );
+        assert_eq!(
+            resolve_catch(Vec3::new(0.0, 0.0, 80.0), &f),
+            OutKind::Fly { deep: true }
+        );
+        assert_eq!(
+            resolve_catch(Vec3::new(-30.0, 0.0, 10.0), &f),
+            OutKind::FoulPop
+        );
+    }
+
+    #[test]
+    fn quick_infield_gather_beats_the_batter() {
+        assert_eq!(
+            resolve_gathered(Vec3::new(0.0, 0.0, 7.0), 1.2, &std_field(), &std_rules()),
+            Outcome::Out(OutKind::Ground)
+        );
+    }
+
+    #[test]
+    fn slow_infield_gather_is_an_infield_single() {
+        assert_eq!(
+            resolve_gathered(Vec3::new(0.0, 0.0, 26.0), 3.0, &std_field(), &std_rules()),
+            Outcome::Hit(1)
+        );
+    }
+
+    #[test]
+    fn shallow_outfield_gather_concedes_a_single() {
+        assert_eq!(
+            resolve_gathered(Vec3::new(0.0, 0.0, 35.0), 2.6, &std_field(), &std_rules()),
+            Outcome::Hit(1)
+        );
+    }
+
+    #[test]
+    fn deep_gap_gather_is_a_double() {
+        assert_eq!(
+            resolve_gathered(Vec3::new(50.0, 0.0, 95.0), 5.8, &std_field(), &std_rules()),
+            Outcome::Hit(2)
+        );
+    }
+
+    #[test]
+    fn ball_to_the_wall_is_a_triple() {
+        assert_eq!(
+            resolve_gathered(Vec3::new(0.0, 0.0, 120.0), 7.5, &std_field(), &std_rules()),
+            Outcome::Hit(3)
+        );
+    }
+
+    // ── Front-yard live play ──────────────────────────────────────────────────
 
     fn yard() -> (FieldSpec, Ruleset) {
         (VariantId::FrontYard.field(), VariantId::FrontYard.rules())
     }
 
     #[test]
-    fn peg_out_low_liner_lands_near_fielder() {
+    fn front_yard_infield_out_is_a_peg() {
         let (f, r) = yard();
-        // A flat ~10° liner up the middle lands a couple of metres from the
-        // mid-yard pitcher — beaned.
         assert_eq!(
-            classify_batted_ball(vel_at(10.0, 20.0), &f, &r),
+            resolve_gathered(Vec3::new(0.0, 0.0, 4.0), 0.4, &f, &r),
             Outcome::Out(OutKind::Pegged)
-        );
-    }
-
-    #[test]
-    fn same_ball_without_peg_rule_is_a_hit() {
-        let (f, mut r) = yard();
-        r.peg_outs = false;
-        assert!(matches!(
-            classify_batted_ball(vel_at(10.0, 20.0), &f, &r),
-            Outcome::Hit(_)
-        ));
-    }
-
-    #[test]
-    fn high_fly_over_fielder_is_not_pegged() {
-        let (f, r) = yard();
-        // Steep flies are governed by the catch bands, never the peg rule.
-        let out = classify_batted_ball(vel_at(45.0, 16.0), &f, &r);
-        assert!(!matches!(out, Outcome::Out(OutKind::Pegged)));
-    }
-
-    #[test]
-    fn four_base_field_can_yield_hit_four() {
-        let (f, r) = yard();
-        // A hard low liner into the right-field gap: deep enough for the
-        // fourth tier, far from every fielder, under the fence.
-        assert_eq!(
-            classify_batted_ball(vel_spray(15.0, 33.0, 30.0), &f, &r),
-            Outcome::Hit(4)
         );
     }
 
