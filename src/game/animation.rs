@@ -111,6 +111,12 @@ pub struct MoveIntent {
     pub speed: f32,
 }
 
+/// A rig root's resting height, captured at spawn — the reference the
+/// sampler's root-drop channel offsets from (crouches and scoops actually
+/// lower the body) and [`settle_removed`] restores.
+#[derive(Component)]
+pub struct RigBaseY(pub f32);
+
 // ── Poses ─────────────────────────────────────────────────────────────────────
 
 fn ease_out(f: f32) -> f32 {
@@ -201,17 +207,41 @@ fn limb_pose(clip: AnimClip, kind: LimbKind, f: f32) -> Quat {
     }
 }
 
+/// How far a clip sinks the whole rig root below its resting height at
+/// progress `f` — the vertical body channel limb rotations can't fake.
+fn root_drop(clip: AnimClip, f: f32) -> f32 {
+    match clip {
+        AnimClip::CatcherCrouch => 0.22,
+        AnimClip::ScoopBall => 0.26 * (f * std::f32::consts::PI).sin(),
+        _ => 0.0,
+    }
+}
+
 // ── Systems ───────────────────────────────────────────────────────────────────
 
 /// Poses every playing rig from `(clip, progress)`, chains `next`, and removes
 /// finished one-shots. The only code in the game that rotates rig parts.
+/// Query alias for every rig currently playing a clip (keeps clippy's
+/// type-complexity check happy).
+type PlayingRigs<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static mut Playing,
+        &'static mut Transform,
+        Option<&'static Children>,
+        Option<&'static RigBaseY>,
+    ),
+>;
+
 fn sample_clips(
     time: Res<Time>,
     mut commands: Commands,
-    mut playing_q: Query<(Entity, &mut Playing, &mut Transform, Option<&Children>)>,
+    mut playing_q: PlayingRigs,
     mut limb_q: Query<(&RigLimb, &mut Transform), Without<Playing>>,
 ) {
-    for (entity, mut playing, mut transform, children) in &mut playing_q {
+    for (entity, mut playing, mut transform, children, base_y) in &mut playing_q {
         playing.timer.tick(time.delta());
         let f = playing.timer.fraction();
 
@@ -223,6 +253,9 @@ fn sample_clips(
                     limb_tf.rotation = limb_pose(playing.clip, limb.kind, f);
                 }
             }
+        }
+        if let Some(base) = base_y {
+            transform.translation.y = base.0 - root_drop(playing.clip, f);
         }
 
         if playing.timer.finished() && !playing.clip.looping() {
@@ -239,12 +272,14 @@ fn sample_clips(
     }
 }
 
-/// Returns limbs to neutral whenever a clip stops (covers both the sampler's
-/// own removal and choreography removing `RunCycle` mid-loop).
+/// Returns limbs to neutral and the root to its resting height whenever a
+/// clip stops (covers both the sampler's own removal and choreography
+/// removing `RunCycle` mid-loop).
 fn settle_removed(
     mut removed: RemovedComponents<Playing>,
     children_q: Query<&Children>,
     mut limb_q: Query<(&RigLimb, &mut Transform)>,
+    mut root_q: Query<(&mut Transform, &RigBaseY), Without<RigLimb>>,
 ) {
     for entity in removed.read() {
         if let Ok(children) = children_q.get(entity) {
@@ -253,6 +288,9 @@ fn settle_removed(
                     limb_tf.rotation = Quat::IDENTITY;
                 }
             }
+        }
+        if let Ok((mut root_tf, base)) = root_q.get_mut(entity) {
+            root_tf.translation.y = base.0;
         }
     }
 }

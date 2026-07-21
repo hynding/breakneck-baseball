@@ -11,7 +11,9 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
-use crate::game::animation::{bat_idle_rotation, AnimClip, LimbKind, MoveIntent, Playing, RigLimb};
+use crate::game::animation::{
+    bat_idle_rotation, AnimClip, LimbKind, MoveIntent, Playing, RigBaseY, RigLimb,
+};
 use crate::game::ball::PLAYER_GROUP;
 use crate::game::flow::{Phase, Play};
 use crate::game::input::Intents;
@@ -284,6 +286,7 @@ pub(crate) fn spawn_rig(
             Collider::capsule_y(0.6, 0.4),
             CollisionGroups::new(PLAYER_GROUP, Group::ALL),
             MoveIntent::default(),
+            RigBaseY(position.y),
         ))
         .with_children(|rig| {
             rig.spawn((
