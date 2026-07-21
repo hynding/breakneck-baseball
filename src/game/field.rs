@@ -67,7 +67,12 @@ fn spawn_field(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     field: Res<FieldSpec>,
+    theme: Res<crate::game::theme::Theme>,
 ) {
+    // The sky is theme data like everything else — a bright day or a night
+    // game. Matters most from the catcher's-eye duel camera, which looks up
+    // past the wall into nothing but clear colour.
+    commands.insert_resource(ClearColor(theme.sky));
     match field.scenery {
         Scenery::Stadium => {
             spawn_stadium_ground(&mut commands, &mut meshes, &mut materials);

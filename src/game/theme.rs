@@ -17,6 +17,8 @@ pub struct Theme {
     pub home: PlayerTemplate,
     pub away: PlayerTemplate,
     pub ball: BallTheme,
+    /// World clear colour — the sky above the park (bright day or night).
+    pub sky: Color,
 }
 
 /// Palette for every HUD/menu element.
@@ -127,6 +129,7 @@ impl ThemeId {
                     visual_scale: 2.7,
                     trail: Color::srgba(1.0, 1.0, 0.9, 0.35),
                 },
+                sky: Color::srgb(0.48, 0.67, 0.88),
             },
             // Night-game arcade look: black glass, cyan accents, cyan-vs-
             // magenta teams, a neon ball that reads at any distance.
@@ -164,6 +167,7 @@ impl ThemeId {
                     visual_scale: 2.7,
                     trail: Color::srgba(1.0, 0.95, 0.4, 0.4),
                 },
+                sky: Color::srgb(0.02, 0.03, 0.08),
             },
         }
     }

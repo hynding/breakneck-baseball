@@ -6,11 +6,11 @@
 
 use bevy::prelude::*;
 
-use crate::game::flow::{BannerTone, PlayBanner};
+use crate::game::flow::{BannerTone, Phase, Play, PlayBanner};
 use crate::game::rules::{Bases, BattingOrder, LINEUP_SIZE};
 use crate::game::theme::Theme;
 use crate::game::variant::{FieldSpec, Ruleset};
-use crate::game::{GameState, GameplayEntity, ScoreBoard};
+use crate::game::{GameState, GameplayEntity, ScoreBoard, Team};
 
 // ── Markers ───────────────────────────────────────────────────────────────────
 
@@ -47,6 +47,27 @@ struct BannerPill;
 #[derive(Component)]
 struct BannerText;
 
+/// Root of one of the two duel cards flanking the catcher's-eye pitch view.
+#[derive(Component)]
+struct DuelPanel;
+
+/// One line of a duel card, updated (and shown/hidden) by phase.
+#[derive(Component)]
+struct DuelLine(DuelLineKind);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DuelLineKind {
+    BatterTitle,
+    BatterTeam,
+    BatterSlot,
+    BatterRuns,
+    PitcherTitle,
+    PitcherTeam,
+    LegendFast,
+    LegendChange,
+    LegendCurve,
+}
+
 /// A colour reduced to near-invisibility. Never fully transparent: on the
 /// wasm target an element extracted with alpha 0 is culled for good.
 fn hidden_tint(color: Color) -> Color {
@@ -78,6 +99,7 @@ impl Plugin for UiPlugin {
                     update_score_text,
                     update_count_dots,
                     update_base_ring,
+                    update_duel_panels,
                     show_banner,
                     fade_banner,
                 )
@@ -183,6 +205,7 @@ fn spawn_hud(
         });
 
     spawn_base_ring(&mut commands, field.base_count(), &theme);
+    spawn_duel_panels(&mut commands, &theme);
 
     // Banner: persistent wrapper root + pill child + text grandchild.
     // wasm/WebGL2 dictates the structure: an element that is fully
@@ -239,7 +262,10 @@ fn spawn_hud(
             justify_content: JustifyContent::Center,
             ..default()
         },
-        Text::new("Aim: Stick / WASD / Arrows      A / Space: Pitch & Swing      C: Camera"),
+        Text::new(
+            "Aim: Stick / WASD / Arrows      A / Space: Pitch & Swing      \
+             Fielding: hold a base direction + A / Space to throw      C: Camera",
+        ),
         TextFont {
             font_size: 13.0,
             ..default()
@@ -247,6 +273,143 @@ fn spawn_hud(
         TextColor(ui.text_dim),
         TextLayout::new_with_justify(JustifyText::Center),
     ));
+}
+
+/// The two cards flanking the catcher's-eye duel view: the batter card on the
+/// left, the pitcher card (with the pitch-selection legend) on the right —
+/// visible only during the pitch duel, hidden while the ball is in play.
+///
+/// Both roots are painted at spawn and shown/hidden by mutating colours and
+/// text (never alpha 0 / despawn): on wasm/WebGL2 an element extracted fully
+/// transparent is culled for good.
+fn spawn_duel_panels(commands: &mut Commands, theme: &Theme) {
+    let ui = &theme.ui;
+    let lines: [(&[DuelLineKind], f32); 2] = [
+        (
+            &[
+                DuelLineKind::BatterTitle,
+                DuelLineKind::BatterTeam,
+                DuelLineKind::BatterSlot,
+                DuelLineKind::BatterRuns,
+            ],
+            14.0,
+        ),
+        (
+            &[
+                DuelLineKind::PitcherTitle,
+                DuelLineKind::PitcherTeam,
+                DuelLineKind::LegendFast,
+                DuelLineKind::LegendChange,
+                DuelLineKind::LegendCurve,
+            ],
+            14.0,
+        ),
+    ];
+
+    for (side, (kinds, _)) in lines.into_iter().enumerate() {
+        let mut node = Node {
+            position_type: PositionType::Absolute,
+            top: Val::Percent(38.0),
+            padding: UiRect::axes(Val::Px(14.0), Val::Px(12.0)),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(5.0),
+            border: UiRect::all(Val::Px(1.5)),
+            min_width: Val::Px(150.0),
+            ..default()
+        };
+        if side == 0 {
+            node.left = Val::Px(14.0);
+        } else {
+            node.right = Val::Px(14.0);
+        }
+        commands
+            .spawn((
+                DuelPanel,
+                GameplayEntity,
+                node,
+                BackgroundColor(ui.panel_bg),
+                BorderColor(ui.panel_border),
+                BorderRadius::all(Val::Px(12.0)),
+            ))
+            .with_children(|card| {
+                for kind in kinds {
+                    let (size, color) = match kind {
+                        DuelLineKind::BatterTitle | DuelLineKind::PitcherTitle => (13.0, ui.accent),
+                        DuelLineKind::BatterTeam | DuelLineKind::PitcherTeam => {
+                            (22.0, ui.text_primary)
+                        }
+                        _ => (14.0, ui.text_dim),
+                    };
+                    card.spawn((
+                        DuelLine(*kind),
+                        Text::new(""),
+                        TextFont {
+                            font_size: size,
+                            ..default()
+                        },
+                        TextColor(color),
+                    ));
+                }
+            });
+    }
+}
+
+/// Fills the duel cards during the pitch duel and blanks them (keeping every
+/// alpha nonzero for wasm) once the ball is in play.
+fn update_duel_panels(
+    play: Res<Play>,
+    score: Res<ScoreBoard>,
+    order: Res<BattingOrder>,
+    theme: Res<Theme>,
+    mut panels: Query<(&mut BackgroundColor, &mut BorderColor), With<DuelPanel>>,
+    mut lines: Query<(&DuelLine, &mut Text, &mut TextColor)>,
+) {
+    let visible = matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch);
+    let ui = &theme.ui;
+    for (mut bg, mut border) in &mut panels {
+        if visible {
+            bg.0 = ui.panel_bg;
+            border.0 = ui.panel_border;
+        } else {
+            bg.0 = hidden_tint(ui.panel_bg);
+            border.0 = hidden_tint(ui.panel_border);
+        }
+    }
+
+    let team_label = |team: Team| match team {
+        Team::Home => "HOME",
+        Team::Away => "AWAY",
+    };
+    let batting = score.batting_team();
+    let batting_runs = match batting {
+        Team::Home => score.home_runs,
+        Team::Away => score.away_runs,
+    };
+    for (line, mut text, mut color) in &mut lines {
+        if !visible {
+            **text = String::new();
+            continue;
+        }
+        let (value, tint) = match line.0 {
+            DuelLineKind::BatterTitle => ("AT BAT".to_string(), ui.accent),
+            DuelLineKind::BatterTeam => (team_label(batting).to_string(), ui.text_primary),
+            DuelLineKind::BatterSlot => (
+                format!("AB {}/{}", order.current(batting), LINEUP_SIZE),
+                ui.text_dim,
+            ),
+            DuelLineKind::BatterRuns => (format!("RUNS {batting_runs}"), ui.text_dim),
+            DuelLineKind::PitcherTitle => ("PITCHING".to_string(), ui.accent),
+            DuelLineKind::PitcherTeam => (
+                team_label(score.fielding_team()).to_string(),
+                ui.text_primary,
+            ),
+            DuelLineKind::LegendFast => ("AIM UP:   FASTBALL".to_string(), ui.text_dim),
+            DuelLineKind::LegendChange => ("NEUTRAL:  CHANGEUP".to_string(), ui.text_dim),
+            DuelLineKind::LegendCurve => ("AIM DOWN: CURVEBALL".to_string(), ui.text_dim),
+        };
+        **text = value;
+        color.0 = tint;
+    }
 }
 
 /// A 96×96 px ring of base pips (top-right): one pip per base, laid out like
