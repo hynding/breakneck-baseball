@@ -101,6 +101,12 @@ impl Play {
     pub fn is_resolved(&self) -> bool {
         self.resolved
     }
+
+    /// Seconds since contact, given the current `Time::elapsed_secs` — the
+    /// live-play race clock the fielding choreography and rules share.
+    pub fn since_contact(&self, now: f32) -> f32 {
+        now - self.contact_at
+    }
 }
 
 impl Default for Play {
@@ -152,8 +158,15 @@ pub enum LiveBallEvent {
     Caught { pos: Vec3 },
     /// First bounce at `pos` — the fair/foul call point.
     Landed { pos: Vec3 },
-    /// Picked up off the ground at `pos`; the throw races begin.
-    Gathered { pos: Vec3 },
+    /// The gathered ball was thrown from `pos` at `base` (`base_count()` =
+    /// home), `race_time` seconds after contact on the shared race clock.
+    /// Auto-throws backdate `race_time` to the gather instant (the analytic
+    /// defense throws promptly); manual throws pay for every held moment.
+    Thrown {
+        pos: Vec3,
+        base: usize,
+        race_time: f32,
+    },
 }
 
 /// A transient on-screen message (e.g. "STRIKE!", "BALL", "HOME RUN!").
@@ -462,10 +475,13 @@ fn resolve_live_play(
             LiveBallEvent::Landed { pos } if !rules::is_fair(pos, &field) => Some(None),
             // A fair bounce just keeps the play alive.
             LiveBallEvent::Landed { .. } => continue,
-            LiveBallEvent::Gathered { pos } => {
-                let t = time.elapsed_secs() - play.contact_at;
-                Some(Some(rules::resolve_gathered(pos, t, &field, &rules_res)))
-            }
+            LiveBallEvent::Thrown {
+                pos,
+                base,
+                race_time,
+            } => Some(Some(rules::resolve_thrown(
+                pos, race_time, base, &bases, &field, &rules_res,
+            ))),
         };
         break;
     }

@@ -17,6 +17,7 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
+use crate::game::rules;
 use crate::game::variant::{FieldSpec, Scenery};
 use crate::game::{GameState, GameplayEntity};
 
@@ -72,7 +73,7 @@ fn spawn_field(
             spawn_stadium_ground(&mut commands, &mut meshes, &mut materials);
             spawn_stadium_mound(&mut commands, &mut meshes, &mut materials, &field);
             spawn_foul_poles(&mut commands, &mut meshes, &mut materials);
-            spawn_outfield_wall(&mut commands, &mut meshes, &mut materials);
+            spawn_outfield_wall(&mut commands, &mut meshes, &mut materials, &field);
         }
         Scenery::FrontYard => {
             spawn_front_yard(&mut commands, &mut meshes, &mut materials, &field);
@@ -352,13 +353,19 @@ fn spawn_foul_poles(
 }
 
 // ── Outfield wall ─────────────────────────────────────────────────────────────
-/// A curved wall of flat panels spanning the fair-territory arc (foul pole to
-/// foul pole), giving the outfield a visible boundary for home runs. Visual
-/// only — no collider, so batted balls fly over it freely.
+/// Height of the outfield wall (m).
+pub const WALL_HEIGHT: f32 = 3.0;
+
+/// A curved wall of flat panels spanning the fair-territory arc, standing
+/// exactly on the spec's home-run fence ([`rules::fence_at`] interpolates the
+/// foul-line distance out to straightaway centre). Each panel is a fixed
+/// collider, so live balls carom off it — a ball ruled a home run at contact
+/// clears it in the air, and everything else plays off the wall.
 fn spawn_outfield_wall(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
+    field: &FieldSpec,
 ) {
     let wall_material = materials.add(StandardMaterial {
         base_color: Color::srgb(0.13, 0.30, 0.55), // padded outfield-wall blue
@@ -369,27 +376,45 @@ fn spawn_outfield_wall(
         ..default()
     });
 
-    let radius = 112.0_f32;
-    let height = 3.0_f32;
-    let panels = 17;
-    // Fair territory spans ±45° from the +Z (centre-field) axis.
-    let span = std::f32::consts::FRAC_PI_2; // 90°
-    let seg_angle = span / panels as f32;
-    // Panel width slightly over the chord so neighbours overlap (no gaps).
-    let panel_width = 2.0 * radius * (seg_angle / 2.0).sin() * 1.05;
-    let panel_mesh = meshes.add(Cuboid::new(panel_width, height, 0.4));
+    let thickness = 0.4_f32;
+    let panels = 24;
+    let span = field.fair_half_angle * 2.0;
+    // A point on the rules fence at angle `theta` off the centre-field axis.
+    let fence_point = |theta: f32| {
+        let dir = Vec3::new(theta.sin(), 0.0, theta.cos());
+        dir * rules::fence_at(dir, field)
+    };
 
+    // The wall is the polyline through the fence points: each panel is the
+    // chord between neighbours, so visual, physical, and home-run fences are
+    // one and the same surface.
     for i in 0..panels {
-        let theta = -span / 2.0 + seg_angle * (i as f32 + 0.5);
-        let pos = Vec3::new(radius * theta.sin(), height / 2.0, radius * theta.cos());
+        let t0 = -span / 2.0 + span * i as f32 / panels as f32;
+        let t1 = -span / 2.0 + span * (i + 1) as f32 / panels as f32;
+        let (p0, p1) = (fence_point(t0), fence_point(t1));
+        let mid = (p0 + p1) / 2.0 + Vec3::Y * (WALL_HEIGHT / 2.0);
+        let chord = p1 - p0;
+        // Slightly over the chord so neighbouring panels overlap (no gaps).
+        let width = chord.length() * 1.02;
+        // Yaw that maps the panel's local +X onto the chord direction.
+        let yaw = (-chord.z).atan2(chord.x);
+
         commands.spawn((
             GameplayEntity,
-            Mesh3d(panel_mesh.clone()),
+            Mesh3d(meshes.add(Cuboid::new(width, WALL_HEIGHT, thickness))),
             MeshMaterial3d(wall_material.clone()),
             Transform {
-                translation: pos,
-                rotation: Quat::from_rotation_y(theta),
+                translation: mid,
+                rotation: Quat::from_rotation_y(yaw),
                 ..default()
+            },
+            RigidBody::Fixed,
+            Collider::cuboid(width / 2.0, WALL_HEIGHT / 2.0, thickness / 2.0),
+            // Matches the ball's own restitution so its Min combine rule
+            // keeps a lively carom instead of a dead drop.
+            Restitution {
+                coefficient: 0.55,
+                combine_rule: CoefficientCombineRule::Min,
             },
         ));
     }

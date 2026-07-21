@@ -344,15 +344,18 @@ pub enum ContactKind {
 pub fn classify_contact(landing: Vec3, field: &FieldSpec) -> ContactKind {
     let fair = is_fair(landing, field);
     let dist = Vec2::new(landing.x, landing.z).length();
-    if fair && dist > fence_at(landing, dist, field) {
+    if fair && dist > fence_at(landing, field) {
         return ContactKind::HomeRun;
     }
     ContactKind::Live { fair }
 }
 
 /// Radial fence distance in the direction of `pos`, interpolated from the
-/// foul lines to straightaway centre.
-fn fence_at(pos: Vec3, dist: f32, field: &FieldSpec) -> f32 {
+/// foul lines to straightaway centre. The single source of truth for where
+/// the wall stands: home-run classification, the spawned wall geometry, and
+/// the fielders' don't-run-through-the-wall caps all read it.
+pub fn fence_at(pos: Vec3, field: &FieldSpec) -> f32 {
+    let dist = Vec2::new(pos.x, pos.z).length();
     let cos_half = field.fair_half_angle.cos();
     let centeredness = (((pos.z / dist.max(0.001)) - cos_half) / (1.0 - cos_half)).clamp(0.0, 1.0);
     field.fence_line + (field.fence_center - field.fence_line) * centeredness
@@ -429,6 +432,145 @@ pub fn resolve_gathered(
         bases += 1;
     }
     Outcome::Hit(bases as u32)
+}
+
+/// The base the defense throws to for the most reasonable out once a fair
+/// ball is gathered at `pos`, `gather_time` seconds after contact: the lead
+/// *force* out the throw can still beat, falling back to first base when no
+/// better play is on. 0-indexed into `base_positions`; `base_count()` means
+/// home plate (bases loaded, force at the plate). Pure choreography guidance —
+/// the call itself still comes from [`resolve_gathered`] / `apply_batted_out`.
+pub fn throw_target(pos: Vec3, gather_time: f32, bases: &Bases, field: &FieldSpec) -> usize {
+    let leg = field.base_positions.first().map_or(27.43, |b| b.length());
+    // Every forced runner (batter included) sprints exactly one base from a
+    // standing start at contact, so one clock covers them all.
+    let runner_at = REACTION + leg / RUNNER_SPEED;
+    let throw_at = |target: Vec3| {
+        gather_time
+            + THROW_TRANSFER
+            + Vec2::new(target.x - pos.x, target.z - pos.z).length() / THROW_FLIGHT_SPEED
+    };
+    let base_pos = |b: usize| {
+        if b == field.base_count() {
+            Vec3::ZERO // home plate
+        } else {
+            field.base_positions[b]
+        }
+    };
+
+    // Take the biggest force out the throw still beats; else the sure-ish
+    // play at first.
+    let mut b = lead_force(bases, field);
+    loop {
+        if runner_at > throw_at(base_pos(b)) + RUNNER_MARGIN {
+            return b;
+        }
+        if b == 0 {
+            return 0;
+        }
+        b -= 1;
+    }
+}
+
+/// The lead base of the force chain: the batter forces first, and each
+/// consecutively occupied base extends the chain one further (bases loaded
+/// forces the runner at the plate, expressed as `base_count()`).
+fn lead_force(bases: &Bases, field: &FieldSpec) -> usize {
+    let mut lead = 0;
+    for b in 0..field.base_count() {
+        if lead == b && bases.is_occupied(b) {
+            lead = b + 1;
+        } else {
+            break;
+        }
+    }
+    lead
+}
+
+/// The race once the ball-holder throws to `target` (0-indexed;
+/// `base_count()` = home plate), `throw_time` seconds after contact. An out
+/// needs a live force at the target, an infield-range gather, and the throw
+/// beating the forced runner's one-base sprint; anything else concedes, and
+/// the batter stretches for every base the throw can't beat — the same walk
+/// as [`resolve_gathered`], whose behaviour this reproduces exactly for a
+/// prompt throw to first with empty bases.
+pub fn resolve_thrown(
+    pos: Vec3,
+    throw_time: f32,
+    target: usize,
+    bases: &Bases,
+    field: &FieldSpec,
+    rules: &Ruleset,
+) -> Outcome {
+    let leg = field.base_positions.first().map_or(27.43, |b| b.length());
+    let throw_at = |p: Vec3| {
+        throw_time
+            + THROW_TRANSFER
+            + Vec2::new(p.x - pos.x, p.z - pos.z).length() / THROW_FLIGHT_SPEED
+    };
+    let base_pos = |b: usize| {
+        if b == field.base_count() {
+            Vec3::ZERO // home plate
+        } else {
+            field.base_positions[b]
+        }
+    };
+
+    let from_home = Vec2::new(pos.x, pos.z).length();
+    // Every forced runner sprints exactly one base from a standing start.
+    let forced_runner_at = REACTION + leg / RUNNER_SPEED;
+    if target <= lead_force(bases, field)
+        && from_home < INFIELD_GATHER_RADIUS * field.hit_scale
+        && forced_runner_at > throw_at(base_pos(target)) + RUNNER_MARGIN
+    {
+        return Outcome::Out(if rules.peg_outs {
+            OutKind::Pegged
+        } else {
+            OutKind::Ground
+        });
+    }
+
+    // No out on the throw: the batter takes every base it can't beat.
+    let batter_at = |base: usize| REACTION + leg * base as f32 / RUNNER_SPEED;
+    let safe = |base: usize| {
+        field
+            .base_positions
+            .get(base - 1)
+            .is_some_and(|bp| batter_at(base) <= throw_at(*bp) + RUNNER_MARGIN)
+    };
+    let mut n = 1;
+    while n < field.base_count() && safe(n + 1) {
+        n += 1;
+    }
+    Outcome::Hit(n as u32)
+}
+
+/// The base a held defensive aim selects for a manual throw — the base
+/// (home = `base_count()`) whose on-screen direction from the plate best
+/// matches the stick. Screen right is world −X and screen up is +Z (the
+/// behind-home camera), so the diamond reads naturally: right = first,
+/// up = second on a three-base diamond, left = third, down = home. `None`
+/// when the stick is too centred or points nowhere near a base.
+pub fn aimed_base(aim: Vec2, field: &FieldSpec) -> Option<usize> {
+    if aim.length() < 0.5 {
+        return None;
+    }
+    let dir = Vec2::new(-aim.x, aim.y).normalize(); // screen aim → world (x, z)
+    let mut best: Option<(usize, f32)> = None;
+    let mut consider = |b: usize, world: Vec2| {
+        let Some(bd) = world.try_normalize() else {
+            return;
+        };
+        let dot = dir.dot(bd);
+        if dot > best.map_or(0.3, |(_, d)| d) {
+            best = Some((b, dot));
+        }
+    };
+    for (b, p) in field.base_positions.iter().enumerate() {
+        consider(b, Vec2::new(p.x, p.z));
+    }
+    consider(field.base_count(), Vec2::new(0.0, -1.0)); // home reads as "down"
+    best.map(|(b, _)| b)
 }
 
 /// Numerically integrates a batted ball's flight from contact height with the
@@ -1392,6 +1534,165 @@ mod tests {
             resolve_gathered(Vec3::new(0.0, 0.0, 120.0), 7.5, &std_field(), &std_rules()),
             Outcome::Hit(3)
         );
+    }
+
+    // ── Throw-target selection ────────────────────────────────────────────────
+
+    #[test]
+    fn bases_empty_throws_to_first() {
+        assert_eq!(
+            throw_target(Vec3::new(0.0, 0.0, 7.0), 1.2, &empty(), &std_field()),
+            0
+        );
+    }
+
+    #[test]
+    fn runner_on_first_takes_the_force_at_second() {
+        // Gathered near second with a runner on first: the lead force is on
+        // and the short throw beats the runner.
+        assert_eq!(
+            throw_target(Vec3::new(0.0, 0.0, 30.0), 1.2, &with(&[0]), &std_field()),
+            1
+        );
+    }
+
+    #[test]
+    fn runner_on_second_is_not_forced() {
+        // No runner on first, so second base is not a force — take first.
+        assert_eq!(
+            throw_target(Vec3::new(0.0, 0.0, 30.0), 1.2, &with(&[1]), &std_field()),
+            0
+        );
+    }
+
+    #[test]
+    fn bases_loaded_forces_the_play_at_home() {
+        let field = std_field();
+        assert_eq!(
+            throw_target(Vec3::new(-5.0, 0.0, 10.0), 0.8, &loaded(), &field),
+            field.base_count()
+        );
+    }
+
+    #[test]
+    fn late_gather_falls_back_to_first() {
+        // Gathered so late that no throw beats any runner: still play to
+        // first — the conventional, "most reasonable" attempt.
+        assert_eq!(
+            throw_target(Vec3::new(0.0, 0.0, 60.0), 6.0, &with(&[0]), &std_field()),
+            0
+        );
+    }
+
+    // ── Thrown-ball resolution ────────────────────────────────────────────────
+
+    #[test]
+    fn prompt_throw_to_first_matches_resolve_gathered() {
+        let (f, r) = (std_field(), std_rules());
+        for (pos, t) in [
+            (Vec3::new(0.0, 0.0, 7.0), 1.2),
+            (Vec3::new(0.0, 0.0, 26.0), 3.0),
+            (Vec3::new(0.0, 0.0, 35.0), 2.6),
+            (Vec3::new(50.0, 0.0, 95.0), 5.8),
+        ] {
+            assert_eq!(
+                resolve_thrown(pos, t, 0, &empty(), &f, &r),
+                resolve_gathered(pos, t, &f, &r),
+                "at {pos:?} t={t}"
+            );
+        }
+    }
+
+    #[test]
+    fn quick_throw_to_the_force_at_second_is_an_out() {
+        assert_eq!(
+            resolve_thrown(
+                Vec3::new(0.0, 0.0, 28.0),
+                1.2,
+                1,
+                &with(&[0]),
+                &std_field(),
+                &std_rules()
+            ),
+            Outcome::Out(OutKind::Ground)
+        );
+    }
+
+    #[test]
+    fn throw_behind_the_play_concedes_the_single() {
+        // Third base is not a force with only a runner on first: the throw
+        // there gets nobody, and the batter has the single.
+        assert_eq!(
+            resolve_thrown(
+                Vec3::new(0.0, 0.0, 28.0),
+                1.2,
+                2,
+                &with(&[0]),
+                &std_field(),
+                &std_rules()
+            ),
+            Outcome::Hit(1)
+        );
+    }
+
+    #[test]
+    fn bases_loaded_quick_throw_home_gets_the_force() {
+        let field = std_field();
+        assert_eq!(
+            resolve_thrown(
+                Vec3::new(-5.0, 0.0, 10.0),
+                0.8,
+                field.base_count(),
+                &loaded(),
+                &field,
+                &std_rules()
+            ),
+            Outcome::Out(OutKind::Ground)
+        );
+    }
+
+    #[test]
+    fn outfield_gather_cannot_force_anyone() {
+        // Even aimed at a live force, a deep gather concedes: the out at any
+        // bag is only contested from infield range.
+        assert_eq!(
+            resolve_thrown(
+                Vec3::new(0.0, 0.0, 60.0),
+                3.5,
+                1,
+                &with(&[0]),
+                &std_field(),
+                &std_rules()
+            ),
+            Outcome::Hit(1)
+        );
+    }
+
+    // ── Aimed-base selection ──────────────────────────────────────────────────
+
+    #[test]
+    fn aim_maps_the_diamond_to_the_stick() {
+        let f = std_field();
+        // Screen right = first, up = second, left = third, down = home.
+        assert_eq!(aimed_base(Vec2::new(1.0, 0.0), &f), Some(0));
+        assert_eq!(aimed_base(Vec2::new(0.0, 1.0), &f), Some(1));
+        assert_eq!(aimed_base(Vec2::new(-1.0, 0.0), &f), Some(2));
+        assert_eq!(aimed_base(Vec2::new(0.0, -1.0), &f), Some(f.base_count()));
+    }
+
+    #[test]
+    fn centred_stick_selects_nothing() {
+        assert_eq!(aimed_base(Vec2::new(0.2, 0.1), &std_field()), None);
+    }
+
+    #[test]
+    fn fence_interpolates_line_to_center() {
+        let f = std_field();
+        // Straightaway centre field.
+        assert!((fence_at(Vec3::new(0.0, 0.0, 100.0), &f) - f.fence_center).abs() < 0.01);
+        // Down the line the fence sits at the line distance.
+        let line = Vec3::new(100.0, 0.0, 100.0); // 45° = the foul line
+        assert!((fence_at(line, &f) - f.fence_line).abs() < 0.01);
     }
 
     // ── Front-yard live play ──────────────────────────────────────────────────
