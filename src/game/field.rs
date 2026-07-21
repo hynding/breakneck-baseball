@@ -52,6 +52,10 @@ pub struct PitchersMound;
 #[derive(Component)]
 pub struct FoulPole;
 
+/// Marks an outfield-wall panel — collision partners for wall-carom effects.
+#[derive(Component)]
+pub struct OutfieldWall;
+
 // ── Plugin ────────────────────────────────────────────────────────────────────
 pub struct FieldPlugin;
 
@@ -405,6 +409,7 @@ fn spawn_outfield_wall(
         let yaw = (-chord.z).atan2(chord.x);
 
         commands.spawn((
+            OutfieldWall,
             GameplayEntity,
             Mesh3d(meshes.add(Cuboid::new(width, WALL_HEIGHT, thickness))),
             MeshMaterial3d(wall_material.clone()),

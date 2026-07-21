@@ -11,7 +11,7 @@ use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::Velocity;
 
-use crate::game::ball::{Baseball, HitEvent, BALL_DRAG_FACTOR, MAGNUS_FACTOR};
+use crate::game::ball::{Baseball, HitEvent, WallBangEvent, BALL_DRAG_FACTOR, MAGNUS_FACTOR};
 use crate::game::flow::{Phase, Play};
 use crate::game::rules;
 use crate::game::variant::FieldSpec;
@@ -92,6 +92,13 @@ fn kick_on_hit(mut hits: EventReader<HitEvent>, mut kick: ResMut<CameraKick>) {
     }
 }
 
+/// A smaller thump when the ball bangs off the outfield wall.
+fn kick_on_wall_bang(mut bangs: EventReader<WallBangEvent>, mut kick: ResMut<CameraKick>) {
+    for _ in bangs.read() {
+        kick.0 += Vec3::new(0.0, 0.10, 0.20);
+    }
+}
+
 fn decay_kick(real: Res<Time<Real>>, mut kick: ResMut<CameraKick>) {
     kick.0 *= (-14.0 * real.delta_secs()).exp();
 }
@@ -109,7 +116,13 @@ impl Plugin for CameraPlugin {
             .add_systems(Startup, spawn_camera)
             .add_systems(
                 Update,
-                (toggle_camera_mode, kick_on_hit, decay_kick).run_if(in_state(GameState::Playing)),
+                (
+                    toggle_camera_mode,
+                    kick_on_hit,
+                    kick_on_wall_bang,
+                    decay_kick,
+                )
+                    .run_if(in_state(GameState::Playing)),
             )
             .add_systems(
                 Update,

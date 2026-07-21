@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::{CollisionEvent, Velocity};
 
 use crate::game::ai::{hash01, noise};
-use crate::game::ball::{Baseball, HitEvent};
+use crate::game::ball::{Baseball, HitEvent, WallBangEvent};
 use crate::game::theme::Theme;
 use crate::game::{GameState, GameplayEntity};
 
@@ -120,6 +120,38 @@ fn contact_burst(
     }
 }
 
+/// Sparks spray back off the padding when the ball bangs the wall.
+fn wall_bang_burst(
+    mut bangs: EventReader<WallBangEvent>,
+    assets: Option<Res<FxAssets>>,
+    time: Res<Time>,
+    mut commands: Commands,
+) {
+    let Some(assets) = assets else { return };
+    for bang in bangs.read() {
+        // Spray hemisphere back toward the infield (the wall is behind).
+        let inward = -Vec3::new(bang.pos.x, 0.0, bang.pos.z).normalize_or_zero();
+        for i in 0..8 {
+            let seed = time.elapsed_secs() * 11.3 + i as f32 * 1.618;
+            let dir = (inward * (0.6 + hash01(seed))
+                + Vec3::new(noise(seed * 1.3), hash01(seed * 1.7), noise(seed * 2.1)) * 0.7)
+                .normalize_or_zero();
+            commands.spawn((
+                Particle {
+                    vel: dir * (3.0 + hash01(seed * 2.9) * 4.0),
+                    timer: Timer::from_seconds(0.4, TimerMode::Once),
+                    gravity: 5.0,
+                    grow: -1.0,
+                },
+                GameplayEntity,
+                Mesh3d(assets.spark_mesh.clone()),
+                MeshMaterial3d(assets.spark.clone()),
+                Transform::from_translation(bang.pos),
+            ));
+        }
+    }
+}
+
 /// Threshold impact speed for a dust puff (m/s).
 const DUST_MIN_SPEED: f32 = 4.0;
 
@@ -207,6 +239,7 @@ impl Plugin for FxPlugin {
                     start_hit_stop,
                     end_hit_stop,
                     contact_burst,
+                    wall_bang_burst,
                     bounce_dust,
                     tick_particles,
                 )

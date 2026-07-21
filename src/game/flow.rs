@@ -22,7 +22,7 @@ use bevy_rapier3d::prelude::*;
 
 use crate::game::ai::{cpu_defense, cpu_offense, CpuConfig, CpuState};
 use crate::game::animation::{AnimClip, Playing};
-use crate::game::ball::{Baseball, HitEvent, InFlight, PitchEvent};
+use crate::game::ball::{Baseball, HitEvent, InFlight, PitchEvent, WallBangEvent};
 use crate::game::input::Intents;
 use crate::game::player::Pitcher;
 use crate::game::rules::{
@@ -92,6 +92,8 @@ pub struct Play {
     steal_armed: bool,
     /// `Time::elapsed_secs` at contact — the live-play race clock's zero.
     contact_at: f32,
+    /// A wall carom has already been called this play (one banner per play).
+    wall_called: bool,
 }
 
 impl Play {
@@ -120,6 +122,7 @@ impl Default for Play {
             live_kind: None,
             steal_armed: false,
             contact_at: 0.0,
+            wall_called: false,
         }
     }
 }
@@ -210,6 +213,7 @@ impl Plugin for FlowPlugin {
                     wind_up,
                     pitch_live,
                     in_play,
+                    announce_wall_bang,
                     resolve_live_play,
                     result_phase,
                 )
@@ -548,6 +552,22 @@ fn result_phase(
         play.pending_pitch = None;
         play.live_kind = None;
         play.steal_armed = false;
+        play.wall_called = false;
+    }
+}
+
+/// A live ball caroms off the wall: one excited call per play. Resolved
+/// plays (a rare home run clipping the top of the wall) stay silent — the
+/// call was already made.
+fn announce_wall_bang(
+    mut bangs: EventReader<WallBangEvent>,
+    mut play: ResMut<Play>,
+    mut banner: EventWriter<PlayBanner>,
+) {
+    let banged = bangs.read().next().is_some();
+    if banged && play.phase == Phase::InPlay && !play.resolved && !play.wall_called {
+        play.wall_called = true;
+        banner.send(PlayBanner::new("OFF THE WALL!", BannerTone::Good));
     }
 }
 

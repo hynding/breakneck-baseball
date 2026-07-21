@@ -86,6 +86,45 @@ pub struct HitEvent {
     pub velocity: Vec3,
 }
 
+/// Fired when a live ball caroms off the outfield wall — consumed by flow
+/// (the "OFF THE WALL!" call), the camera (impact kick), and fx (sparks).
+#[derive(Event, Clone, Copy)]
+pub struct WallBangEvent {
+    pub pos: Vec3,
+}
+
+/// Minimum impact speed (m/s) for a carom to register as a wall bang.
+const WALL_BANG_MIN_SPEED: f32 = 8.0;
+
+/// Reports ball ↔ outfield-wall contacts as [`WallBangEvent`]s.
+fn detect_wall_bang(
+    mut collisions: EventReader<CollisionEvent>,
+    ball_q: Query<(Entity, &Transform, &Velocity), With<Baseball>>,
+    walls: Query<(), With<crate::game::field::OutfieldWall>>,
+    mut bangs: EventWriter<WallBangEvent>,
+) {
+    let Ok((ball_entity, ball_tf, vel)) = ball_q.get_single() else {
+        return;
+    };
+    for event in collisions.read() {
+        let CollisionEvent::Started(a, b, _) = event else {
+            continue;
+        };
+        let other = if *a == ball_entity {
+            *b
+        } else if *b == ball_entity {
+            *a
+        } else {
+            continue;
+        };
+        if walls.get(other).is_ok() && vel.linvel.length() >= WALL_BANG_MIN_SPEED {
+            bangs.send(WallBangEvent {
+                pos: ball_tf.translation,
+            });
+        }
+    }
+}
+
 // ── Plugin ────────────────────────────────────────────────────────────────────
 pub struct BallPlugin;
 
@@ -93,6 +132,7 @@ impl Plugin for BallPlugin {
     fn build(&self, app: &mut App) {
         app.add_event::<PitchEvent>()
             .add_event::<HitEvent>()
+            .add_event::<WallBangEvent>()
             .add_systems(OnEnter(GameState::Playing), spawn_ball)
             .add_systems(
                 Update,
@@ -101,6 +141,7 @@ impl Plugin for BallPlugin {
                     apply_hit,
                     apply_drag,
                     apply_magnus,
+                    detect_wall_bang,
                     reset_ball_if_out_of_bounds,
                     spawn_trail,
                     fade_trail,
