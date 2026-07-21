@@ -17,6 +17,7 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
+use crate::game::flow::{Phase, Play};
 use crate::game::rules;
 use crate::game::variant::{FieldSpec, Scenery};
 use crate::game::{GameState, GameplayEntity};
@@ -56,12 +57,20 @@ pub struct FoulPole;
 #[derive(Component)]
 pub struct OutfieldWall;
 
+/// Marks a piece of the floating strike-zone box shown during the duel.
+#[derive(Component)]
+struct StrikeZoneOverlay;
+
 // ── Plugin ────────────────────────────────────────────────────────────────────
 pub struct FieldPlugin;
 
 impl Plugin for FieldPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(GameState::Playing), spawn_field);
+        app.add_systems(OnEnter(GameState::Playing), spawn_field)
+            .add_systems(
+                Update,
+                strike_zone_visibility.run_if(in_state(GameState::Playing)),
+            );
     }
 }
 
@@ -89,6 +98,7 @@ fn spawn_field(
         }
     }
     spawn_bases(&mut commands, &mut meshes, &mut materials, &field);
+    spawn_strike_zone(&mut commands, &mut meshes, &mut materials);
     // The sun sits behind home plate in both parks so everything the
     // broadcast and duel cameras look at — players' backs, house fronts, the
     // outfield — is lit rather than silhouetted; ambient keeps shadow sides
@@ -331,6 +341,82 @@ fn spawn_front_yard(
         Vec3::new(-16.0, 0.5, 10.0),
         hedge,
     );
+}
+
+// ── Strike-zone overlay ───────────────────────────────────────────────────────
+/// A floating box over the plate showing exactly the zone the umpire calls
+/// ([`rules::ZONE_HALF_WIDTH`] / `ZONE_LOW..ZONE_HIGH`) — the catcher's-eye
+/// duel view's aiming aid. Visible only during the duel (see
+/// [`strike_zone_visibility`]); no colliders, the ball flies through it.
+fn spawn_strike_zone(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+) {
+    let width = rules::ZONE_HALF_WIDTH * 2.0;
+    let height = rules::ZONE_HIGH - rules::ZONE_LOW;
+    let mid_y = (rules::ZONE_HIGH + rules::ZONE_LOW) / 2.0;
+    let mut translucent = |color: Color| {
+        materials.add(StandardMaterial {
+            base_color: color,
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            cull_mode: None,
+            ..default()
+        })
+    };
+    let fill = translucent(Color::srgba(1.0, 1.0, 1.0, 0.07));
+    let frame = translucent(Color::srgba(1.0, 1.0, 1.0, 0.4));
+
+    let mut part = |size: Vec3, pos: Vec3, mat: &Handle<StandardMaterial>| {
+        commands.spawn((
+            StrikeZoneOverlay,
+            GameplayEntity,
+            Mesh3d(meshes.add(Cuboid::new(size.x, size.y, size.z))),
+            MeshMaterial3d(mat.clone()),
+            Transform::from_translation(pos),
+        ));
+    };
+
+    part(
+        Vec3::new(width, height, 0.006),
+        Vec3::new(0.0, mid_y, 0.0),
+        &fill,
+    );
+    let bar = 0.02;
+    for y in [rules::ZONE_LOW, rules::ZONE_HIGH] {
+        part(
+            Vec3::new(width + bar, bar, 0.008),
+            Vec3::new(0.0, y, 0.0),
+            &frame,
+        );
+    }
+    for x in [-rules::ZONE_HALF_WIDTH, rules::ZONE_HALF_WIDTH] {
+        part(
+            Vec3::new(bar, height + bar, 0.008),
+            Vec3::new(x, mid_y, 0.0),
+            &frame,
+        );
+    }
+}
+
+/// The zone box belongs to the duel: shown while a pitch is coming, hidden
+/// the moment the ball is in play.
+fn strike_zone_visibility(
+    play: Res<Play>,
+    mut overlay: Query<&mut Visibility, With<StrikeZoneOverlay>>,
+) {
+    let visible = matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch);
+    for mut visibility in &mut overlay {
+        let desired = if visible {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        if *visibility != desired {
+            *visibility = desired;
+        }
+    }
 }
 
 // ── Foul poles ────────────────────────────────────────────────────────────────

@@ -36,6 +36,11 @@ pub struct Fielder {
     pub index: usize,
 }
 
+/// The fielder stationed behind the plate (spawn spot at z < 0): crouches
+/// through the pitch duel. Parks without one (the front yard) have none.
+#[derive(Component)]
+pub struct CatcherRole;
+
 /// Facing direction for the player model (world-space).
 #[allow(dead_code)]
 #[derive(Component, Default)]
@@ -126,8 +131,31 @@ impl Plugin for PlayerPlugin {
         app.add_systems(OnEnter(GameState::Playing), spawn_players)
             .add_systems(
                 Update,
-                (recolor_teams, trigger_swing).run_if(in_state(GameState::Playing)),
+                (recolor_teams, trigger_swing, catcher_crouch).run_if(in_state(GameState::Playing)),
             );
+    }
+}
+
+/// Holds the catcher in the receiving crouch through the duel, and releases
+/// the stance the moment the ball is in play so coverage can take over.
+fn catcher_crouch(
+    play: Res<Play>,
+    catchers: Query<(Entity, Option<&Playing>), With<CatcherRole>>,
+    mut commands: Commands,
+) {
+    let dueling = matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch);
+    for (entity, playing) in &catchers {
+        match playing {
+            None if dueling => {
+                commands
+                    .entity(entity)
+                    .insert(Playing::new(AnimClip::CatcherCrouch));
+            }
+            Some(playing) if !dueling && playing.clip == AnimClip::CatcherCrouch => {
+                commands.entity(entity).remove::<Playing>();
+            }
+            _ => {}
+        }
     }
 }
 
@@ -192,6 +220,9 @@ fn spawn_players(
             -1.0,
         );
         commands.entity(fielder).insert(Fielder { index });
+        if spot.z < 0.0 {
+            commands.entity(fielder).insert(CatcherRole);
+        }
     }
 
     // Batter beside home plate, holding the bat on a swing pivot.

@@ -173,8 +173,8 @@ impl VariantId {
                 // Catcher's point of view: centred just behind and above the
                 // catcher, looking out at the pitcher — batter and zone at
                 // the bottom of frame, the delivery coming straight in.
-                duel_eye: Vec3::new(0.0, 3.1, -5.4),
-                duel_target: Vec3::new(0.0, 0.8, 14.8),
+                duel_eye: Vec3::new(0.0, 3.7, -5.9),
+                duel_target: Vec3::new(0.0, 0.55, 14.8),
                 scenery: Scenery::Stadium,
             },
             // A front lawn: four bases across the lawn corners, the defense
@@ -204,8 +204,8 @@ impl VariantId {
                 broadcast_eye: Vec3::new(0.0, 7.0, -12.0),
                 broadcast_target: Vec3::new(0.0, 1.0, 5.0),
                 // Same catcher's-eye framing, scaled to the short lawn duel.
-                duel_eye: Vec3::new(0.0, 2.8, -4.6),
-                duel_target: Vec3::new(0.0, 0.8, 8.0),
+                duel_eye: Vec3::new(0.0, 3.3, -5.0),
+                duel_target: Vec3::new(0.0, 0.55, 8.0),
                 scenery: Scenery::FrontYard,
             },
         }

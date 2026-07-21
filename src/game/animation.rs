@@ -28,6 +28,9 @@ pub enum AnimClip {
     SwingBat,
     /// Bat pivot returns to the shoulder (poses the entity itself).
     RecoverSwing,
+    /// Catcher's receiving stance: knees bent, glove presented. Loops
+    /// through the whole pitch duel.
+    CatcherCrouch,
 }
 
 impl AnimClip {
@@ -41,12 +44,13 @@ impl AnimClip {
             AnimClip::GloveUp => 0.28,
             AnimClip::SwingBat => 0.16,
             AnimClip::RecoverSwing => 0.25,
+            AnimClip::CatcherCrouch => 1.2,
         }
     }
 
     /// Clips that repeat until the component is removed.
     pub fn looping(self) -> bool {
-        matches!(self, AnimClip::RunCycle)
+        matches!(self, AnimClip::RunCycle | AnimClip::CatcherCrouch)
     }
 }
 
@@ -182,6 +186,15 @@ fn limb_pose(clip: AnimClip, kind: LimbKind, f: f32) -> Quat {
             match kind {
                 ArmL => Quat::from_rotation_x(-2.9 * lift),
                 _ => Quat::IDENTITY,
+            }
+        }
+        CatcherCrouch => {
+            // A held stance with a slow breath: legs folded, glove arm out.
+            let sway = (f * std::f32::consts::TAU).sin() * 0.04;
+            match kind {
+                LegL | LegR => Quat::from_rotation_x(1.35),
+                ArmL => Quat::from_rotation_x(-1.15 + sway),
+                ArmR => Quat::from_rotation_x(-0.55 - sway),
             }
         }
         SwingBat | RecoverSwing => Quat::IDENTITY,

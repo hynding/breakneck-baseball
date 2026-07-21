@@ -263,8 +263,8 @@ fn spawn_hud(
             ..default()
         },
         Text::new(
-            "Aim: Stick / WASD / Arrows      A / Space: Pitch & Swing      \
-             Fielding: hold a base direction + A / Space to throw      C: Camera",
+            "A/Space: Pitch & Swing   Fielding: aim steers, base dir + A/Space throws   \
+             Batting: Down = send, Up = hold   C: Camera",
         ),
         TextFont {
             font_size: 13.0,
