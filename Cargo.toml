@@ -10,8 +10,9 @@ name = "breakneck-baseball"
 path = "src/main.rs"
 
 [dependencies]
-# Game engine — uses wgpu as its rendering backend
-bevy = { version = "0.15" }
+# Game engine — uses wgpu as its rendering backend. The extra "wav" feature
+# lets bevy_audio decode the WAVs `game::audio` synthesizes in memory.
+bevy = { version = "0.15", features = ["wav"] }
 
 # 3D physics (features are target-specific, see below)
 bevy_rapier3d = { version = "0.28", features = ["debug-render-3d"] }

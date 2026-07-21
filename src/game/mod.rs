@@ -5,6 +5,7 @@
 
 pub mod ai;
 pub mod animation;
+pub mod audio;
 pub mod ball;
 pub mod camera;
 pub mod field;
@@ -23,6 +24,7 @@ pub mod variant;
 use bevy::prelude::*;
 
 use animation::AnimationPlugin;
+use audio::SoundPlugin;
 use ball::BallPlugin;
 use camera::CameraPlugin;
 use field::FieldPlugin;
@@ -196,6 +198,7 @@ impl Plugin for GamePlugin {
                 AnimationPlugin,
                 FlowPlugin,
                 FxPlugin,
+                SoundPlugin,
                 FieldingPlugin,
                 RunnerPlugin,
                 CameraPlugin,
