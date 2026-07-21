@@ -17,10 +17,10 @@ use bevy_rapier3d::prelude::Velocity;
 use crate::game::animation::{AnimClip, MoveIntent, Playing};
 use crate::game::ball::{Baseball, InFlight, BALL_DRAG_FACTOR, MAGNUS_FACTOR};
 use crate::game::flow::{BallInPlayEvent, LiveBallEvent, Phase, Play};
-use crate::game::input::Intents;
+use crate::game::input::{Controllers, InputSource, Intents};
 use crate::game::player::Fielder;
 use crate::game::rules;
-use crate::game::variant::FieldSpec;
+use crate::game::variant::{FieldSpec, Ruleset};
 use crate::game::{GameState, ScoreBoard};
 
 /// Sprint speed while chasing (m/s) — mirrors `rules::FIELDER_SPEED` so the
@@ -69,9 +69,12 @@ enum PlayState {
         held_at: f32,
         race_time: f32,
     },
-    /// The ball has been thrown and is on its way to `catcher`.
+    /// The ball has been thrown and is on its way to `catcher`. When the
+    /// throw started a double play, `relay_to` is the bag the receiver fires
+    /// on to (the visible 6-4-3) — pure choreography, the call is made.
     Thrown {
         catcher: Entity,
+        relay_to: Option<usize>,
     },
     Done,
 }
@@ -298,6 +301,7 @@ fn hold_and_throw(
     time: Res<Time>,
     play: Res<Play>,
     field: Res<FieldSpec>,
+    ruleset: Res<Ruleset>,
     bases: Res<rules::Bases>,
     score: Res<ScoreBoard>,
     intents: Res<Intents>,
@@ -336,14 +340,30 @@ fn hold_and_throw(
     } else {
         None
     };
+    let going = play.runners_going();
     let (base, throw_time) = if let Some(base) = manual {
         (base, play.since_contact(now))
     } else if now - held_at >= AUTO_THROW_DELAY {
-        let target = rules::throw_target(ball_tf.translation, race_time, &bases, &field);
+        let target = rules::throw_target(ball_tf.translation, race_time, &bases, going, &field);
         (target, race_time)
     } else {
         return;
     };
+
+    // Same pure race flow will run: if this throw turns two, the receiver
+    // fires the visible relay on to first.
+    let call = rules::runner_call_from_aim(intents.get(score.batting_team()).aim);
+    let outcome = rules::resolve_thrown(
+        ball_tf.translation,
+        throw_time,
+        base,
+        &bases,
+        going,
+        call,
+        &field,
+        &ruleset,
+    );
+    let relay_to = matches!(outcome, rules::Outcome::DoublePlay).then_some(0);
 
     let target_pos = cover_pos(&field, base);
     let receiver = active
@@ -377,33 +397,106 @@ fn hold_and_throw(
     });
     active.state = PlayState::Thrown {
         catcher: receiver.unwrap_or(holder),
+        relay_to,
     };
 }
 
-/// The throw arrives: the receiver stops the ball dead.
+/// The throw arrives: the receiver stops the ball dead — or, on a double
+/// play, pivots and fires the relay leg on to the next bag.
 fn receive_throw(
+    field: Res<FieldSpec>,
     mut active: ResMut<ActivePlay>,
     mut ball_q: Query<(Entity, &Transform, &mut Velocity), With<Baseball>>,
-    fielders: Query<&Transform, With<Fielder>>,
+    fielders: FielderSpots,
     mut commands: Commands,
 ) {
-    let PlayState::Thrown { catcher } = active.state else {
+    let PlayState::Thrown { catcher, relay_to } = active.state else {
         return;
     };
     let Ok((ball_entity, ball_tf, mut ball_vel)) = ball_q.get_single_mut() else {
         return;
     };
-    let Ok(catcher_tf) = fielders.get(catcher) else {
+    let Ok((_, catcher_tf)) = fielders.get(catcher) else {
         active.state = PlayState::Done;
         return;
     };
     let arrived = ball_tf.translation.distance(catcher_tf.translation) < 1.0
         || (ball_tf.translation.y < 0.15 && ball_vel.linvel.length() < 2.0);
-    if arrived {
-        ball_vel.linvel = Vec3::ZERO;
-        ball_vel.angvel = Vec3::ZERO;
-        commands.entity(ball_entity).remove::<InFlight>();
-        active.state = PlayState::Done;
+    if !arrived {
+        return;
+    }
+    if let Some(base) = relay_to {
+        let target_pos = cover_pos(&field, base);
+        let pivot = active
+            .cover
+            .iter()
+            .find(|(b, _)| *b == base)
+            .map(|&(_, entity)| entity)
+            .filter(|&entity| entity != catcher)
+            .or_else(|| {
+                fielders
+                    .iter()
+                    .filter(|(entity, _)| *entity != catcher)
+                    .min_by(|a, b| {
+                        horizontal_distance(a.1.translation, target_pos)
+                            .total_cmp(&horizontal_distance(b.1.translation, target_pos))
+                    })
+                    .map(|(entity, _)| entity)
+            });
+        if let Some(pivot) = pivot {
+            ball_vel.linvel = lob_velocity(ball_tf.translation, target_pos + Vec3::Y * 0.6);
+            ball_vel.angvel = Vec3::ZERO;
+            commands
+                .entity(pivot)
+                .insert(Playing::new(AnimClip::GloveUp));
+            active.state = PlayState::Thrown {
+                catcher: pivot,
+                relay_to: None,
+            };
+            return;
+        }
+    }
+    ball_vel.linvel = Vec3::ZERO;
+    ball_vel.angvel = Vec3::ZERO;
+    commands.entity(ball_entity).remove::<InFlight>();
+    active.state = PlayState::Done;
+}
+
+/// A human defense steers the chaser directly: while the stick is deflected
+/// the fielder runs where it points (screen aim → world, same mapping as the
+/// throw selector) instead of the auto intercept — risk and reward, since a
+/// missed route means a dropped-in hit. Runs after `chase_and_gather` so the
+/// override wins the frame; the CPU never steers.
+fn steer_chaser(
+    play: Res<Play>,
+    score: Res<ScoreBoard>,
+    controllers: Res<Controllers>,
+    intents: Res<Intents>,
+    field: Res<FieldSpec>,
+    active: Res<ActivePlay>,
+    mut fielders: Query<(&Transform, &mut MoveIntent), With<Fielder>>,
+) {
+    let PlayState::Chasing { chaser, .. } = active.state else {
+        return;
+    };
+    if play.phase != Phase::InPlay {
+        return;
+    }
+    if controllers.source(score.fielding_team()) == InputSource::Cpu {
+        return;
+    }
+    let aim = intents.get(score.fielding_team()).aim;
+    if aim.length() < 0.5 {
+        return;
+    }
+    let dir = Vec3::new(-aim.x, 0.0, aim.y).normalize_or_zero();
+    if let Ok((tf, mut intent)) = fielders.get_mut(chaser) {
+        intent.target = Some(cap_inside_fence(
+            tf.translation + dir * 4.0,
+            &field,
+            GROUND_FENCE_MARGIN,
+        ));
+        intent.speed = CHASE_SPEED;
     }
 }
 
@@ -446,6 +539,7 @@ impl Plugin for FieldingPlugin {
                 (
                     assign_on_contact,
                     chase_and_gather,
+                    steer_chaser,
                     hold_and_throw,
                     receive_throw,
                     return_to_spots,

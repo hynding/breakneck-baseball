@@ -109,6 +109,12 @@ impl Play {
     pub fn since_contact(&self, now: f32) -> f32 {
         now - self.contact_at
     }
+
+    /// Whether the batting side sent the runners with the windup (the
+    /// hit-and-run jump); read by the throw races.
+    pub fn runners_going(&self) -> bool {
+        self.steal_armed
+    }
 }
 
 impl Default for Play {
@@ -457,6 +463,7 @@ fn resolve_live_play(
     mut play: ResMut<Play>,
     rules_res: Res<Ruleset>,
     field: Res<FieldSpec>,
+    intents: Res<Intents>,
     mut score: ResMut<ScoreBoard>,
     mut bases: ResMut<Bases>,
     mut order: ResMut<BattingOrder>,
@@ -483,9 +490,19 @@ fn resolve_live_play(
                 pos,
                 base,
                 race_time,
-            } => Some(Some(rules::resolve_thrown(
-                pos, race_time, base, &bases, &field, &rules_res,
-            ))),
+            } => {
+                let call = rules::runner_call_from_aim(intents.get(score.batting_team()).aim);
+                Some(Some(rules::resolve_thrown(
+                    pos,
+                    race_time,
+                    base,
+                    &bases,
+                    play.runners_going(),
+                    call,
+                    &field,
+                    &rules_res,
+                )))
+            }
         };
         break;
     }
@@ -588,9 +605,7 @@ fn resolve_contact(
         }
         Outcome::Out(kind) => {
             let play = rules::apply_batted_out(score, bases, ruleset, kind, runners_going);
-            let base_text = if play.double_play {
-                "DOUBLE PLAY!"
-            } else if play.doubled_off {
+            let base_text = if play.doubled_off {
                 "DOUBLED OFF!"
             } else if play.runs > 0 && matches!(kind, OutKind::Fly { .. }) {
                 "SAC FLY"
@@ -601,6 +616,7 @@ fn resolve_contact(
                     OutKind::Pop => "POP OUT",
                     OutKind::FoulPop => "FOUL POP OUT",
                     OutKind::Pegged => "PEGGED!",
+                    OutKind::Stretching { .. } => "OUT STRETCHING!",
                 }
             };
             let text = if play.runs > 0 {
@@ -609,6 +625,19 @@ fn resolve_contact(
                 base_text.to_string()
             };
             banner.send(PlayBanner::new(text, BannerTone::Bad));
+        }
+        Outcome::DoublePlay => {
+            let play = rules::apply_double_play(score, bases, ruleset);
+            let text = if play.runs > 0 {
+                format!("DOUBLE PLAY!  +{}", play.runs)
+            } else {
+                "DOUBLE PLAY!".to_string()
+            };
+            banner.send(PlayBanner::new(text, BannerTone::Bad));
+        }
+        Outcome::FieldersChoice { out_base } => {
+            rules::apply_fielders_choice(score, bases, ruleset, out_base);
+            banner.send(PlayBanner::new("FIELDER'S CHOICE", BannerTone::Bad));
         }
         Outcome::Hit(n) => {
             let label = match n {

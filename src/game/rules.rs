@@ -24,11 +24,12 @@ const CONTACT_HEIGHT: f32 = 0.6;
 /// Nominal fastball speed (m/s) — roughly 85 mph.
 pub const PITCH_SPEED: f32 = 38.0;
 
-/// Horizontal half-width of the called strike zone (metres from plate centre).
-const ZONE_HALF_WIDTH: f32 = 0.34;
+/// Horizontal half-width of the called strike zone (metres from plate
+/// centre). Public so the field can draw the zone the umpire actually calls.
+pub const ZONE_HALF_WIDTH: f32 = 0.34;
 /// Vertical strike-zone bounds (metres).
-const ZONE_LOW: f32 = 0.5;
-const ZONE_HIGH: f32 = 1.45;
+pub const ZONE_LOW: f32 = 0.5;
+pub const ZONE_HIGH: f32 = 1.45;
 
 /// A caught fly at least this far out (scaled by [`FieldSpec::hit_scale`])
 /// gives runners time to tag up and advance.
@@ -48,6 +49,14 @@ const REACTION: f32 = 0.35;
 /// Throw flight speed and glove-to-hand transfer time.
 const THROW_FLIGHT_SPEED: f32 = 27.0;
 const THROW_TRANSFER: f32 = 0.5;
+/// A relay (catch-and-rethrow at a bag) turns faster than a gather.
+const RELAY_TRANSFER: f32 = 0.3;
+/// Head start a hit-and-run jump gives every forced runner (they broke with
+/// the windup, not at contact).
+const HIT_AND_RUN_JUMP: f32 = 1.6;
+/// Extra grace a sent batter gets stretching for the next base — the throw
+/// is usually going somewhere else, so the race is softer than the walk.
+const STRETCH_GRACE: f32 = 0.9;
 /// Bang-bang margin: ties and near-ties go to the runner.
 const RUNNER_MARGIN: f32 = 0.35;
 /// Gathers beyond this radius (scaled by hit_scale) concede first base — the
@@ -161,6 +170,11 @@ pub enum OutKind {
     FoulPop,
     /// The runner was hit with the thrown ball (front-yard rules).
     Pegged,
+    /// The batter was cut down trying for one base too many; the other
+    /// runners keep the `advanced` bases they'd earned.
+    Stretching {
+        advanced: u32,
+    },
 }
 
 /// The result of a batted ball.
@@ -168,9 +182,27 @@ pub enum OutKind {
 pub enum Outcome {
     Foul,
     Out(OutKind),
+    /// The force-and-relay two outs: the forced runner and the batter.
+    DoublePlay,
+    /// The force got the runner at `out_base` but the batter beat the relay:
+    /// one out, batter on first.
+    FieldersChoice {
+        out_base: usize,
+    },
     /// A clean hit worth this many bases (1 = single … up to the base count).
     Hit(u32),
     HomeRun,
+}
+
+/// The batting side's call on a live ball, read at resolution: send the
+/// batter for the extra base, hold him a base early, or let the analytic
+/// walk decide.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum RunnerCall {
+    #[default]
+    Neutral,
+    Send,
+    Hold,
 }
 
 /// What a taken ball did to the count.
@@ -437,38 +469,58 @@ pub fn resolve_gathered(
 /// The base the defense throws to for the most reasonable out once a fair
 /// ball is gathered at `pos`, `gather_time` seconds after contact: the lead
 /// *force* out the throw can still beat, falling back to first base when no
-/// better play is on. 0-indexed into `base_positions`; `base_count()` means
-/// home plate (bases loaded, force at the plate). Pure choreography guidance —
-/// the call itself still comes from [`resolve_gathered`] / `apply_batted_out`.
-pub fn throw_target(pos: Vec3, gather_time: f32, bases: &Bases, field: &FieldSpec) -> usize {
+/// better play is on. `runners_going` marks a hit-and-run jump, which takes
+/// the runner forces off the table. 0-indexed into `base_positions`;
+/// `base_count()` means home plate (bases loaded, force at the plate). Pure
+/// choreography guidance — the call itself comes from [`resolve_thrown`].
+pub fn throw_target(
+    pos: Vec3,
+    gather_time: f32,
+    bases: &Bases,
+    runners_going: bool,
+    field: &FieldSpec,
+) -> usize {
     let leg = field.base_positions.first().map_or(27.43, |b| b.length());
     // Every forced runner (batter included) sprints exactly one base from a
-    // standing start at contact, so one clock covers them all.
-    let runner_at = REACTION + leg / RUNNER_SPEED;
+    // standing start at contact, so one clock covers them all — minus the
+    // jump when the runners broke with the windup.
+    let runner_at = forced_runner_at(leg, runners_going);
     let throw_at = |target: Vec3| {
         gather_time
             + THROW_TRANSFER
             + Vec2::new(target.x - pos.x, target.z - pos.z).length() / THROW_FLIGHT_SPEED
     };
-    let base_pos = |b: usize| {
-        if b == field.base_count() {
-            Vec3::ZERO // home plate
-        } else {
-            field.base_positions[b]
-        }
-    };
+    let base_pos = |b: usize| home_or_base(b, field);
 
     // Take the biggest force out the throw still beats; else the sure-ish
-    // play at first.
+    // play at first. The batter never has the jump, so first base races on
+    // the standing-start clock.
+    let batter_at = forced_runner_at(leg, false);
     let mut b = lead_force(bases, field);
     loop {
-        if runner_at > throw_at(base_pos(b)) + RUNNER_MARGIN {
+        let clock = if b == 0 { batter_at } else { runner_at };
+        if clock > throw_at(base_pos(b)) + RUNNER_MARGIN {
             return b;
         }
         if b == 0 {
             return 0;
         }
         b -= 1;
+    }
+}
+
+/// One forced runner's time to the next bag: a standing start at contact,
+/// minus the hit-and-run head start when the runners broke with the windup.
+fn forced_runner_at(leg: f32, going: bool) -> f32 {
+    REACTION + leg / RUNNER_SPEED - if going { HIT_AND_RUN_JUMP } else { 0.0 }
+}
+
+/// World position of base `b`, where `b == base_count()` means home plate.
+fn home_or_base(b: usize, field: &FieldSpec) -> Vec3 {
+    if b == field.base_count() {
+        Vec3::ZERO
+    } else {
+        field.base_positions[b]
     }
 }
 
@@ -488,17 +540,27 @@ fn lead_force(bases: &Bases, field: &FieldSpec) -> usize {
 }
 
 /// The race once the ball-holder throws to `target` (0-indexed;
-/// `base_count()` = home plate), `throw_time` seconds after contact. An out
-/// needs a live force at the target, an infield-range gather, and the throw
-/// beating the forced runner's one-base sprint; anything else concedes, and
-/// the batter stretches for every base the throw can't beat — the same walk
-/// as [`resolve_gathered`], whose behaviour this reproduces exactly for a
-/// prompt throw to first with empty bases.
+/// `base_count()` = home plate), `throw_time` seconds after contact.
+///
+/// An out needs a live force at the target, an infield-range gather, and the
+/// throw beating the forced runner's one-base sprint (minus the jump on a
+/// hit-and-run). A force out at first retires the batter plainly; at any
+/// later bag the relay to first races the batter — beat him and it's the
+/// classic [`Outcome::DoublePlay`], lose and it's a
+/// [`Outcome::FieldersChoice`]. No out at all concedes, and the batter takes
+/// every base the throw can't beat — the same walk as [`resolve_gathered`],
+/// whose behaviour this reproduces exactly for a prompt neutral throw to
+/// first with empty bases. `runner_call` is the batting side's say: `Send`
+/// stretches for one extra base against a softer race (cut down trying if it
+/// fails), `Hold` pulls up a base early.
+#[allow(clippy::too_many_arguments)]
 pub fn resolve_thrown(
     pos: Vec3,
     throw_time: f32,
     target: usize,
     bases: &Bases,
+    runners_going: bool,
+    runner_call: RunnerCall,
     field: &FieldSpec,
     rules: &Ruleset,
 ) -> Outcome {
@@ -508,26 +570,37 @@ pub fn resolve_thrown(
             + THROW_TRANSFER
             + Vec2::new(p.x - pos.x, p.z - pos.z).length() / THROW_FLIGHT_SPEED
     };
-    let base_pos = |b: usize| {
-        if b == field.base_count() {
-            Vec3::ZERO // home plate
-        } else {
-            field.base_positions[b]
-        }
-    };
+    let base_pos = |b: usize| home_or_base(b, field);
+    let flat_dist = |a: Vec3, b: Vec3| Vec2::new(a.x - b.x, a.z - b.z).length();
 
     let from_home = Vec2::new(pos.x, pos.z).length();
-    // Every forced runner sprints exactly one base from a standing start.
-    let forced_runner_at = REACTION + leg / RUNNER_SPEED;
+    let infield = from_home < INFIELD_GATHER_RADIUS * field.hit_scale;
+    let runner_clock = if target == 0 {
+        // The batter is the forced runner at first and never has the jump.
+        forced_runner_at(leg, false)
+    } else {
+        forced_runner_at(leg, runners_going)
+    };
     if target <= lead_force(bases, field)
-        && from_home < INFIELD_GATHER_RADIUS * field.hit_scale
-        && forced_runner_at > throw_at(base_pos(target)) + RUNNER_MARGIN
+        && infield
+        && runner_clock > throw_at(base_pos(target)) + RUNNER_MARGIN
     {
-        return Outcome::Out(if rules.peg_outs {
-            OutKind::Pegged
-        } else {
-            OutKind::Ground
-        });
+        if target == 0 {
+            // The sure out at first: just the batter.
+            return Outcome::Out(if rules.peg_outs {
+                OutKind::Pegged
+            } else {
+                OutKind::Ground
+            });
+        }
+        // Forced runner retired; the relay to first races the batter.
+        let relay_arrival = throw_at(base_pos(target))
+            + RELAY_TRANSFER
+            + flat_dist(base_pos(target), base_pos(0)) / THROW_FLIGHT_SPEED;
+        if forced_runner_at(leg, false) > relay_arrival + RUNNER_MARGIN {
+            return Outcome::DoublePlay;
+        }
+        return Outcome::FieldersChoice { out_base: target };
     }
 
     // No out on the throw: the batter takes every base it can't beat.
@@ -542,7 +615,34 @@ pub fn resolve_thrown(
     while n < field.base_count() && safe(n + 1) {
         n += 1;
     }
-    Outcome::Hit(n as u32)
+    match runner_call {
+        // Sent for one more: a softer race (the ball is usually elsewhere),
+        // but getting it wrong is an out on the bases.
+        RunnerCall::Send if n < field.base_count() => {
+            let stretch_to = field.base_positions[n];
+            if batter_at(n + 1) <= throw_at(stretch_to) + RUNNER_MARGIN + STRETCH_GRACE {
+                Outcome::Hit(n as u32 + 1)
+            } else {
+                Outcome::Out(OutKind::Stretching { advanced: n as u32 })
+            }
+        }
+        // Held up: bank the sure bases (never less than the single).
+        RunnerCall::Hold => Outcome::Hit((n as u32 - 1).max(1)),
+        _ => Outcome::Hit(n as u32),
+    }
+}
+
+/// The batting side's runner call from its held aim during a live ball:
+/// stick down sends the batter for the extra base (matching the send-the-
+/// runner steal convention), stick up holds him a base early.
+pub fn runner_call_from_aim(aim: Vec2) -> RunnerCall {
+    if aim.y < -0.7 {
+        RunnerCall::Send
+    } else if aim.y > 0.7 {
+        RunnerCall::Hold
+    } else {
+        RunnerCall::Neutral
+    }
 }
 
 /// The base a held defensive aim selects for a manual throw — the base
@@ -763,8 +863,11 @@ pub struct OutPlay {
 
 /// Applies a batted-ball out with its base-running consequences.
 /// `runners_going` is the hit-and-run flag: runners broke with the pitch, so
-/// grounders can't be turned two, but a caught ball doubles the runner off
-/// and nobody tags up.
+/// a caught ball doubles the runner off and nobody tags up. Whether a
+/// grounder turns two is no longer decided here — [`resolve_thrown`] races
+/// the actual relay and reports [`Outcome::DoublePlay`] /
+/// [`Outcome::FieldersChoice`] outright (see [`apply_double_play`] and
+/// [`apply_fielders_choice`]).
 pub fn apply_batted_out(
     score: &mut ScoreBoard,
     bases: &mut Bases,
@@ -781,14 +884,8 @@ pub fn apply_batted_out(
     };
     match kind {
         OutKind::Ground => {
-            if !runners_going && bases.is_occupied(0) && outs_left >= 2 {
-                // The force at second plus the relay to first: two outs.
-                bases.set(0, false);
-                play.outs = 2;
-                play.double_play = true;
-            }
-            // Unless the play ends the inning, the defense took the sure
-            // out(s) and everyone else moved up a base.
+            // The defense took the sure out at first; unless the play ends
+            // the inning, everyone else moved up a base.
             if play.outs < outs_left {
                 play.runs = advance_trailing(bases);
             }
@@ -806,9 +903,41 @@ pub fn apply_batted_out(
             }
         }
         OutKind::Pegged => {}
+        // Cut down stretching: the other runners keep the bases they earned
+        // (a timing play — any run that crossed counts).
+        OutKind::Stretching { advanced } => {
+            play.runs = advance_runners_only(bases, advanced);
+        }
     }
     if play.doubled_off {
         play.outs += 1;
+    }
+    // Never charge past the end of the half — a second out on the play can't
+    // leak into the next half-inning.
+    play.outs = play.outs.min(outs_left);
+    score.add_runs(play.runs);
+    reset_count(score);
+    for _ in 0..play.outs {
+        charge_out(score, bases, rules);
+    }
+    play
+}
+
+/// Applies [`Outcome::DoublePlay`]: the forced runner at second and the
+/// batter at first, with the trailing advance only when the play doesn't end
+/// the inning — identical base math to the old fiat double play. With one
+/// out remaining only the force counts (the inning ends on it).
+pub fn apply_double_play(score: &mut ScoreBoard, bases: &mut Bases, rules: &Ruleset) -> OutPlay {
+    let outs_left = rules.outs_per_half.saturating_sub(score.outs);
+    let mut play = OutPlay {
+        outs: 2.min(outs_left),
+        runs: 0,
+        double_play: true,
+        doubled_off: false,
+    };
+    bases.set(0, false); // the forced runner dies at the middle bag
+    if play.outs < outs_left {
+        play.runs = advance_trailing(bases);
     }
     score.add_runs(play.runs);
     reset_count(score);
@@ -816,6 +945,60 @@ pub fn apply_batted_out(
         charge_out(score, bases, rules);
     }
     play
+}
+
+/// Applies [`Outcome::FieldersChoice`]: the forced runner is retired at
+/// `out_base` while the batter reaches first; the forced runners behind the
+/// out move up with him and everyone ahead holds. Never scores a run.
+pub fn apply_fielders_choice(
+    score: &mut ScoreBoard,
+    bases: &mut Bases,
+    rules: &Ruleset,
+    out_base: usize,
+) -> OutPlay {
+    let outs_left = rules.outs_per_half.saturating_sub(score.outs);
+    let play = OutPlay {
+        outs: 1,
+        runs: 0,
+        double_play: false,
+        doubled_off: false,
+    };
+    if out_base > 0 {
+        bases.set(out_base - 1, false);
+    }
+    if play.outs < outs_left {
+        // Everyone behind the out was forced by the batter: each moves up,
+        // and the batter takes first.
+        for base in (0..out_base.saturating_sub(1)).rev() {
+            if bases.is_occupied(base) {
+                bases.set(base, false);
+                bases.set(base + 1, true);
+            }
+        }
+        bases.set(0, true);
+    }
+    reset_count(score);
+    charge_out(score, bases, rules);
+    play
+}
+
+/// Advances every *existing* runner `n` bases without placing the batter —
+/// the base state after the batter is cut down stretching. Returns runs.
+fn advance_runners_only(bases: &mut Bases, n: u32) -> u32 {
+    let count = bases.count();
+    let mut runs = 0;
+    for base in (0..count).rev() {
+        if bases.is_occupied(base) {
+            bases.set(base, false);
+            let dest = base + n as usize;
+            if dest >= count {
+                runs += 1;
+            } else {
+                bases.set(dest, true);
+            }
+        }
+    }
+    runs
 }
 
 /// After the batter is retired on the ground, every runner advances one base
@@ -1234,10 +1417,10 @@ mod tests {
     }
 
     #[test]
-    fn ground_ball_with_runner_on_first_turns_two() {
+    fn double_play_retires_the_batter_and_the_forced_runner() {
         let mut score = batting_home(0);
         let mut bases = with(&[0]);
-        let play = apply_batted_out(&mut score, &mut bases, &std_rules(), OutKind::Ground, false);
+        let play = apply_double_play(&mut score, &mut bases, &std_rules());
         assert!(play.double_play);
         assert_eq!(play.outs, 2);
         assert_eq!(score.outs, 2);
@@ -1250,7 +1433,7 @@ mod tests {
         // because the inning does not end on the play.
         let mut score = batting_home(0);
         let mut bases = with(&[0, 2]);
-        let play = apply_batted_out(&mut score, &mut bases, &std_rules(), OutKind::Ground, false);
+        let play = apply_double_play(&mut score, &mut bases, &std_rules());
         assert!(play.double_play);
         assert_eq!(play.runs, 1);
         assert_eq!(score.home_runs, 1);
@@ -1263,7 +1446,7 @@ mod tests {
         // force ends the inning and the run never counts.
         let mut score = batting_home(1);
         let mut bases = with(&[0, 2]);
-        let play = apply_batted_out(&mut score, &mut bases, &std_rules(), OutKind::Ground, false);
+        let play = apply_double_play(&mut score, &mut bases, &std_rules());
         assert!(play.double_play);
         assert_eq!(play.runs, 0);
         assert_eq!(score.home_runs, 0);
@@ -1272,7 +1455,63 @@ mod tests {
     }
 
     #[test]
-    fn no_double_play_with_two_outs() {
+    fn double_play_with_two_outs_only_counts_the_force() {
+        // The inning ends on the force at second; the relay out can't leak
+        // into the next half.
+        let mut score = batting_home(2);
+        let mut bases = with(&[0]);
+        let play = apply_double_play(&mut score, &mut bases, &std_rules());
+        assert_eq!(play.outs, 1);
+        assert_eq!(score.outs, 0); // half flipped cleanly
+        assert!(score.top_of_inning);
+    }
+
+    #[test]
+    fn fielders_choice_trades_the_runner_for_the_batter() {
+        let mut score = batting_home(0);
+        let mut bases = with(&[0]);
+        let play = apply_fielders_choice(&mut score, &mut bases, &std_rules(), 1);
+        assert_eq!(play.outs, 1);
+        assert_eq!(score.outs, 1);
+        assert_eq!(bases, with(&[0])); // batter standing where the runner was
+    }
+
+    #[test]
+    fn fielders_choice_at_home_keeps_the_bases_loaded() {
+        // Force at the plate with the bases full: the lead runner dies, the
+        // rest move up behind the batter — still loaded, nobody scored.
+        let mut score = batting_home(0);
+        let mut bases = loaded();
+        let count = bases.count();
+        let play = apply_fielders_choice(&mut score, &mut bases, &std_rules(), count);
+        assert_eq!(play.outs, 1);
+        assert_eq!(play.runs, 0);
+        assert_eq!(score.home_runs, 0);
+        assert_eq!(bases, loaded());
+    }
+
+    #[test]
+    fn cut_down_stretching_keeps_the_runners_advance() {
+        // Batter out trying to stretch a single with a runner on second: the
+        // runner still moves up (and in from third would score).
+        let mut score = batting_home(0);
+        let mut bases = with(&[1]);
+        let play = apply_batted_out(
+            &mut score,
+            &mut bases,
+            &std_rules(),
+            OutKind::Stretching { advanced: 1 },
+            false,
+        );
+        assert_eq!(play.outs, 1);
+        assert_eq!(bases, with(&[2]));
+        assert_eq!(play.runs, 0);
+    }
+
+    #[test]
+    fn honest_ground_out_takes_one_and_advances_the_runner() {
+        // The out at first is just the batter now — the runner moves up
+        // behind the play instead of being doubled off by fiat.
         let mut score = batting_home(2);
         let mut bases = with(&[0]);
         let play = apply_batted_out(&mut score, &mut bases, &std_rules(), OutKind::Ground, false);
@@ -1541,7 +1780,7 @@ mod tests {
     #[test]
     fn bases_empty_throws_to_first() {
         assert_eq!(
-            throw_target(Vec3::new(0.0, 0.0, 7.0), 1.2, &empty(), &std_field()),
+            throw_target(Vec3::new(0.0, 0.0, 7.0), 1.2, &empty(), false, &std_field()),
             0
         );
     }
@@ -1551,7 +1790,13 @@ mod tests {
         // Gathered near second with a runner on first: the lead force is on
         // and the short throw beats the runner.
         assert_eq!(
-            throw_target(Vec3::new(0.0, 0.0, 30.0), 1.2, &with(&[0]), &std_field()),
+            throw_target(
+                Vec3::new(0.0, 0.0, 30.0),
+                1.2,
+                &with(&[0]),
+                false,
+                &std_field()
+            ),
             1
         );
     }
@@ -1560,7 +1805,13 @@ mod tests {
     fn runner_on_second_is_not_forced() {
         // No runner on first, so second base is not a force — take first.
         assert_eq!(
-            throw_target(Vec3::new(0.0, 0.0, 30.0), 1.2, &with(&[1]), &std_field()),
+            throw_target(
+                Vec3::new(0.0, 0.0, 30.0),
+                1.2,
+                &with(&[1]),
+                false,
+                &std_field()
+            ),
             0
         );
     }
@@ -1569,7 +1820,7 @@ mod tests {
     fn bases_loaded_forces_the_play_at_home() {
         let field = std_field();
         assert_eq!(
-            throw_target(Vec3::new(-5.0, 0.0, 10.0), 0.8, &loaded(), &field),
+            throw_target(Vec3::new(-5.0, 0.0, 10.0), 0.8, &loaded(), false, &field),
             field.base_count()
         );
     }
@@ -1579,12 +1830,39 @@ mod tests {
         // Gathered so late that no throw beats any runner: still play to
         // first — the conventional, "most reasonable" attempt.
         assert_eq!(
-            throw_target(Vec3::new(0.0, 0.0, 60.0), 6.0, &with(&[0]), &std_field()),
+            throw_target(
+                Vec3::new(0.0, 0.0, 60.0),
+                6.0,
+                &with(&[0]),
+                false,
+                &std_field()
+            ),
             0
         );
     }
 
+    #[test]
+    fn hit_and_run_jump_takes_the_force_off_the_table() {
+        // A mid-infield gather that forces the standing-start runner at
+        // second — but with the windup jump the throw can't win there, so
+        // the smart throw goes to first instead.
+        let pos = Vec3::new(0.0, 0.0, 20.0);
+        assert_eq!(throw_target(pos, 1.2, &with(&[0]), false, &std_field()), 1);
+        assert_eq!(throw_target(pos, 1.2, &with(&[0]), true, &std_field()), 0);
+    }
+
     // ── Thrown-ball resolution ────────────────────────────────────────────────
+
+    fn neutral(
+        pos: Vec3,
+        t: f32,
+        target: usize,
+        bases: &Bases,
+        f: &FieldSpec,
+        r: &Ruleset,
+    ) -> Outcome {
+        resolve_thrown(pos, t, target, bases, false, RunnerCall::Neutral, f, r)
+    }
 
     #[test]
     fn prompt_throw_to_first_matches_resolve_gathered() {
@@ -1596,7 +1874,7 @@ mod tests {
             (Vec3::new(50.0, 0.0, 95.0), 5.8),
         ] {
             assert_eq!(
-                resolve_thrown(pos, t, 0, &empty(), &f, &r),
+                neutral(pos, t, 0, &empty(), &f, &r),
                 resolve_gathered(pos, t, &f, &r),
                 "at {pos:?} t={t}"
             );
@@ -1604,9 +1882,11 @@ mod tests {
     }
 
     #[test]
-    fn quick_throw_to_the_force_at_second_is_an_out() {
+    fn quick_force_at_second_turns_two() {
+        // Sharp play near the bag: the force arrives early and the relay to
+        // first still beats the batter — the classic double play.
         assert_eq!(
-            resolve_thrown(
+            neutral(
                 Vec3::new(0.0, 0.0, 28.0),
                 1.2,
                 1,
@@ -1614,7 +1894,24 @@ mod tests {
                 &std_field(),
                 &std_rules()
             ),
-            Outcome::Out(OutKind::Ground)
+            Outcome::DoublePlay
+        );
+    }
+
+    #[test]
+    fn slow_force_at_second_is_a_fielders_choice() {
+        // A weak roller near the plate: the force barely beats the runner,
+        // and the long relay cannot double the batter.
+        assert_eq!(
+            neutral(
+                Vec3::new(0.0, 0.0, 5.0),
+                1.8,
+                1,
+                &with(&[0]),
+                &std_field(),
+                &std_rules()
+            ),
+            Outcome::FieldersChoice { out_base: 1 }
         );
     }
 
@@ -1623,7 +1920,7 @@ mod tests {
         // Third base is not a force with only a runner on first: the throw
         // there gets nobody, and the batter has the single.
         assert_eq!(
-            resolve_thrown(
+            neutral(
                 Vec3::new(0.0, 0.0, 28.0),
                 1.2,
                 2,
@@ -1636,10 +1933,11 @@ mod tests {
     }
 
     #[test]
-    fn bases_loaded_quick_throw_home_gets_the_force() {
+    fn bases_loaded_quick_throw_home_turns_two() {
+        // The 2-3 special: force at the plate, relay to first in time.
         let field = std_field();
         assert_eq!(
-            resolve_thrown(
+            neutral(
                 Vec3::new(-5.0, 0.0, 10.0),
                 0.8,
                 field.base_count(),
@@ -1647,7 +1945,7 @@ mod tests {
                 &field,
                 &std_rules()
             ),
-            Outcome::Out(OutKind::Ground)
+            Outcome::DoublePlay
         );
     }
 
@@ -1656,7 +1954,7 @@ mod tests {
         // Even aimed at a live force, a deep gather concedes: the out at any
         // bag is only contested from infield range.
         assert_eq!(
-            resolve_thrown(
+            neutral(
                 Vec3::new(0.0, 0.0, 60.0),
                 3.5,
                 1,
@@ -1665,6 +1963,94 @@ mod tests {
                 &std_rules()
             ),
             Outcome::Hit(1)
+        );
+    }
+
+    #[test]
+    fn hit_and_run_beats_the_force_at_second() {
+        // The jump the runner got at the windup makes the force unwinnable;
+        // the play falls through to a plain single.
+        assert_eq!(
+            resolve_thrown(
+                Vec3::new(0.0, 0.0, 28.0),
+                1.2,
+                1,
+                &with(&[0]),
+                true,
+                RunnerCall::Neutral,
+                &std_field(),
+                &std_rules()
+            ),
+            Outcome::Hit(1)
+        );
+    }
+
+    #[test]
+    fn sent_batter_is_cut_down_stretching() {
+        // A shallow-outfield single with the batter sent: the extra base is
+        // not there, and the batter is out on the bases with the single's
+        // advancement preserved for the other runners.
+        assert_eq!(
+            resolve_thrown(
+                Vec3::new(0.0, 0.0, 60.0),
+                3.5,
+                0,
+                &empty(),
+                false,
+                RunnerCall::Send,
+                &std_field(),
+                &std_rules()
+            ),
+            Outcome::Out(OutKind::Stretching { advanced: 1 })
+        );
+    }
+
+    #[test]
+    fn sent_batter_stretches_a_double_into_a_triple() {
+        // Deep in the gap the softer stretch race is winnable.
+        assert_eq!(
+            resolve_thrown(
+                Vec3::new(0.0, 0.0, 110.0),
+                6.5,
+                0,
+                &empty(),
+                false,
+                RunnerCall::Send,
+                &std_field(),
+                &std_rules()
+            ),
+            Outcome::Hit(3)
+        );
+    }
+
+    #[test]
+    fn held_batter_banks_the_single() {
+        // The same deep ball played safe stops a base short of the walk.
+        let neutral_bases = match resolve_thrown(
+            Vec3::new(0.0, 0.0, 110.0),
+            6.5,
+            0,
+            &empty(),
+            false,
+            RunnerCall::Neutral,
+            &std_field(),
+            &std_rules(),
+        ) {
+            Outcome::Hit(n) => n,
+            other => panic!("expected a hit, got {other:?}"),
+        };
+        assert_eq!(
+            resolve_thrown(
+                Vec3::new(0.0, 0.0, 110.0),
+                6.5,
+                0,
+                &empty(),
+                false,
+                RunnerCall::Hold,
+                &std_field(),
+                &std_rules()
+            ),
+            Outcome::Hit((neutral_bases - 1).max(1))
         );
     }
 
