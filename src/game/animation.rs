@@ -31,6 +31,10 @@ pub enum AnimClip {
     /// Catcher's receiving stance: knees bent, glove presented. Loops
     /// through the whole pitch duel.
     CatcherCrouch,
+    /// Full-extension dive: body pitches forward and drops, arms out.
+    Dive,
+    /// Feet-first slide into a bag: body leans back and drops low.
+    Slide,
 }
 
 impl AnimClip {
@@ -45,6 +49,8 @@ impl AnimClip {
             AnimClip::SwingBat => 0.16,
             AnimClip::RecoverSwing => 0.25,
             AnimClip::CatcherCrouch => 1.2,
+            AnimClip::Dive => 0.5,
+            AnimClip::Slide => 0.6,
         }
     }
 
@@ -203,6 +209,22 @@ fn limb_pose(clip: AnimClip, kind: LimbKind, f: f32) -> Quat {
                 ArmR => Quat::from_rotation_x(-0.55 - sway),
             }
         }
+        Dive => {
+            // Arms reach out ahead, legs trail behind the layout.
+            let s = ease_out(f);
+            match kind {
+                ArmL | ArmR => Quat::from_rotation_x(-2.6 * s),
+                LegL | LegR => Quat::from_rotation_x(0.5 * s),
+            }
+        }
+        Slide => {
+            // Legs kick out in front, arms thrown up for balance.
+            let s = ease_out(f);
+            match kind {
+                LegL | LegR => Quat::from_rotation_x(-1.2 * s),
+                ArmL | ArmR => Quat::from_rotation_x(-0.7 * s),
+            }
+        }
         SwingBat | RecoverSwing => Quat::IDENTITY,
     }
 }
@@ -213,6 +235,19 @@ fn root_drop(clip: AnimClip, f: f32) -> f32 {
     match clip {
         AnimClip::CatcherCrouch => 0.22,
         AnimClip::ScoopBall => 0.26 * (f * std::f32::consts::PI).sin(),
+        AnimClip::Dive => 0.38 * ease_out(f),
+        AnimClip::Slide => 0.30 * ease_out(f),
+        _ => 0.0,
+    }
+}
+
+/// How far a clip pitches the whole rig root about its local X axis at
+/// progress `f` (radians; positive = face-first forward) — the body-lean
+/// channel dives and slides need. Composed on top of the rig's travel yaw.
+fn root_pitch(clip: AnimClip, f: f32) -> f32 {
+    match clip {
+        AnimClip::Dive => 1.25 * ease_out(f),
+        AnimClip::Slide => -0.85 * ease_out(f),
         _ => 0.0,
     }
 }
@@ -256,6 +291,12 @@ fn sample_clips(
         }
         if let Some(base) = base_y {
             transform.translation.y = base.0 - root_drop(playing.clip, f);
+            // Body lean rides on top of whatever facing locomotion set.
+            let pitch = root_pitch(playing.clip, f);
+            if pitch != 0.0 {
+                let (yaw, _, _) = transform.rotation.to_euler(EulerRot::YXZ);
+                transform.rotation = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(pitch);
+            }
         }
 
         if playing.timer.finished() && !playing.clip.looping() {
@@ -291,6 +332,9 @@ fn settle_removed(
         }
         if let Ok((mut root_tf, base)) = root_q.get_mut(entity) {
             root_tf.translation.y = base.0;
+            // Straighten any body lean, keeping only the facing yaw.
+            let (yaw, _, _) = root_tf.rotation.to_euler(EulerRot::YXZ);
+            root_tf.rotation = Quat::from_rotation_y(yaw);
         }
     }
 }

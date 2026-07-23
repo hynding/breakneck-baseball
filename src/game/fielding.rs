@@ -230,14 +230,19 @@ fn chase_and_gather(
     let d = horizontal_distance(ball_pos, chaser_pos);
 
     if !bounced {
-        // Catch: on the ball as it drops in, before it touches grass.
+        // Catch: on the ball as it drops in, before it touches grass. A ball
+        // at the edge of reach is a full-extension dive; anything closer is a
+        // routine glove-up.
         if d < 1.2 && ball_pos.y < CATCH_HEIGHT && ball_vel.linvel.y < 0.0 {
             ball_vel.linvel = Vec3::ZERO;
             ball_vel.angvel = Vec3::ZERO;
             commands.entity(ball_entity).remove::<InFlight>();
-            commands
-                .entity(chaser)
-                .insert(Playing::new(AnimClip::GloveUp));
+            let catch_clip = if d > 0.85 {
+                AnimClip::Dive
+            } else {
+                AnimClip::GloveUp
+            };
+            commands.entity(chaser).insert(Playing::new(catch_clip));
             if let Ok((_, _, mut intent)) = fielders.get_mut(chaser) {
                 intent.target = None;
             }
@@ -533,7 +538,10 @@ pub struct FieldingPlugin;
 impl Plugin for FieldingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ActivePlay>()
-            .add_systems(OnEnter(GameState::Playing), reset_active)
+            .add_systems(
+                crate::game::game_start(),
+                reset_active,
+            )
             .add_systems(
                 Update,
                 (

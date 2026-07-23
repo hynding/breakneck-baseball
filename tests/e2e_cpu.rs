@@ -11,8 +11,9 @@ use breakneck_baseball::game::{GameState, ScoreBoard, Team};
 
 use common::{headless_app, run_until, DriveGame};
 
-/// ≈ 250 sim-seconds — dozens of pitches, far beyond a normal half-inning.
-const MAX_FRAMES: u64 = 60_000;
+/// ≈ 10 sim-minutes — dozens of pitches, far beyond a normal half-inning even
+/// with 5-second steal windows whenever the CPU puts runners aboard.
+const MAX_FRAMES: u64 = 150_000;
 
 #[derive(Resource, Default)]
 struct MenuScript {

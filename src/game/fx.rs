@@ -5,7 +5,11 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::{CollisionEvent, Velocity};
 
 use crate::game::ai::{hash01, noise};
-use crate::game::ball::{Baseball, HitEvent, WallBangEvent};
+use crate::game::ball::{
+    Baseball, HitEvent, InFlight, WallBangEvent, BALL_DRAG_FACTOR, MAGNUS_FACTOR,
+};
+use crate::game::flow::{Phase, Play};
+use crate::game::rules;
 use crate::game::theme::Theme;
 use crate::game::{GameState, GameplayEntity};
 
@@ -81,6 +85,81 @@ fn build_fx_assets(
             ..default()
         }),
     });
+}
+
+// ── Landing ring ──────────────────────────────────────────────────────────────
+
+/// The touchdown indicator: a flat ring on the grass under a live fly ball.
+#[derive(Component)]
+struct LandingRing;
+
+/// Ring radius per second of remaining hang time, and its bounds.
+const RING_PER_SECOND: f32 = 0.8;
+const RING_MIN: f32 = 0.55;
+const RING_MAX: f32 = 3.5;
+/// Below this ball height the ring retires (the ball is basically down).
+const RING_OFF_HEIGHT: f32 = 1.2;
+
+fn spawn_landing_ring(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    theme: Res<Theme>,
+) {
+    commands.spawn((
+        LandingRing,
+        GameplayEntity,
+        Mesh3d(meshes.add(Torus {
+            minor_radius: 0.07,
+            major_radius: 1.0,
+        })),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: theme.ui.accent.with_alpha(0.85),
+            unlit: true,
+            alpha_mode: AlphaMode::Blend,
+            ..default()
+        })),
+        Transform::from_xyz(0.0, 0.06, 0.0),
+        Visibility::Hidden,
+    ));
+}
+
+/// While an uncalled fly ball is up, the ring sits on its predicted landing
+/// spot and shrinks with the remaining hang time — where *and when* it will
+/// come down, at a glance.
+#[allow(clippy::type_complexity)]
+fn update_landing_ring(
+    play: Res<Play>,
+    ball_q: Query<(&Transform, &Velocity), (With<Baseball>, With<InFlight>, Without<LandingRing>)>,
+    mut ring_q: Query<(&mut Transform, &mut Visibility), With<LandingRing>>,
+) {
+    let Ok((mut ring_tf, mut visibility)) = ring_q.get_single_mut() else {
+        return;
+    };
+    let live = play.phase == Phase::InPlay && !play.is_resolved();
+    let flying = ball_q
+        .get_single()
+        .ok()
+        .filter(|(ball, _)| ball.translation.y > RING_OFF_HEIGHT);
+    let Some((ball, vel)) = (if live { flying } else { None }) else {
+        if *visibility != Visibility::Hidden {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    };
+    let (landing, hang) = rules::predict_landing_from(
+        ball.translation,
+        vel.linvel,
+        vel.angvel,
+        BALL_DRAG_FACTOR,
+        MAGNUS_FACTOR,
+    );
+    ring_tf.translation = Vec3::new(landing.x, 0.06, landing.z);
+    let radius = (RING_MIN + RING_PER_SECOND * hang).clamp(RING_MIN, RING_MAX);
+    ring_tf.scale = Vec3::new(radius, 1.0, radius);
+    if *visibility != Visibility::Inherited {
+        *visibility = Visibility::Inherited;
+    }
 }
 
 /// Sparks fly off the bat at contact.
@@ -232,7 +311,10 @@ pub struct FxPlugin;
 impl Plugin for FxPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<HitStop>()
-            .add_systems(OnEnter(GameState::Playing), build_fx_assets)
+            .add_systems(
+                crate::game::game_start(),
+                (build_fx_assets, spawn_landing_ring),
+            )
             .add_systems(
                 Update,
                 (
@@ -241,6 +323,7 @@ impl Plugin for FxPlugin {
                     contact_burst,
                     wall_bang_burst,
                     bounce_dust,
+                    update_landing_ring,
                     tick_particles,
                 )
                     .run_if(in_state(GameState::Playing)),

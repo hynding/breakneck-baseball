@@ -13,10 +13,13 @@ pub mod fielding;
 pub mod flow;
 pub mod fx;
 pub mod input;
+pub mod jersey;
 pub mod menu;
 pub mod player;
+pub mod roster;
 pub mod rules;
 pub mod runner;
+pub mod subs;
 pub mod theme;
 pub mod ui;
 pub mod variant;
@@ -32,9 +35,12 @@ use fielding::FieldingPlugin;
 use flow::FlowPlugin;
 use fx::FxPlugin;
 use input::InputPlugin;
+use jersey::JerseyPlugin;
 use menu::MenuPlugin;
 use player::PlayerPlugin;
+use roster::Rosters;
 use runner::RunnerPlugin;
+use subs::SubsPlugin;
 use theme::ThemeId;
 use ui::UiPlugin;
 use variant::VariantId;
@@ -53,6 +59,24 @@ impl Team {
             Team::Home => Team::Away,
             Team::Away => Team::Home,
         }
+    }
+
+    /// HUD/menu label.
+    pub fn label(self) -> &'static str {
+        match self {
+            Team::Home => "HOME",
+            Team::Away => "AWAY",
+        }
+    }
+}
+
+/// The schedule that fires once when a game starts from the menu — the slot
+/// for every scene spawn/reset system. Deliberately *not* `OnEnter(Playing)`:
+/// resuming from `Paused` re-enters `Playing` and must not respawn anything.
+pub(crate) fn game_start() -> OnTransition<GameState> {
+    OnTransition {
+        exited: GameState::MainMenu,
+        entered: GameState::Playing,
     }
 }
 
@@ -96,8 +120,10 @@ impl Default for GameConfig {
 /// Global game-state machine.
 ///
 /// Systems that should only run while the game is active use
-/// `.run_if(in_state(GameState::Playing))`.
-#[allow(dead_code)]
+/// `.run_if(in_state(GameState::Playing))`. Scene spawn/reset systems key on
+/// the `MainMenu → Playing` *transition* (not `OnEnter(Playing)`), and
+/// teardown on `Playing → GameOver`, so that pausing (`Playing ⇄ Paused`)
+/// leaves the whole scene intact.
 #[derive(States, Debug, Clone, Eq, PartialEq, Hash, Default)]
 pub enum GameState {
     /// The game has not started yet (title screen / menus).
@@ -105,7 +131,7 @@ pub enum GameState {
     MainMenu,
     /// Active gameplay.
     Playing,
-    /// The game is paused.
+    /// Stopped between plays — the substitution board (see `subs.rs`).
     Paused,
     /// Inning / game over screen.
     GameOver,
@@ -188,6 +214,7 @@ impl Plugin for GamePlugin {
                 top_of_inning: true,
                 ..default()
             })
+            .init_resource::<Rosters>()
             // Sub-plugins (input/menu first so their resources exist for the rest)
             .add_plugins((
                 InputPlugin,
@@ -203,18 +230,29 @@ impl Plugin for GamePlugin {
                 RunnerPlugin,
                 CameraPlugin,
                 UiPlugin,
+                JerseyPlugin,
+                SubsPlugin,
             ))
-            // Fresh scoreboard each time a game starts; tear the scene down after.
-            .add_systems(OnEnter(GameState::Playing), reset_scoreboard)
-            .add_systems(OnExit(GameState::Playing), cleanup_gameplay);
+            // Fresh scoreboard/rosters each time a game starts from the menu;
+            // tear the scene down once the game is over. Pausing stays inside
+            // Playing ⇄ Paused and touches neither.
+            .add_systems(game_start(), reset_scoreboard)
+            .add_systems(
+                OnTransition {
+                    exited: GameState::Playing,
+                    entered: GameState::GameOver,
+                },
+                cleanup_gameplay,
+            );
         // The game now boots to `GameState::MainMenu` (the default) and the menu
         // transitions into `Playing` once a mode is chosen.
     }
 }
 
-/// Resets the scoreboard to inning 1 whenever a new game begins.
-fn reset_scoreboard(mut score: ResMut<ScoreBoard>) {
+/// Resets the scoreboard (and both rosters) whenever a new game begins.
+fn reset_scoreboard(mut score: ResMut<ScoreBoard>, mut rosters: ResMut<Rosters>) {
     score.reset();
+    *rosters = Rosters::default();
 }
 
 /// Despawns all gameplay entities when leaving `Playing` so a restart rebuilds

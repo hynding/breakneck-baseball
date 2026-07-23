@@ -14,7 +14,7 @@ use bevy::prelude::*;
 
 use crate::game::ai::hash01;
 use crate::game::ball::{HitEvent, WallBangEvent};
-use crate::game::flow::{BannerTone, LiveBallEvent, PlayBanner};
+use crate::game::flow::{BannerTone, LiveBallEvent, PitchCaughtEvent, PlayBanner};
 use crate::game::{GameState, GameplayEntity};
 
 /// Mono synthesis rate — plenty for percussive game sounds, tiny in memory.
@@ -115,17 +115,23 @@ fn play(commands: &mut Commands, handle: &Handle<AudioSource>, volume: f32) {
 }
 
 /// Fires the bank off gameplay events.
+#[allow(clippy::too_many_arguments)]
 fn play_event_sounds(
     bank: Option<Res<SoundBank>>,
     mut hits: EventReader<HitEvent>,
     mut bangs: EventReader<WallBangEvent>,
     mut live: EventReader<LiveBallEvent>,
+    mut received: EventReader<PitchCaughtEvent>,
     mut banners: EventReader<PlayBanner>,
     mut commands: Commands,
 ) {
     let Some(bank) = bank else { return };
     for _ in hits.read() {
         play(&mut commands, &bank.crack, 0.8);
+    }
+    // The catcher's mitt pops on every received pitch.
+    for _ in received.read() {
+        play(&mut commands, &bank.glove, 0.6);
     }
     for _ in bangs.read() {
         play(&mut commands, &bank.wall, 0.9);

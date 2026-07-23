@@ -9,8 +9,7 @@
 use bevy::prelude::*;
 
 use crate::game::ball::Baseball;
-use crate::game::flow::Phase;
-use crate::game::flow::Play;
+use crate::game::flow::{LeadState, Phase, Play};
 use crate::game::input::{Controllers, InputSource, Intents};
 use crate::game::rules::{steal_candidate, Bases};
 use crate::game::ScoreBoard;
@@ -37,6 +36,9 @@ pub struct CpuState {
     /// Whether the AI offense sends the runner this pitch — decided once at
     /// the start of the windup and held for the whole delivery.
     steal_call: Option<bool>,
+    /// Whether the AI offense stretches the lead through the pre-pitch steal
+    /// window — decided once per window (the early break, pickoff risk).
+    window_steal: Option<bool>,
 }
 
 impl Default for CpuState {
@@ -45,6 +47,7 @@ impl Default for CpuState {
             pitch_delay: Timer::from_seconds(0.9, TimerMode::Once),
             decided_swing: false,
             steal_call: None,
+            window_steal: None,
         }
     }
 }
@@ -63,12 +66,14 @@ pub(crate) fn noise(seed: f32) -> f32 {
 
 // ── Defense: the AI pitches ───────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 pub fn cpu_defense(
     time: Res<Time>,
     controllers: Res<Controllers>,
     cfg: Res<CpuConfig>,
     score: Res<ScoreBoard>,
     play: Res<Play>,
+    lead: Res<LeadState>,
     mut cpu: ResMut<CpuState>,
     mut intents: ResMut<Intents>,
 ) {
@@ -84,22 +89,41 @@ pub fn cpu_defense(
         return;
     }
 
+    // The steal window: the ball is held, and pressing action would be a
+    // pickoff throw. Mostly the CPU just waits it out — but a runner
+    // stretching his lead draws the occasional throw over.
+    if play.in_steal_window() {
+        let intent = intents.get_mut(team);
+        intent.action = false;
+        if lead.extended {
+            // ~0.5 attempts per second of extended lead, deterministic noise.
+            let p = (0.3 + 0.5 * cfg.skill) * time.delta_secs();
+            intent.action = hash01(time.elapsed_secs() * 3.9) < p;
+        }
+        cpu.pitch_delay.reset();
+        return;
+    }
+
     if cpu.pitch_delay.tick(time.delta()).finished() {
         let t = time.elapsed_secs();
-        // Better skill → tighter aim around the strike zone. The vertical
-        // component then gets a pitch-selection bias: held-aim direction is
-        // what picks the kind (see `PitchKind::from_aim`), so shifting aim.y
-        // is how the CPU "calls" its pitch.
+        // Better skill → tighter aim around the strike zone. The aim then
+        // gets a pitch-selection bias: held-aim direction is what picks the
+        // kind (see `PitchKind::from_aim`), so shifting the aim is how the
+        // CPU "calls" its pitch — heaters up, benders down, sweepers wide.
         let spread = 0.55 * (1.0 - cfg.skill) + 0.12;
         let mut aim = Vec2::new(noise(t * 1.7) * spread, noise(t * 2.3) * spread * 0.5);
         let roll = hash01(t * 4.3);
-        aim.y += if roll < 0.45 {
-            0.55 // fastball
-        } else if roll < 0.75 {
-            0.0 // changeup
+        if roll < 0.40 {
+            aim.y += 0.55; // fastball
+        } else if roll < 0.65 {
+            // changeup: neutral
+        } else if roll < 0.85 {
+            aim.y -= 0.55; // curveball
+        } else if roll < 0.925 {
+            aim.x -= 0.6; // slider, sweeping in
         } else {
-            -0.55 // curveball
-        };
+            aim.x += 0.6; // sinker, running away
+        }
         aim = aim.clamp(Vec2::splat(-1.0), Vec2::splat(1.0));
 
         let intent = intents.get_mut(team);
@@ -134,21 +158,49 @@ pub fn cpu_offense(
         return;
     }
 
-    // Reset the per-pitch decisions before each delivery.
+    // Reset the per-pitch decisions before each delivery. In the steal
+    // window the AI occasionally stretches the lead — the early break: a
+    // guaranteed jump on the pitch, bought at pickoff risk — and, once
+    // committed, keeps the lead stretched after the window closes so the
+    // gamble actually cashes in at the delivery. A vanished candidate (the
+    // runner was picked off) drops the plan.
     if play.phase == Phase::PrePitch {
         cpu.decided_swing = false;
         cpu.steal_call = None;
-        intents.get_mut(team).action = false;
+        let extend = if steal_candidate(&bases).is_some() {
+            if play.in_steal_window() {
+                *cpu.window_steal.get_or_insert_with(|| {
+                    hash01(time.elapsed_secs() * 5.3) < 0.1 + 0.2 * cfg.skill
+                })
+            } else {
+                cpu.window_steal == Some(true)
+            }
+        } else {
+            cpu.window_steal = None;
+            false
+        };
+        let intent = intents.get_mut(team);
+        intent.action = false;
+        intent.aim = if extend {
+            Vec2::new(0.0, -1.0)
+        } else {
+            Vec2::ZERO
+        };
         return;
     }
     // During the windup the AI occasionally sends the runner — decided once,
     // then the aim is held down so flow sees the steal armed all delivery.
+    // A lead stretched through the window is always sent (that was the plan);
+    // with no candidate, nobody goes.
     if play.phase == Phase::WindUp {
         cpu.decided_swing = false;
         let elapsed = time.elapsed_secs();
-        let send = *cpu.steal_call.get_or_insert_with(|| {
-            steal_candidate(&bases).is_some() && hash01(elapsed * 6.1) < 0.2 + 0.2 * cfg.skill
-        });
+        let committed = cpu.window_steal == Some(true);
+        let send = steal_candidate(&bases).is_some()
+            && (committed
+                || *cpu
+                    .steal_call
+                    .get_or_insert_with(|| hash01(elapsed * 6.1) < 0.2 + 0.2 * cfg.skill));
         let intent = intents.get_mut(team);
         intent.action = false;
         if send {
@@ -157,6 +209,7 @@ pub fn cpu_offense(
         return;
     }
     if play.phase != Phase::Pitch || cpu.decided_swing {
+        cpu.window_steal = None;
         intents.get_mut(team).action = false;
         return;
     }

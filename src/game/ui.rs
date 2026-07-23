@@ -7,6 +7,7 @@
 use bevy::prelude::*;
 
 use crate::game::flow::{BannerTone, Phase, Play, PlayBanner};
+use crate::game::roster::Rosters;
 use crate::game::rules::{Bases, BattingOrder, LINEUP_SIZE};
 use crate::game::theme::Theme;
 use crate::game::variant::{FieldSpec, Ruleset};
@@ -66,11 +67,13 @@ enum DuelLineKind {
     LegendFast,
     LegendChange,
     LegendCurve,
+    LegendSlider,
+    LegendSinker,
 }
 
 /// A colour reduced to near-invisibility. Never fully transparent: on the
 /// wasm target an element extracted with alpha 0 is culled for good.
-fn hidden_tint(color: Color) -> Color {
+pub(crate) fn hidden_tint(color: Color) -> Color {
     color.with_alpha(0.004)
 }
 
@@ -91,7 +94,10 @@ pub struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BannerTimer>()
-            .add_systems(OnEnter(GameState::Playing), spawn_hud)
+            .add_systems(
+                crate::game::game_start(),
+                spawn_hud,
+            )
             .add_systems(
                 Update,
                 (
@@ -264,7 +270,8 @@ fn spawn_hud(
         },
         Text::new(
             "A/Space: Pitch & Swing   Fielding: aim steers, base dir + A/Space throws   \
-             Batting: Down = send, Up = hold   C: Camera",
+             Runners: hold Down = lead & steal (window: defense A = pickoff)   \
+             Batting: Down = send, Up = hold   Esc/P: Subs   C: Camera",
         ),
         TextFont {
             font_size: 13.0,
@@ -301,6 +308,8 @@ fn spawn_duel_panels(commands: &mut Commands, theme: &Theme) {
                 DuelLineKind::LegendFast,
                 DuelLineKind::LegendChange,
                 DuelLineKind::LegendCurve,
+                DuelLineKind::LegendSlider,
+                DuelLineKind::LegendSinker,
             ],
             14.0,
         ),
@@ -360,6 +369,7 @@ fn update_duel_panels(
     play: Res<Play>,
     score: Res<ScoreBoard>,
     order: Res<BattingOrder>,
+    rosters: Res<Rosters>,
     theme: Res<Theme>,
     mut panels: Query<(&mut BackgroundColor, &mut BorderColor), With<DuelPanel>>,
     mut lines: Query<(&DuelLine, &mut Text, &mut TextColor)>,
@@ -376,10 +386,7 @@ fn update_duel_panels(
         }
     }
 
-    let team_label = |team: Team| match team {
-        Team::Home => "HOME",
-        Team::Away => "AWAY",
-    };
+    let team_label = |team: Team| team.label();
     let batting = score.batting_team();
     let batting_runs = match batting {
         Team::Home => score.home_runs,
@@ -393,19 +400,30 @@ fn update_duel_panels(
         let (value, tint) = match line.0 {
             DuelLineKind::BatterTitle => ("AT BAT".to_string(), ui.accent),
             DuelLineKind::BatterTeam => (team_label(batting).to_string(), ui.text_primary),
-            DuelLineKind::BatterSlot => (
-                format!("AB {}/{}", order.current(batting), LINEUP_SIZE),
-                ui.text_dim,
-            ),
+            DuelLineKind::BatterSlot => {
+                let card = rosters.team(batting).batting(order.current(batting));
+                (
+                    format!(
+                        "AB {}/{}  {} #{}",
+                        order.current(batting),
+                        LINEUP_SIZE,
+                        card.name,
+                        card.number
+                    ),
+                    ui.text_dim,
+                )
+            }
             DuelLineKind::BatterRuns => (format!("RUNS {batting_runs}"), ui.text_dim),
             DuelLineKind::PitcherTitle => ("PITCHING".to_string(), ui.accent),
             DuelLineKind::PitcherTeam => (
                 team_label(score.fielding_team()).to_string(),
                 ui.text_primary,
             ),
-            DuelLineKind::LegendFast => ("AIM UP:   FASTBALL".to_string(), ui.text_dim),
-            DuelLineKind::LegendChange => ("NEUTRAL:  CHANGEUP".to_string(), ui.text_dim),
-            DuelLineKind::LegendCurve => ("AIM DOWN: CURVEBALL".to_string(), ui.text_dim),
+            DuelLineKind::LegendFast => ("AIM UP:    FASTBALL".to_string(), ui.text_dim),
+            DuelLineKind::LegendChange => ("NEUTRAL:   CHANGEUP".to_string(), ui.text_dim),
+            DuelLineKind::LegendCurve => ("AIM DOWN:  CURVEBALL".to_string(), ui.text_dim),
+            DuelLineKind::LegendSlider => ("AIM LEFT:  SLIDER".to_string(), ui.text_dim),
+            DuelLineKind::LegendSinker => ("AIM RIGHT: SINKER".to_string(), ui.text_dim),
         };
         **text = value;
         color.0 = tint;

@@ -26,6 +26,10 @@ pub struct Ruleset {
     /// Whether a batted ball landing near a fielder pegs the runner out
     /// (front-yard rules: outs by hitting the runner with the ball).
     pub peg_outs: bool,
+    /// Length of the pre-pitch steal window (seconds): with a runner able to
+    /// steal, the pitch is held this long while the leadoff/pickoff duel
+    /// runs. Zero disables the window.
+    pub steal_window_secs: f32,
 }
 
 /// Menu-selectable regulation game lengths.
@@ -61,6 +65,10 @@ pub struct FieldSpec {
     /// Defensive spawn spots *excluding* the pitcher, who always stands at
     /// the rubber. Length sets the fielder count; the team size is this + 1.
     pub fielder_positions: Vec<Vec3>,
+    /// Umpire spawn spots. The first entry (behind the plate, z < 0) is the
+    /// plate umpire, who crouches through the duel; the rest work the bases.
+    /// Purely presentational — the rules module is the actual umpire.
+    pub umpire_positions: Vec<Vec3>,
     /// Ball-reset radius: past this the ball is considered lost.
     pub bounds: f32,
     /// Broadcast-camera eye position for this park's size (wide framing,
@@ -125,6 +133,7 @@ impl VariantId {
                 outs_per_half: 3,
                 innings: 9,
                 peg_outs: false,
+                steal_window_secs: 5.0,
             },
             // Kid's rules: short games, outs by pegging the runner.
             VariantId::FrontYard => Ruleset {
@@ -133,6 +142,7 @@ impl VariantId {
                 outs_per_half: 3,
                 innings: 3,
                 peg_outs: true,
+                steal_window_secs: 5.0,
             },
         }
     }
@@ -167,6 +177,14 @@ impl VariantId {
                     Vec3::new(0.0, 0.0, 110.0), // centre field
                     Vec3::new(-40.0, 0.0, 85.0), // right field
                 ],
+                // A full crew: behind the plate, outside each line at first
+                // and third, and behind the keystone for the middle.
+                umpire_positions: vec![
+                    Vec3::new(0.0, 0.0, -3.0),
+                    Vec3::new(-HALF_DIAGONAL - 3.0, 0.0, HALF_DIAGONAL + 2.0),
+                    Vec3::new(0.0, 0.0, HALF_DIAGONAL * 2.0 + 4.0),
+                    Vec3::new(HALF_DIAGONAL + 3.0, 0.0, HALF_DIAGONAL + 2.0),
+                ],
                 bounds: 220.0,
                 broadcast_eye: Vec3::new(0.0, 13.0, -21.0),
                 broadcast_target: Vec3::new(0.0, 1.2, 9.0),
@@ -200,6 +218,8 @@ impl VariantId {
                     Vec3::new(-12.0, 0.0, 20.0), // left sidewalk
                     Vec3::new(0.0, 0.0, 34.0),   // across-the-street yard
                 ],
+                // A kid's game gets one grown-up calling it from the lawn.
+                umpire_positions: vec![Vec3::new(0.0, 0.0, -2.2)],
                 bounds: 90.0,
                 broadcast_eye: Vec3::new(0.0, 7.0, -12.0),
                 broadcast_target: Vec3::new(0.0, 1.0, 5.0),

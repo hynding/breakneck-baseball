@@ -3,10 +3,10 @@
 
 use bevy::prelude::*;
 
-use crate::game::animation::MoveIntent;
-use crate::game::flow::{BallInPlayEvent, Phase, Play};
+use crate::game::animation::{AnimClip, MoveIntent, Playing};
+use crate::game::flow::{BallInPlayEvent, LeadState, Phase, Play};
 use crate::game::player::{spawn_rig, Batter, RigMeshes, RigUnit, TeamPalette};
-use crate::game::rules::{Bases, ContactKind};
+use crate::game::rules::{self, Bases, ContactKind};
 use crate::game::variant::FieldSpec;
 use crate::game::{GameState, ScoreBoard};
 
@@ -16,6 +16,25 @@ const RUN_SPEED: f32 = crate::game::rules::RUNNER_SPEED;
 const RIG_Y: f32 = 0.6;
 /// Where a new runner starts (the batter's box).
 const PLATE_START: Vec3 = Vec3::new(0.7, RIG_Y, 0.0);
+/// Leadoff distances off the bag toward the next base (metres): the normal
+/// lead every runner takes, and the stretched lead that arms the early break.
+const LEAD_NORMAL: f32 = 2.2;
+const LEAD_EXTENDED: f32 = 4.5;
+/// Shuffle speed for taking / retreating from a lead.
+const LEAD_SPEED: f32 = 2.6;
+/// Distance from the bag at which an arriving runner drops into the slide.
+const SLIDE_RANGE: f32 = 2.2;
+
+/// Whether every runner rig has finished its base path — the flow's gate for
+/// the next at-bat (the play isn't over while the trot is still running).
+#[derive(Resource)]
+pub struct RunnersSettled(pub bool);
+
+impl Default for RunnersSettled {
+    fn default() -> Self {
+        RunnersSettled(true)
+    }
+}
 
 /// A rig standing on (or running to) 0-indexed base `base`.
 #[derive(Component)]
@@ -79,6 +98,84 @@ fn advance_paths(
             path.next += 1;
         } else if despawn.is_some() {
             commands.entity(entity).despawn_recursive();
+        } else {
+            // Path exhausted and arrived: the rig has settled on its base.
+            commands.entity(entity).remove::<BasePath>();
+        }
+    }
+}
+
+/// Mirrors whether any rig still has a live base path into
+/// [`RunnersSettled`], the flow's end-of-play gate.
+fn track_settled(paths: Query<(), With<BasePath>>, mut settled: ResMut<RunnersSettled>) {
+    let now_settled = paths.is_empty();
+    if settled.0 != now_settled {
+        settled.0 = now_settled;
+    }
+}
+
+/// Leadoffs: during the pre-pitch duel and the delivery, the lead eligible
+/// runner shuffles off the bag — a normal lead, stretched while the offense
+/// holds Down ([`LeadState`]), and a full sprint for the next bag once the
+/// steal is on and the pitch is in the air. Everyone else stays planted, and
+/// rigs already running a base path are left alone.
+#[allow(clippy::type_complexity)]
+fn take_leadoffs(
+    play: Res<Play>,
+    lead: Res<LeadState>,
+    bases: Res<Bases>,
+    field: Res<FieldSpec>,
+    mut runners: Query<(&Runner, &Transform, &mut MoveIntent), Without<BasePath>>,
+) {
+    let dueling = matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch);
+    let candidate = rules::steal_candidate(&bases);
+    for (runner, tf, mut intent) in &mut runners {
+        let bag = base_pos(&field, runner.base);
+        let target = if dueling && Some(runner.base) == candidate {
+            let next = base_pos(&field, runner.base + 1);
+            let dir = (next - bag).normalize_or_zero();
+            if play.phase == Phase::Pitch && play.runners_going() {
+                // He's off with the pitch — the resolution at the catcher
+                // will repath him (safe) or send him off (caught).
+                intent.target = Some(next);
+                intent.speed = RUN_SPEED;
+                continue;
+            }
+            let dist = if lead.extended {
+                LEAD_EXTENDED
+            } else {
+                LEAD_NORMAL
+            };
+            bag + dir * dist
+        } else {
+            bag
+        };
+        if (tf.translation - target).length() > 0.25 {
+            intent.target = Some(target);
+            intent.speed = LEAD_SPEED;
+        }
+    }
+}
+
+/// Drops an arriving runner into the slide for the last couple of metres of
+/// the final leg of his path — pure presentation on top of the same
+/// [`MoveIntent`] locomotion.
+#[allow(clippy::type_complexity)]
+fn slide_into_base(
+    movers: Query<(Entity, &BasePath, &MoveIntent, &Transform, Option<&Playing>), With<Runner>>,
+    mut commands: Commands,
+) {
+    for (entity, path, intent, tf, playing) in &movers {
+        let Some(target) = intent.target else {
+            continue;
+        };
+        let last_leg = path.next >= path.waypoints.len();
+        let close = (tf.translation - target).length() < SLIDE_RANGE;
+        let sliding = playing.is_some_and(|p| p.clip == AnimClip::Slide);
+        if last_leg && close && !sliding {
+            commands
+                .entity(entity)
+                .insert(Playing::new(AnimClip::Slide));
         }
     }
 }
@@ -240,9 +337,17 @@ pub struct RunnerPlugin;
 
 impl Plugin for RunnerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.init_resource::<RunnersSettled>().add_systems(
             Update,
-            (batter_runs, sync_runners, advance_paths, batter_returns)
+            (
+                batter_runs,
+                sync_runners,
+                advance_paths,
+                take_leadoffs,
+                slide_into_base,
+                track_settled,
+                batter_returns,
+            )
                 .chain()
                 .run_if(in_state(GameState::Playing)),
         );

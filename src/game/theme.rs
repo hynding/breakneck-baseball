@@ -10,6 +10,17 @@
 use bevy::color::LinearRgba;
 use bevy::prelude::{Color, Resource};
 
+/// Which rig construction builds the player bodies. The animation seam
+/// ([`crate::game::animation::AnimClip`] + `MoveIntent` + the root
+/// drop/pitch channels) is model-agnostic, so a richer humanoid model plugs
+/// in as a new arm here plus its own mesh/pose builders — no system changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum PlayerModelId {
+    /// The built-in capsule-and-cylinder rig.
+    #[default]
+    Blocky,
+}
+
 /// The full presentation bundle, inserted as a resource.
 #[derive(Resource, Clone, Debug)]
 pub struct Theme {
@@ -19,6 +30,8 @@ pub struct Theme {
     pub ball: BallTheme,
     /// World clear colour — the sky above the park (bright day or night).
     pub sky: Color,
+    /// Which player-model construction dresses the rigs.
+    pub player_model: PlayerModelId,
 }
 
 /// Palette for every HUD/menu element.
@@ -130,6 +143,7 @@ impl ThemeId {
                     trail: Color::srgba(1.0, 1.0, 0.9, 0.35),
                 },
                 sky: Color::srgb(0.48, 0.67, 0.88),
+                player_model: PlayerModelId::Blocky,
             },
             // Night-game arcade look: black glass, cyan accents, cyan-vs-
             // magenta teams, a neon ball that reads at any distance.
@@ -168,6 +182,7 @@ impl ThemeId {
                     trail: Color::srgba(1.0, 0.95, 0.4, 0.4),
                 },
                 sky: Color::srgb(0.02, 0.03, 0.08),
+                player_model: PlayerModelId::Blocky,
             },
         }
     }

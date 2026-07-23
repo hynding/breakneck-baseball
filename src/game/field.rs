@@ -66,11 +66,14 @@ pub struct FieldPlugin;
 
 impl Plugin for FieldPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(GameState::Playing), spawn_field)
-            .add_systems(
-                Update,
-                strike_zone_visibility.run_if(in_state(GameState::Playing)),
-            );
+        app.add_systems(
+            crate::game::game_start(),
+            spawn_field,
+        )
+        .add_systems(
+            Update,
+            strike_zone_visibility.run_if(in_state(GameState::Playing)),
+        );
     }
 }
 

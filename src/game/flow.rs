@@ -24,10 +24,11 @@ use crate::game::ai::{cpu_defense, cpu_offense, CpuConfig, CpuState};
 use crate::game::animation::{AnimClip, Playing};
 use crate::game::ball::{Baseball, HitEvent, InFlight, PitchEvent, WallBangEvent};
 use crate::game::input::Intents;
-use crate::game::player::Pitcher;
+use crate::game::player::{CatcherRole, Pitcher};
 use crate::game::rules::{
     self, BallCall, Bases, BattingOrder, OutKind, Outcome, StealResult, StrikeCall,
 };
+use crate::game::runner::RunnersSettled;
 use crate::game::variant::{FieldSpec, Ruleset};
 use crate::game::{GameState, ScoreBoard};
 
@@ -44,6 +45,13 @@ const SWING_REACH_X: f32 = 1.8;
 
 /// Seconds the result banner lingers before the next pitch.
 const RESULT_SECS: f32 = 1.2;
+/// Extra seconds the result pause will wait for runner rigs to finish their
+/// paths (the home-run trot, a first-to-third sprint) before the next batter
+/// steps in — a hard cap so a stray path can never stall the game.
+const RESULT_SETTLE_CAP: f32 = 20.0;
+/// Minimum seconds between pickoff throws — the arm has to reload, so a held
+/// button can't machine-gun the bag.
+const PICKOFF_COOLDOWN_SECS: f32 = 0.9;
 /// Home-run trot window: hang time plus a little air, clamped.
 const INPLAY_BUFFER: f32 = 1.2;
 const INPLAY_MIN: f32 = 2.2;
@@ -90,6 +98,21 @@ pub struct Play {
     /// The batting side sent the lead runner as the delivery started
     /// (aim held down through the windup).
     steal_armed: bool,
+    /// The armed steal broke from an extended pre-pitch lead — a jump no
+    /// throw beats (the pickoff was the defense's counter).
+    big_jump: bool,
+    /// The lead was stretched *during* the steal window — the only extension
+    /// that earns the guaranteed jump, because it was the only one exposed
+    /// to the pickoff. Stretching after the window is a plain late break.
+    window_lead: bool,
+    /// The pre-pitch steal window: while running, the pitch is gated and the
+    /// leadoff/pickoff duel is live. Zero-length when nobody can steal.
+    hold: Timer,
+    /// Reload time between pickoff throws.
+    pickoff_cooldown: Timer,
+    /// The last pitch ended untouched (take / swing-through): the ball is on
+    /// its way to the catcher's mitt, and [`catcher_receives`] may stop it.
+    pitch_taken: bool,
     /// `Time::elapsed_secs` at contact — the live-play race clock's zero.
     contact_at: f32,
     /// A wall carom has already been called this play (one banner per play).
@@ -115,6 +138,20 @@ impl Play {
     pub fn runners_going(&self) -> bool {
         self.steal_armed
     }
+
+    /// Whether the pre-pitch steal window is still open: the pitch is held,
+    /// leads may stretch, and a defensive action is a pickoff throw.
+    pub fn in_steal_window(&self) -> bool {
+        !self.hold.finished()
+    }
+}
+
+/// The live leadoff state, shared with the runner visuals and the CPU: the
+/// offense holding Down stretches the lead runner off the bag — arming the
+/// guaranteed steal jump, and offering the pickoff.
+#[derive(Resource, Default)]
+pub struct LeadState {
+    pub extended: bool,
 }
 
 impl Default for Play {
@@ -127,10 +164,34 @@ impl Default for Play {
             pending_pitch: None,
             live_kind: None,
             steal_armed: false,
+            big_jump: false,
+            window_lead: false,
+            hold: Timer::from_seconds(0.0, TimerMode::Once),
+            pickoff_cooldown: Timer::from_seconds(0.0, TimerMode::Once),
+            pitch_taken: false,
             contact_at: 0.0,
             wall_called: false,
         }
     }
+}
+
+/// The steal window a fresh at-bat opens: the ruleset's duel length whenever
+/// a runner is actually in a position to steal ([`rules::steal_candidate`]),
+/// nothing otherwise — a runner parked on third alone gates no pitch.
+fn steal_window_for(bases: &Bases, rules: &Ruleset) -> Timer {
+    let secs = if rules::steal_candidate(bases).is_some() {
+        rules.steal_window_secs
+    } else {
+        0.0
+    };
+    Timer::from_seconds(secs, TimerMode::Once)
+}
+
+/// The offense's send-the-runner gesture: the same held-Down read the live
+/// runner call uses ([`rules::runner_call_from_aim`]), so leads, steals, and
+/// send-the-batter share one stick convention.
+fn wants_send(aim: Vec2) -> bool {
+    rules::runner_call_from_aim(aim) == rules::RunnerCall::Send
 }
 
 // ── Events ────────────────────────────────────────────────────────────────────
@@ -178,6 +239,11 @@ pub enum LiveBallEvent {
     },
 }
 
+/// The pitch ended untouched and the catcher gloved it — cosmetic (the call
+/// was already made from the crossing), fired for the glove-pop sound.
+#[derive(Event, Clone, Copy)]
+pub struct PitchCaughtEvent;
+
 /// A transient on-screen message (e.g. "STRIKE!", "BALL", "HOME RUN!").
 #[derive(Event, Clone)]
 pub struct PlayBanner {
@@ -203,12 +269,14 @@ impl Plugin for FlowPlugin {
         app.init_resource::<Play>()
             .init_resource::<Bases>()
             .init_resource::<BattingOrder>()
+            .init_resource::<LeadState>()
             .init_resource::<CpuConfig>()
             .init_resource::<CpuState>()
             .add_event::<BallInPlayEvent>()
             .add_event::<LiveBallEvent>()
+            .add_event::<PitchCaughtEvent>()
             .add_event::<PlayBanner>()
-            .add_systems(OnEnter(GameState::Playing), reset_flow)
+            .add_systems(crate::game::game_start(), reset_flow)
             .add_systems(
                 Update,
                 // CPU intent is written first so pitching/batting see it this frame.
@@ -218,6 +286,7 @@ impl Plugin for FlowPlugin {
                     pre_pitch,
                     wind_up,
                     pitch_live,
+                    catcher_receives,
                     in_play,
                     announce_wall_bang,
                     resolve_live_play,
@@ -235,33 +304,86 @@ fn reset_flow(
     mut play: ResMut<Play>,
     mut bases: ResMut<Bases>,
     mut order: ResMut<BattingOrder>,
+    mut lead: ResMut<LeadState>,
     field: Res<FieldSpec>,
 ) {
     *play = Play::default();
     bases.reset_for(field.base_count());
     *order = BattingOrder::default();
+    lead.extended = false;
 }
 
-// ── PrePitch: defense aims and releases ───────────────────────────────────────
+// ── PrePitch: the leadoff duel, then the defense aims and releases ────────────
 
+#[allow(clippy::too_many_arguments)]
 fn pre_pitch(
+    time: Res<Time>,
     mut play: ResMut<Play>,
     intents: Res<Intents>,
-    score: Res<ScoreBoard>,
+    mut score: ResMut<ScoreBoard>,
+    mut bases: ResMut<Bases>,
+    rules_res: Res<Ruleset>,
+    mut lead: ResMut<LeadState>,
+    mut banner: EventWriter<PlayBanner>,
     pitcher_q: Query<Entity, With<Pitcher>>,
+    mut next_state: ResMut<NextState<GameState>>,
     mut commands: Commands,
 ) {
     if play.phase != Phase::PrePitch {
         return;
     }
+    play.hold.tick(time.delta());
+    play.pickoff_cooldown.tick(time.delta());
+
+    // The offense works the lead: holding Down stretches the lead runner off
+    // the bag — the guaranteed steal jump, bought at pickoff risk.
+    let offense = intents.get(score.batting_team());
+    lead.extended = wants_send(offense.aim) && rules::steal_candidate(&bases).is_some();
 
     let intent = intents.get(score.fielding_team());
+    if play.in_steal_window() {
+        // Only a stretch *held through* the window (while the pickoff threat
+        // is live) earns the guaranteed jump at delivery — retreating to the
+        // bag forfeits it, so a one-frame pulse can't bank a risk-free jump.
+        play.window_lead = lead.extended;
+        // The duel window: the ball is held. A defensive action here is a
+        // pickoff throw at the leading runner, not a pitch — one throw per
+        // reload, so a held button can't spam the bag.
+        if intent.action && play.pickoff_cooldown.finished() {
+            play.pickoff_cooldown = Timer::from_seconds(PICKOFF_COOLDOWN_SECS, TimerMode::Once);
+            match rules::attempt_pickoff(&mut score, &mut bases, &rules_res, lead.extended) {
+                rules::PickoffResult::PickedOff { .. } => {
+                    banner.send(PlayBanner::new("PICKED OFF!", BannerTone::Bad));
+                    // A pickoff out is a play: it takes the same result
+                    // pause as any other out (banner linger + runners
+                    // settling) before the next window can open.
+                    end_pitch(&mut play);
+                    maybe_end_game(&score, &rules_res, &mut next_state);
+                }
+                rules::PickoffResult::SafeBack => {
+                    banner.send(PlayBanner::new("BACK IN TIME", BannerTone::Info));
+                }
+                rules::PickoffResult::NoRunner => {}
+            }
+        }
+        return;
+    }
+
     if intent.action {
         play.pending_pitch = Some((intent.aim, rules::PitchKind::from_aim(intent.aim)));
         play.phase = Phase::WindUp;
         play.timer = Timer::from_seconds(AnimClip::WindUp.duration(), TimerMode::Once);
         play.crossing = None;
         play.resolved = false;
+        play.pitch_taken = false;
+        // A lead still stretched at first movement sends the runner with the
+        // delivery. It's only the no-throw-beats-it jump when the stretch
+        // was made during the window — that's the extension that paid the
+        // pickoff risk; stretching only after the window is a late break.
+        if lead.extended {
+            play.steal_armed = true;
+            play.big_jump = play.window_lead;
+        }
         for pitcher in &pitcher_q {
             commands
                 .entity(pitcher)
@@ -272,20 +394,27 @@ fn pre_pitch(
 
 // ── WindUp: the delivery plays out, then the ball leaves the hand ─────────────
 
+#[allow(clippy::too_many_arguments)]
 fn wind_up(
     time: Res<Time>,
     mut play: ResMut<Play>,
     field: Res<FieldSpec>,
     intents: Res<Intents>,
     score: Res<ScoreBoard>,
+    bases: Res<Bases>,
+    mut lead: ResMut<LeadState>,
     mut pitch_ev: EventWriter<PitchEvent>,
 ) {
     if play.phase != Phase::WindUp {
         return;
     }
-    // Holding the stick down through the delivery sends the lead runner.
-    if intents.get(score.batting_team()).aim.y < -0.7 {
+    // Holding the stick down through the delivery sends the lead runner (the
+    // late break: a classic race against the catcher, no guaranteed jump).
+    // Nobody in a position to steal means nobody is going.
+    if wants_send(intents.get(score.batting_team()).aim) && rules::steal_candidate(&bases).is_some()
+    {
         play.steal_armed = true;
+        lead.extended = true;
     }
     if play.timer.tick(time.delta()).finished() {
         let (aim, kind) = play
@@ -389,6 +518,9 @@ fn pitch_live(
             let dropped =
                 play.live_kind == Some(rules::PitchKind::Curveball) && !bases.is_occupied(0);
             let call = add_strike(&mut score, &mut bases, &rules, &mut banner, true, dropped);
+            // The catcher gloves everything except the strike three that got
+            // away (that one is in the dirt by definition).
+            play.pitch_taken = call != StrikeCall::DroppedThird;
             if call != StrikeCall::Strike {
                 order.advance(batter);
             }
@@ -416,6 +548,7 @@ fn pitch_live(
             banner.send(PlayBanner::new("HIT BY PITCH", tone));
             order.advance(batter);
         } else {
+            play.pitch_taken = true;
             let (pa_over, walked) = if rules::is_in_zone(cross) {
                 let call = add_strike(&mut score, &mut bases, &rules, &mut banner, false, false);
                 (call != StrikeCall::Strike, false)
@@ -435,6 +568,47 @@ fn pitch_live(
         end_pitch(&mut play);
         maybe_end_game(&score, &rules, &mut next_state);
     }
+}
+
+// ── The catcher receives ──────────────────────────────────────────────────────
+
+/// Stops an untouched pitch in the catcher's mitt instead of letting it sail
+/// to the backstop. Cosmetic — the call was already made at the crossing —
+/// but the ball really ends up in the glove, with the pop to prove it. Parks
+/// without a catcher (the front yard) let the ball fly as before.
+#[allow(clippy::type_complexity)]
+fn catcher_receives(
+    mut play: ResMut<Play>,
+    catchers: Query<(Entity, &Transform), (With<CatcherRole>, Without<Baseball>)>,
+    mut ball_q: Query<(Entity, &mut Transform, &mut Velocity), (With<Baseball>, With<InFlight>)>,
+    mut caught: EventWriter<PitchCaughtEvent>,
+    mut commands: Commands,
+) {
+    if play.phase != Phase::Result || !play.pitch_taken {
+        return;
+    }
+    let Some((catcher, catcher_tf)) = catchers.iter().next() else {
+        return;
+    };
+    let Ok((ball, mut ball_tf, mut vel)) = ball_q.get_single_mut() else {
+        return;
+    };
+    let pos = ball_tf.translation;
+    if pos.z > catcher_tf.translation.z + 0.6 || vel.linvel.z >= 0.0 {
+        return; // still on its way in
+    }
+    play.pitch_taken = false;
+    if pos.y < 0.12 || pos.y > 2.4 {
+        return; // in the dirt or over everything: play it off the backstop
+    }
+    ball_tf.translation = catcher_tf.translation + Vec3::new(0.0, 0.5, 0.45);
+    vel.linvel = Vec3::ZERO;
+    vel.angvel = Vec3::ZERO;
+    commands.entity(ball).remove::<InFlight>();
+    commands
+        .entity(catcher)
+        .insert(Playing::new(AnimClip::GloveUp));
+    caught.send(PitchCaughtEvent);
 }
 
 // ── InPlay: the ball is live ──────────────────────────────────────────────────
@@ -546,31 +720,52 @@ fn resolve_live_play(
 
 // ── Result: brief pause, then reset for the next pitch ────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 fn result_phase(
     mut play: ResMut<Play>,
     time: Res<Time>,
     field: Res<FieldSpec>,
+    rules_res: Res<Ruleset>,
+    bases: Res<Bases>,
+    settled: Res<RunnersSettled>,
+    mut overtime: Local<f32>,
+    mut lead: ResMut<LeadState>,
     mut ball_q: Query<(Entity, &mut Transform, &mut Velocity), With<Baseball>>,
     mut commands: Commands,
 ) {
     if play.phase != Phase::Result {
         return;
     }
-    if play.timer.tick(time.delta()).finished() {
-        if let Ok((entity, mut transform, mut vel)) = ball_q.get_single_mut() {
-            transform.translation = rules::mound_reset_pos(field.pitch_distance);
-            vel.linvel = Vec3::ZERO;
-            vel.angvel = Vec3::ZERO;
-            commands.entity(entity).remove::<InFlight>();
-        }
-        play.phase = Phase::PrePitch;
-        play.crossing = None;
-        play.resolved = false;
-        play.pending_pitch = None;
-        play.live_kind = None;
-        play.steal_armed = false;
-        play.wall_called = false;
+    if !play.timer.tick(time.delta()).finished() {
+        return;
     }
+    // The play isn't over while runner rigs are still moving (the home-run
+    // trot, a first-to-third sprint): the next batter waits for the bases to
+    // settle, with a hard cap so a stray path can never stall the game.
+    if !settled.0 && *overtime < RESULT_SETTLE_CAP {
+        *overtime += time.delta_secs();
+        return;
+    }
+    *overtime = 0.0;
+    if let Ok((entity, mut transform, mut vel)) = ball_q.get_single_mut() {
+        transform.translation = rules::mound_reset_pos(field.pitch_distance);
+        vel.linvel = Vec3::ZERO;
+        vel.angvel = Vec3::ZERO;
+        commands.entity(entity).remove::<InFlight>();
+    }
+    play.phase = Phase::PrePitch;
+    play.crossing = None;
+    play.resolved = false;
+    play.pending_pitch = None;
+    play.live_kind = None;
+    play.steal_armed = false;
+    play.big_jump = false;
+    play.window_lead = false;
+    play.pitch_taken = false;
+    play.wall_called = false;
+    // A runner in stealing position opens the duel window for the next at-bat.
+    play.hold = steal_window_for(&bases, &rules_res);
+    lead.extended = false;
 }
 
 /// A live ball caroms off the wall: one excited call per play. Resolved
@@ -721,7 +916,7 @@ fn resolve_steal(
     banner: &mut EventWriter<PlayBanner>,
 ) {
     let off_speed = play.live_kind != Some(rules::PitchKind::Fastball);
-    match rules::attempt_steal(score, bases, ruleset, off_speed) {
+    match rules::attempt_steal(score, bases, ruleset, off_speed, play.big_jump) {
         StealResult::Stolen { .. } => {
             banner.send(PlayBanner::new("STOLEN BASE!", BannerTone::Good));
         }

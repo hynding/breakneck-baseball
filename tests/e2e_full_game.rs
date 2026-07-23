@@ -21,8 +21,9 @@ use breakneck_baseball::game::{GameState, ScoreBoard, Team};
 
 use common::{headless_app, run_until, DriveGame};
 
-/// Hard cap ≈ 5 sim-minutes; the scripted game needs ~10 pitches (~40 s).
-const MAX_FRAMES: u64 = 72_000;
+/// Hard cap ≈ 7 sim-minutes; the scripted game needs ~10 pitches (~40 s) plus
+/// the full walk-off trot (the play must end before the game can).
+const MAX_FRAMES: u64 = 100_000;
 
 #[derive(Resource, Default)]
 struct Driver {

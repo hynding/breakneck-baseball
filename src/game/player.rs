@@ -17,7 +17,8 @@ use crate::game::animation::{
 use crate::game::ball::PLAYER_GROUP;
 use crate::game::flow::{Phase, Play};
 use crate::game::input::Intents;
-use crate::game::theme::{PlayerTemplate, Theme};
+use crate::game::jersey::{attach_jerseys, JerseyRole};
+use crate::game::theme::{PlayerModelId, PlayerTemplate, Theme};
 use crate::game::variant::FieldSpec;
 use crate::game::{GameState, GameplayEntity, ScoreBoard, Team};
 
@@ -43,6 +44,11 @@ pub struct Fielder {
 #[derive(Component)]
 pub struct CatcherRole;
 
+/// The umpire behind the plate, who crouches through the duel like the
+/// catcher he's peering over.
+#[derive(Component)]
+pub struct PlateUmpire;
+
 /// Facing direction for the player model (world-space).
 #[allow(dead_code)]
 #[derive(Component, Default)]
@@ -50,11 +56,12 @@ pub struct FacingDirection(pub Vec3);
 
 /// Whether a rig belongs to the defense (pitcher + fielders) or the batting
 /// side (batter, runners) — decides which team's colours it wears as innings
-/// flip.
+/// flip. Umpires wear their own blacks and never recolour.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RigUnit {
     Defense,
     Batter,
+    Umpire,
 }
 
 /// Which template material a rig child wears.
@@ -118,6 +125,20 @@ fn build_materials(
     }
 }
 
+/// The umpires' blacks — a fixed look, deliberately outside the theme's
+/// team templates so the crew reads as neutral in every palette.
+fn umpire_materials(materials: &mut Assets<StandardMaterial>) -> RigMaterials {
+    build_materials(
+        materials,
+        &PlayerTemplate {
+            jersey: Color::srgb(0.15, 0.16, 0.19),
+            cap: Color::srgb(0.05, 0.05, 0.06),
+            skin: Color::srgb(0.85, 0.66, 0.5),
+            bat: Color::srgb(0.3, 0.3, 0.3),
+        },
+    )
+}
+
 // ── Bat swing ─────────────────────────────────────────────────────────────────
 
 /// Marks the batter's bat pivot — the entity the swing clips rotate.
@@ -130,19 +151,24 @@ pub struct PlayerPlugin;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(GameState::Playing), spawn_players)
-            .add_systems(
-                Update,
-                (recolor_teams, trigger_swing, catcher_crouch).run_if(in_state(GameState::Playing)),
-            );
+        app.add_systems(
+            crate::game::game_start(),
+            spawn_players,
+        )
+        .add_systems(
+            Update,
+            (recolor_teams, trigger_swing, catcher_crouch).run_if(in_state(GameState::Playing)),
+        );
     }
 }
 
-/// Holds the catcher in the receiving crouch through the duel, and releases
-/// the stance the moment the ball is in play so coverage can take over.
+/// Holds the catcher (and the plate umpire peering over him) in the
+/// receiving crouch through the duel, and releases the stance the moment the
+/// ball is in play so coverage can take over.
+#[allow(clippy::type_complexity)]
 fn catcher_crouch(
     play: Res<Play>,
-    catchers: Query<(Entity, Option<&Playing>), With<CatcherRole>>,
+    catchers: Query<(Entity, Option<&Playing>), Or<(With<CatcherRole>, With<PlateUmpire>)>>,
     mut commands: Commands,
 ) {
     let dueling = matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch);
@@ -187,14 +213,19 @@ fn spawn_players(
         home: build_materials(&mut materials, &theme.home),
         away: build_materials(&mut materials, &theme.away),
     };
-    let rig_meshes = RigMeshes {
-        torso: meshes.add(Capsule3d::new(0.3, 0.9)),
-        head: meshes.add(Sphere::new(0.18)),
-        cap: meshes.add(Cylinder::new(0.19, 0.09)),
-        brim: meshes.add(Cuboid::new(0.26, 0.03, 0.16)),
-        bat: meshes.add(Cylinder::new(0.032, 0.84)),
-        limb: meshes.add(Cylinder::new(0.055, 0.5)),
+    // The model seam: a future humanoid model is a new arm here (its own
+    // meshes — and richer poses behind the same AnimClip names).
+    let rig_meshes = match theme.player_model {
+        PlayerModelId::Blocky => RigMeshes {
+            torso: meshes.add(Capsule3d::new(0.3, 0.9)),
+            head: meshes.add(Sphere::new(0.18)),
+            cap: meshes.add(Cylinder::new(0.19, 0.09)),
+            brim: meshes.add(Cuboid::new(0.26, 0.03, 0.16)),
+            bat: meshes.add(Cylinder::new(0.032, 0.84)),
+            limb: meshes.add(Cylinder::new(0.055, 0.5)),
+        },
     };
+    let jersey_assets = crate::game::jersey::make_assets(&mut meshes, &mut materials);
 
     // Top of the 1st: Away bats, Home fields.
     let defense = palette.for_team(Team::Home);
@@ -210,6 +241,7 @@ fn spawn_players(
         -1.0,
     );
     commands.entity(pitcher).insert(Pitcher);
+    attach_jerseys(&mut commands, pitcher, JerseyRole::Pitcher, &jersey_assets);
 
     // Fielders at the spec's spots.
     for (index, spot) in field.fielder_positions.iter().enumerate() {
@@ -222,8 +254,32 @@ fn spawn_players(
             -1.0,
         );
         commands.entity(fielder).insert(Fielder { index });
+        attach_jerseys(
+            &mut commands,
+            fielder,
+            JerseyRole::Fielder(index),
+            &jersey_assets,
+        );
         if spot.z < 0.0 {
             commands.entity(fielder).insert(CatcherRole);
+        }
+    }
+
+    // The umpiring crew, in their own blacks (never recoloured). The plate
+    // umpire faces the field from behind home; the rest face the plate.
+    let umpire_mats = umpire_materials(&mut materials);
+    for (i, spot) in field.umpire_positions.iter().enumerate() {
+        let facing = if spot.z < 0.0 { 1.0 } else { -1.0 };
+        let umpire = spawn_rig(
+            &mut commands,
+            &rig_meshes,
+            RigUnit::Umpire,
+            &umpire_mats,
+            *spot + Vec3::Y * 0.6,
+            facing,
+        );
+        if i == 0 && spot.z < 0.0 {
+            commands.entity(umpire).insert(PlateUmpire);
         }
     }
 
@@ -236,6 +292,8 @@ fn spawn_players(
         Vec3::new(0.7, 0.6, 0.0),
         1.0,
     );
+    attach_jerseys(&mut commands, batter, JerseyRole::Batter, &jersey_assets);
+    commands.insert_resource(jersey_assets);
     commands.entity(batter).insert(Batter).with_children(|rig| {
         rig.spawn((
             BatPivot,
@@ -372,6 +430,8 @@ fn recolor_teams(
         let team = match rig_part.unit {
             RigUnit::Defense => score.fielding_team(),
             RigUnit::Batter => score.batting_team(),
+            // Umpires keep their blacks through every half-inning.
+            RigUnit::Umpire => continue,
         };
         let mats = palette.for_team(team);
         material.0 = match rig_part.part {

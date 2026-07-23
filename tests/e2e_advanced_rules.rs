@@ -20,8 +20,9 @@ use breakneck_baseball::game::{GameState, ScoreBoard};
 
 use common::{headless_app, run_until, DriveGame};
 
-/// Generous per-milestone budget (~40 sim-seconds).
-const STAGE_FRAMES: u64 = 10_000;
+/// Generous per-milestone budget (~60 sim-seconds — pitches wait out the
+/// 5-second steal window whenever runners are aboard).
+const STAGE_FRAMES: u64 = 15_000;
 
 #[derive(Resource, Default)]
 struct Stage(usize);
@@ -118,9 +119,12 @@ fn drive_scenario(
         2 => (Vec2::new(0.0, 0.6), true, None),
         // S3: plunk the next batter to restock first base.
         3 => (Vec2::new(-1.0, 0.0), false, None),
-        // S4: centre changeup, batter tops a very late weak grounder with a
-        // runner on first → inning-ending 6-4-3.
-        4 => (Vec2::ZERO, false, Some((-1.2, -0.95, Vec2::ZERO))),
+        // S4: centre changeup, batter tops late grounders sprayed at the
+        // first baseman with a runner on first → force plays until the
+        // side is retired. (With the pre-pitch steal window the defense is
+        // fully set every pitch, so a tap in front of the plate — where no
+        // set fielder stands — is an infield single, not a force.)
+        4 => (Vec2::ZERO, false, Some((-0.6, -0.35, Vec2::new(0.9, -1.0)))),
         // Bottom of the 1st: Away pitches to Home.
         // S5: plunk the Home batter.
         5 => (Vec2::new(-1.0, 0.0), false, None),

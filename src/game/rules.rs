@@ -235,6 +235,10 @@ pub enum PitchKind {
     Fastball,
     Curveball,
     Changeup,
+    /// Hard breaking ball that sweeps toward the batter's side (+X).
+    Slider,
+    /// Two-seamer that dives and runs away from the batter (−X).
+    Sinker,
 }
 
 impl PitchKind {
@@ -243,6 +247,8 @@ impl PitchKind {
             PitchKind::Fastball => PITCH_SPEED,
             PitchKind::Curveball => 31.0,
             PitchKind::Changeup => 29.0,
+            PitchKind::Slider => 33.0,
+            PitchKind::Sinker => 35.0,
         }
     }
 
@@ -251,14 +257,25 @@ impl PitchKind {
             PitchKind::Fastball => Vec3::new(20.0, 0.0, 0.0),
             PitchKind::Curveball => Vec3::new(-18.0, 6.0, 0.0),
             PitchKind::Changeup => Vec3::new(6.0, 0.0, 0.0),
+            // −Y spin accelerates a −Z pitch toward +X (the batter's side);
+            // +Y sweeps it away toward −X. Mild ±X components add ride/dive.
+            PitchKind::Slider => Vec3::new(-4.0, -14.0, 0.0),
+            PitchKind::Sinker => Vec3::new(-10.0, 10.0, 0.0),
         }
     }
 
-    /// Held aim at release selects the pitch (up = fastball, down = curveball,
-    /// neutral = changeup). Aim keeps steering location too — aiming high
-    /// *means* throwing the heater upstairs.
+    /// Held aim at release selects the pitch by its dominant axis: up =
+    /// fastball, down = curveball, left = slider, right = sinker, neutral =
+    /// changeup. Aim keeps steering location too — aiming high *means*
+    /// throwing the heater upstairs, and aiming inside means the sweeper in.
     pub fn from_aim(aim: Vec2) -> PitchKind {
-        if aim.y > 0.35 {
+        if aim.x.abs() > 0.35 && aim.x.abs() >= aim.y.abs() {
+            if aim.x < 0.0 {
+                PitchKind::Slider
+            } else {
+                PitchKind::Sinker
+            }
+        } else if aim.y > 0.35 {
             PitchKind::Fastball
         } else if aim.y < -0.35 {
             PitchKind::Curveball
@@ -1058,17 +1075,21 @@ pub enum StealResult {
 
 /// Resolves a straight steal on a pitch the batter didn't put in play: the
 /// jump beats the throw on off-speed stuff, but a fastball gets there in
-/// time. One runner (the lead eligible one) goes per pitch.
+/// time — unless the runner broke from an extended lead (`big_jump`), which
+/// beats any pitch. The extended lead was the gamble: it exposed the runner
+/// to a pickoff during the pre-pitch window (see [`attempt_pickoff`]). One
+/// runner (the lead eligible one) goes per pitch.
 pub fn attempt_steal(
     score: &mut ScoreBoard,
     bases: &mut Bases,
     rules: &Ruleset,
     off_speed: bool,
+    big_jump: bool,
 ) -> StealResult {
     let Some(runner) = steal_candidate(bases) else {
         return StealResult::NoRunner;
     };
-    if off_speed {
+    if off_speed || big_jump {
         bases.set(runner, false);
         bases.set(runner + 1, true);
         StealResult::Stolen { base: runner + 1 }
@@ -1076,6 +1097,39 @@ pub fn attempt_steal(
         bases.set(runner, false);
         charge_out(score, bases, rules);
         StealResult::Caught
+    }
+}
+
+/// What a pickoff throw during the pre-pitch window produced.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PickoffResult {
+    /// Caught off the bag mid-extension — the runner is out.
+    PickedOff { base: usize },
+    /// The runner dove back in time (a normal lead is always safe).
+    SafeBack,
+    /// Nobody was leading off anywhere.
+    NoRunner,
+}
+
+/// Resolves a pickoff throw at the lead eligible runner. The analytic model
+/// keeps runners glued to the bag on a normal lead — only an *extended* lead
+/// (the offense arming an early steal) strays far enough to be caught. This
+/// is the deterministic counter to the guaranteed [`attempt_steal`] big jump.
+pub fn attempt_pickoff(
+    score: &mut ScoreBoard,
+    bases: &mut Bases,
+    rules: &Ruleset,
+    extended: bool,
+) -> PickoffResult {
+    let Some(runner) = steal_candidate(bases) else {
+        return PickoffResult::NoRunner;
+    };
+    if extended {
+        bases.set(runner, false);
+        charge_out(score, bases, rules);
+        PickoffResult::PickedOff { base: runner }
+    } else {
+        PickoffResult::SafeBack
     }
 }
 
@@ -1217,7 +1271,7 @@ mod tests {
         let mut score = ScoreBoard::default();
         let mut bases = with(&[0]);
         assert_eq!(
-            attempt_steal(&mut score, &mut bases, &std_rules(), true),
+            attempt_steal(&mut score, &mut bases, &std_rules(), true, false),
             StealResult::Stolen { base: 1 }
         );
         assert_eq!(bases, with(&[1]));
@@ -1233,7 +1287,7 @@ mod tests {
         };
         let mut bases = with(&[0]);
         assert_eq!(
-            attempt_steal(&mut score, &mut bases, &std_rules(), false),
+            attempt_steal(&mut score, &mut bases, &std_rules(), false, false),
             StealResult::Caught
         );
         assert_eq!(bases, empty());
@@ -1249,7 +1303,7 @@ mod tests {
         let mut score = ScoreBoard::default();
         let mut bases = with(&[0, 1]);
         assert_eq!(
-            attempt_steal(&mut score, &mut bases, &std_rules(), true),
+            attempt_steal(&mut score, &mut bases, &std_rules(), true, false),
             StealResult::Stolen { base: 2 }
         );
         assert_eq!(bases, with(&[0, 2]));
@@ -1260,7 +1314,7 @@ mod tests {
         let mut score = ScoreBoard::default();
         let mut bases = with(&[2]);
         assert_eq!(
-            attempt_steal(&mut score, &mut bases, &std_rules(), true),
+            attempt_steal(&mut score, &mut bases, &std_rules(), true, false),
             StealResult::NoRunner
         );
         assert_eq!(bases, with(&[2]));
@@ -1271,9 +1325,81 @@ mod tests {
         let mut score = ScoreBoard::default();
         let mut bases = empty();
         assert_eq!(
-            attempt_steal(&mut score, &mut bases, &std_rules(), true),
+            attempt_steal(&mut score, &mut bases, &std_rules(), true, false),
             StealResult::NoRunner
         );
+    }
+
+    #[test]
+    fn big_jump_beats_even_a_fastball() {
+        let mut score = ScoreBoard::default();
+        let mut bases = with(&[0]);
+        assert_eq!(
+            attempt_steal(&mut score, &mut bases, &std_rules(), false, true),
+            StealResult::Stolen { base: 1 }
+        );
+        assert_eq!(bases, with(&[1]));
+        assert_eq!(score.outs, 0);
+    }
+
+    // ── Pickoffs ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn pickoff_catches_an_extended_lead() {
+        let mut score = ScoreBoard {
+            balls: 1,
+            strikes: 2,
+            ..Default::default()
+        };
+        let mut bases = with(&[0]);
+        assert_eq!(
+            attempt_pickoff(&mut score, &mut bases, &std_rules(), true),
+            PickoffResult::PickedOff { base: 0 }
+        );
+        assert_eq!(bases, empty());
+        assert_eq!(score.outs, 1);
+        // The batter's count survives — no pitch was thrown.
+        assert_eq!((score.balls, score.strikes), (1, 2));
+    }
+
+    #[test]
+    fn pickoff_on_a_normal_lead_is_safe() {
+        let mut score = ScoreBoard::default();
+        let mut bases = with(&[0]);
+        assert_eq!(
+            attempt_pickoff(&mut score, &mut bases, &std_rules(), false),
+            PickoffResult::SafeBack
+        );
+        assert_eq!(bases, with(&[0]));
+        assert_eq!(score.outs, 0);
+    }
+
+    #[test]
+    fn pickoff_with_nobody_leading_is_no_play() {
+        let mut score = ScoreBoard::default();
+        let mut bases = empty();
+        assert_eq!(
+            attempt_pickoff(&mut score, &mut bases, &std_rules(), true),
+            PickoffResult::NoRunner
+        );
+    }
+
+    #[test]
+    fn pickoff_third_out_retires_the_side() {
+        let mut score = ScoreBoard {
+            outs: 2,
+            top_of_inning: true,
+            inning: 1,
+            ..Default::default()
+        };
+        let mut bases = with(&[0]);
+        assert_eq!(
+            attempt_pickoff(&mut score, &mut bases, &std_rules(), true),
+            PickoffResult::PickedOff { base: 0 }
+        );
+        assert_eq!(score.outs, 0, "side retired: outs reset");
+        assert!(!score.top_of_inning, "half-inning flips on the third out");
+        assert_eq!(bases, empty());
     }
 
     #[test]
@@ -2171,6 +2297,8 @@ mod tests {
             PitchKind::Fastball,
             PitchKind::Curveball,
             PitchKind::Changeup,
+            PitchKind::Slider,
+            PitchKind::Sinker,
         ] {
             let cross = simulate_pitch(kind, Vec2::ZERO);
             assert!(
@@ -2203,6 +2331,31 @@ mod tests {
             PitchKind::Curveball
         );
         assert_eq!(PitchKind::from_aim(Vec2::ZERO), PitchKind::Changeup);
+        assert_eq!(PitchKind::from_aim(Vec2::new(-1.0, 0.0)), PitchKind::Slider);
+        assert_eq!(PitchKind::from_aim(Vec2::new(1.0, 0.0)), PitchKind::Sinker);
+        // The dominant axis wins a diagonal.
+        assert_eq!(
+            PitchKind::from_aim(Vec2::new(0.4, 0.9)),
+            PitchKind::Fastball
+        );
+        assert_eq!(PitchKind::from_aim(Vec2::new(-0.9, 0.4)), PitchKind::Slider);
+    }
+
+    #[test]
+    fn slider_sweeps_in_and_sinker_runs_away() {
+        let neutral = simulate_pitch(PitchKind::Changeup, Vec2::ZERO);
+        let slider = simulate_pitch(PitchKind::Slider, Vec2::ZERO);
+        let sinker = simulate_pitch(PitchKind::Sinker, Vec2::ZERO);
+        // The batter stands at +X: the slider breaks toward him, the sinker
+        // runs away, and the sinker also finishes below the slider.
+        assert!(
+            slider.x > neutral.x + 0.08,
+            "slider {slider:?} vs {neutral:?}"
+        );
+        assert!(
+            sinker.x < neutral.x - 0.08,
+            "sinker {sinker:?} vs {neutral:?}"
+        );
     }
 
     #[test]
