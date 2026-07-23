@@ -19,63 +19,44 @@ use breakneck_baseball::game::input::Intents;
 use breakneck_baseball::game::variant::Ruleset;
 use breakneck_baseball::game::{GameState, ScoreBoard, Team};
 
-use common::{headless_app, run_until, DriveGame};
+use common::{headless_app, run_until, start_game, tap_key, DriveGame};
 
 /// Hard cap ≈ 7 sim-minutes; the scripted game needs ~10 pitches (~40 s) plus
 /// the full walk-off trot (the play must end before the game can).
 const MAX_FRAMES: u64 = 100_000;
 
-#[derive(Resource, Default)]
-struct Driver {
-    frame: u64,
-}
-
 fn drive(
     state: Res<State<GameState>>,
-    mut driver: ResMut<Driver>,
-    mut keyboard: ResMut<ButtonInput<KeyCode>>,
     mut intents: ResMut<Intents>,
     play: Option<Res<Play>>,
     score: Option<Res<ScoreBoard>>,
     ball: Query<&Transform, With<Baseball>>,
 ) {
-    driver.frame += 1;
-    match state.get() {
-        GameState::MainMenu => match driver.frame {
-            // One press of I cycles the default 9 innings to 1.
-            10 => keyboard.press(KeyCode::KeyI),
-            12 => keyboard.release(KeyCode::KeyI),
-            // Start a two-player game so the test scripts both teams.
-            30 => keyboard.press(KeyCode::Digit2),
-            32 => keyboard.release(KeyCode::Digit2),
-            _ => {}
-        },
-        GameState::Playing => {
-            let (Some(play), Some(score)) = (play, score) else {
-                return;
-            };
-            // Neutral by default; the phases below opt in.
-            intents.home = default();
-            intents.away = default();
-            match play.phase {
-                // The fielding side throws straightaway changeups: known
-                // called strikes (unit-tested), so a take always advances
-                // the count against the batter.
-                Phase::PrePitch => {
-                    intents.get_mut(score.fielding_team()).action = true;
+    if *state.get() != GameState::Playing {
+        return;
+    }
+    let (Some(play), Some(score)) = (play, score) else {
+        return;
+    };
+    // Neutral by default; the phases below opt in.
+    intents.home = default();
+    intents.away = default();
+    match play.phase {
+        // The fielding side throws straightaway changeups: known called
+        // strikes (unit-tested), so a take always advances the count
+        // against the batter.
+        Phase::PrePitch => {
+            intents.get_mut(score.fielding_team()).action = true;
+        }
+        // Away never swings (strikes out); Home swings just before the
+        // ideal contact point (contact_z ≈ 0.4) with full uppercut aim —
+        // a deterministic home run.
+        Phase::Pitch if score.batting_team() == Team::Home => {
+            if let Ok(t) = ball.get_single() {
+                intents.home.aim = Vec2::new(0.0, 1.0);
+                if t.translation.z <= 0.45 && t.translation.z >= 0.0 {
+                    intents.home.action = true;
                 }
-                // Away never swings (strikes out); Home swings just before
-                // the ideal contact point (contact_z ≈ 0.4) with full
-                // uppercut aim — a deterministic home run.
-                Phase::Pitch if score.batting_team() == Team::Home => {
-                    if let Ok(t) = ball.get_single() {
-                        intents.home.aim = Vec2::new(0.0, 1.0);
-                        if t.translation.z <= 0.45 && t.translation.z >= 0.0 {
-                            intents.home.action = true;
-                        }
-                    }
-                }
-                _ => {}
             }
         }
         _ => {}
@@ -85,8 +66,12 @@ fn drive(
 #[test]
 fn one_inning_game_plays_to_completion() {
     let mut app = headless_app();
-    app.init_resource::<Driver>();
     app.add_systems(DriveGame, drive);
+
+    // One press of I cycles the default 9 innings to 1, then 2 starts a
+    // two-player game so the test scripts both teams.
+    tap_key(&mut app, KeyCode::KeyI);
+    start_game(&mut app, KeyCode::Digit2);
 
     let finished = run_until(&mut app, MAX_FRAMES, |app| {
         *app.world().resource::<State<GameState>>().get() == GameState::GameOver

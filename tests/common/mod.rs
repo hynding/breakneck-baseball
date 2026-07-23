@@ -26,6 +26,49 @@ pub const DT: f64 = 1.0 / 240.0;
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct DriveGame;
 
+/// A queued key tap, applied from the [`DriveGame`] schedule. Pressing the
+/// `ButtonInput` resource directly from a test body doesn't work: the input
+/// plugin's `PreUpdate` clear wipes `just_pressed` before any `Update`
+/// system sees it, so taps must be injected after `PreUpdate`.
+#[derive(Resource, Default)]
+pub struct TapKey(Option<(KeyCode, u8)>);
+
+fn apply_taps(mut tap: ResMut<TapKey>, mut keyboard: ResMut<ButtonInput<KeyCode>>) {
+    if let Some((key, frames_left)) = tap.0 {
+        if frames_left > 0 {
+            keyboard.press(key);
+            tap.0 = Some((key, frames_left - 1));
+        } else {
+            keyboard.release(key);
+            tap.0 = None;
+        }
+    }
+}
+
+/// Presses `key` for one frame (release the next) and steps the app past it.
+#[allow(dead_code)]
+pub fn tap_key(app: &mut App, key: KeyCode) {
+    app.world_mut().resource_mut::<TapKey>().0 = Some((key, 1));
+    for _ in 0..4 {
+        app.update();
+    }
+}
+
+/// Starts a game from the main menu by tapping `select_key` (**1** = one
+/// player vs CPU, **2** = two players) and waits for `GameState::Playing`.
+#[allow(dead_code)]
+pub fn start_game(app: &mut App, select_key: KeyCode) {
+    use breakneck_baseball::game::GameState;
+    tap_key(app, select_key);
+    let started = run_until(app, 2_000, |app| {
+        *app.world()
+            .resource::<bevy::prelude::State<GameState>>()
+            .get()
+            == GameState::Playing
+    });
+    assert!(started.is_some(), "menu never started the game");
+}
+
 /// Builds the headless app. Add driver systems to the [`DriveGame`] schedule
 /// afterwards: `app.add_systems(DriveGame, drive)`.
 pub fn headless_app() -> App {
@@ -60,6 +103,8 @@ pub fn headless_app() -> App {
     app.world_mut()
         .resource_mut::<MainScheduleOrder>()
         .insert_after(PreUpdate, DriveGame);
+    app.init_resource::<TapKey>();
+    app.add_systems(DriveGame, apply_taps);
 
     // Driving `app.update()` by hand skips what `App::run` would do: wait out
     // async plugin setup (the wgpu adapter request), then run `finish` /

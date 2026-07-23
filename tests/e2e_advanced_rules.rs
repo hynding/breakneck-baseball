@@ -1,6 +1,9 @@
 //! End-to-end scenarios for the advanced rules, driven through the real app:
-//! hit-by-pitch, stolen bases, caught stealing, double plays, hit-and-run,
-//! and the dropped third strike.
+//! hit-by-pitch, stolen bases, caught stealing, infield force outs,
+//! hit-and-run, and the dropped third strike. (The turned-two relay math
+//! itself is pinned by the `resolve_thrown` unit tests in `rules.rs` —
+//! `quick_force_at_second_turns_two` and friends; the live sim here proves
+//! the force plays retire the side.)
 //!
 //! Each scenario is a staged script: the outer loop watches `Bases` /
 //! `ScoreBoard` for the current milestone and bumps the `Stage` resource; the
@@ -18,7 +21,7 @@ use breakneck_baseball::game::input::Intents;
 use breakneck_baseball::game::rules::Bases;
 use breakneck_baseball::game::{GameState, ScoreBoard};
 
-use common::{headless_app, run_until, DriveGame};
+use common::{headless_app, run_until, start_game, DriveGame};
 
 /// Generous per-milestone budget (~60 sim-seconds — pitches wait out the
 /// 5-second steal window whenever runners are aboard).
@@ -27,36 +30,9 @@ const STAGE_FRAMES: u64 = 15_000;
 #[derive(Resource, Default)]
 struct Stage(usize);
 
-#[derive(Resource, Default)]
-struct MenuScript {
-    frame: u64,
-}
-
-/// Presses **2** on the menu to start a two-player game.
-fn drive_menu(
-    state: Res<State<GameState>>,
-    mut script: ResMut<MenuScript>,
-    mut keyboard: ResMut<ButtonInput<KeyCode>>,
-) {
-    if *state.get() != GameState::MainMenu {
-        return;
-    }
-    script.frame += 1;
-    match script.frame {
-        10 => keyboard.press(KeyCode::Digit2),
-        12 => keyboard.release(KeyCode::Digit2),
-        _ => {}
-    }
-}
-
 fn start_two_player_game(app: &mut App) {
     app.init_resource::<Stage>();
-    app.init_resource::<MenuScript>();
-    app.add_systems(DriveGame, drive_menu);
-    let started = run_until(app, STAGE_FRAMES, |app| {
-        *app.world().resource::<State<GameState>>().get() == GameState::Playing
-    });
-    assert!(started.is_some(), "menu never started the game");
+    start_game(app, KeyCode::Digit2);
 }
 
 fn bases(app: &mut App) -> &Bases {
@@ -84,7 +60,7 @@ fn expect_stage(app: &mut App, stage: usize, what: &str, milestone: impl FnMut(&
     );
 }
 
-// ── Scenario 1: HBP → SB → CS → HBP → DP → HBP → hit-and-run ─────────────────
+// ── Scenario 1: HBP → SB → CS → HBP → force outs → HBP → hit-and-run ─────────
 
 /// Per-stage intents. The pitching side always initiates from PrePitch; the
 /// batting side arms steals in the windup and times its swings off the live
@@ -158,7 +134,7 @@ fn drive_scenario(
 }
 
 #[test]
-fn hbp_steals_double_play_and_hit_and_run() {
+fn hbp_steals_force_outs_and_hit_and_run() {
     let mut app = headless_app();
     app.add_systems(DriveGame, drive_scenario);
     start_two_player_game(&mut app);
@@ -187,11 +163,11 @@ fn hbp_steals_double_play_and_hit_and_run() {
     expect_stage(&mut app, 3, "second hit-by-pitch", |app| {
         bases(app).is_occupied(0) && score(app).outs == 1
     });
-    expect_stage(&mut app, 4, "inning-ending double play", |app| {
+    expect_stage(&mut app, 4, "force outs retire the side", |app| {
         !score(app).top_of_inning
     });
     let s = score(&mut app);
-    assert_eq!(s.inning, 1, "the DP ends the half, not the game");
+    assert_eq!(s.inning, 1, "the forces end the half, not the game");
     assert_eq!(s.outs, 0, "outs reset after the flip");
     assert_eq!((s.home_runs, s.away_runs), (0, 0));
 
