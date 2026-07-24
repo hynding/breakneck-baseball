@@ -485,11 +485,14 @@ pub fn resolve_gathered(
 
 /// The base the defense throws to for the most reasonable out once a fair
 /// ball is gathered at `pos`, `gather_time` seconds after contact: the lead
-/// *force* out the throw can still beat, falling back to first base when no
-/// better play is on. `runners_going` marks a hit-and-run jump, which takes
-/// the runner forces off the table. 0-indexed into `base_positions`;
-/// `base_count()` means home plate (bases loaded, force at the plate). Pure
-/// choreography guidance — the call itself comes from [`resolve_thrown`].
+/// *force* out the throw can still beat. When no out is winnable anywhere,
+/// the throw goes ahead of the batter to the bag he will end on — first on a
+/// single (the conventional play), second on a stand-up double, and so on —
+/// so the defense visibly makes the attempt even on a conceded hit.
+/// `runners_going` marks a hit-and-run jump, which takes the runner forces
+/// off the table. 0-indexed into `base_positions`; `base_count()` means home
+/// plate (bases loaded, force at the plate). Pure choreography guidance —
+/// the call itself comes from [`resolve_thrown`].
 pub fn throw_target(
     pos: Vec3,
     gather_time: f32,
@@ -509,9 +512,8 @@ pub fn throw_target(
     };
     let base_pos = |b: usize| home_or_base(b, field);
 
-    // Take the biggest force out the throw still beats; else the sure-ish
-    // play at first. The batter never has the jump, so first base races on
-    // the standing-start clock.
+    // Take the biggest force out the throw still beats. The batter never
+    // has the jump, so first base races on the standing-start clock.
     let batter_at = forced_runner_at(leg, false);
     let mut b = lead_force(bases, field);
     loop {
@@ -520,7 +522,21 @@ pub fn throw_target(
             return b;
         }
         if b == 0 {
-            return 0;
+            // No out is winnable anywhere: throw ahead of the batter, to
+            // the bag he'll finish on (the same walk [`resolve_thrown`]
+            // concedes) — the play the crowd expects to see attempted.
+            let batter_reaches = |base: usize| REACTION + leg * base as f32 / RUNNER_SPEED;
+            let safe = |base: usize| {
+                field
+                    .base_positions
+                    .get(base - 1)
+                    .is_some_and(|bp| batter_reaches(base) <= throw_at(*bp) + RUNNER_MARGIN)
+            };
+            let mut n = 1;
+            while n < field.base_count() && safe(n + 1) {
+                n += 1;
+            }
+            return n - 1;
         }
         b -= 1;
     }
@@ -1964,6 +1980,22 @@ mod tests {
                 &std_field()
             ),
             0
+        );
+    }
+
+    #[test]
+    fn outfield_double_draws_the_throw_to_second() {
+        // A clean gap double: no force is winnable, so the throw goes ahead
+        // of the batter to the bag he's stretching for.
+        assert_eq!(
+            throw_target(
+                Vec3::new(0.0, 0.0, 110.0),
+                6.5,
+                &empty(),
+                false,
+                &std_field()
+            ),
+            1
         );
     }
 

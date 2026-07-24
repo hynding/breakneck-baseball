@@ -52,6 +52,10 @@ const RESULT_SETTLE_CAP: f32 = 20.0;
 /// Minimum seconds between pickoff throws — the arm has to reload, so a held
 /// button can't machine-gun the bag.
 const PICKOFF_COOLDOWN_SECS: f32 = 0.9;
+/// Backstop on a decided throw still in the air: if the settle report never
+/// arrives (a dropped relay edge case), the pending call is announced after
+/// this many seconds so the game can never hang on presentation.
+const THROW_SETTLE_CAP: f32 = 4.0;
 /// Home-run trot window: hang time plus a little air, clamped.
 const INPLAY_BUFFER: f32 = 1.2;
 const INPLAY_MIN: f32 = 2.2;
@@ -113,6 +117,10 @@ pub struct Play {
     /// The last pitch ended untouched (take / swing-through): the ball is on
     /// its way to the catcher's mitt, and [`catcher_receives`] may stop it.
     pitch_taken: bool,
+    /// A call decided by the throw race but not yet announced: the ball is
+    /// still in the air, and the play stays visually alive (the throw flies,
+    /// the batter rounds the bases) until fielding reports it settled.
+    pending_call: Option<Outcome>,
     /// `Time::elapsed_secs` at contact — the live-play race clock's zero.
     contact_at: f32,
     /// A wall carom has already been called this play (one banner per play).
@@ -144,6 +152,16 @@ impl Play {
     pub fn in_steal_window(&self) -> bool {
         !self.hold.finished()
     }
+
+    /// The hit the umpire has already decided but not yet announced (the
+    /// throw is still in the air): `Some(bases)` lets the runner rigs break
+    /// for the bases they've earned while the play finishes.
+    pub fn pending_hit(&self) -> Option<u32> {
+        match self.pending_call {
+            Some(Outcome::Hit(n)) => Some(n),
+            _ => None,
+        }
+    }
 }
 
 /// The live leadoff state, shared with the runner visuals and the CPU: the
@@ -169,6 +187,7 @@ impl Default for Play {
             hold: Timer::from_seconds(0.0, TimerMode::Once),
             pickoff_cooldown: Timer::from_seconds(0.0, TimerMode::Once),
             pitch_taken: false,
+            pending_call: None,
             contact_at: 0.0,
             wall_called: false,
         }
@@ -237,6 +256,10 @@ pub enum LiveBallEvent {
         base: usize,
         race_time: f32,
     },
+    /// The thrown ball (relay leg included) has been received and the play
+    /// is physically dead — the cue [`resolve_live_play`] waits for before
+    /// announcing a call decided at the throw.
+    Settled,
 }
 
 /// The pitch ended untouched and the catcher gloved it — cosmetic (the call
@@ -615,13 +638,15 @@ fn catcher_receives(
 
 /// Ticks the play clock. Resolved plays (home runs, or anything already
 /// called by [`resolve_live_play`]) move on to the result pause when the
-/// timer runs out; unresolved plays are force-called by `resolve_live_play`.
+/// timer runs out; unresolved plays are force-called by `resolve_live_play`,
+/// and a decided-but-unannounced throw waits there too (the announcement is
+/// what flips the phase).
 fn in_play(mut play: ResMut<Play>, time: Res<Time>) {
     if play.phase != Phase::InPlay {
         return;
     }
     play.timer.tick(time.delta());
-    if play.resolved && play.timer.finished() {
+    if play.resolved && play.pending_call.is_none() && play.timer.finished() {
         play.phase = Phase::Result;
         play.timer = Timer::from_seconds(RESULT_SECS, TimerMode::Once);
     }
@@ -645,8 +670,33 @@ fn resolve_live_play(
     ball_q: Query<&Transform, With<Baseball>>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
-    if play.phase != Phase::InPlay || play.resolved {
+    if play.phase != Phase::InPlay {
         events.clear();
+        return;
+    }
+    // A decided throw still in the air: the umpire's call is made, but the
+    // announcement waits for the ball to arrive (fielding's Settled report),
+    // with the flight cap as a backstop — bang-bang plays look bang-bang.
+    if play.resolved {
+        let arrived = events.read().any(|ev| matches!(ev, LiveBallEvent::Settled));
+        if play.pending_call.is_some() && (arrived || play.timer.finished()) {
+            let outcome = play.pending_call.take().unwrap();
+            let batter = score.batting_team();
+            resolve_contact(
+                outcome,
+                &mut score,
+                &mut bases,
+                &rules_res,
+                &mut banner,
+                play.steal_armed,
+            );
+            if outcome != Outcome::Foul {
+                order.advance(batter);
+            }
+            play.phase = Phase::Result;
+            play.timer = Timer::from_seconds(RESULT_SECS, TimerMode::Once);
+            maybe_end_game(&score, &rules_res, &mut next_state);
+        }
         return;
     }
 
@@ -660,13 +710,14 @@ fn resolve_live_play(
             LiveBallEvent::Landed { pos } if !rules::is_fair(pos, &field) => Some(None),
             // A fair bounce just keeps the play alive.
             LiveBallEvent::Landed { .. } => continue,
+            LiveBallEvent::Settled => continue,
             LiveBallEvent::Thrown {
                 pos,
                 base,
                 race_time,
             } => {
                 let call = rules::runner_call_from_aim(intents.get(score.batting_team()).aim);
-                Some(Some(rules::resolve_thrown(
+                let outcome = rules::resolve_thrown(
                     pos,
                     race_time,
                     base,
@@ -675,7 +726,15 @@ fn resolve_live_play(
                     call,
                     &field,
                     &rules_res,
-                )))
+                );
+                // The race is decided the moment the ball leaves the hand —
+                // but the play stays visually alive until it lands in the
+                // glove: the throw flies, the batter rounds the bases, and
+                // only then is the call announced.
+                play.pending_call = Some(outcome);
+                play.resolved = true;
+                play.timer = Timer::from_seconds(THROW_SETTLE_CAP, TimerMode::Once);
+                return;
             }
         };
         break;
@@ -762,6 +821,7 @@ fn result_phase(
     play.big_jump = false;
     play.window_lead = false;
     play.pitch_taken = false;
+    play.pending_call = None;
     play.wall_called = false;
     // A runner in stealing position opens the duel window for the next at-bat.
     play.hold = steal_window_for(&bases, &rules_res);

@@ -321,6 +321,73 @@ fn batter_runs(
     }
 }
 
+/// A hit has been decided but the throw is still in the air
+/// ([`Play::pending_hit`]): the play is visually alive, so everyone breaks
+/// for the bases the call will give them *now* — the batter ghost becomes a
+/// real runner rounding first while the outfielder's throw comes in, and the
+/// runners aboard sprint (or score) ahead of the announcement. When the call
+/// applies, [`sync_runners`] finds every rig already on (or heading to) its
+/// base and has nothing left to move.
+#[allow(clippy::type_complexity)]
+fn run_out_pending_call(
+    play: Res<Play>,
+    field: Res<FieldSpec>,
+    mut handled: Local<bool>,
+    ghosts: Query<Entity, With<BatterGhost>>,
+    mut runners: Query<(Entity, &mut Runner), Without<BatterGhost>>,
+    mut commands: Commands,
+) {
+    let Some(hit_bases) = play.pending_hit() else {
+        *handled = false;
+        return;
+    };
+    if *handled {
+        return;
+    }
+    *handled = true;
+    let count = field.base_count();
+    let jump = play.runners_going() as usize;
+
+    // Runners aboard take the bases the decided call gives them.
+    for (entity, mut runner) in &mut runners {
+        let dest = runner.base + hit_bases as usize + jump;
+        if dest >= count {
+            commands.entity(entity).insert((
+                BasePath {
+                    waypoints: path_home(&field, runner.base),
+                    next: 0,
+                },
+                DespawnAtPathEnd,
+            ));
+            commands.entity(entity).remove::<Runner>();
+        } else {
+            commands.entity(entity).insert(BasePath {
+                waypoints: path_between(&field, Some(runner.base), dest),
+                next: 0,
+            });
+            runner.base = dest;
+        }
+    }
+
+    // The run-out ghost becomes the real runner and keeps going for the
+    // extra bases while the ball is in the air.
+    let batter_dest = (hit_bases as usize).min(count) - 1;
+    if let Some(ghost) = ghosts.iter().next() {
+        commands
+            .entity(ghost)
+            .remove::<BatterGhost>()
+            .remove::<DespawnAtPathEnd>()
+            .insert(Runner { base: batter_dest });
+        if batter_dest > 0 {
+            // Queued behind the leg to first that's already running.
+            commands.entity(ghost).insert(BasePath {
+                waypoints: path_between(&field, Some(0), batter_dest),
+                next: 0,
+            });
+        }
+    }
+}
+
 /// The next at-bat begins: the batter steps back into the box.
 fn batter_returns(play: Res<Play>, mut batter_q: Query<&mut Visibility, With<Batter>>) {
     if play.phase != Phase::PrePitch {
@@ -341,6 +408,7 @@ impl Plugin for RunnerPlugin {
             Update,
             (
                 batter_runs,
+                run_out_pending_call,
                 sync_runners,
                 advance_paths,
                 take_leadoffs,

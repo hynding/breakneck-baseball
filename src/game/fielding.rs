@@ -407,12 +407,15 @@ fn hold_and_throw(
 }
 
 /// The throw arrives: the receiver stops the ball dead — or, on a double
-/// play, pivots and fires the relay leg on to the next bag.
+/// play, pivots and fires the relay leg on to the next bag. The final
+/// arrival is reported as [`LiveBallEvent::Settled`]: the cue flow waits
+/// for before announcing a call that was decided at the throw.
 fn receive_throw(
     field: Res<FieldSpec>,
     mut active: ResMut<ActivePlay>,
     mut ball_q: Query<(Entity, &Transform, &mut Velocity), With<Baseball>>,
     fielders: FielderSpots,
+    mut reports: EventWriter<LiveBallEvent>,
     mut commands: Commands,
 ) {
     let PlayState::Thrown { catcher, relay_to } = active.state else {
@@ -423,6 +426,7 @@ fn receive_throw(
     };
     let Ok((_, catcher_tf)) = fielders.get(catcher) else {
         active.state = PlayState::Done;
+        reports.send(LiveBallEvent::Settled);
         return;
     };
     let arrived = ball_tf.translation.distance(catcher_tf.translation) < 1.0
@@ -465,6 +469,7 @@ fn receive_throw(
     ball_vel.angvel = Vec3::ZERO;
     commands.entity(ball_entity).remove::<InFlight>();
     active.state = PlayState::Done;
+    reports.send(LiveBallEvent::Settled);
 }
 
 /// A human defense steers the chaser directly: while the stick is deflected
@@ -538,10 +543,7 @@ pub struct FieldingPlugin;
 impl Plugin for FieldingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ActivePlay>()
-            .add_systems(
-                crate::game::game_start(),
-                reset_active,
-            )
+            .add_systems(crate::game::game_start(), reset_active)
             .add_systems(
                 Update,
                 (
