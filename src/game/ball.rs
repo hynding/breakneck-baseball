@@ -133,10 +133,7 @@ impl Plugin for BallPlugin {
         app.add_event::<PitchEvent>()
             .add_event::<HitEvent>()
             .add_event::<WallBangEvent>()
-            .add_systems(
-                crate::game::game_start(),
-                spawn_ball,
-            )
+            .add_systems(crate::game::game_start(), spawn_ball)
             .add_systems(
                 Update,
                 (

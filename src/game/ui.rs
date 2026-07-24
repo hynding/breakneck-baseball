@@ -94,10 +94,7 @@ pub struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BannerTimer>()
-            .add_systems(
-                crate::game::game_start(),
-                spawn_hud,
-            )
+            .add_systems(crate::game::game_start(), spawn_hud)
             .add_systems(
                 Update,
                 (
