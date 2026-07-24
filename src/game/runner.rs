@@ -53,6 +53,19 @@ struct BasePath {
 #[derive(Component)]
 struct DespawnAtPathEnd;
 
+/// A freshly spawned run-out rig waiting (hidden) at the plate while the
+/// real batter finishes the swing follow-through — or admires the home run.
+/// When the delay expires the batter rig hides and this one takes over, so
+/// the swing is actually seen instead of the batter vanishing at contact.
+#[derive(Component)]
+struct RunDelay(Timer);
+
+/// Seconds the batter holds the box after fair contact before the run-out
+/// rig breaks for first (≈ the runner reaction time the race math charges).
+const RUN_OUT_DELAY: f32 = 0.4;
+/// A home run earns a longer look before the trot starts.
+const TROT_DELAY: f32 = 0.9;
+
 /// The batter running out a live ball whose call hasn't come yet. If the
 /// resolution puts the batter on base, [`sync_runners`] adopts this rig's
 /// position so the runner doesn't teleport back to the plate.
@@ -79,13 +92,18 @@ fn path_home(field: &FieldSpec, from: usize) -> Vec<Vec3> {
 }
 
 /// Feeds the next waypoint whenever the rig has arrived at the previous one.
+/// Rigs still serving their [`RunDelay`] hold at the plate.
+#[allow(clippy::type_complexity)]
 fn advance_paths(
-    mut movers: Query<(
-        Entity,
-        &mut BasePath,
-        &mut MoveIntent,
-        Option<&DespawnAtPathEnd>,
-    )>,
+    mut movers: Query<
+        (
+            Entity,
+            &mut BasePath,
+            &mut MoveIntent,
+            Option<&DespawnAtPathEnd>,
+        ),
+        Without<RunDelay>,
+    >,
     mut commands: Commands,
 ) {
     for (entity, mut path, mut intent, despawn) in &mut movers {
@@ -268,14 +286,14 @@ fn sync_runners(
 /// On fair contact the batter always runs — like real baseball, even on outs.
 /// Hits and walks get their runner from [`sync_runners`]; outs get a ghost
 /// run to first and home runs a full trot, both despawning at path end. The
-/// real batter rig hides for the duration and "steps back in" at PrePitch.
+/// run-out rig waits hidden through a short [`RunDelay`] so the real batter
+/// is seen finishing the swing before the swap; fouls leave him in the box.
 fn batter_runs(
     mut events: EventReader<BallInPlayEvent>,
     field: Res<FieldSpec>,
     score: Res<ScoreBoard>,
     rig_meshes: Option<Res<RigMeshes>>,
     palette: Option<Res<TeamPalette>>,
-    mut batter_q: Query<&mut Visibility, With<Batter>>,
     mut commands: Commands,
 ) {
     for ev in events.read() {
@@ -283,23 +301,19 @@ fn batter_runs(
             return;
         };
 
-        // The batter leaves the box on every fair ball; on hits the runner
-        // spawned by sync_runners is the batter, visually.
-        for mut visibility in &mut batter_q {
-            *visibility = Visibility::Hidden;
-        }
-
-        let (waypoints, ghost) = match ev.kind {
-            // The trot: every base, then home.
+        let (waypoints, ghost, delay) = match ev.kind {
+            // The trot: every base, then home — after a look at the ball.
             ContactKind::HomeRun => {
                 let mut wp: Vec<Vec3> = (0..field.base_count())
                     .map(|b| base_pos(&field, b))
                     .collect();
                 wp.push(Vec3::new(0.0, RIG_Y, 0.0));
-                (wp, false)
+                (wp, false, TROT_DELAY)
             }
             // A live fair ball: run it out — nobody knows the call yet.
-            ContactKind::Live { fair: true } => (path_between(&field, None, 0), true),
+            ContactKind::Live { fair: true } => {
+                (path_between(&field, None, 0), true, RUN_OUT_DELAY)
+            }
             ContactKind::Live { fair: false } => continue,
         };
 
@@ -312,11 +326,35 @@ fn batter_runs(
             PLATE_START,
             1.0,
         );
-        commands
-            .entity(entity)
-            .insert((BasePath { waypoints, next: 0 }, DespawnAtPathEnd));
+        commands.entity(entity).insert((
+            BasePath { waypoints, next: 0 },
+            DespawnAtPathEnd,
+            RunDelay(Timer::from_seconds(delay, TimerMode::Once)),
+            Visibility::Hidden,
+        ));
         if ghost {
             commands.entity(entity).insert(BatterGhost);
+        }
+    }
+}
+
+/// Counts down each [`RunDelay`]; on expiry the stand-in rig appears, the
+/// real batter rig hides, and the run begins — a seamless handoff at the
+/// plate that lets the swing follow-through actually be seen.
+#[allow(clippy::type_complexity)]
+fn tick_run_delays(
+    time: Res<Time>,
+    mut delayed: Query<(Entity, &mut RunDelay, &mut Visibility), Without<Batter>>,
+    mut batter_q: Query<&mut Visibility, (With<Batter>, Without<RunDelay>)>,
+    mut commands: Commands,
+) {
+    for (entity, mut delay, mut visibility) in &mut delayed {
+        if delay.0.tick(time.delta()).finished() {
+            commands.entity(entity).remove::<RunDelay>();
+            *visibility = Visibility::Inherited;
+            for mut batter_visibility in &mut batter_q {
+                *batter_visibility = Visibility::Hidden;
+            }
         }
     }
 }
@@ -408,6 +446,7 @@ impl Plugin for RunnerPlugin {
             Update,
             (
                 batter_runs,
+                tick_run_delays,
                 run_out_pending_call,
                 sync_runners,
                 advance_paths,

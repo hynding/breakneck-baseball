@@ -188,11 +188,13 @@ impl VariantId {
                 bounds: 220.0,
                 broadcast_eye: Vec3::new(0.0, 13.0, -21.0),
                 broadcast_target: Vec3::new(0.0, 1.2, 9.0),
-                // Catcher's point of view: centred just behind and above the
-                // catcher, looking out at the pitcher — batter and zone at
-                // the bottom of frame, the delivery coming straight in.
-                duel_eye: Vec3::new(0.0, 3.7, -5.9),
-                duel_target: Vec3::new(0.0, 0.55, 14.8),
+                // The catcher's point of view: just over the crouched
+                // catcher's helmet (the plate umpire peers in from behind
+                // the camera), looking out at the pitcher — batter and zone
+                // filling the bottom of frame, the delivery coming straight
+                // in at eye level.
+                duel_eye: Vec3::new(0.0, 2.3, -4.4),
+                duel_target: Vec3::new(0.0, 0.85, 15.0),
                 scenery: Scenery::Stadium,
             },
             // A front lawn: four bases across the lawn corners, the defense
@@ -223,9 +225,10 @@ impl VariantId {
                 bounds: 90.0,
                 broadcast_eye: Vec3::new(0.0, 7.0, -12.0),
                 broadcast_target: Vec3::new(0.0, 1.0, 5.0),
-                // Same catcher's-eye framing, scaled to the short lawn duel.
-                duel_eye: Vec3::new(0.0, 3.3, -5.0),
-                duel_target: Vec3::new(0.0, 0.55, 8.0),
+                // Same catcher's-eye framing, scaled to the short lawn duel
+                // (the lone umpire crouches at z = -2.2, ahead of the lens).
+                duel_eye: Vec3::new(0.0, 2.2, -3.8),
+                duel_target: Vec3::new(0.0, 0.8, 8.0),
                 scenery: Scenery::FrontYard,
             },
         }

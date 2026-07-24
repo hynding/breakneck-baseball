@@ -38,6 +38,10 @@ fn is_orbit(mode: Res<CameraMode>) -> bool {
 const BROADCAST_HOME_TARGET: Vec3 = Vec3::new(0.0, 1.2, 9.0);
 const BROADCAST_EYE: Vec3 = Vec3::new(0.0, 13.0, -21.0);
 
+/// Seconds after contact before the camera leaves the plate to chase the
+/// ball — long enough to watch the swing land and the batter break.
+const BALL_FOLLOW_DELAY: f32 = 1.0;
+
 // ── Orbit state ───────────────────────────────────────────────────────────────
 
 #[derive(Resource)]
@@ -182,6 +186,11 @@ fn broadcast_camera(
 ) {
     // Pick the framing the current phase wants.
     let (desired_eye, desired_target) = match (play.phase, ball_q.get_single()) {
+        // Fresh contact: hold the plate framing for a beat — the swing, the
+        // crack, the batter breaking from the box — before chasing the ball.
+        (Phase::InPlay, Ok(_)) if play.since_contact(time.elapsed_secs()) < BALL_FOLLOW_DELAY => {
+            (field.duel_eye, field.duel_target)
+        }
         // A live, uncalled play: cut to where the ball is coming down. The
         // eye stations itself between home and the predicted landing spot —
         // a medium shot of the drop zone, so the chasing fielder and the

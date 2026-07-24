@@ -258,8 +258,11 @@ fn update_board(
             continue;
         }
         let (value, tint) = match line.0 {
-            SubsLineKind::Title => (format!("SUBSTITUTIONS - {}", menu.team.label()), ui.accent),
-            SubsLineKind::LineupHeader => ("LINEUP".to_string(), ui.text_dim),
+            SubsLineKind::Title => ("PAUSED".to_string(), ui.accent),
+            SubsLineKind::LineupHeader => (
+                format!("SUBSTITUTIONS - {} LINEUP", menu.team.label()),
+                ui.text_dim,
+            ),
             SubsLineKind::Row(i) => {
                 let Some(player) = roster.lineup.get(i) else {
                     **text = String::new();

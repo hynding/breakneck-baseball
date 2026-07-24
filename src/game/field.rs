@@ -14,9 +14,14 @@
 //! | Home plate → centre-field   | 400 ft    | 121.9 m    |
 //! | Foul lines (1B / 3B)        | 330 ft    | 100.6 m    |
 
+use bevy::asset::RenderAssetUsages;
+use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
+use bevy::math::Affine2;
 use bevy::prelude::*;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy_rapier3d::prelude::*;
 
+use crate::game::ai::hash01;
 use crate::game::flow::{Phase, Play};
 use crate::game::rules;
 use crate::game::variant::{FieldSpec, Scenery};
@@ -61,27 +66,128 @@ pub struct OutfieldWall;
 #[derive(Component)]
 struct StrikeZoneOverlay;
 
+// ── Procedural surfaces ───────────────────────────────────────────────────────
+// Runtime-generated textures, no asset files (the same philosophy as the
+// procedural audio and jerseys): mowing-striped grass and speckled infield
+// dirt, per the groundskeeping notes in docs/BASEBALL.md.
+
+/// Grass with alternating mow stripes and per-blade jitter.
+fn grass_image() -> Image {
+    const SIZE: usize = 64;
+    const STRIPE: usize = 8;
+    let mut data = vec![0u8; SIZE * SIZE * 4];
+    for y in 0..SIZE {
+        let light = (y / STRIPE).is_multiple_of(2);
+        for x in 0..SIZE {
+            let n = hash01(x as f32 * 12.9 + y as f32 * 78.2) * 14.0 - 7.0;
+            let (r, g, b) = if light {
+                (52.0, 142.0, 52.0)
+            } else {
+                (42.0, 122.0, 44.0)
+            };
+            let at = (y * SIZE + x) * 4;
+            data[at] = (r + n) as u8;
+            data[at + 1] = (g + n) as u8;
+            data[at + 2] = (b + n) as u8;
+            data[at + 3] = 255;
+        }
+    }
+    tiling_image(SIZE as u32, data)
+}
+
+/// Infield dirt: warm clay with darker speckles.
+fn dirt_image() -> Image {
+    const SIZE: usize = 64;
+    let mut data = vec![0u8; SIZE * SIZE * 4];
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let seed = x as f32 * 31.7 + y as f32 * 57.3;
+            let n = hash01(seed) * 24.0 - 12.0;
+            let (r, g, b) = if hash01(seed * 1.7) > 0.93 {
+                (150.0, 115.0, 82.0) // a pebble
+            } else {
+                (194.0, 153.0, 108.0)
+            };
+            let at = (y * SIZE + x) * 4;
+            data[at] = (r + n) as u8;
+            data[at + 1] = (g + n) as u8;
+            data[at + 2] = (b + n) as u8;
+            data[at + 3] = 255;
+        }
+    }
+    tiling_image(SIZE as u32, data)
+}
+
+/// Wraps raw RGBA pixels in a repeat-sampled square texture.
+fn tiling_image(size: u32, data: Vec<u8>) -> Image {
+    let mut image = Image::new(
+        Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::Repeat,
+        ..default()
+    });
+    image
+}
+
+/// The pair of tiled surface materials every park is dressed with.
+struct FieldSurfaces {
+    grass: Handle<Image>,
+    dirt: Handle<Image>,
+}
+
+impl FieldSurfaces {
+    fn build(images: &mut Assets<Image>) -> Self {
+        Self {
+            grass: images.add(grass_image()),
+            dirt: images.add(dirt_image()),
+        }
+    }
+
+    /// A material tiling `texture` `repeats` times across a unit UV face.
+    fn tiled(
+        materials: &mut Assets<StandardMaterial>,
+        texture: &Handle<Image>,
+        repeats: f32,
+    ) -> Handle<StandardMaterial> {
+        materials.add(StandardMaterial {
+            base_color_texture: Some(texture.clone()),
+            uv_transform: Affine2::from_scale(Vec2::splat(repeats)),
+            perceptual_roughness: 0.95,
+            ..default()
+        })
+    }
+}
+
 // ── Plugin ────────────────────────────────────────────────────────────────────
 pub struct FieldPlugin;
 
 impl Plugin for FieldPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            crate::game::game_start(),
-            spawn_field,
-        )
-        .add_systems(
-            Update,
-            strike_zone_visibility.run_if(in_state(GameState::Playing)),
-        );
+        app.add_systems(crate::game::game_start(), spawn_field)
+            .add_systems(
+                Update,
+                strike_zone_visibility.run_if(in_state(GameState::Playing)),
+            );
     }
 }
 
 // ── Systems ───────────────────────────────────────────────────────────────────
+#[allow(clippy::too_many_arguments)]
 fn spawn_field(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
     field: Res<FieldSpec>,
     theme: Res<crate::game::theme::Theme>,
 ) {
@@ -89,15 +195,28 @@ fn spawn_field(
     // game. Matters most from the catcher's-eye duel camera, which looks up
     // past the wall into nothing but clear colour.
     commands.insert_resource(ClearColor(theme.sky));
+    let surfaces = FieldSurfaces::build(&mut images);
     match field.scenery {
         Scenery::Stadium => {
-            spawn_stadium_ground(&mut commands, &mut meshes, &mut materials);
-            spawn_stadium_mound(&mut commands, &mut meshes, &mut materials, &field);
+            spawn_stadium_ground(&mut commands, &mut meshes, &mut materials, &surfaces);
+            spawn_stadium_mound(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &surfaces,
+                &field,
+            );
             spawn_foul_poles(&mut commands, &mut meshes, &mut materials);
             spawn_outfield_wall(&mut commands, &mut meshes, &mut materials, &field);
         }
         Scenery::FrontYard => {
-            spawn_front_yard(&mut commands, &mut meshes, &mut materials, &field);
+            spawn_front_yard(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &surfaces,
+                &field,
+            );
         }
     }
     spawn_bases(&mut commands, &mut meshes, &mut materials, &field);
@@ -120,12 +239,13 @@ fn spawn_field(
     }
 }
 
-/// The flat ground slab every scenery stands on (static collider for the ball).
+/// The flat ground slab every scenery stands on (static collider for the
+/// ball), dressed in the tiled mown-grass texture.
 fn spawn_ground_slab(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
-    color: Color,
+    surfaces: &FieldSurfaces,
 ) {
     let half_size = 150.0_f32;
     commands.spawn((
@@ -136,11 +256,8 @@ fn spawn_ground_slab(
             GROUND_HALF_DEPTH * 2.0,
             half_size * 2.0,
         ))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: color,
-            perceptual_roughness: 0.9,
-            ..default()
-        })),
+        // ~48 tiles across 300 m puts the mow stripes at ~0.8 m each.
+        MeshMaterial3d(FieldSurfaces::tiled(materials, &surfaces.grass, 48.0)),
         Transform::from_xyz(0.0, -GROUND_HALF_DEPTH, 0.0),
         RigidBody::Fixed,
         Collider::cuboid(half_size, GROUND_HALF_DEPTH, half_size),
@@ -148,35 +265,68 @@ fn spawn_ground_slab(
 }
 
 // ── Stadium scenery ───────────────────────────────────────────────────────────
+/// The playing surface, layered per docs/BASEBALL.md's groundskeeping notes:
+/// striped outfield grass, a dirt basepath diamond with a grass infield
+/// inside it, and the 13 ft dirt cutouts at the bags and around home plate.
 fn spawn_stadium_ground(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
+    surfaces: &FieldSurfaces,
 ) {
-    spawn_ground_slab(
-        commands,
-        meshes,
-        materials,
-        Color::srgb(0.18, 0.55, 0.18), // outfield green
-    );
+    spawn_ground_slab(commands, meshes, materials, surfaces);
 
-    // A lighter infield-dirt square rotated 45° to form the diamond shape.
+    // The infield-dirt square rotated 45° to form the diamond.
     let infield_half = BASE_DISTANCE / std::f32::consts::SQRT_2;
+    let dirt = FieldSurfaces::tiled(materials, &surfaces.dirt, 8.0);
     commands.spawn((
         GameplayEntity,
         Mesh3d(meshes.add(Cuboid::new(infield_half * 2.0, 0.001, infield_half * 2.0))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.76, 0.60, 0.42), // dirt brown
-            perceptual_roughness: 1.0,
-            ..default()
-        })),
+        MeshMaterial3d(dirt.clone()),
         Transform {
             translation: Vec3::new(0.0, 0.001, HALF_DIAGONAL),
             rotation: Quat::from_rotation_y(std::f32::consts::FRAC_PI_4),
             ..default()
         },
     ));
+
+    // Rounded dirt cutouts at the corner bags (the ~13 ft sliding pits) and
+    // the home-plate circle.
+    let cutout = meshes.add(Cylinder::new(CUTOUT_RADIUS, 0.001));
+    let corners = [
+        Vec3::ZERO,
+        Vec3::new(-HALF_DIAGONAL, 0.0, HALF_DIAGONAL),
+        Vec3::new(0.0, 0.0, HALF_DIAGONAL * 2.0),
+        Vec3::new(HALF_DIAGONAL, 0.0, HALF_DIAGONAL),
+    ];
+    for corner in corners {
+        commands.spawn((
+            GameplayEntity,
+            Mesh3d(cutout.clone()),
+            MeshMaterial3d(dirt.clone()),
+            Transform::from_translation(corner + Vec3::Y * 0.0016),
+        ));
+    }
+
+    // The grass interior of the diamond: dirt shows only as the basepath
+    // band around it (plus the mound and cutouts layered above).
+    let inner_half = infield_half - BASEPATH_WIDTH;
+    commands.spawn((
+        GameplayEntity,
+        Mesh3d(meshes.add(Cuboid::new(inner_half * 2.0, 0.001, inner_half * 2.0))),
+        MeshMaterial3d(FieldSurfaces::tiled(materials, &surfaces.grass, 5.0)),
+        Transform {
+            translation: Vec3::new(0.0, 0.0022, HALF_DIAGONAL),
+            rotation: Quat::from_rotation_y(std::f32::consts::FRAC_PI_4),
+            ..default()
+        },
+    ));
 }
+
+/// Dirt-cutout radius at each bag and around home (~13 ft, docs/BASEBALL.md).
+const CUTOUT_RADIUS: f32 = 3.96;
+/// Width of the dirt basepath band framing the grass infield.
+const BASEPATH_WIDTH: f32 = 4.0;
 
 // ── Bases ─────────────────────────────────────────────────────────────────────
 /// Home plate at the origin plus one bag per spec base position.
@@ -186,55 +336,86 @@ fn spawn_bases(
     materials: &mut ResMut<Assets<StandardMaterial>>,
     field: &FieldSpec,
 ) {
+    // Regulation bags (docs/BASEBALL.md): 18 in square since the 2023 rule
+    // change, a real raised bag with a touch of glow so it pops against the
+    // dirt; home plate is the flat 17 in slab.
     let base_material = materials.add(StandardMaterial {
         base_color: Color::WHITE,
+        emissive: LinearRgba::rgb(0.12, 0.12, 0.12),
+        perceptual_roughness: 0.6,
         ..default()
     });
     let home_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.9, 0.9, 0.9),
-        perceptual_roughness: 0.8,
+        base_color: Color::srgb(0.94, 0.94, 0.92),
+        emissive: LinearRgba::rgb(0.08, 0.08, 0.08),
+        perceptual_roughness: 0.7,
         ..default()
     });
-    let base_mesh = meshes.add(Cuboid::new(0.38, 0.05, 0.38));
-    let home_mesh = meshes.add(Cuboid::new(0.43, 0.03, 0.43));
+    let base_mesh = meshes.add(Cuboid::new(0.457, 0.09, 0.457));
+    let home_mesh = meshes.add(Cuboid::new(0.432, 0.02, 0.432));
 
-    let mut spawn = |index: Option<usize>, pos: Vec3, mesh: Handle<Mesh>, mat| {
+    let mut spawn = |index: Option<usize>, pos: Vec3, y: f32, mesh: Handle<Mesh>, mat| {
         commands.spawn((
             Base { index },
             GameplayEntity,
             Mesh3d(mesh),
             MeshMaterial3d(mat),
-            Transform::from_translation(pos),
+            Transform::from_translation(pos + Vec3::Y * y),
             RigidBody::Fixed,
-            Collider::cuboid(0.19, 0.025, 0.19),
+            Collider::cuboid(0.23, 0.045, 0.23),
         ));
     };
 
-    spawn(None, Vec3::ZERO, home_mesh, home_material);
+    spawn(None, Vec3::ZERO, 0.01, home_mesh, home_material);
     for (i, pos) in field.base_positions.iter().enumerate() {
-        spawn(Some(i), *pos, base_mesh.clone(), base_material.clone());
+        spawn(
+            Some(i),
+            *pos,
+            0.045,
+            base_mesh.clone(),
+            base_material.clone(),
+        );
     }
 }
 
 // ── Pitcher's mound ───────────────────────────────────────────────────────────
+/// Regulation mound per docs/BASEBALL.md: 18 ft diameter, 10 in high, with a
+/// wider low skirt approximating the 1-in-per-foot slope, and the white
+/// 24 in × 6 in pitching rubber on the table.
 fn spawn_stadium_mound(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
+    surfaces: &FieldSurfaces,
     field: &FieldSpec,
 ) {
+    let dirt = FieldSurfaces::tiled(materials, &surfaces.dirt, 3.0);
+    // The sloped skirt: a broad, shallow ring under the mound proper.
+    commands.spawn((
+        GameplayEntity,
+        Mesh3d(meshes.add(Cylinder::new(3.6, 0.1))),
+        MeshMaterial3d(dirt.clone()),
+        Transform::from_xyz(0.0, 0.05, field.pitch_distance),
+    ));
     commands.spawn((
         PitchersMound,
         GameplayEntity,
-        Mesh3d(meshes.add(Cylinder::new(2.74, 0.25))), // 9 ft radius mound
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.76, 0.60, 0.42),
-            perceptual_roughness: 1.0,
-            ..default()
-        })),
+        Mesh3d(meshes.add(Cylinder::new(2.74, 0.25))), // 9 ft radius, 10 in high
+        MeshMaterial3d(dirt),
         Transform::from_xyz(0.0, 0.125, field.pitch_distance),
         RigidBody::Fixed,
         Collider::cylinder(0.125, 2.74),
+    ));
+    // The rubber, proud of the table.
+    commands.spawn((
+        GameplayEntity,
+        Mesh3d(meshes.add(Cuboid::new(0.61, 0.02, 0.152))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.95, 0.95, 0.93),
+            perceptual_roughness: 0.7,
+            ..default()
+        })),
+        Transform::from_xyz(0.0, 0.26, field.pitch_distance),
     ));
 }
 
@@ -247,14 +428,11 @@ fn spawn_front_yard(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
+    surfaces: &FieldSurfaces,
     field: &FieldSpec,
 ) {
-    spawn_ground_slab(
-        commands,
-        meshes,
-        materials,
-        Color::srgb(0.24, 0.52, 0.20), // lawn green
-    );
+    // A well-kept suburban lawn gets the same mow stripes as the stadium.
+    spawn_ground_slab(commands, meshes, materials, surfaces);
 
     // A rubber pitching mat instead of a mound.
     commands.spawn((

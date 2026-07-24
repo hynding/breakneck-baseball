@@ -35,6 +35,9 @@ pub enum AnimClip {
     Dive,
     /// Feet-first slide into a bag: body leans back and drops low.
     Slide,
+    /// The batter's arms drive through the swing (the bat pivot plays
+    /// [`AnimClip::SwingBat`] in parallel — this is the body half).
+    BatterSwing,
 }
 
 impl AnimClip {
@@ -51,6 +54,7 @@ impl AnimClip {
             AnimClip::CatcherCrouch => 1.2,
             AnimClip::Dive => 0.5,
             AnimClip::Slide => 0.6,
+            AnimClip::BatterSwing => 0.42,
         }
     }
 
@@ -223,6 +227,15 @@ fn limb_pose(clip: AnimClip, kind: LimbKind, f: f32) -> Quat {
             match kind {
                 LegL | LegR => Quat::from_rotation_x(-1.2 * s),
                 ArmL | ArmR => Quat::from_rotation_x(-0.7 * s),
+            }
+        }
+        BatterSwing => {
+            // Both arms whip horizontally through the zone and settle back —
+            // one out-and-return arc matching the bat pivot's sweep+recover.
+            let sweep = (f * std::f32::consts::PI).sin() * 1.9;
+            match kind {
+                ArmL | ArmR => Quat::from_rotation_y(sweep) * Quat::from_rotation_x(-0.5),
+                LegL | LegR => Quat::IDENTITY,
             }
         }
         SwingBat | RecoverSwing => Quat::IDENTITY,

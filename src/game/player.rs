@@ -151,14 +151,11 @@ pub struct PlayerPlugin;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            crate::game::game_start(),
-            spawn_players,
-        )
-        .add_systems(
-            Update,
-            (recolor_teams, trigger_swing, catcher_crouch).run_if(in_state(GameState::Playing)),
-        );
+        app.add_systems(crate::game::game_start(), spawn_players)
+            .add_systems(
+                Update,
+                (recolor_teams, trigger_swing, catcher_crouch).run_if(in_state(GameState::Playing)),
+            );
     }
 }
 
@@ -283,7 +280,9 @@ fn spawn_players(
         }
     }
 
-    // Batter beside home plate, holding the bat on a swing pivot.
+    // Batter in the right-handed box beside the plate, holding the bat on a
+    // swing pivot. He stands side-on to the pitcher, facing the plate (−X),
+    // as a real batter does in the box (per docs/BASEBALL.md).
     let batter = spawn_rig(
         &mut commands,
         &rig_meshes,
@@ -291,6 +290,10 @@ fn spawn_players(
         offense,
         Vec3::new(0.7, 0.6, 0.0),
         1.0,
+    );
+    commands.entity(batter).insert(
+        Transform::from_xyz(0.7, 0.6, 0.0)
+            .with_rotation(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)),
     );
     attach_jerseys(&mut commands, batter, JerseyRole::Batter, &jersey_assets);
     commands.insert_resource(jersey_assets);
@@ -444,12 +447,16 @@ fn recolor_teams(
 }
 
 /// Starts a swing when the batting side presses action during the duel —
-/// humans and the CPU share the same `Intents`, so both animate.
+/// humans and the CPU share the same `Intents`, so both animate. The bat
+/// pivot sweeps and the batter's arms drive through with it, so the swing
+/// reads on the whole body, not just the bat.
+#[allow(clippy::type_complexity)]
 fn trigger_swing(
     intents: Res<Intents>,
     score: Res<ScoreBoard>,
     play: Res<Play>,
     pivots: Query<(Entity, Option<&Playing>), With<BatPivot>>,
+    batters: Query<(Entity, Option<&Playing>), (With<Batter>, Without<BatPivot>)>,
     mut commands: Commands,
 ) {
     if !matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch) {
@@ -463,6 +470,13 @@ fn trigger_swing(
             commands
                 .entity(entity)
                 .insert(Playing::then(AnimClip::SwingBat, AnimClip::RecoverSwing));
+        }
+    }
+    for (entity, playing) in &batters {
+        if playing.is_none() {
+            commands
+                .entity(entity)
+                .insert(Playing::new(AnimClip::BatterSwing));
         }
     }
 }
