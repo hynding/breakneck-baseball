@@ -42,6 +42,20 @@ const BROADCAST_EYE: Vec3 = Vec3::new(0.0, 13.0, -21.0);
 /// ball — long enough to watch the swing land and the batter break.
 const BALL_FOLLOW_DELAY: f32 = 1.0;
 
+/// Vertical FOV used everywhere except the duel (unchanged from the single
+/// FOV this camera used to run at everywhere).
+const BROADCAST_FOV: f32 = std::f32::consts::FRAC_PI_3;
+
+/// Vertical FOV during the duel — *wider* than the broadcast framing, not
+/// narrower. Sitting the eye just past the catcher's crouched head (so no
+/// part of him renders) puts the batter, off to the side at x≈0.7-1.1,
+/// less than a metre from the lens; at that range `BROADCAST_FOV` clips his
+/// far edge. Opening the lens up keeps him fully in frame while the zone
+/// box — close enough now to fill a quarter of the screen width — still
+/// reads far more prominent than the old far-back framing ever did, since
+/// its screen size comes from eye proximity, not FOV.
+const DUEL_FOV: f32 = 80.0_f32.to_radians();
+
 // ── Orbit state ───────────────────────────────────────────────────────────────
 
 #[derive(Resource)]
@@ -63,13 +77,15 @@ impl Default for OrbitState {
     }
 }
 
-/// Smoothed eye + look-at for the broadcast camera. Both lerp toward the
-/// framing the current play phase wants (tight duel framing for the pitch,
-/// wide ball-following framing in play), so zooms glide instead of cutting.
+/// Smoothed eye + look-at + FOV for the broadcast camera. All three lerp
+/// toward what the current play phase wants (tight duel framing for the
+/// pitch, wide ball-following framing in play), so zooms glide instead of
+/// cutting.
 #[derive(Resource)]
 struct BroadcastRig {
     eye: Vec3,
     target: Vec3,
+    fov: f32,
 }
 
 impl Default for BroadcastRig {
@@ -77,6 +93,7 @@ impl Default for BroadcastRig {
         Self {
             eye: BROADCAST_EYE,
             target: BROADCAST_HOME_TARGET,
+            fov: BROADCAST_FOV,
         }
     }
 }
@@ -150,7 +167,7 @@ fn spawn_camera(mut commands: Commands) {
         Camera3d::default(),
         Transform::from_translation(BROADCAST_EYE).looking_at(BROADCAST_HOME_TARGET, Vec3::Y),
         Projection::Perspective(PerspectiveProjection {
-            fov: std::f32::consts::FRAC_PI_3,
+            fov: BROADCAST_FOV,
             ..default()
         }),
     ));
@@ -182,14 +199,14 @@ fn broadcast_camera(
     kick: Res<CameraKick>,
     ball_q: BallQuery,
     mut rig: ResMut<BroadcastRig>,
-    mut cam_q: Query<&mut Transform, With<Camera3d>>,
+    mut cam_q: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
 ) {
     // Pick the framing the current phase wants.
-    let (desired_eye, desired_target) = match (play.phase, ball_q.get_single()) {
+    let (desired_eye, desired_target, desired_fov) = match (play.phase, ball_q.get_single()) {
         // Fresh contact: hold the plate framing for a beat — the swing, the
         // crack, the batter breaking from the box — before chasing the ball.
         (Phase::InPlay, Ok(_)) if play.since_contact(time.elapsed_secs()) < BALL_FOLLOW_DELAY => {
-            (field.duel_eye, field.duel_target)
+            (field.duel_eye, field.duel_target, DUEL_FOV)
         }
         // A live, uncalled play: cut to where the ball is coming down. The
         // eye stations itself between home and the predicted landing spot —
@@ -217,7 +234,7 @@ fn broadcast_camera(
             let height = (depth * 0.30).clamp(8.0, 18.0);
             let toward_home = -flat.normalize_or_zero();
             let eye = focus + Vec3::new(toward_home.x * back, height, toward_home.y * back);
-            (eye, target)
+            (eye, target, BROADCAST_FOV)
         }
         // Called plays (home-run trots): sweep with the ball — the eye
         // slides laterally and pulls up and back as it travels deep.
@@ -234,21 +251,25 @@ fn broadcast_camera(
                     depth * 0.6 + ball.translation.y * 0.15,
                     -depth,
                 );
-            (eye, target)
+            (eye, target, BROADCAST_FOV)
         }
         // Result pause: settle on the wide home framing.
-        (Phase::Result, _) => (field.broadcast_eye, field.broadcast_target),
-        // The duel: zoom in tight on batter vs pitcher.
-        _ => (field.duel_eye, field.duel_target),
+        (Phase::Result, _) => (field.broadcast_eye, field.broadcast_target, BROADCAST_FOV),
+        // The duel: zoom in tight on batter vs pitcher, catcher's-eye style.
+        _ => (field.duel_eye, field.duel_target, DUEL_FOV),
     };
 
     // Critically-damped-ish smoothing so framing changes glide, never cut.
     let follow = 1.0 - (-5.0 * time.delta_secs()).exp();
     rig.eye = rig.eye.lerp(desired_eye, follow);
     rig.target = rig.target.lerp(desired_target, follow);
+    rig.fov = rig.fov + (desired_fov - rig.fov) * follow;
 
-    if let Ok(mut cam) = cam_q.get_single_mut() {
+    if let Ok((mut cam, mut projection)) = cam_q.get_single_mut() {
         *cam = Transform::from_translation(rig.eye + kick.0).looking_at(rig.target, Vec3::Y);
+        if let Projection::Perspective(persp) = projection.as_mut() {
+            persp.fov = rig.fov;
+        }
     }
 }
 

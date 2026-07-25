@@ -188,12 +188,22 @@ impl VariantId {
                 bounds: 220.0,
                 broadcast_eye: Vec3::new(0.0, 13.0, -21.0),
                 broadcast_target: Vec3::new(0.0, 1.2, 9.0),
-                // The catcher's point of view: just over the crouched
-                // catcher's helmet (the plate umpire peers in from behind
-                // the camera), looking out at the pitcher — batter and zone
-                // filling the bottom of frame, the delivery coming straight
-                // in at eye level.
-                duel_eye: Vec3::new(0.0, 2.3, -4.4),
+                // The catcher's own point of view: the lens sits at his
+                // crouched eye height, just in front of his head, so no
+                // part of his rig renders (it's all behind the near plane)
+                // — the plate umpire, further back at z=-3.0, stays hidden
+                // too. Catcher spot is (0,0,-1.5) (see `fielder_positions`
+                // below); the rig's capsule collider (radius 0.4, matching
+                // `Collider::capsule_y` in player.rs) puts his forward-most
+                // surface at about z=-1.1, so z=-0.9 clears him with a
+                // ~0.2 m margin. Crouched eye height: the rig is authored
+                // 1.85 m tall (tools/build_player.py), head centred at
+                // Blender Z=1.66 standing; `CatcherCrouch` only translates
+                // the whole Hips chain down 0.22 m (no separate spine
+                // lean — see the clip's `Hips: {"dz": ...}` entry), so the
+                // crouched head sits at ~1.44 m, not the ~1.1 m a folded
+                // crouch might suggest.
+                duel_eye: Vec3::new(0.0, 1.4, -0.9),
                 duel_target: Vec3::new(0.0, 0.85, 15.0),
                 scenery: Scenery::Stadium,
             },
@@ -225,9 +235,15 @@ impl VariantId {
                 bounds: 90.0,
                 broadcast_eye: Vec3::new(0.0, 7.0, -12.0),
                 broadcast_target: Vec3::new(0.0, 1.0, 5.0),
-                // Same catcher's-eye framing, scaled to the short lawn duel
-                // (the lone umpire crouches at z = -2.2, ahead of the lens).
-                duel_eye: Vec3::new(0.0, 2.2, -3.8),
+                // No catcher on the lawn (see `fielder_positions` above —
+                // none sits at z<0), so the crouching figure to clear here
+                // is the lone plate umpire (z=-2.2, same rig, same
+                // CatcherCrouch pose). Same reasoning as the standard
+                // park's `duel_eye`: his capsule's front surface sits at
+                // about z=-1.8, so z=-1.5 clears him with a margin, and the
+                // eye height matches the same ~1.4 m crouched head derived
+                // there (see the comment on Standard's `duel_eye`).
+                duel_eye: Vec3::new(0.0, 1.35, -1.5),
                 duel_target: Vec3::new(0.0, 0.8, 8.0),
                 scenery: Scenery::FrontYard,
             },
@@ -309,6 +325,14 @@ mod tests {
             assert!(
                 f.duel_eye.z > f.broadcast_eye.z,
                 "duel eye must be closer to the plate than the wide framing"
+            );
+            // Catcher's-eye height: the rig crouches to about 1.44 m (see
+            // the comment on `duel_eye` above), well below both a standing
+            // eye line and the old high broadcast-style duel camera
+            // (y=2.3/2.2) — this guards against a regression back to that.
+            assert!(
+                f.duel_eye.y > 0.9 && f.duel_eye.y < 1.6,
+                "duel eye should sit at crouched-catcher eye height, not a standing/overhead one"
             );
         }
     }
