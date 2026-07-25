@@ -121,14 +121,14 @@ fn spawn_hud(
 ) {
     let ui = &theme.ui;
 
-    // Scoreboard card (top-left).
+    // Scoreboard card (bottom-right).
     commands
         .spawn((
             GameplayEntity,
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Px(14.0),
-                left: Val::Px(14.0),
+                bottom: Val::Px(14.0),
+                right: Val::Px(14.0),
                 padding: UiRect::axes(Val::Px(16.0), Val::Px(12.0)),
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(6.0),
@@ -258,9 +258,10 @@ fn spawn_hud(
     // than a bar pinned to the bottom of the screen during play.
 }
 
-/// The two cards flanking the catcher's-eye duel view: the batter card on the
-/// left, the pitcher card (with the pitch-selection legend) on the right —
-/// visible only during the pitch duel, hidden while the ball is in play.
+/// The two cards anchored to the bottom-left (batter/"AT BAT") and top-right
+/// (pitcher/"PITCHING", with the pitch-selection legend) corners — visible
+/// only during the pitch duel, hidden while the ball is in play. Corners are
+/// fixed regardless of which team is batting or fielding.
 ///
 /// Both roots are painted at spawn and shown/hidden by mutating colours and
 /// text (never alpha 0 / despawn): on wasm/WebGL2 an element extracted fully
@@ -294,7 +295,6 @@ fn spawn_duel_panels(commands: &mut Commands, theme: &Theme) {
     for (side, (kinds, _)) in lines.into_iter().enumerate() {
         let mut node = Node {
             position_type: PositionType::Absolute,
-            top: Val::Percent(38.0),
             padding: UiRect::axes(Val::Px(14.0), Val::Px(12.0)),
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(5.0),
@@ -303,8 +303,12 @@ fn spawn_duel_panels(commands: &mut Commands, theme: &Theme) {
             ..default()
         };
         if side == 0 {
+            // Batter/"AT BAT" card: bottom-left corner.
+            node.bottom = Val::Px(14.0);
             node.left = Val::Px(14.0);
         } else {
+            // Pitcher/"PITCHING" card: top-right corner.
+            node.top = Val::Px(14.0);
             node.right = Val::Px(14.0);
         }
         commands
@@ -406,7 +410,7 @@ fn update_duel_panels(
     }
 }
 
-/// A 96×96 px ring of base pips (top-right): one pip per base, laid out like
+/// A 96×96 px ring of base pips (top-left): one pip per base, laid out like
 /// the field — home at the bottom, first base to the right, counter-clockwise.
 fn spawn_base_ring(commands: &mut Commands, base_count: usize, theme: &Theme) {
     const BOX: f32 = 96.0;
@@ -419,7 +423,7 @@ fn spawn_base_ring(commands: &mut Commands, base_count: usize, theme: &Theme) {
             Node {
                 position_type: PositionType::Absolute,
                 top: Val::Px(14.0),
-                right: Val::Px(14.0),
+                left: Val::Px(14.0),
                 width: Val::Px(BOX),
                 height: Val::Px(BOX),
                 border: UiRect::all(Val::Px(1.5)),
