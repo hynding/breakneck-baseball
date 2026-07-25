@@ -151,10 +151,55 @@ named bone.
   arcade omission; (d) `.glb` size — one low-poly rig is tens of KB; the
   validation test's size ceiling guards the wasm deploy.
 
-## Follow-ups (explicitly out of scope)
+## Section 7 — Performance budgets & authoring conventions
 
-- Animation **notify events** for the two load-bearing beats (pitch release,
-  bat contact) so clips can play at authored speed without gameplay constants.
-- Additional model variants (home/away body types, crowd figures) via the
-  `Theme` model-id map.
-- IK glove targeting, if fidelity ambitions ever outgrow arcade.
+Roughly 18 skinned rigs are on the field at once (nine fielders, batter,
+runners, pitcher, four umpires) and WebGL2 is the floor, so the model carries
+explicit budgets — enforced by the contract-validation test alongside the size
+ceiling:
+
+- **≤ 5 k triangles** and **≤ 48 bones** per rig (well under skinning uniform
+  limits on WebGL2; our minimal humanoid needs ~20). One skinned mesh
+  primitive per material — no per-limb draw calls.
+- **No LOD system.** One model, one detail level — arcade camera distances
+  don't earn the complexity. Recorded as a non-goal.
+- **Authoring conventions, pinned once in `tools/export_glb.py`:** 1 Blender
+  unit = 1 m; rig authored to real player height (~1.85 m per
+  docs/BASEBALL.md conventions); rest pose faces the axis the game's yaw
+  convention treats as "forward," with exporter axis settings encoded in the
+  script — never set by hand in the export dialog. A wrong-sized or
+  wrong-facing model is a script bug, not a mystery.
+- **Determinism unaffected:** `AnimationPlayer` output is visual-only.
+  Gameplay timing stays owned by `Playing` timers and `rules.rs` stays
+  RNG-free, so the headless e2e suite's determinism guarantees hold.
+- **CI needs no Blender.** The `.glb` is committed; CI validates it with the
+  `gltf` parser crate. Blender is only needed on machines that *author*.
+
+## Roadmap (future work this pipeline unlocks)
+
+Ordered roughly by value-for-effort once the base migration lands:
+
+1. **Animation notify events** for the load-bearing beats (pitch release, bat
+   contact) so clips play at authored speed without gameplay constants — the
+   one piece of production animation practice deferred from this design.
+2. **Umpire call clips** — punch-out strike call, safe/out signals — triggered
+   off the same flow events that fire banners today. High charm, low cost:
+   pure new-clip work (3-step recipe, no engine changes).
+3. **Left-handed batters** — mirrored stance/swing, either runtime-mirrored or
+   authored clips, keyed off a new handedness field in `roster.rs`. Affects
+   the box position `FieldSpec` picks.
+4. **Catcher gear** — mask/chest-protector meshes parented to named bones,
+   worn by `CatcherRole` only. First test of the "new prop on a player" recipe.
+5. **Body variation** — per-player height/bulk scale factors from roster data
+   applied at the rig root; makes the lineup read as individuals for free.
+6. **Batting stances & celebrations** — idle-stance variants per batter,
+   home-run-trot celebration, walk-off pile — pure clip additions.
+7. **More model variants** — home/away body styles, crowd figures, mascots —
+   each just a `.glb` + `Theme` entry via the model-id map.
+8. **IK glove targeting**, only if fidelity ambitions ever outgrow arcade.
+
+## Follow-ups (explicitly out of scope for the initial migration)
+
+Everything in the roadmap above, plus: facial animation, cloth/hair
+simulation, root-motion locomotion, motion matching, and any LOD system —
+none of which the arcade genre or camera distances justify today.
