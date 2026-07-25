@@ -189,3 +189,79 @@ fn gltf_team_tints_follow_a_theme_cycled_before_kickoff() {
         "defense jersey material never left Daylight Classic's colour"
     );
 }
+
+use breakneck_baseball::game::model_assets::RigAnimations;
+use breakneck_baseball::game::player::Batter;
+
+/// The bat is skinned into the shared mesh, so every glTF rig instantiates a
+/// bat-material submesh — catchers, fielders, umpires, and run-out rigs
+/// (`RigUnit::Batter` but no `Batter` marker) all carry one. Only the plate
+/// batter (the `Batter`-marked rig) should ever show it.
+#[test]
+fn bat_shows_only_on_the_batter() {
+    let mut app = common::headless_app();
+    common::start_game(&mut app, KeyCode::Digit2);
+    common::run_until(&mut app, 4_000, |app| {
+        let world = app.world_mut();
+        let total = world
+            .query_filtered::<(), With<GltfRig>>()
+            .iter(world)
+            .count();
+        let done = world
+            .query_filtered::<(), (With<GltfRig>, With<RigPlayer>)>()
+            .iter(world)
+            .count();
+        total > 0 && done == total
+    })
+    .expect("rigs wired");
+
+    let world = app.world_mut();
+    let bat_material = world.resource::<RigAnimations>().bat_material.clone();
+
+    let mut roots = world.query_filtered::<(Entity, Option<&Batter>), With<GltfRig>>();
+    let roots: Vec<(Entity, bool)> = roots
+        .iter(world)
+        .map(|(e, batter)| (e, batter.is_some()))
+        .collect();
+    assert!(!roots.is_empty(), "expected wired glTF rigs to exist");
+
+    let mut children_q = world.query::<&Children>();
+    let mut mats_q = world.query::<&MeshMaterial3d<StandardMaterial>>();
+
+    for (root, is_batter) in roots {
+        let mut bat_meshes = Vec::new();
+        let mut stack = vec![root];
+        while let Some(e) = stack.pop() {
+            if let Ok(mat) = mats_q.get(world, e) {
+                if mat.0 == bat_material {
+                    bat_meshes.push(e);
+                }
+            }
+            if let Ok(children) = children_q.get(world, e) {
+                stack.extend(children.iter().copied());
+            }
+        }
+        assert_eq!(
+            bat_meshes.len(),
+            1,
+            "rig {root:?} (batter={is_batter}) expected exactly one bat submesh, got {bat_meshes:?}"
+        );
+        let bat_mesh = bat_meshes[0];
+        let visibility = world
+            .get::<Visibility>(bat_mesh)
+            .expect("bat submesh must have a Visibility component");
+        if is_batter {
+            assert_eq!(
+                *visibility,
+                Visibility::Inherited,
+                "batter's bat submesh must be visible"
+            );
+        } else {
+            assert_eq!(
+                *visibility,
+                Visibility::Hidden,
+                "non-batter rig {root:?}'s bat submesh must be hidden"
+            );
+        }
+    }
+}

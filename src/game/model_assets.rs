@@ -12,6 +12,9 @@ pub const PLAYER_GLB: &str = "src/game/models/player.glb";
 pub const JERSEY_MATERIAL: &str = "JerseyBody";
 /// Named cap material, also team-tinted.
 pub const CAP_MATERIAL: &str = "Cap";
+/// Named bat material — the exporter splits mesh primitives per material, so
+/// the bat is its own child entity `wire_rigs` finds by handle equality.
+pub const BAT_MATERIAL: &str = "Bat";
 
 /// Bones gameplay attaches to (jersey lettering, the bat, future props).
 pub const ATTACH_BONES: &[&str] = &["Hips", "Spine", "Head", "UpperArm.L", "UpperArm.R", "Bat"];
@@ -53,7 +56,7 @@ use bevy::asset::embedded_asset;
 use bevy::gltf::Gltf;
 use bevy::prelude::*;
 
-use crate::game::player::{GltfRig, RigUnit, RigUnitTag};
+use crate::game::player::{Batter, GltfRig, RigUnit, RigUnitTag};
 use crate::game::theme::Theme;
 
 /// Asset path the runtime loads. Task 8 adds a `dev`-feature arm that reads
@@ -79,6 +82,9 @@ pub struct RigAnimations {
     pub scene: Handle<Scene>,
     pub jersey_material: Handle<StandardMaterial>,
     pub cap_material: Handle<StandardMaterial>,
+    /// The bat submesh's material handle — `wire_rigs` compares every
+    /// descendant against it to find and show/hide the batter's prop.
+    pub bat_material: Handle<StandardMaterial>,
     nodes: Vec<AnimationNodeIndex>, // parallel to CLIP_TABLE
     speeds: Vec<f32>,               // authored duration / AnimClip::duration()
 }
@@ -223,6 +229,11 @@ fn build_rig_animations(
         .get(CAP_MATERIAL)
         .cloned()
         .unwrap_or_default();
+    let bat_material = gltf
+        .named_materials
+        .get(BAT_MATERIAL)
+        .cloned()
+        .unwrap_or_default();
 
     let tint = |materials: &mut Assets<StandardMaterial>,
                 base: &Handle<StandardMaterial>,
@@ -246,6 +257,7 @@ fn build_rig_animations(
         scene: gltf.scenes[0].clone(),
         jersey_material: jersey_base,
         cap_material: cap_base,
+        bat_material,
         nodes,
         speeds,
     });
@@ -270,15 +282,19 @@ pub struct RigBones {
 
 /// Finishes glTF rigs once their scene has instantiated: attaches the shared
 /// graph + transitions to the skeleton's AnimationPlayer, resolves the
-/// contract's named bones, and tags every skinned mesh wearing the model's
+/// contract's named bones, tags every skinned mesh wearing the model's
 /// jersey/cap material with [`GltfJerseyMesh`] so [`recolor_gltf`] can dress
-/// it. Retries each frame until the async scene lands (cheap: only unwired
-/// rigs are visited, and only for a frame or two).
+/// it, and shows the bat submesh only on the plate batter (the `Batter`
+/// marker) — every other rig, including run-out rigs which also carry
+/// `RigUnit::Batter`, hides it, since the bat is skinned into the shared mesh
+/// and every instance would otherwise carry one. Retries each frame until
+/// the async scene lands (cheap: only unwired rigs are visited, and only for
+/// a frame or two).
 #[allow(clippy::type_complexity)]
 fn wire_rigs(
     mut commands: Commands,
     anims: Option<Res<RigAnimations>>,
-    unwired: Query<(Entity, &RigUnitTag), (With<GltfRig>, Without<RigPlayer>)>,
+    unwired: Query<(Entity, &RigUnitTag, Has<Batter>), (With<GltfRig>, Without<RigPlayer>)>,
     children_q: Query<&Children>,
     players: Query<(), With<AnimationPlayer>>,
     names: Query<&Name>,
@@ -287,11 +303,12 @@ fn wire_rigs(
     let Some(anims) = anims else {
         return;
     };
-    for (root, unit_tag) in &unwired {
+    for (root, unit_tag, is_batter) in &unwired {
         let mut player = None;
         let (mut spine, mut ual, mut uar, mut bat) = (None, None, None, None);
         let mut jersey_meshes = Vec::new();
         let mut cap_meshes = Vec::new();
+        let mut bat_meshes = Vec::new();
         let mut stack = vec![root];
         while let Some(e) = stack.pop() {
             if players.get(e).is_ok() {
@@ -311,6 +328,8 @@ fn wire_rigs(
                     jersey_meshes.push(e);
                 } else if mat.0 == anims.cap_material {
                     cap_meshes.push(e);
+                } else if mat.0 == anims.bat_material {
+                    bat_meshes.push(e);
                 }
             }
             if let Ok(children) = children_q.get(e) {
@@ -350,6 +369,14 @@ fn wire_rigs(
                 unit,
                 part: GltfPart::Cap,
             });
+        }
+        let bat_visibility = if is_batter {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        for e in bat_meshes {
+            commands.entity(e).insert(bat_visibility);
         }
     }
 }
