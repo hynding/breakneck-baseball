@@ -236,6 +236,10 @@ pub enum BannerTone {
 pub struct BallInPlayEvent {
     pub kind: rules::ContactKind,
     pub landing: Vec3,
+    /// The baserunning shape of the ball off the bat (grounder / catchable fly
+    /// / deep fly), for the runner rigs' break reads. Cosmetic only — the call
+    /// still comes from the live-play races. Meaningful for a fair live ball.
+    pub contact_class: rules::ContactClass,
 }
 
 /// Physical reports from the fielding simulation. Fielding never touches the
@@ -503,7 +507,12 @@ fn pitch_live(
                 crate::game::ball::MAGNUS_FACTOR,
             );
             let kind = rules::classify_contact(landing, &field);
-            in_play_ev.send(BallInPlayEvent { kind, landing });
+            let contact_class = rules::contact_class(landing, hang_time, &field);
+            in_play_ev.send(BallInPlayEvent {
+                kind,
+                landing,
+                contact_class,
+            });
             play.contact_at = time.elapsed_secs();
             play.phase = Phase::InPlay;
             match kind {

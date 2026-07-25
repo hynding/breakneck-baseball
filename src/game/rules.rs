@@ -399,6 +399,93 @@ pub fn classify_contact(landing: Vec3, field: &FieldSpec) -> ContactKind {
     ContactKind::Live { fair }
 }
 
+// ── Baserunning reads after contact ───────────────────────────────────────────
+// Pure, deterministic reads that drive *when the runner rigs break* off contact
+// (never the call — the outcome still comes from the live-play races). Encodes
+// the real-baseball conventions documented in docs/BASEBALL.md
+// ("Baserunning after contact").
+
+/// A fly ball hanging at least this long (seconds) is airborne long enough to
+/// be a catch read; anything quicker is a grounder / hard liner that will be
+/// on the ground before a runner has to commit. Calibrated against
+/// [`predict_landing`] hang times (see the `contact_class_*` unit tests).
+const GROUNDER_HANG_SECS: f32 = 1.2;
+
+/// The shape of a fair batted ball as the runners read it off the bat — the
+/// distinction that decides how each aboard runner breaks. Derived purely from
+/// the predicted flight (hang time + landing distance); no RNG.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContactClass {
+    /// On the ground (or a liner already down) before the runner must commit.
+    Grounder,
+    /// A fly that hangs long enough to be caught but is shallow enough that a
+    /// tag-up would gain nothing — the "may be a fly out" read.
+    CatchableFly,
+    /// A deep fly: catchable, but far enough that tagging up can advance a
+    /// runner (the sacrifice-fly distance, [`TAG_UP_MIN_DIST`]).
+    DeepFly,
+}
+
+/// How a base runner breaks off contact. Purely a *choreography* decision —
+/// the rigs move on this while the umpire's call is still being raced out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RunnerBreak {
+    /// Break for the next bag immediately (run on contact).
+    GoNow,
+    /// Advance about halfway and read the play: continue if the ball drops,
+    /// retreat if it is caught.
+    Halfway,
+    /// Hold the bag to tag up, advancing legally after the catch.
+    TagUp,
+}
+
+/// Classifies a fair batted ball for the baserunning read, from the predicted
+/// `landing` point and `hang_time` (see [`predict_landing`]). Per
+/// docs/BASEBALL.md "Baserunning after contact": a quick ball is a grounder,
+/// a long hang deep enough for a sacrifice fly is a deep fly, everything else
+/// in between is a catchable fly.
+pub fn contact_class(landing: Vec3, hang_time: f32, field: &FieldSpec) -> ContactClass {
+    if hang_time < GROUNDER_HANG_SECS {
+        return ContactClass::Grounder;
+    }
+    let dist = Vec2::new(landing.x, landing.z).length();
+    if dist >= TAG_UP_MIN_DIST * field.hit_scale {
+        ContactClass::DeepFly
+    } else {
+        ContactClass::CatchableFly
+    }
+}
+
+/// The break a runner takes off contact, per docs/BASEBALL.md "Baserunning
+/// after contact":
+/// 1. Two outs — run on contact (nothing to lose).
+/// 2. Fewer than two outs, ground ball — a forced runner goes immediately; an
+///    unforced runner reads whether it gets through (breaks halfway).
+/// 3. Fewer than two outs, catchable fly — go halfway and read the catch.
+/// 4. Fewer than two outs, deep fly — tag up.
+///
+/// Deterministic and RNG-free; the actual call still comes from the live-play
+/// races, so this only governs *when the rig moves*, never the outcome.
+pub fn runner_break(outs: u32, forced: bool, contact: ContactClass) -> RunnerBreak {
+    if outs >= 2 {
+        return RunnerBreak::GoNow;
+    }
+    match contact {
+        ContactClass::Grounder if forced => RunnerBreak::GoNow,
+        ContactClass::Grounder => RunnerBreak::Halfway,
+        ContactClass::CatchableFly => RunnerBreak::Halfway,
+        ContactClass::DeepFly => RunnerBreak::TagUp,
+    }
+}
+
+/// Whether the runner on (0-indexed) `base` is *forced* to advance: every base
+/// behind him back toward home is occupied, so the batter reaching first
+/// pushes the whole chain. The runner on first is always forced. Per
+/// docs/BASEBALL.md.
+pub fn is_forced(bases: &Bases, base: usize) -> bool {
+    (0..base).all(|b| bases.is_occupied(b))
+}
+
 /// Radial fence distance in the direction of `pos`, interpolated from the
 /// foul lines to straightaway centre. The single source of truth for where
 /// the wall stands: home-run classification, the spawned wall geometry, and
@@ -1840,6 +1927,120 @@ mod tests {
             classify_contact(landing, &std_field()),
             ContactKind::Live { fair: false }
         );
+    }
+
+    // ── Baserunning reads after contact ───────────────────────────────────────
+
+    /// Predicted landing + hang time for a launch angle/speed, run through the
+    /// same flight model the live ball uses (so the thresholds are calibrated
+    /// against real trajectories, not hand-picked numbers).
+    fn flight(launch_deg: f32, speed: f32, spray_deg: f32) -> (Vec3, f32) {
+        let vel = vel_spray(launch_deg, speed, spray_deg);
+        predict_landing(
+            vel,
+            hit_spin(vel),
+            BALL_DRAG_FACTOR,
+            crate::game::ball::MAGNUS_FACTOR,
+        )
+    }
+
+    #[test]
+    fn contact_class_topped_ball_is_a_grounder() {
+        // A ball hit nearly flat is on the ground almost at once.
+        let (landing, hang) = flight(2.0, 20.0, 0.0);
+        assert!(hang < GROUNDER_HANG_SECS, "hang {hang}");
+        assert_eq!(
+            contact_class(landing, hang, &std_field()),
+            ContactClass::Grounder
+        );
+    }
+
+    #[test]
+    fn contact_class_can_of_corn_is_a_catchable_fly() {
+        // A high, shallow pop hangs a long time but lands in the infield/short
+        // outfield — catchable, but no tag-up value.
+        let (landing, hang) = flight(60.0, 24.0, 0.0);
+        assert!(hang >= GROUNDER_HANG_SECS, "hang {hang}");
+        assert_eq!(
+            contact_class(landing, hang, &std_field()),
+            ContactClass::CatchableFly
+        );
+    }
+
+    #[test]
+    fn contact_class_deep_drive_is_a_deep_fly() {
+        // A long carry to the warning track: catchable, and deep enough that a
+        // runner tags up.
+        let (landing, hang) = flight(30.0, 40.0, 0.0);
+        assert!(hang >= GROUNDER_HANG_SECS, "hang {hang}");
+        assert!(
+            Vec2::new(landing.x, landing.z).length() >= TAG_UP_MIN_DIST,
+            "landing {landing:?}"
+        );
+        assert_eq!(
+            contact_class(landing, hang, &std_field()),
+            ContactClass::DeepFly
+        );
+    }
+
+    #[test]
+    fn two_outs_everyone_runs_on_contact() {
+        for class in [
+            ContactClass::Grounder,
+            ContactClass::CatchableFly,
+            ContactClass::DeepFly,
+        ] {
+            for forced in [false, true] {
+                assert_eq!(runner_break(2, forced, class), RunnerBreak::GoNow);
+            }
+        }
+    }
+
+    #[test]
+    fn forced_grounder_goes_and_unforced_grounder_reads() {
+        assert_eq!(
+            runner_break(0, true, ContactClass::Grounder),
+            RunnerBreak::GoNow
+        );
+        assert_eq!(
+            runner_break(1, false, ContactClass::Grounder),
+            RunnerBreak::Halfway
+        );
+    }
+
+    #[test]
+    fn catchable_fly_goes_halfway_regardless_of_force() {
+        assert_eq!(
+            runner_break(0, false, ContactClass::CatchableFly),
+            RunnerBreak::Halfway
+        );
+        assert_eq!(
+            runner_break(1, true, ContactClass::CatchableFly),
+            RunnerBreak::Halfway
+        );
+    }
+
+    #[test]
+    fn deep_fly_tags_up_with_fewer_than_two_outs() {
+        assert_eq!(
+            runner_break(0, false, ContactClass::DeepFly),
+            RunnerBreak::TagUp
+        );
+        assert_eq!(
+            runner_break(1, true, ContactClass::DeepFly),
+            RunnerBreak::TagUp
+        );
+    }
+
+    #[test]
+    fn force_chain_extends_from_home() {
+        // Batter on first is always forced; the chain reaches only as far as
+        // the runners are contiguous from first.
+        assert!(is_forced(&with(&[0]), 0));
+        assert!(is_forced(&with(&[0, 1]), 1));
+        assert!(!is_forced(&with(&[1]), 1)); // gap at first: runner on second free
+        assert!(!is_forced(&with(&[0, 2]), 2)); // gap at second: runner on third free
+        assert!(is_forced(&loaded(), 2)); // bases loaded: everyone forced
     }
 
     // ── Live-play races ───────────────────────────────────────────────────────

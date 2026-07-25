@@ -80,6 +80,50 @@ procedural audio and jerseys).
 - Batting order: 9 slots, rotating; a substituted player's replacement bats
   in the same slot.
 
+## Baserunning after contact (coaching conventions)
+
+How a base runner *breaks off the bat* is one of baseball's oldest read-and-react
+skills. The conventions the game encodes (in `rules::runner_break`, driving the
+runner-rig choreography — never the call):
+
+1. **Two outs — run on contact.** With two down there is nothing to lose by
+   getting caught off base (a caught fly ends the inning anyway), so every
+   runner goes immediately on any batted ball; the two-out lead is even
+   lengthened for exactly this reason ("in a 2 out, the runner must think about
+   an increased distance on the primary lead" — Baseball Training World).
+2. **Fewer than two outs, ground ball — forced runners go, unforced runners
+   read.** A *forced* runner (one the batter-runner pushes ahead — see the force
+   play below) has to advance, so he breaks on contact. An *unforced* runner
+   advances only if the ball gets through or past the infield, reading the
+   fielders' depth ("knowing when to run home on a ground ball with 0 or 1 outs
+   is very difficult, and the depth of the shortstop and second baseman will let
+   you know if they are willing to give up a run for the out or not" — QC
+   Baseball). In this game's ground-out model every runner advances a base on a
+   grounder (`rules::advance_trailing`), so the "read" is the unforced runner
+   edging halfway and committing once the ball is down.
+3. **Fewer than two outs, catchable fly — go halfway.** "The tag-up rule is the
+   primary reason behind the strategy of base runners advancing halfway on a
+   fly ball. Baserunners study the fielder and advance only far enough from the
+   base to ensure that they can return safely if the ball is caught" — i.e. edge
+   out, continue if it drops, retreat if it is caught.
+4. **Fewer than two outs, deep fly — tag up.** On a catch a runner must retouch
+   his starting base ("tag up") before advancing; a deep fly gives him the time
+   to tag and take the next base — the **sacrifice fly**. "On long fly ball outs,
+   runners can often gain a base. On short fly balls, runners rarely attempt to
+   advance after tagging up, due to the high risk of being thrown out"
+   (Wikipedia, *Tag up*). The deep-fly distance mirrors `TAG_UP_MIN_DIST`, the
+   same threshold the sac-fly rule already uses.
+5. **The batter always runs on contact** (fair-ball assumption); the engine
+   resets him on a foul.
+
+**Force play:** "When a runner is bumped over to the next base by the advancing
+batter or by another runner who was bumped by the advancing batter, that runner
+is considered to have been forced to advance." The batter-runner always forces
+first base, and the force extends up the bases as long as they are continuously
+occupied behind the lead runner (`rules::is_forced`). With two outs a force out
+ends the inning the instant it is recorded, so no run scores on the play
+(Baseball Rules Academy).
+
 ## Rules modeled elsewhere
 
 Count thresholds (4 balls / 3 strikes / 3 outs), the strike zone, tag-ups,
@@ -96,3 +140,7 @@ CLAUDE.md's architecture notes for how each maps.
 - [Baseball-Reference Bullpen — Batter's box](https://www.baseball-reference.com/bullpen/Batter's_box)
 - [Turface Athletics — Field layouts & dimensions](https://www.turface.com/education/resource-library/baseball-softball-field-layouts-dimensions)
 - [Mighty Grass — Baseball field dimensions guide](https://www.mightygrass.com/baseball-field-dimensions-guide/)
+- [Wikipedia — Tag up](https://en.wikipedia.org/wiki/Tag_up)
+- [Baseball Training World — The 9 fundamentals of base running](https://baseballtrainingworld.com/the-9-fundamentals-of-base-running-in-baseball/)
+- [QC Baseball — Baserunning: tagging up](http://www.qcbaseball.com/skills/baserunning-tagging-up.aspx)
+- [Baseball Rules Academy — 5.06 Running the bases](https://baseballrulesacademy.com/official-rule/mlb/5-06-running-the-bases/)
