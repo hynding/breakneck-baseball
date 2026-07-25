@@ -34,7 +34,7 @@ gltf = "1"
 default = []
 
 # Enable this for faster iteration in development (loads Bevy as a dynamic library)
-dev = ["bevy/dynamic_linking"]
+dev = ["bevy/dynamic_linking", "bevy/file_watcher"]
 
 [profile.dev]
 opt-level = 1

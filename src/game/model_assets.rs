@@ -59,7 +59,12 @@ use crate::game::theme::Theme;
 /// Asset path the runtime loads. Task 8 adds a `dev`-feature arm that reads
 /// the plain file for Blender hot-reload; release/wasm always embed.
 pub fn player_model_path() -> &'static str {
-    "embedded://breakneck_baseball/game/models/player.glb"
+    if cfg!(feature = "dev") {
+        // Served from the file-watched "src" asset root (see main.rs).
+        "game/models/player.glb"
+    } else {
+        "embedded://breakneck_baseball/game/models/player.glb"
+    }
 }
 
 /// The whole-model Gltf handle, held so [`build_rig_animations`] can poll it.
