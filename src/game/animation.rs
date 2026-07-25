@@ -463,8 +463,9 @@ fn drive_graph_rigs(
 }
 
 /// Rigs with nothing to play settle into the looping Idle — covers both
-/// freshly wired rigs and clip removal (settle_graph_removed clears
-/// `current`).
+/// freshly wired rigs and clip removal (runs after `settle_graph_removed`,
+/// which has already cleared `current` for anything dropped this frame, so
+/// each removal starts Idle exactly once instead of twice).
 fn idle_graph_rigs(
     anims: Option<Res<RigAnimations>>,
     mut rigs: Query<&mut RigPlayer, Without<Playing>>,
@@ -481,7 +482,9 @@ fn idle_graph_rigs(
 }
 
 /// The glTF half of settle: when choreography removes `Playing` mid-loop
-/// (e.g. `RunCycle` on arrival), forget the clip so idle takes over.
+/// (e.g. `RunCycle` on arrival), forget the clip so `idle_graph_rigs` (which
+/// runs right after, in the same frame) starts Idle exactly once instead of
+/// this system clobbering a start it already made.
 fn settle_graph_removed(mut removed: RemovedComponents<Playing>, mut rigs: Query<&mut RigPlayer>) {
     for entity in removed.read() {
         if let Ok(mut rig) = rigs.get_mut(entity) {
@@ -501,8 +504,8 @@ impl Plugin for AnimationPlugin {
             (
                 locomote,
                 drive_graph_rigs,
-                idle_graph_rigs,
                 settle_graph_removed,
+                idle_graph_rigs,
                 sample_clips,
                 settle_removed,
             )
