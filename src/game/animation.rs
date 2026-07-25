@@ -7,8 +7,11 @@
 //! [`MoveIntent`], so a human controller can later drive a fielder by writing
 //! the same component the CPU choreography writes.
 
+use std::time::Duration;
+
 use bevy::prelude::*;
 
+use crate::game::model_assets::{RigAnimations, RigPlayer};
 use crate::game::GameState;
 
 /// Every animation the game can play, by name.
@@ -287,6 +290,7 @@ type PlayingRigs<'w, 's> = Query<
         Option<&'static Children>,
         Option<&'static RigBaseY>,
     ),
+    Without<RigPlayer>,
 >;
 
 fn sample_clips(
@@ -332,6 +336,16 @@ fn sample_clips(
     }
 }
 
+/// Query alias for `settle_removed`'s root lookup (keeps clippy's
+/// type-complexity check happy) — Blocky rig roots only, glTF rigs settle via
+/// [`settle_graph_removed`] instead.
+type SettledRoots<'w, 's> = Query<
+    'w,
+    's,
+    (&'static mut Transform, &'static RigBaseY),
+    (Without<RigLimb>, Without<RigPlayer>),
+>;
+
 /// Returns limbs to neutral and the root to its resting height whenever a
 /// clip stops (covers both the sampler's own removal and choreography
 /// removing `RunCycle` mid-loop).
@@ -339,7 +353,7 @@ fn settle_removed(
     mut removed: RemovedComponents<Playing>,
     children_q: Query<&Children>,
     mut limb_q: Query<(&RigLimb, &mut Transform)>,
-    mut root_q: Query<(&mut Transform, &RigBaseY), Without<RigLimb>>,
+    mut root_q: SettledRoots,
 ) {
     for entity in removed.read() {
         if let Ok(children) = children_q.get(entity) {
@@ -394,6 +408,88 @@ fn locomote(
     }
 }
 
+/// Cross-fade length between clips — the production-blending upgrade.
+const BLEND: Duration = Duration::from_millis(150);
+
+/// Starts `node` on a rig's AnimationPlayer with a cross-fade, applying the
+/// speed factor and loop mode. The one place transitions are touched.
+fn start_clip(
+    anims: &RigAnimations,
+    players: &mut Query<(&mut AnimationPlayer, &mut AnimationTransitions)>,
+    rig: &mut RigPlayer,
+    clip: AnimClip,
+) {
+    let Ok((mut player, mut transitions)) = players.get_mut(rig.player) else {
+        return;
+    };
+    let (node, speed) = anims.node(clip);
+    let anim = transitions.play(&mut player, node, BLEND);
+    anim.set_speed(speed);
+    if clip.looping() {
+        anim.repeat();
+    }
+    rig.current = Some(clip);
+}
+
+/// The glTF backend of the `Playing` protocol: reacts to clip changes,
+/// ticks the same timer/chaining semantics `sample_clips` keeps for Blocky
+/// rigs, and removes finished one-shots.
+fn drive_graph_rigs(
+    time: Res<Time>,
+    anims: Option<Res<RigAnimations>>,
+    mut commands: Commands,
+    mut rigs: Query<(Entity, &mut Playing, &mut RigPlayer)>,
+    mut players: Query<(&mut AnimationPlayer, &mut AnimationTransitions)>,
+) {
+    let Some(anims) = anims else {
+        return;
+    };
+    for (entity, mut playing, mut rig) in &mut rigs {
+        if rig.current != Some(playing.clip) {
+            start_clip(&anims, &mut players, &mut rig, playing.clip);
+        }
+        playing.timer.tick(time.delta());
+        if playing.timer.finished() && !playing.clip.looping() {
+            if let Some(next) = playing.next.take() {
+                playing.clip = next;
+                playing.timer = Timer::from_seconds(next.duration(), TimerMode::Once);
+                // The mismatch with rig.current starts `next` (with blend)
+                // on the next pass.
+            } else {
+                commands.entity(entity).remove::<Playing>();
+            }
+        }
+    }
+}
+
+/// Rigs with nothing to play settle into the looping Idle — covers both
+/// freshly wired rigs and clip removal (settle_graph_removed clears
+/// `current`).
+fn idle_graph_rigs(
+    anims: Option<Res<RigAnimations>>,
+    mut rigs: Query<&mut RigPlayer, Without<Playing>>,
+    mut players: Query<(&mut AnimationPlayer, &mut AnimationTransitions)>,
+) {
+    let Some(anims) = anims else {
+        return;
+    };
+    for mut rig in &mut rigs {
+        if rig.current != Some(AnimClip::Idle) {
+            start_clip(&anims, &mut players, &mut rig, AnimClip::Idle);
+        }
+    }
+}
+
+/// The glTF half of settle: when choreography removes `Playing` mid-loop
+/// (e.g. `RunCycle` on arrival), forget the clip so idle takes over.
+fn settle_graph_removed(mut removed: RemovedComponents<Playing>, mut rigs: Query<&mut RigPlayer>) {
+    for entity in removed.read() {
+        if let Ok(mut rig) = rigs.get_mut(entity) {
+            rig.current = None;
+        }
+    }
+}
+
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
 pub struct AnimationPlugin;
@@ -402,7 +498,14 @@ impl Plugin for AnimationPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (locomote, sample_clips, settle_removed)
+            (
+                locomote,
+                drive_graph_rigs,
+                idle_graph_rigs,
+                settle_graph_removed,
+                sample_clips,
+                settle_removed,
+            )
                 .chain()
                 .run_if(in_state(GameState::Playing)),
         );

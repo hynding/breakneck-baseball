@@ -56,3 +56,25 @@ fn rigs_wire_graph_and_bones() {
         "some glTF rigs never wired (skeleton or named bones missing)"
     );
 }
+
+use breakneck_baseball::game::animation::AnimClip;
+use breakneck_baseball::game::player::CatcherRole;
+
+#[test]
+fn catcher_crouch_reaches_the_graph() {
+    let mut app = common::headless_app();
+    common::start_game(&mut app, KeyCode::Digit2);
+    // The duel starts immediately; catcher_crouch inserts CatcherCrouch,
+    // and the driver must forward it to the skeleton's AnimationPlayer.
+    let animated = common::run_until(&mut app, 4_000, |app| {
+        let world = app.world_mut();
+        world
+            .query_filtered::<&RigPlayer, With<CatcherRole>>()
+            .iter(world)
+            .any(|rig| rig.current == Some(AnimClip::CatcherCrouch))
+    });
+    assert!(
+        animated.is_some(),
+        "driver never started CatcherCrouch on the catcher's skeleton"
+    );
+}
