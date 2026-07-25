@@ -48,10 +48,12 @@ pub fn node_for(clip: AnimClip) -> AnimClip {
     }
 }
 
-use bevy::animation::graph::{AnimationGraph, AnimationNodeIndex};
+use bevy::animation::graph::{AnimationGraph, AnimationGraphHandle, AnimationNodeIndex};
 use bevy::asset::embedded_asset;
 use bevy::gltf::Gltf;
 use bevy::prelude::*;
+
+use crate::game::player::GltfRig;
 
 /// Asset path the runtime loads. Task 8 adds a `dev`-feature arm that reads
 /// the plain file for Blender hot-reload; release/wasm always embed.
@@ -143,14 +145,96 @@ fn build_rig_animations(
     });
 }
 
+/// Handle from a rig root to its skeleton's [`AnimationPlayer`] entity, plus
+/// which clip that player was last told to run. Presence = "wired".
+#[derive(Component)]
+pub struct RigPlayer {
+    pub player: Entity,
+    pub current: Option<AnimClip>,
+}
+
+/// Named bone entities gameplay attaches to (jersey quads, future props).
+#[derive(Component)]
+pub struct RigBones {
+    pub spine: Entity,
+    pub upper_arm_l: Entity,
+    pub upper_arm_r: Entity,
+    pub bat: Entity,
+}
+
+/// Finishes glTF rigs once their scene has instantiated: attaches the shared
+/// graph + transitions to the skeleton's AnimationPlayer and resolves the
+/// contract's named bones. Retries each frame until the async scene lands
+/// (cheap: only unwired rigs are visited, and only for a frame or two).
+fn wire_rigs(
+    mut commands: Commands,
+    anims: Option<Res<RigAnimations>>,
+    unwired: Query<Entity, (With<GltfRig>, Without<RigPlayer>)>,
+    children_q: Query<&Children>,
+    players: Query<(), With<AnimationPlayer>>,
+    names: Query<&Name>,
+) {
+    let Some(anims) = anims else {
+        return;
+    };
+    for root in &unwired {
+        let mut player = None;
+        let (mut spine, mut ual, mut uar, mut bat) = (None, None, None, None);
+        let mut stack = vec![root];
+        while let Some(e) = stack.pop() {
+            if players.get(e).is_ok() {
+                player = Some(e);
+            }
+            if let Ok(name) = names.get(e) {
+                match name.as_str() {
+                    "Spine" => spine = Some(e),
+                    "UpperArm.L" => ual = Some(e),
+                    "UpperArm.R" => uar = Some(e),
+                    "Bat" => bat = Some(e),
+                    _ => {}
+                }
+            }
+            if let Ok(children) = children_q.get(e) {
+                stack.extend(children.iter().copied());
+            }
+        }
+        let (Some(player), Some(spine), Some(ual), Some(uar), Some(bat)) =
+            (player, spine, ual, uar, bat)
+        else {
+            continue; // scene still instantiating — retry next frame
+        };
+        commands.entity(player).insert((
+            AnimationGraphHandle(anims.graph.clone()),
+            AnimationTransitions::new(),
+        ));
+        commands.entity(root).insert((
+            RigPlayer {
+                player,
+                current: None,
+            },
+            RigBones {
+                spine,
+                upper_arm_l: ual,
+                upper_arm_r: uar,
+                bat,
+            },
+        ));
+    }
+}
+
 pub struct ModelAssetsPlugin;
 
 impl Plugin for ModelAssetsPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "models/player.glb");
-        app.add_systems(Startup, load_player_model).add_systems(
-            Update,
-            build_rig_animations.run_if(|r: Option<Res<RigAnimations>>| r.is_none()),
-        );
+        app.add_systems(Startup, load_player_model)
+            .add_systems(
+                Update,
+                build_rig_animations.run_if(|r: Option<Res<RigAnimations>>| r.is_none()),
+            )
+            .add_systems(
+                Update,
+                wire_rigs.run_if(in_state(crate::game::GameState::Playing)),
+            );
     }
 }

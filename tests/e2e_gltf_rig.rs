@@ -32,3 +32,27 @@ fn rigs_spawn_gltf_scenes_headless() {
     });
     assert!(wired.is_some(), "glTF scenes never instantiated skeletons");
 }
+
+use breakneck_baseball::game::model_assets::{RigBones, RigPlayer};
+
+#[test]
+fn rigs_wire_graph_and_bones() {
+    let mut app = common::headless_app();
+    common::start_game(&mut app, KeyCode::Digit2);
+    let wired = common::run_until(&mut app, 4_000, |app| {
+        let world = app.world_mut();
+        let total = world
+            .query_filtered::<(), With<GltfRig>>()
+            .iter(world)
+            .count();
+        let done = world
+            .query_filtered::<(), (With<GltfRig>, With<RigPlayer>, With<RigBones>)>()
+            .iter(world)
+            .count();
+        total > 0 && done == total
+    });
+    assert!(
+        wired.is_some(),
+        "some glTF rigs never wired (skeleton or named bones missing)"
+    );
+}
