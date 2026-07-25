@@ -38,6 +38,7 @@ use fx::FxPlugin;
 use input::InputPlugin;
 use jersey::JerseyPlugin;
 use menu::MenuPlugin;
+use model_assets::ModelAssetsPlugin;
 use player::PlayerPlugin;
 use roster::Rosters;
 use runner::RunnerPlugin;
@@ -216,12 +217,14 @@ impl Plugin for GamePlugin {
                 ..default()
             })
             .init_resource::<Rosters>()
-            // Sub-plugins (input/menu first so their resources exist for the rest)
+            // Sub-plugins (input/menu first so their resources exist for the
+            // rest); split across two tuples — `add_plugins` tops out at 15.
             .add_plugins((
                 InputPlugin,
                 MenuPlugin,
                 FieldPlugin,
                 BallPlugin,
+                ModelAssetsPlugin,
                 PlayerPlugin,
                 AnimationPlugin,
                 FlowPlugin,
@@ -232,8 +235,8 @@ impl Plugin for GamePlugin {
                 CameraPlugin,
                 UiPlugin,
                 JerseyPlugin,
-                SubsPlugin,
             ))
+            .add_plugins(SubsPlugin)
             // Fresh scoreboard/rosters each time a game starts from the menu;
             // tear the scene down once the game is over. Pausing stays inside
             // Playing ⇄ Paused and touches neither.
