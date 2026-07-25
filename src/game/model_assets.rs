@@ -53,7 +53,8 @@ use bevy::asset::embedded_asset;
 use bevy::gltf::Gltf;
 use bevy::prelude::*;
 
-use crate::game::player::GltfRig;
+use crate::game::player::{GltfRig, RigUnit, RigUnitTag};
+use crate::game::theme::Theme;
 
 /// Asset path the runtime loads. Task 8 adds a `dev`-feature arm that reads
 /// the plain file for Blender hot-reload; release/wasm always embed.
@@ -94,6 +95,52 @@ fn load_player_model(asset_server: Res<AssetServer>, mut commands: Commands) {
     commands.insert_resource(PlayerModelHandle(asset_server.load(player_model_path())));
 }
 
+/// Team-tinted clones of the model's named materials, plus the umpires'
+/// fixed blacks — mirrors player.rs's `TeamPalette` caching pattern, but for
+/// the glTF rigs' shared skinned-mesh materials.
+#[derive(Resource)]
+pub struct GltfTeamMaterials {
+    home_jersey: Handle<StandardMaterial>,
+    home_cap: Handle<StandardMaterial>,
+    away_jersey: Handle<StandardMaterial>,
+    away_cap: Handle<StandardMaterial>,
+    pub umpire_jersey: Handle<StandardMaterial>,
+    pub umpire_cap: Handle<StandardMaterial>,
+}
+
+impl GltfTeamMaterials {
+    pub fn jersey(&self, team: crate::game::Team) -> Handle<StandardMaterial> {
+        match team {
+            crate::game::Team::Home => self.home_jersey.clone(),
+            crate::game::Team::Away => self.away_jersey.clone(),
+        }
+    }
+    pub fn cap(&self, team: crate::game::Team) -> Handle<StandardMaterial> {
+        match team {
+            crate::game::Team::Home => self.home_cap.clone(),
+            crate::game::Team::Away => self.away_cap.clone(),
+        }
+    }
+}
+
+/// Which recolourable model part a skinned-mesh entity is.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum GltfPart {
+    Jersey,
+    Cap,
+}
+
+/// Tag on skinned-mesh entities wearing a team-tintable material, resolved
+/// during [`wire_rigs`] by comparing against the model's named material
+/// handles (the scene spawner does not clone material handles per
+/// instance — every rig's jersey mesh really does carry the same
+/// `Handle<StandardMaterial>` the `Gltf` asset reports).
+#[derive(Component)]
+pub struct GltfJerseyMesh {
+    pub unit: RigUnit,
+    pub part: GltfPart,
+}
+
 /// Polls until the Gltf is in, then builds the graph by CLIP_TABLE name
 /// lookup (never by animation index — export order is not part of the
 /// contract). Runs behind a run_if so it costs nothing once built.
@@ -103,6 +150,8 @@ fn build_rig_animations(
     gltfs: Res<Assets<Gltf>>,
     clips: Res<Assets<AnimationClip>>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
+    theme: Res<Theme>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let Some(gltf) = gltfs.get(&handle.0) else {
         return;
@@ -127,19 +176,39 @@ fn build_rig_animations(
             authored / clip.duration()
         })
         .collect();
+    let jersey_base = gltf
+        .named_materials
+        .get(JERSEY_MATERIAL)
+        .cloned()
+        .unwrap_or_default();
+    let cap_base = gltf
+        .named_materials
+        .get(CAP_MATERIAL)
+        .cloned()
+        .unwrap_or_default();
+
+    let tint = |materials: &mut Assets<StandardMaterial>,
+                base: &Handle<StandardMaterial>,
+                color: Color| {
+        let mut m = materials.get(base).cloned().unwrap_or_default();
+        m.base_color = color;
+        materials.add(m)
+    };
+    let team_mats = GltfTeamMaterials {
+        home_jersey: tint(&mut materials, &jersey_base, theme.home.jersey),
+        home_cap: tint(&mut materials, &cap_base, theme.home.cap),
+        away_jersey: tint(&mut materials, &jersey_base, theme.away.jersey),
+        away_cap: tint(&mut materials, &cap_base, theme.away.cap),
+        umpire_jersey: tint(&mut materials, &jersey_base, Color::srgb(0.15, 0.16, 0.19)),
+        umpire_cap: tint(&mut materials, &cap_base, Color::srgb(0.05, 0.05, 0.06)),
+    };
+    commands.insert_resource(team_mats);
+
     commands.insert_resource(RigAnimations {
         graph: graphs.add(graph),
         scene: gltf.scenes[0].clone(),
-        jersey_material: gltf
-            .named_materials
-            .get(JERSEY_MATERIAL)
-            .cloned()
-            .unwrap_or_default(),
-        cap_material: gltf
-            .named_materials
-            .get(CAP_MATERIAL)
-            .cloned()
-            .unwrap_or_default(),
+        jersey_material: jersey_base,
+        cap_material: cap_base,
         nodes,
         speeds,
     });
@@ -163,23 +232,29 @@ pub struct RigBones {
 }
 
 /// Finishes glTF rigs once their scene has instantiated: attaches the shared
-/// graph + transitions to the skeleton's AnimationPlayer and resolves the
-/// contract's named bones. Retries each frame until the async scene lands
-/// (cheap: only unwired rigs are visited, and only for a frame or two).
+/// graph + transitions to the skeleton's AnimationPlayer, resolves the
+/// contract's named bones, and tags every skinned mesh wearing the model's
+/// jersey/cap material with [`GltfJerseyMesh`] so [`recolor_gltf`] can dress
+/// it. Retries each frame until the async scene lands (cheap: only unwired
+/// rigs are visited, and only for a frame or two).
+#[allow(clippy::type_complexity)]
 fn wire_rigs(
     mut commands: Commands,
     anims: Option<Res<RigAnimations>>,
-    unwired: Query<Entity, (With<GltfRig>, Without<RigPlayer>)>,
+    unwired: Query<(Entity, &RigUnitTag), (With<GltfRig>, Without<RigPlayer>)>,
     children_q: Query<&Children>,
     players: Query<(), With<AnimationPlayer>>,
     names: Query<&Name>,
+    mats_q: Query<&MeshMaterial3d<StandardMaterial>>,
 ) {
     let Some(anims) = anims else {
         return;
     };
-    for root in &unwired {
+    for (root, unit_tag) in &unwired {
         let mut player = None;
         let (mut spine, mut ual, mut uar, mut bat) = (None, None, None, None);
+        let mut jersey_meshes = Vec::new();
+        let mut cap_meshes = Vec::new();
         let mut stack = vec![root];
         while let Some(e) = stack.pop() {
             if players.get(e).is_ok() {
@@ -192,6 +267,13 @@ fn wire_rigs(
                     "UpperArm.R" => uar = Some(e),
                     "Bat" => bat = Some(e),
                     _ => {}
+                }
+            }
+            if let Ok(mat) = mats_q.get(e) {
+                if mat.0 == anims.jersey_material {
+                    jersey_meshes.push(e);
+                } else if mat.0 == anims.cap_material {
+                    cap_meshes.push(e);
                 }
             }
             if let Ok(children) = children_q.get(e) {
@@ -219,6 +301,19 @@ fn wire_rigs(
                 bat,
             },
         ));
+        let unit = unit_tag.0;
+        for e in jersey_meshes {
+            commands.entity(e).insert(GltfJerseyMesh {
+                unit,
+                part: GltfPart::Jersey,
+            });
+        }
+        for e in cap_meshes {
+            commands.entity(e).insert(GltfJerseyMesh {
+                unit,
+                part: GltfPart::Cap,
+            });
+        }
     }
 }
 

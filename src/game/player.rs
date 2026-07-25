@@ -18,6 +18,7 @@ use crate::game::ball::PLAYER_GROUP;
 use crate::game::flow::{Phase, Play};
 use crate::game::input::Intents;
 use crate::game::jersey::{attach_jerseys, JerseyRole};
+use crate::game::model_assets::{GltfJerseyMesh, GltfPart, GltfTeamMaterials};
 use crate::game::theme::{PlayerModelId, PlayerTemplate, Theme};
 use crate::game::variant::FieldSpec;
 use crate::game::{GameState, GameplayEntity, ScoreBoard, Team};
@@ -57,7 +58,7 @@ pub struct FacingDirection(pub Vec3);
 /// Whether a rig belongs to the defense (pitcher + fielders) or the batting
 /// side (batter, runners) — decides which team's colours it wears as innings
 /// flip. Umpires wear their own blacks and never recolour.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RigUnit {
     Defense,
     Batter,
@@ -162,7 +163,8 @@ impl Plugin for PlayerPlugin {
         app.add_systems(crate::game::game_start(), spawn_players)
             .add_systems(
                 Update,
-                (recolor_teams, trigger_swing, catcher_crouch).run_if(in_state(GameState::Playing)),
+                (recolor_teams, recolor_gltf, trigger_swing, catcher_crouch)
+                    .run_if(in_state(GameState::Playing)),
             );
     }
 }
@@ -489,6 +491,33 @@ fn recolor_teams(
             PartKind::Skin => mats.skin.clone(),
             PartKind::Bat => mats.bat.clone(),
         };
+    }
+}
+
+/// glTF twin of [`recolor_teams`]: dresses tagged skinned meshes in the
+/// current sides' tints; umpires get their blacks once and are skipped
+/// after. Also fires for freshly-tagged meshes so a rig wired mid-inning
+/// starts dressed instead of waiting for the next scoreboard change.
+fn recolor_gltf(
+    score: Res<ScoreBoard>,
+    mats: Option<Res<GltfTeamMaterials>>,
+    added: Query<(), Added<GltfJerseyMesh>>,
+    mut meshes: Query<(&GltfJerseyMesh, &mut MeshMaterial3d<StandardMaterial>)>,
+) {
+    let Some(mats) = mats else { return };
+    if !score.is_changed() && added.is_empty() {
+        return;
+    }
+    for (tag, mut material) in &mut meshes {
+        let handle = match (tag.unit, tag.part) {
+            (RigUnit::Umpire, GltfPart::Jersey) => mats.umpire_jersey.clone(),
+            (RigUnit::Umpire, GltfPart::Cap) => mats.umpire_cap.clone(),
+            (RigUnit::Defense, GltfPart::Jersey) => mats.jersey(score.fielding_team()),
+            (RigUnit::Defense, GltfPart::Cap) => mats.cap(score.fielding_team()),
+            (RigUnit::Batter, GltfPart::Jersey) => mats.jersey(score.batting_team()),
+            (RigUnit::Batter, GltfPart::Cap) => mats.cap(score.batting_team()),
+        };
+        material.0 = handle;
     }
 }
 

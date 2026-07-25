@@ -15,6 +15,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
+use crate::game::model_assets::RigBones;
 use crate::game::roster::{PlayerCard, Rosters};
 use crate::game::rules::BattingOrder;
 use crate::game::theme::Theme;
@@ -121,14 +122,20 @@ fn fit_scale(text: &str, max_width: usize) -> usize {
 enum JerseyFace {
     /// Name arched over the big number.
     Back,
-    /// Number only (chest and shoulders share it).
+    /// Number only, worn on the chest.
     Number,
+    /// Number only, worn on the left shoulder (lettered exactly like
+    /// [`JerseyFace::Number`] — the variants exist so [`mount_jerseys_on_bones`]
+    /// can tell the two shoulder quads apart and hang each on its own arm bone).
+    ShoulderL,
+    /// Number only, worn on the right shoulder — see [`JerseyFace::ShoulderL`].
+    ShoulderR,
 }
 
 fn build_texture(card: &PlayerCard, face: JerseyFace, color: [u8; 4]) -> Image {
     let (w, h) = match face {
         JerseyFace::Back => (96, 96),
-        JerseyFace::Number => (48, 48),
+        JerseyFace::Number | JerseyFace::ShoulderL | JerseyFace::ShoulderR => (48, 48),
     };
     let mut canvas = vec![0u8; w * h * 4];
     let number = card.number.to_string();
@@ -142,7 +149,7 @@ fn build_texture(card: &PlayerCard, face: JerseyFace, color: [u8; 4]) -> Image {
             let y = 24 + (h - 24 - 7 * num_scale) / 2;
             draw_text(&mut canvas, w, x, y, num_scale, &number, color);
         }
-        JerseyFace::Number => {
+        JerseyFace::Number | JerseyFace::ShoulderL | JerseyFace::ShoulderR => {
             let scale = fit_scale(&number, w - 8).min(4);
             let x = (w - text_width(&number, scale)) / 2;
             let y = (h - 7 * scale) / 2;
@@ -252,13 +259,13 @@ pub fn attach_jerseys(
             0.0,
         ),
         (
-            JerseyFace::Number,
+            JerseyFace::ShoulderL,
             &assets.shoulder,
             Vec3::new(0.315, 0.52, 0.0),
             half,
         ),
         (
-            JerseyFace::Number,
+            JerseyFace::ShoulderR,
             &assets.shoulder,
             Vec3::new(-0.315, 0.52, 0.0),
             -half,
@@ -274,6 +281,43 @@ pub fn attach_jerseys(
             ))
             .id();
         commands.entity(quad).set_parent(rig);
+    }
+}
+
+/// Re-hangs a glTF rig's lettering quads from the rig root onto the contract
+/// bones the moment wiring resolves them, so lettering rides the animated
+/// torso instead of floating at the root's rest pose. Tolerates rigs with no
+/// quads at all (umpires — [`attach_jerseys`] is never called for them).
+/// Offsets are bone-local first passes — tune visually.
+fn mount_jerseys_on_bones(
+    mut commands: Commands,
+    newly_wired: Query<(Entity, &RigBones), Added<RigBones>>,
+    children_q: Query<&Children>,
+    quads: Query<&JerseyQuad>,
+) {
+    let half = std::f32::consts::FRAC_PI_2;
+    for (root, bones) in &newly_wired {
+        let Ok(children) = children_q.get(root) else {
+            continue;
+        };
+        for &child in children {
+            let Ok(quad) = quads.get(child) else {
+                continue;
+            };
+            let (bone, translation, yaw) = match quad.face {
+                JerseyFace::Back => (
+                    bones.spine,
+                    Vec3::new(0.0, 0.12, -0.16),
+                    std::f32::consts::PI,
+                ),
+                JerseyFace::Number => (bones.spine, Vec3::new(0.0, 0.20, 0.16), 0.0),
+                JerseyFace::ShoulderL => (bones.upper_arm_l, Vec3::new(0.0, -0.04, 0.09), half),
+                JerseyFace::ShoulderR => (bones.upper_arm_r, Vec3::new(0.0, -0.04, -0.09), -half),
+            };
+            commands.entity(child).set_parent(bone).insert(
+                Transform::from_translation(translation).with_rotation(Quat::from_rotation_y(yaw)),
+            );
+        }
     }
 }
 
@@ -341,7 +385,10 @@ impl Plugin for JerseyPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<JerseyCache>()
             .add_systems(crate::game::game_start(), reset_cache)
-            .add_systems(Update, dress_jerseys.run_if(in_state(GameState::Playing)));
+            .add_systems(
+                Update,
+                (dress_jerseys, mount_jerseys_on_bones).run_if(in_state(GameState::Playing)),
+            );
     }
 }
 

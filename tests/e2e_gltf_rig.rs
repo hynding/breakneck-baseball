@@ -78,3 +78,56 @@ fn catcher_crouch_reaches_the_graph() {
         "driver never started CatcherCrouch on the catcher's skeleton"
     );
 }
+
+use breakneck_baseball::game::jersey::JerseyQuad;
+use breakneck_baseball::game::model_assets::GltfJerseyMesh;
+
+#[test]
+fn gltf_rigs_recolor_and_mount_jerseys() {
+    let mut app = common::headless_app();
+    common::start_game(&mut app, KeyCode::Digit2);
+    common::run_until(&mut app, 4_000, |app| {
+        let world = app.world_mut();
+        let total = world
+            .query_filtered::<(), With<GltfRig>>()
+            .iter(world)
+            .count();
+        let done = world
+            .query_filtered::<(), (With<GltfRig>, With<RigPlayer>)>()
+            .iter(world)
+            .count();
+        total > 0 && done == total
+    })
+    .expect("rigs wired");
+
+    // Recolour reached the skinned meshes: at least one jersey mesh exists,
+    // and defense vs batter wear different material handles.
+    let world = app.world_mut();
+    let mut mats = std::collections::HashMap::new();
+    let mut q = world.query::<(&GltfJerseyMesh, &MeshMaterial3d<StandardMaterial>)>();
+    for (tag, mat) in q.iter(world) {
+        // RigUnit gains a Debug derive in this task so it can key the map.
+        mats.entry(format!("{:?}", tag.unit))
+            .or_insert_with(Vec::new)
+            .push(mat.0.clone());
+    }
+    assert!(
+        mats.len() >= 2,
+        "expected defense and batter jersey meshes, got {mats:?}"
+    );
+
+    // Jersey lettering rides bones now: every quad's parent is a named bone.
+    let mut parents = world.query::<(&JerseyQuad, &Parent)>();
+    let mut names = world.query::<&Name>();
+    let quad_parents: Vec<Entity> = parents.iter(world).map(|(_, p)| p.get()).collect();
+    assert!(!quad_parents.is_empty());
+    for parent in quad_parents {
+        let name = names
+            .get(world, parent)
+            .expect("quad parent must be a named bone");
+        assert!(
+            matches!(name.as_str(), "Spine" | "UpperArm.L" | "UpperArm.R"),
+            "quad mounted on {name} — expected a contract bone"
+        );
+    }
+}
