@@ -15,6 +15,7 @@ pub mod fx;
 pub mod input;
 pub mod jersey;
 pub mod menu;
+pub mod model_assets;
 pub mod player;
 pub mod roster;
 pub mod rules;

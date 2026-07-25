@@ -38,6 +38,8 @@ pub enum AnimClip {
     /// The batter's arms drive through the swing (the bat pivot plays
     /// [`AnimClip::SwingBat`] in parallel — this is the body half).
     BatterSwing,
+    /// Neutral resting stance the glTF driver settles rigs into. Loops.
+    Idle,
 }
 
 impl AnimClip {
@@ -55,12 +57,16 @@ impl AnimClip {
             AnimClip::Dive => 0.5,
             AnimClip::Slide => 0.6,
             AnimClip::BatterSwing => 0.42,
+            AnimClip::Idle => 1.0,
         }
     }
 
     /// Clips that repeat until the component is removed.
     pub fn looping(self) -> bool {
-        matches!(self, AnimClip::RunCycle | AnimClip::CatcherCrouch)
+        matches!(
+            self,
+            AnimClip::RunCycle | AnimClip::CatcherCrouch | AnimClip::Idle
+        )
     }
 }
 
@@ -238,7 +244,7 @@ fn limb_pose(clip: AnimClip, kind: LimbKind, f: f32) -> Quat {
                 LegL | LegR => Quat::IDENTITY,
             }
         }
-        SwingBat | RecoverSwing => Quat::IDENTITY,
+        SwingBat | RecoverSwing | Idle => Quat::IDENTITY,
     }
 }
 

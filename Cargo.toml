@@ -26,6 +26,10 @@ bevy_rapier3d = { version = "0.28", features = ["simd-stable", "debug-render-3d"
 wasm-bindgen = "0.2"
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
+[dev-dependencies]
+# Parses the committed player.glb in the model-contract test (no Bevy needed).
+gltf = "1"
+
 [features]
 default = []
 
