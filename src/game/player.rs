@@ -58,11 +58,19 @@ pub struct FacingDirection(pub Vec3);
 /// side (batter, runners) — decides which team's colours it wears as innings
 /// flip. Umpires wear their own blacks and never recolour.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RigUnit {
+pub enum RigUnit {
     Defense,
     Batter,
     Umpire,
 }
+
+/// A rig root's team unit, readable by wiring/recolour systems.
+#[derive(Component, Clone, Copy)]
+pub struct RigUnitTag(pub RigUnit);
+
+/// Marks a glTF rig root awaiting (or holding) its wired skeleton.
+#[derive(Component)]
+pub struct GltfRig;
 
 /// Which template material a rig child wears.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -186,16 +194,22 @@ fn catcher_crouch(
 
 // ── Spawning ──────────────────────────────────────────────────────────────────
 
-/// Shared mesh handles for every rig, kept as a resource so other modules
-/// (runners) can spawn rigs too.
-#[derive(Resource)]
-pub(crate) struct RigMeshes {
+/// Shared mesh handles for the Blocky rig, held inside [`RigModel::Blocky`].
+pub struct RigMeshes {
     torso: Handle<Mesh>,
     head: Handle<Mesh>,
     cap: Handle<Mesh>,
     brim: Handle<Mesh>,
     bat: Handle<Mesh>,
     limb: Handle<Mesh>,
+}
+
+/// How rigs are constructed this game — replaces `RigMeshes` as the
+/// resource; Blocky keeps its meshes inside the arm.
+#[derive(Resource)]
+pub enum RigModel {
+    Blocky(RigMeshes),
+    Gltf { scene: Handle<Scene> },
 }
 
 /// Builds the team palette and every player rig for the current field.
@@ -205,6 +219,7 @@ fn spawn_players(
     mut materials: ResMut<Assets<StandardMaterial>>,
     field: Res<FieldSpec>,
     theme: Res<Theme>,
+    asset_server: Res<AssetServer>,
 ) {
     let palette = TeamPalette {
         home: build_materials(&mut materials, &theme.home),
@@ -212,14 +227,22 @@ fn spawn_players(
     };
     // The model seam: a future humanoid model is a new arm here (its own
     // meshes — and richer poses behind the same AnimClip names).
-    let rig_meshes = match theme.player_model {
-        PlayerModelId::Blocky => RigMeshes {
+    let rig_model = match theme.player_model {
+        PlayerModelId::Blocky => RigModel::Blocky(RigMeshes {
             torso: meshes.add(Capsule3d::new(0.3, 0.9)),
             head: meshes.add(Sphere::new(0.18)),
             cap: meshes.add(Cylinder::new(0.19, 0.09)),
             brim: meshes.add(Cuboid::new(0.26, 0.03, 0.16)),
             bat: meshes.add(Cylinder::new(0.032, 0.84)),
             limb: meshes.add(Cylinder::new(0.055, 0.5)),
+        }),
+        PlayerModelId::Gltf(_) => RigModel::Gltf {
+            // Handle now, bytes async: the scene fills in when loaded, so
+            // there is no menu-vs-load race to gate.
+            scene: asset_server.load(
+                bevy::gltf::GltfAssetLabel::Scene(0)
+                    .from_asset(crate::game::model_assets::player_model_path()),
+            ),
         },
     };
     let jersey_assets = crate::game::jersey::make_assets(&mut meshes, &mut materials);
@@ -231,7 +254,7 @@ fn spawn_players(
     // Pitcher, standing on the rubber.
     let pitcher = spawn_rig(
         &mut commands,
-        &rig_meshes,
+        &rig_model,
         RigUnit::Defense,
         defense,
         Vec3::new(0.0, 0.6 + 0.25, field.pitch_distance),
@@ -244,7 +267,7 @@ fn spawn_players(
     for (index, spot) in field.fielder_positions.iter().enumerate() {
         let fielder = spawn_rig(
             &mut commands,
-            &rig_meshes,
+            &rig_model,
             RigUnit::Defense,
             defense,
             *spot + Vec3::Y * 0.6,
@@ -269,7 +292,7 @@ fn spawn_players(
         let facing = if spot.z < 0.0 { 1.0 } else { -1.0 };
         let umpire = spawn_rig(
             &mut commands,
-            &rig_meshes,
+            &rig_model,
             RigUnit::Umpire,
             &umpire_mats,
             *spot + Vec3::Y * 0.6,
@@ -285,7 +308,7 @@ fn spawn_players(
     // as a real batter does in the box (per docs/BASEBALL.md).
     let batter = spawn_rig(
         &mut commands,
-        &rig_meshes,
+        &rig_model,
         RigUnit::Batter,
         offense,
         Vec3::new(0.7, 0.6, 0.0),
@@ -297,44 +320,52 @@ fn spawn_players(
     );
     attach_jerseys(&mut commands, batter, JerseyRole::Batter, &jersey_assets);
     commands.insert_resource(jersey_assets);
-    commands.entity(batter).insert(Batter).with_children(|rig| {
-        rig.spawn((
-            BatPivot,
-            Transform::from_translation(Vec3::new(-0.25, 0.45, 0.0))
-                .with_rotation(bat_idle_rotation()),
-            Visibility::default(),
-        ))
-        .with_children(|pivot| {
-            pivot.spawn((
-                RigPart {
-                    unit: RigUnit::Batter,
-                    part: PartKind::Bat,
-                },
-                Mesh3d(rig_meshes.bat.clone()),
-                MeshMaterial3d(offense.bat.clone()),
-                Transform::from_xyz(0.0, 0.46, 0.0),
-            ));
+    commands.entity(batter).insert(Batter);
+    // The bat is a mesh child only for Blocky — in glTF it's a bone under
+    // the skeleton, wired up alongside the rest of the rig (Task 5).
+    if let RigModel::Blocky(meshes) = &rig_model {
+        commands.entity(batter).with_children(|rig| {
+            rig.spawn((
+                BatPivot,
+                Transform::from_translation(Vec3::new(-0.25, 0.45, 0.0))
+                    .with_rotation(bat_idle_rotation()),
+                Visibility::default(),
+            ))
+            .with_children(|pivot| {
+                pivot.spawn((
+                    RigPart {
+                        unit: RigUnit::Batter,
+                        part: PartKind::Bat,
+                    },
+                    Mesh3d(meshes.bat.clone()),
+                    MeshMaterial3d(offense.bat.clone()),
+                    Transform::from_xyz(0.0, 0.46, 0.0),
+                ));
+            });
         });
-    });
+    }
 
     commands.insert_resource(palette);
-    commands.insert_resource(rig_meshes);
+    commands.insert_resource(rig_model);
 }
 
-/// Spawns one player rig (body + head + cap + brim + limbs) and returns the
-/// parent entity so the caller can attach role markers or extras.
+/// Spawns one player rig root and returns the entity so the caller can
+/// attach role markers or extras. The [`RigModel`] decides the children: the
+/// Blocky arm builds the body/head/cap/limb meshes verbatim, the Gltf arm
+/// hangs a `SceneRoot` off the root (the skeleton wires up async — Task 5).
 pub(crate) fn spawn_rig(
     commands: &mut Commands,
-    meshes: &RigMeshes,
+    model: &RigModel,
     unit: RigUnit,
     mats: &RigMaterials,
     position: Vec3,
     facing: f32,
 ) -> Entity {
-    commands
+    let root = commands
         .spawn((
             GameplayEntity,
             FacingDirection(Vec3::Z * facing),
+            RigUnitTag(unit),
             Transform::from_translation(position).with_rotation(Quat::from_rotation_y(
                 if facing < 0.0 {
                     std::f32::consts::PI
@@ -349,68 +380,83 @@ pub(crate) fn spawn_rig(
             MoveIntent::default(),
             RigBaseY(position.y),
         ))
-        .with_children(|rig| {
-            rig.spawn((
-                RigPart {
-                    unit,
-                    part: PartKind::Jersey,
-                },
-                Mesh3d(meshes.torso.clone()),
-                MeshMaterial3d(mats.jersey.clone()),
-                Transform::default(),
-            ));
-            rig.spawn((
-                RigPart {
-                    unit,
-                    part: PartKind::Skin,
-                },
-                Mesh3d(meshes.head.clone()),
-                MeshMaterial3d(mats.skin.clone()),
-                Transform::from_xyz(0.0, 0.78, 0.0),
-            ));
-            rig.spawn((
-                RigPart {
-                    unit,
-                    part: PartKind::Cap,
-                },
-                Mesh3d(meshes.cap.clone()),
-                MeshMaterial3d(mats.cap.clone()),
-                Transform::from_xyz(0.0, 0.93, 0.0),
-            ));
-            rig.spawn((
-                RigPart {
-                    unit,
-                    part: PartKind::Cap,
-                },
-                Mesh3d(meshes.brim.clone()),
-                MeshMaterial3d(mats.cap.clone()),
-                Transform::from_xyz(0.0, 0.9, 0.19),
-            ));
-            for (kind, x, y) in [
-                (LimbKind::ArmL, 0.36, 0.30),
-                (LimbKind::ArmR, -0.36, 0.30),
-                (LimbKind::LegL, 0.14, -0.40),
-                (LimbKind::LegR, -0.14, -0.40),
-            ] {
+        .id();
+    match model {
+        RigModel::Blocky(meshes) => {
+            commands.entity(root).with_children(|rig| {
                 rig.spawn((
-                    RigLimb { kind },
-                    Transform::from_xyz(x, y, 0.0),
-                    Visibility::default(),
-                ))
-                .with_children(|joint| {
-                    joint.spawn((
-                        RigPart {
-                            unit,
-                            part: PartKind::Jersey,
-                        },
-                        Mesh3d(meshes.limb.clone()),
-                        MeshMaterial3d(mats.jersey.clone()),
-                        Transform::from_xyz(0.0, -0.26, 0.0),
-                    ));
-                });
-            }
-        })
-        .id()
+                    RigPart {
+                        unit,
+                        part: PartKind::Jersey,
+                    },
+                    Mesh3d(meshes.torso.clone()),
+                    MeshMaterial3d(mats.jersey.clone()),
+                    Transform::default(),
+                ));
+                rig.spawn((
+                    RigPart {
+                        unit,
+                        part: PartKind::Skin,
+                    },
+                    Mesh3d(meshes.head.clone()),
+                    MeshMaterial3d(mats.skin.clone()),
+                    Transform::from_xyz(0.0, 0.78, 0.0),
+                ));
+                rig.spawn((
+                    RigPart {
+                        unit,
+                        part: PartKind::Cap,
+                    },
+                    Mesh3d(meshes.cap.clone()),
+                    MeshMaterial3d(mats.cap.clone()),
+                    Transform::from_xyz(0.0, 0.93, 0.0),
+                ));
+                rig.spawn((
+                    RigPart {
+                        unit,
+                        part: PartKind::Cap,
+                    },
+                    Mesh3d(meshes.brim.clone()),
+                    MeshMaterial3d(mats.cap.clone()),
+                    Transform::from_xyz(0.0, 0.9, 0.19),
+                ));
+                for (kind, x, y) in [
+                    (LimbKind::ArmL, 0.36, 0.30),
+                    (LimbKind::ArmR, -0.36, 0.30),
+                    (LimbKind::LegL, 0.14, -0.40),
+                    (LimbKind::LegR, -0.14, -0.40),
+                ] {
+                    rig.spawn((
+                        RigLimb { kind },
+                        Transform::from_xyz(x, y, 0.0),
+                        Visibility::default(),
+                    ))
+                    .with_children(|joint| {
+                        joint.spawn((
+                            RigPart {
+                                unit,
+                                part: PartKind::Jersey,
+                            },
+                            Mesh3d(meshes.limb.clone()),
+                            MeshMaterial3d(mats.jersey.clone()),
+                            Transform::from_xyz(0.0, -0.26, 0.0),
+                        ));
+                    });
+                }
+            });
+        }
+        RigModel::Gltf { scene } => {
+            commands.entity(root).insert(GltfRig).with_children(|rig| {
+                rig.spawn((
+                    SceneRoot(scene.clone()),
+                    // Model origin is at the feet; the root floats at
+                    // collider-center height, so drop the scene to ground.
+                    Transform::from_xyz(0.0, -position.y, 0.0),
+                ));
+            });
+        }
+    }
+    root
 }
 
 // ── Systems ───────────────────────────────────────────────────────────────────

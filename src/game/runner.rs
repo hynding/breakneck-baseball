@@ -5,7 +5,7 @@ use bevy::prelude::*;
 
 use crate::game::animation::{AnimClip, MoveIntent, Playing};
 use crate::game::flow::{BallInPlayEvent, LeadState, Phase, Play};
-use crate::game::player::{spawn_rig, Batter, RigMeshes, RigUnit, TeamPalette};
+use crate::game::player::{spawn_rig, Batter, RigModel, RigUnit, TeamPalette};
 use crate::game::rules::{self, Bases, ContactKind};
 use crate::game::variant::FieldSpec;
 use crate::game::{GameState, ScoreBoard};
@@ -206,7 +206,7 @@ fn sync_runners(
     bases: Res<Bases>,
     field: Res<FieldSpec>,
     score: Res<ScoreBoard>,
-    rig_meshes: Option<Res<RigMeshes>>,
+    rig_model: Option<Res<RigModel>>,
     palette: Option<Res<TeamPalette>>,
     mut runners: Query<(Entity, &mut Runner)>,
     ghosts: Query<(Entity, &Transform), With<BatterGhost>>,
@@ -215,7 +215,7 @@ fn sync_runners(
     if !bases.is_changed() {
         return;
     }
-    let (Some(rig_meshes), Some(palette)) = (rig_meshes, palette) else {
+    let (Some(rig_model), Some(palette)) = (rig_model, palette) else {
         return;
     };
 
@@ -253,14 +253,7 @@ fn sync_runners(
             tf.translation
         });
         let mats = palette.for_team(score.batting_team());
-        let entity = spawn_rig(
-            &mut commands,
-            &rig_meshes,
-            RigUnit::Batter,
-            mats,
-            start,
-            1.0,
-        );
+        let entity = spawn_rig(&mut commands, &rig_model, RigUnit::Batter, mats, start, 1.0);
         commands.entity(entity).insert((
             Runner { base: target },
             BasePath {
@@ -292,12 +285,12 @@ fn batter_runs(
     mut events: EventReader<BallInPlayEvent>,
     field: Res<FieldSpec>,
     score: Res<ScoreBoard>,
-    rig_meshes: Option<Res<RigMeshes>>,
+    rig_model: Option<Res<RigModel>>,
     palette: Option<Res<TeamPalette>>,
     mut commands: Commands,
 ) {
     for ev in events.read() {
-        let (Some(rig_meshes), Some(palette)) = (&rig_meshes, &palette) else {
+        let (Some(rig_model), Some(palette)) = (&rig_model, &palette) else {
             return;
         };
 
@@ -320,7 +313,7 @@ fn batter_runs(
         let mats = palette.for_team(score.batting_team());
         let entity = spawn_rig(
             &mut commands,
-            rig_meshes,
+            rig_model,
             RigUnit::Batter,
             mats,
             PLATE_START,
