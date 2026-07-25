@@ -276,20 +276,10 @@ fn spawn_stadium_ground(
 ) {
     spawn_ground_slab(commands, meshes, materials, surfaces);
 
-    // The infield-dirt square rotated 45° to form the diamond. A square of
-    // half-size `H` has its corners at distance `H * √2` from centre, so for
-    // the rotated diamond's corners to land exactly on home plate and the
-    // three bases (each `HALF_DIAGONAL` from the diamond's centre — see
-    // `spawn_bases`/`variant.rs`) we need `H * √2 == HALF_DIAGONAL`, i.e.
-    // `H == BASE_DISTANCE / 2`. Using `BASE_DISTANCE / √2` here (√2 too big)
-    // used to overshoot the bases by ~40%, stranding the bags inside the
-    // "grass interior" cutout instead of centered on the dirt basepath band —
-    // see `infield_diamond_corners_align_with_bases` below.
-    let infield_half = BASE_DISTANCE / 2.0;
     let dirt = FieldSurfaces::tiled(materials, &surfaces.dirt, 8.0);
     commands.spawn((
         GameplayEntity,
-        Mesh3d(meshes.add(Cuboid::new(infield_half * 2.0, 0.001, infield_half * 2.0))),
+        Mesh3d(meshes.add(Cuboid::new(INFIELD_HALF * 2.0, 0.001, INFIELD_HALF * 2.0))),
         MeshMaterial3d(dirt.clone()),
         Transform {
             translation: Vec3::new(0.0, 0.001, HALF_DIAGONAL),
@@ -318,7 +308,7 @@ fn spawn_stadium_ground(
 
     // The grass interior of the diamond: dirt shows only as the basepath
     // band around it (plus the mound and cutouts layered above).
-    let inner_half = infield_half - BASEPATH_WIDTH;
+    let inner_half = INFIELD_HALF - BASEPATH_WIDTH;
     commands.spawn((
         GameplayEntity,
         Mesh3d(meshes.add(Cuboid::new(inner_half * 2.0, 0.001, inner_half * 2.0))),
@@ -330,6 +320,21 @@ fn spawn_stadium_ground(
         },
     ));
 }
+
+/// Half-size of the infield-dirt square *before* the 45° rotation
+/// `spawn_stadium_ground` applies to turn it into the basepath diamond.
+///
+/// A square of half-size `H` has its corners at distance `H * √2` from its
+/// centre; for the rotated diamond's corners to land exactly on home plate
+/// and the three bases (each `HALF_DIAGONAL` from the diamond's centre — see
+/// `spawn_bases`/`variant.rs`'s `base_positions`, per docs/BASEBALL.md) we
+/// need `H * √2 == HALF_DIAGONAL`, i.e. `H == BASE_DISTANCE / 2`. This used
+/// to be `BASE_DISTANCE / √2` (√2 too big), which overshot the bases by
+/// ~40% and stranded the bags inside the "grass interior" square instead of
+/// on the dirt basepath band — regression-tested by
+/// `tests::infield_diamond_corners_align_with_bases`, which reads this
+/// const directly.
+const INFIELD_HALF: f32 = BASE_DISTANCE / 2.0;
 
 /// Dirt-cutout radius at each bag and around home (~13 ft, docs/BASEBALL.md).
 const CUTOUT_RADIUS: f32 = 3.96;
@@ -749,34 +754,35 @@ mod tests {
     /// The infield dirt diamond's four corners must land exactly on home
     /// plate and the three bases, so the dirt basepath band runs along the
     /// real baselines and every bag sits centered on it (docs/BASEBALL.md's
-    /// groundskeeping notes). Regression test for a bug where `infield_half`
+    /// groundskeeping notes). Regression test for a bug where `INFIELD_HALF`
     /// was `BASE_DISTANCE / √2` — √2 too large — which overshot the bases by
     /// ~40% and left the bags (and home plate's own dirt cutout, painted
     /// underneath the grass-interior layer) stranded inside the diamond's
-    /// grass interior instead of on its dirt corners.
+    /// grass interior instead of on its dirt corners. Reads `INFIELD_HALF`
+    /// directly — the same const `spawn_stadium_ground` builds the mesh
+    /// from — so a regression to the old formula fails this test.
     #[test]
     fn infield_diamond_corners_align_with_bases() {
-        let half = BASE_DISTANCE / 2.0;
         let eps = 0.01;
 
-        let home = diamond_corner(1.0, -1.0, half);
+        let home = diamond_corner(1.0, -1.0, INFIELD_HALF);
         assert!(home.distance(Vec3::ZERO) < eps, "home at {home:?}");
 
-        let first = diamond_corner(-1.0, -1.0, half);
+        let first = diamond_corner(-1.0, -1.0, INFIELD_HALF);
         let want_first = Vec3::new(-HALF_DIAGONAL, 0.0, HALF_DIAGONAL);
         assert!(
             first.distance(want_first) < eps,
             "first at {first:?}, want {want_first:?}"
         );
 
-        let second = diamond_corner(-1.0, 1.0, half);
+        let second = diamond_corner(-1.0, 1.0, INFIELD_HALF);
         let want_second = Vec3::new(0.0, 0.0, HALF_DIAGONAL * 2.0);
         assert!(
             second.distance(want_second) < eps,
             "second at {second:?}, want {want_second:?}"
         );
 
-        let third = diamond_corner(1.0, 1.0, half);
+        let third = diamond_corner(1.0, 1.0, INFIELD_HALF);
         let want_third = Vec3::new(HALF_DIAGONAL, 0.0, HALF_DIAGONAL);
         assert!(
             third.distance(want_third) < eps,
