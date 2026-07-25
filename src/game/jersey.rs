@@ -288,7 +288,19 @@ pub fn attach_jerseys(
 /// bones the moment wiring resolves them, so lettering rides the animated
 /// torso instead of floating at the root's rest pose. Tolerates rigs with no
 /// quads at all (umpires — [`attach_jerseys`] is never called for them).
-/// Offsets are bone-local first passes — tune visually.
+///
+/// The two `UpperArm` bones are *not* mirror images of each other in the rig
+/// contract: `tools/build_player.py`'s bone table gives `UpperArm.L` and
+/// `UpperArm.R` the same rest rotation (only their translation's X sign
+/// differs), confirmed by the exported glTF's node rotations. So both
+/// shoulder quads take the *same* yaw — mirroring the sign (as a naive "L
+/// vs R" symmetry assumption would suggest) turns `ShoulderR`'s face 180°
+/// from where it belongs, which back-face-culling then exposes as the
+/// quad's reverse (mirrored) side at some camera angles instead of hiding
+/// it. Verified empirically by isolating each quad (moving the other three
+/// off-screen) under the close duel camera on both wgpu/Metal and
+/// wasm/WebGL2: with matching signs both shoulders honestly cull from the
+/// front, like `Back` does.
 fn mount_jerseys_on_bones(
     mut commands: Commands,
     newly_wired: Query<(Entity, &RigBones), Added<RigBones>>,
@@ -312,7 +324,7 @@ fn mount_jerseys_on_bones(
                 ),
                 JerseyFace::Number => (bones.spine, Vec3::new(0.0, 0.20, 0.16), 0.0),
                 JerseyFace::ShoulderL => (bones.upper_arm_l, Vec3::new(0.0, -0.04, 0.09), half),
-                JerseyFace::ShoulderR => (bones.upper_arm_r, Vec3::new(0.0, -0.04, -0.09), -half),
+                JerseyFace::ShoulderR => (bones.upper_arm_r, Vec3::new(0.0, -0.04, -0.09), half),
             };
             commands.entity(child).set_parent(bone).insert(
                 Transform::from_translation(translation).with_rotation(Quat::from_rotation_y(yaw)),
@@ -369,7 +381,11 @@ fn dress_jerseys(
             materials.add(StandardMaterial {
                 base_color_texture: Some(images.add(image)),
                 alpha_mode: AlphaMode::Blend,
-                perceptual_roughness: 0.9,
+                // Printed lettering, not a lit surface: scene lighting was
+                // otherwise darkening (sometimes to near-black, see the
+                // AmbientLight fix in field.rs) exactly the numbers a jersey
+                // needs to stay legible.
+                unlit: true,
                 ..default()
             })
         });

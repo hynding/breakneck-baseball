@@ -265,3 +265,72 @@ fn bat_shows_only_on_the_batter() {
         }
     }
 }
+
+/// Regression for the mirrored-lettering bug: `UpperArm.L` and `UpperArm.R`
+/// share the *same* rest rotation in the model contract (only their
+/// translation's X sign differs — confirmed against the exported glTF's
+/// node rotations), so `mount_jerseys_on_bones` must give both shoulder
+/// quads the *same* yaw. Mirroring the sign (as a naive left/right symmetry
+/// assumption did) turned `ShoulderR`'s face 180° from where it belonged;
+/// back-face culling then showed its reverse (mirrored) side to the close
+/// duel camera instead of honestly hiding it — confirmed visually on both
+/// wgpu/Metal and wasm/WebGL2 by isolating each mounted quad in turn. This
+/// test can't render, so it encodes the fix at the level that matters: every
+/// quad mounted on an `UpperArm.L` bone and every quad mounted on an
+/// `UpperArm.R` bone must carry an identical local rotation.
+#[test]
+fn shoulder_jersey_quads_share_the_same_mount_yaw() {
+    let mut app = common::headless_app();
+    common::start_game(&mut app, KeyCode::Digit2);
+    common::run_until(&mut app, 4_000, |app| {
+        let world = app.world_mut();
+        let total = world
+            .query_filtered::<(), With<GltfRig>>()
+            .iter(world)
+            .count();
+        let done = world
+            .query_filtered::<(), (With<GltfRig>, With<RigPlayer>)>()
+            .iter(world)
+            .count();
+        total > 0 && done == total
+    })
+    .expect("rigs wired");
+
+    let world = app.world_mut();
+    let mut quads = world.query::<(&JerseyQuad, &Transform, &Parent)>();
+    let mut names = world.query::<&Name>();
+    let entries: Vec<(Transform, Entity)> = quads
+        .iter(world)
+        .map(|(_, transform, parent)| (*transform, parent.get()))
+        .collect();
+
+    let mut left_rotations = Vec::new();
+    let mut right_rotations = Vec::new();
+    for (transform, parent) in entries {
+        let Ok(name) = names.get(world, parent) else {
+            continue;
+        };
+        match name.as_str() {
+            "UpperArm.L" => left_rotations.push(transform.rotation),
+            "UpperArm.R" => right_rotations.push(transform.rotation),
+            _ => {}
+        }
+    }
+
+    assert!(
+        !left_rotations.is_empty() && !right_rotations.is_empty(),
+        "expected shoulder quads mounted on both arms, got {} left, {} right",
+        left_rotations.len(),
+        right_rotations.len()
+    );
+    for &l in &left_rotations {
+        for &r in &right_rotations {
+            assert!(
+                l.abs_diff_eq(r, 1e-5),
+                "ShoulderL yaw {l:?} != ShoulderR yaw {r:?} — UpperArm.L/.R share a rest \
+                 rotation, so mirroring the mount yaw turns one shoulder's face 180° from \
+                 where it belongs"
+            );
+        }
+    }
+}

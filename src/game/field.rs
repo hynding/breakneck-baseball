@@ -711,13 +711,28 @@ fn spawn_outfield_wall(
 }
 
 // ── Lighting ──────────────────────────────────────────────────────────────────
+/// Sun illuminance, matched to `AmbientLight::brightness`'s physical lux-like
+/// units (Bevy 0.15; `AmbientLight::default()` is 80.0, nowhere near a
+/// plausible "sun") — `ambient_fraction` below is a fraction of *this*, not
+/// an absolute brightness.
+const SUN_ILLUMINANCE: f32 = 50_000.0;
+
 /// Sunlight angled to cast shadows, with the azimuth (`yaw`) chosen per
-/// scenery, plus an ambient fill so shadows aren't pitch-black.
-fn spawn_lighting(commands: &mut Commands, yaw: f32, ambient: f32) {
+/// scenery, plus an ambient fill so shadows aren't pitch-black. `ambient_fraction`
+/// is relative to [`SUN_ILLUMINANCE`] (e.g. 0.25 = a quarter of the sun's
+/// illuminance) rather than an absolute brightness — passing a raw lux value
+/// here (as opposed to a 0..1-ish fraction) would make every unlit surface
+/// render essentially black next to a 50,000 lux sun, which is exactly the
+/// regression this constant documents: `AmbientLight::brightness` changed
+/// from a small relative multiplier to absolute lux in Bevy 0.14, and a
+/// leftover pre-migration value (~0.25) is indistinguishable from "no
+/// ambient at all" at this scale — invisible from a distance, but glaring
+/// once the duel camera sits close enough to see a shadowed cube face.
+fn spawn_lighting(commands: &mut Commands, yaw: f32, ambient_fraction: f32) {
     commands.spawn((
         GameplayEntity,
         DirectionalLight {
-            illuminance: 50_000.0,
+            illuminance: SUN_ILLUMINANCE,
             shadows_enabled: true,
             ..default()
         },
@@ -731,7 +746,7 @@ fn spawn_lighting(commands: &mut Commands, yaw: f32, ambient: f32) {
 
     commands.insert_resource(AmbientLight {
         color: Color::WHITE,
-        brightness: ambient,
+        brightness: ambient_fraction * SUN_ILLUMINANCE,
     });
 }
 
@@ -788,5 +803,32 @@ mod tests {
             third.distance(want_third) < eps,
             "third at {third:?}, want {want_third:?}"
         );
+    }
+
+    /// Regression for a units bug: `spawn_lighting`'s `ambient_fraction`
+    /// call sites (0.25 Stadium, 0.35 FrontYard) were passed straight
+    /// through as `AmbientLight::brightness` — fine under Bevy's pre-0.14
+    /// small-multiplier semantics, but in 0.15 `brightness` is an absolute
+    /// lux-like value (`AmbientLight::default()` is 80.0), so 0.25 was
+    /// indistinguishable from "no ambient light at all" next to a 50,000 lux
+    /// sun. Every scenery's resulting ambient must clear Bevy's own default
+    /// fill (else it's *darker* than doing nothing) and stay a sane fraction
+    /// of the sun rather than approaching or exceeding it.
+    #[test]
+    fn ambient_fraction_scales_with_sun_illuminance_not_raw() {
+        for ambient_fraction in [0.25_f32, 0.35] {
+            let brightness = ambient_fraction * SUN_ILLUMINANCE;
+            assert!(
+                brightness > AmbientLight::default().brightness,
+                "ambient {brightness} lux is dimmer than Bevy's own default ({}) — \
+                 shadowed surfaces will render darker than out-of-the-box Bevy",
+                AmbientLight::default().brightness
+            );
+            assert!(
+                brightness < SUN_ILLUMINANCE,
+                "ambient {brightness} lux should stay a fraction of the sun ({SUN_ILLUMINANCE}), \
+                 not wash shadows out entirely"
+            );
+        }
     }
 }
