@@ -123,6 +123,38 @@ impl GltfTeamMaterials {
     }
 }
 
+/// Keeps the baked [`GltfTeamMaterials`] in step with the active [`Theme`]:
+/// [`build_rig_animations`] only ever bakes the four team materials once
+/// (the moment the Gltf loads, typically on the main menu, against whatever
+/// theme happened to be active then), so without this system cycling themes
+/// with **T** — or simply loading with a non-default theme already
+/// selected — left the glTF rigs permanently wearing the theme baked at
+/// boot. Re-tinting the existing handles in place (rather than rebuilding
+/// and reassigning them) means tagged meshes pick up the change for free —
+/// no need to touch `GltfJerseyMesh`/[`crate::game::player::recolor_gltf`]
+/// at all. Umpire blacks are theme-independent and are left alone.
+fn retint_gltf_team_materials(
+    theme: Res<Theme>,
+    mats: Option<Res<GltfTeamMaterials>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    if !theme.is_changed() {
+        return;
+    }
+    let Some(mats) = mats else {
+        return;
+    };
+    let mut set = |handle: &Handle<StandardMaterial>, color: Color| {
+        if let Some(m) = materials.get_mut(handle) {
+            m.base_color = color;
+        }
+    };
+    set(&mats.home_jersey, theme.home.jersey);
+    set(&mats.home_cap, theme.home.cap);
+    set(&mats.away_jersey, theme.away.jersey);
+    set(&mats.away_cap, theme.away.cap);
+}
+
 /// Which recolourable model part a skinned-mesh entity is.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum GltfPart {
@@ -327,6 +359,7 @@ impl Plugin for ModelAssetsPlugin {
                 Update,
                 build_rig_animations.run_if(|r: Option<Res<RigAnimations>>| r.is_none()),
             )
+            .add_systems(Update, retint_gltf_team_materials)
             .add_systems(
                 Update,
                 wire_rigs.run_if(in_state(crate::game::GameState::Playing)),

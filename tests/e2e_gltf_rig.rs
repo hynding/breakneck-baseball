@@ -131,3 +131,61 @@ fn gltf_rigs_recolor_and_mount_jerseys() {
         );
     }
 }
+
+use breakneck_baseball::game::model_assets::GltfPart;
+use breakneck_baseball::game::player::RigUnit;
+use breakneck_baseball::game::theme::ThemeId;
+
+/// Regression for the bug where `GltfTeamMaterials` was baked once against
+/// whatever theme happened to be active the instant the Gltf finished
+/// loading, and never re-tinted afterwards — cycling themes on the menu
+/// left glTF rigs permanently in Daylight Classic's colours. Cycle to
+/// Midnight Neon on the menu *before* starting, then assert the fielding
+/// team's baked jersey material actually carries Midnight Neon's colour,
+/// not Daylight Classic's.
+#[test]
+fn gltf_team_tints_follow_a_theme_cycled_before_kickoff() {
+    let mut app = common::headless_app();
+    common::tap_key(&mut app, KeyCode::KeyT); // Daylight Classic -> Midnight Neon
+    common::start_game(&mut app, KeyCode::Digit2);
+    common::run_until(&mut app, 4_000, |app| {
+        let world = app.world_mut();
+        let total = world
+            .query_filtered::<(), With<GltfRig>>()
+            .iter(world)
+            .count();
+        let done = world
+            .query_filtered::<(), (With<GltfRig>, With<RigPlayer>)>()
+            .iter(world)
+            .count();
+        total > 0 && done == total
+    })
+    .expect("rigs wired");
+
+    let world = app.world_mut();
+    // Top of the 1st: Away bats, Home fields — the tagged Defense jersey
+    // mesh wears the fielding (Home) team's colour.
+    let mut q = world.query::<(&GltfJerseyMesh, &MeshMaterial3d<StandardMaterial>)>();
+    let defense_handle = q
+        .iter(world)
+        .find(|(tag, _)| tag.unit == RigUnit::Defense && tag.part == GltfPart::Jersey)
+        .map(|(_, mat)| mat.0.clone())
+        .expect("a defense jersey mesh must be tagged");
+
+    let materials = world.resource::<Assets<StandardMaterial>>();
+    let actual = materials
+        .get(&defense_handle)
+        .expect("tagged material must be loaded")
+        .base_color;
+
+    let daylight_home_jersey = ThemeId::DaylightClassic.build().home.jersey;
+    let midnight_home_jersey = ThemeId::MidnightNeon.build().home.jersey;
+    assert_eq!(
+        actual, midnight_home_jersey,
+        "defense jersey material still shows the boot-time theme, not the active one"
+    );
+    assert_ne!(
+        actual, daylight_home_jersey,
+        "defense jersey material never left Daylight Classic's colour"
+    );
+}
