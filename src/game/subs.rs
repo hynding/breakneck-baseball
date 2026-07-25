@@ -7,12 +7,16 @@
 //! managing (T), and resume (Esc / P). Gameplay systems all gate on
 //! `GameState::Playing`, so the world freezes underneath the board;
 //! substitutions rewrite [`Rosters`], which the jerseys and the duel HUD
-//! pick up on the next frame.
+//! pick up on the next frame. Alongside the board sits a controls-help
+//! dialog (the reference the old bottom-of-screen bar used to give during
+//! play, moved here so it doesn't clutter every screenshot) — it carries no
+//! state of its own and just mirrors the board's visibility.
 //!
 //! The board itself obeys the wasm/WebGL2 UI rule (see CLAUDE.md): its root
 //! is spawned *painted* with the rest of the game UI at game start (hidden
 //! behind [`hidden_tint`]) and shown/hidden by mutating the children of that
-//! painted root — never despawned or respawned mid-session.
+//! painted root — never despawned or respawned mid-session. The controls
+//! dialog follows the exact same idiom.
 
 use bevy::prelude::*;
 
@@ -31,6 +35,23 @@ struct SubsUi;
 /// Marker for the board's inner card.
 #[derive(Component)]
 struct SubsCard;
+
+/// Marker for the controls-help dialog card, spawned alongside the
+/// substitution board and shown/hidden with it (see the module docs and
+/// `tests/e2e_pause_subs.rs`, which queries this to prove pause reveals it).
+#[derive(Component)]
+pub struct ControlsDialog;
+
+/// The dialog's single text line.
+#[derive(Component)]
+struct ControlsText;
+
+/// Same control reference the bottom-of-screen bar used to show during play,
+/// now only surfaced while paused.
+const CONTROLS_TEXT: &str =
+    "A/Space: Pitch & Swing   Fielding: aim steers, base dir + A/Space throws   \
+     Runners: hold Down = lead & steal (window: defense A = pickoff)   \
+     Batting: Down = send, Up = hold   Esc/P: Subs   C: Camera";
 
 /// One line of the board, painted by [`update_board`].
 #[derive(Component)]
@@ -72,7 +93,7 @@ impl Plugin for SubsPlugin {
             .add_systems(crate::game::game_start(), spawn_board)
             .add_systems(Update, open_pause.run_if(in_state(GameState::Playing)))
             .add_systems(Update, board_controls.run_if(in_state(GameState::Paused)))
-            .add_systems(Update, update_board);
+            .add_systems(Update, (update_board, update_controls_dialog));
     }
 }
 
@@ -167,6 +188,8 @@ fn spawn_board(mut commands: Commands, theme: Res<Theme>) {
                 left: Val::Px(0.0),
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(16.0),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 ..default()
@@ -209,6 +232,35 @@ fn spawn_board(mut commands: Commands, theme: Res<Theme>) {
                     line(SubsLineKind::BenchHeader, 14.0);
                     line(SubsLineKind::Bench, 17.0);
                     line(SubsLineKind::Hint, 13.0);
+                });
+
+            // Controls-help dialog: below the board, same painted-at-spawn /
+            // shown-by-mutation idiom, own card so it reads as a distinct
+            // panel rather than part of the substitution board.
+            screen
+                .spawn((
+                    ControlsDialog,
+                    Node {
+                        max_width: Val::Px(760.0),
+                        padding: UiRect::axes(Val::Px(20.0), Val::Px(12.0)),
+                        border: UiRect::all(Val::Px(1.5)),
+                        ..default()
+                    },
+                    BackgroundColor(hidden_tint(ui.panel_bg)),
+                    BorderColor(hidden_tint(ui.panel_border)),
+                    BorderRadius::all(Val::Px(12.0)),
+                ))
+                .with_children(|card| {
+                    card.spawn((
+                        ControlsText,
+                        Text::new(""),
+                        TextFont {
+                            font_size: 13.0,
+                            ..default()
+                        },
+                        TextColor(ui.text_dim),
+                        TextLayout::new_with_justify(JustifyText::Center),
+                    ));
                 });
         });
 }
@@ -303,5 +355,37 @@ fn update_board(
         };
         **text = value;
         color.0 = tint;
+    }
+}
+
+/// Paints the controls-help dialog while paused and blanks it (alpha kept
+/// nonzero) otherwise — the same show/hide-by-mutation pattern as the board.
+fn update_controls_dialog(
+    state: Res<State<GameState>>,
+    theme: Res<Theme>,
+    mut cards: Query<(&mut BackgroundColor, &mut BorderColor), With<ControlsDialog>>,
+    mut text: Query<&mut Text, With<ControlsText>>,
+) {
+    if !state.is_changed() {
+        return;
+    }
+    let ui = &theme.ui;
+    let visible = *state.get() == GameState::Paused;
+
+    for (mut bg, mut border) in &mut cards {
+        if visible {
+            bg.0 = ui.panel_bg;
+            border.0 = ui.panel_border;
+        } else {
+            bg.0 = hidden_tint(ui.panel_bg);
+            border.0 = hidden_tint(ui.panel_border);
+        }
+    }
+    for mut text in &mut text {
+        **text = if visible {
+            CONTROLS_TEXT.to_string()
+        } else {
+            String::new()
+        };
     }
 }

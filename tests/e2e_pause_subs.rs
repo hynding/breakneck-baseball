@@ -1,6 +1,8 @@
 //! End-to-end: pausing between plays opens the substitution board, a bench
 //! swap rewrites the roster, and resuming leaves the scene intact — the
 //! Playing ⇄ Paused transitions must neither tear down nor respawn the world.
+//! Also covers Task 13: the controls-help dialog spawned alongside the board
+//! stays hidden during play and only paints in while paused.
 
 mod common;
 
@@ -10,6 +12,7 @@ use breakneck_baseball::game::ball::Baseball;
 use breakneck_baseball::game::flow::{Phase, Play};
 use breakneck_baseball::game::input::Intents;
 use breakneck_baseball::game::roster::Rosters;
+use breakneck_baseball::game::subs::ControlsDialog;
 use breakneck_baseball::game::{GameState, ScoreBoard};
 
 use common::{headless_app, run_until, start_game, tap_key, DriveGame};
@@ -41,6 +44,18 @@ fn state(app: &App) -> GameState {
     app.world().resource::<State<GameState>>().get().clone()
 }
 
+/// The controls-help dialog is painted at spawn with a near-zero alpha (the
+/// wasm/WebGL2 rule: never extract a UI root fully transparent) and only
+/// gets its real, opaque panel colour while paused — so alpha stands in for
+/// "visible" without touching a despawn/respawn or a `Visibility` toggle.
+fn controls_dialog_alpha(app: &mut App) -> f32 {
+    app.world_mut()
+        .query_filtered::<&BackgroundColor, With<ControlsDialog>>()
+        .single(app.world())
+        .0
+        .alpha()
+}
+
 #[test]
 fn pause_swaps_the_bench_and_resumes_cleanly() {
     let mut app = headless_app();
@@ -52,8 +67,23 @@ fn pause_swaps_the_bench_and_resumes_cleanly() {
         app.world().resource::<Play>().phase == Phase::PrePitch
     });
     assert!(ready.is_some(), "never reached a PrePitch dead ball");
+
+    // Task 13: the controls-help dialog is spawned painted-hidden alongside
+    // the board and stays that way during ordinary play.
+    assert!(
+        controls_dialog_alpha(&mut app) < 0.01,
+        "controls dialog must be hidden during play"
+    );
+
     tap_key(&mut app, KeyCode::Escape);
     assert_eq!(state(&app), GameState::Paused, "Esc between plays pauses");
+
+    // Pausing reveals the controls dialog alongside the substitution board —
+    // no despawn/respawn, just its background/border painted opaque.
+    assert!(
+        controls_dialog_alpha(&mut app) > 0.5,
+        "controls dialog must be shown while paused"
+    );
 
     // The scene survives the pause: the ball entity is still there.
     let balls = |app: &mut App| {
@@ -80,6 +110,10 @@ fn pause_swaps_the_bench_and_resumes_cleanly() {
     tap_key(&mut app, KeyCode::Escape);
     assert_eq!(state(&app), GameState::Playing, "Esc again resumes");
     assert_eq!(balls(&mut app), 1, "resuming must not respawn the scene");
+    assert!(
+        controls_dialog_alpha(&mut app) < 0.01,
+        "controls dialog must hide again on resume"
+    );
 
     let progressed = run_until(&mut app, MAX_FRAMES, |app| {
         let s = app.world().resource::<ScoreBoard>();

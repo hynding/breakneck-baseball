@@ -254,29 +254,8 @@ fn spawn_hud(
                 ));
             });
         });
-
-    // Controls hint (bottom-centre).
-    commands.spawn((
-        GameplayEntity,
-        Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(10.0),
-            width: Val::Percent(100.0),
-            justify_content: JustifyContent::Center,
-            ..default()
-        },
-        Text::new(
-            "A/Space: Pitch & Swing   Fielding: aim steers, base dir + A/Space throws   \
-             Runners: hold Down = lead & steal (window: defense A = pickoff)   \
-             Batting: Down = send, Up = hold   Esc/P: Subs   C: Camera",
-        ),
-        TextFont {
-            font_size: 13.0,
-            ..default()
-        },
-        TextColor(ui.text_dim),
-        TextLayout::new_with_justify(JustifyText::Center),
-    ));
+    // Controls help now lives in the pause dialog (see `subs.rs`) rather
+    // than a bar pinned to the bottom of the screen during play.
 }
 
 /// The two cards flanking the catcher's-eye duel view: the batter card on the
