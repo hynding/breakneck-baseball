@@ -919,7 +919,9 @@ git add src/game/theme.rs src/game/player.rs src/game/runner.rs tests/e2e_gltf_r
 git commit -m "feat: glTF rig spawning behind PlayerModelId::Gltf; themes cut over"
 ```
 
----### Task 5: Rig wiring — find the skeleton, attach the graph, resolve bones
+---
+
+### Task 5: Rig wiring — find the skeleton, attach the graph, resolve bones
 
 **Files:**
 - Modify: `src/game/model_assets.rs` (add `RigPlayer`, `RigBones`, `wire_rigs`)
