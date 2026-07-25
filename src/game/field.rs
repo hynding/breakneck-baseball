@@ -276,8 +276,16 @@ fn spawn_stadium_ground(
 ) {
     spawn_ground_slab(commands, meshes, materials, surfaces);
 
-    // The infield-dirt square rotated 45° to form the diamond.
-    let infield_half = BASE_DISTANCE / std::f32::consts::SQRT_2;
+    // The infield-dirt square rotated 45° to form the diamond. A square of
+    // half-size `H` has its corners at distance `H * √2` from centre, so for
+    // the rotated diamond's corners to land exactly on home plate and the
+    // three bases (each `HALF_DIAGONAL` from the diamond's centre — see
+    // `spawn_bases`/`variant.rs`) we need `H * √2 == HALF_DIAGONAL`, i.e.
+    // `H == BASE_DISTANCE / 2`. Using `BASE_DISTANCE / √2` here (√2 too big)
+    // used to overshoot the bases by ~40%, stranding the bags inside the
+    // "grass interior" cutout instead of centered on the dirt basepath band —
+    // see `infield_diamond_corners_align_with_bases` below.
+    let infield_half = BASE_DISTANCE / 2.0;
     let dirt = FieldSurfaces::tiled(materials, &surfaces.dirt, 8.0);
     commands.spawn((
         GameplayEntity,
@@ -720,4 +728,59 @@ fn spawn_lighting(commands: &mut Commands, yaw: f32, ambient: f32) {
         color: Color::WHITE,
         brightness: ambient,
     });
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Mirrors the rotation + translation `spawn_stadium_ground` applies to
+    /// the infield-dirt cuboid (`Transform::from_rotation_y(FRAC_PI_4)`
+    /// around a centre at `(0, HALF_DIAGONAL)`), so the diamond's *actual*
+    /// world-space corners — not just its nominal half-size — can be checked
+    /// against the true base positions.
+    fn diamond_corner(sign_x: f32, sign_z: f32, half_size: f32) -> Vec3 {
+        let center = Vec3::new(0.0, 0.0, HALF_DIAGONAL);
+        let rotation = Quat::from_rotation_y(std::f32::consts::FRAC_PI_4);
+        center + rotation * Vec3::new(sign_x * half_size, 0.0, sign_z * half_size)
+    }
+
+    /// The infield dirt diamond's four corners must land exactly on home
+    /// plate and the three bases, so the dirt basepath band runs along the
+    /// real baselines and every bag sits centered on it (docs/BASEBALL.md's
+    /// groundskeeping notes). Regression test for a bug where `infield_half`
+    /// was `BASE_DISTANCE / √2` — √2 too large — which overshot the bases by
+    /// ~40% and left the bags (and home plate's own dirt cutout, painted
+    /// underneath the grass-interior layer) stranded inside the diamond's
+    /// grass interior instead of on its dirt corners.
+    #[test]
+    fn infield_diamond_corners_align_with_bases() {
+        let half = BASE_DISTANCE / 2.0;
+        let eps = 0.01;
+
+        let home = diamond_corner(1.0, -1.0, half);
+        assert!(home.distance(Vec3::ZERO) < eps, "home at {home:?}");
+
+        let first = diamond_corner(-1.0, -1.0, half);
+        let want_first = Vec3::new(-HALF_DIAGONAL, 0.0, HALF_DIAGONAL);
+        assert!(
+            first.distance(want_first) < eps,
+            "first at {first:?}, want {want_first:?}"
+        );
+
+        let second = diamond_corner(-1.0, 1.0, half);
+        let want_second = Vec3::new(0.0, 0.0, HALF_DIAGONAL * 2.0);
+        assert!(
+            second.distance(want_second) < eps,
+            "second at {second:?}, want {want_second:?}"
+        );
+
+        let third = diamond_corner(1.0, 1.0, half);
+        let want_third = Vec3::new(HALF_DIAGONAL, 0.0, HALF_DIAGONAL);
+        assert!(
+            third.distance(want_third) < eps,
+            "third at {third:?}, want {want_third:?}"
+        );
+    }
 }
