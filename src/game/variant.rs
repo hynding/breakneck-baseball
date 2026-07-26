@@ -76,9 +76,21 @@ pub struct FieldSpec {
     pub broadcast_eye: Vec3,
     /// Broadcast-camera resting look-at point.
     pub broadcast_target: Vec3,
-    /// Tight at-bat framing used during the pitch/swing duel.
+    /// Tight at-bat framing used during the pitch/swing duel (catcher POV,
+    /// the default [`crate::game::camera::DuelView`]).
     pub duel_eye: Vec3,
     pub duel_target: Vec3,
+    /// The reference "pitcher cam": behind and above the mound, looking out
+    /// at the batter. Far enough from the plate that the catcher/plate
+    /// umpire are never auto-hidden here — they're meant to stay in frame.
+    pub behind_pitcher_eye: Vec3,
+    pub behind_pitcher_target: Vec3,
+    /// A tight zoom from behind and beside the batter's box, looking across
+    /// the zone toward the pitcher — close enough behind the plate that the
+    /// catcher (and the umpire behind him) sit in the sightline and get
+    /// auto-hidden.
+    pub batting_zoom_eye: Vec3,
+    pub batting_zoom_target: Vec3,
     /// Which scenery routine dresses the set.
     pub scenery: Scenery,
 }
@@ -205,6 +217,23 @@ impl VariantId {
                 // crouch might suggest.
                 duel_eye: Vec3::new(0.0, 1.4, -0.9),
                 duel_target: Vec3::new(0.0, 0.85, 15.0),
+                // Behind and above the mound (rubber at z=`pitch_distance`),
+                // looking back at the batter's box — the reference
+                // pitcher-cam shot. 3 m of standoff behind the rubber keeps
+                // the pitcher's own rig out of the near clip; at that
+                // distance the catcher (z=-1.5) and plate umpire (z=-3.0)
+                // are ~21-23 m from the eye, far outside the near-eye
+                // occlusion cone (`OCCLUSION_NEAR`), so they stay visible —
+                // exactly what the reference shot wants.
+                behind_pitcher_eye: Vec3::new(0.0, 2.2, PITCH_DISTANCE + 3.0),
+                behind_pitcher_target: Vec3::new(0.3, 1.0, 0.0),
+                // Behind and beside the batter's box, elevated a touch above
+                // and behind the plate umpire — a tight "zone cam" close
+                // enough that the catcher (and the umpire behind him) sit
+                // right in the sightline down the pipe, so they're the ones
+                // auto-hidden here (see `camera::hide_occluders`).
+                batting_zoom_eye: Vec3::new(0.8, 1.7, -3.2),
+                batting_zoom_target: Vec3::new(0.1, 1.0, 12.0),
                 scenery: Scenery::Stadium,
             },
             // A front lawn: four bases across the lawn corners, the defense
@@ -245,6 +274,18 @@ impl VariantId {
                 // there (see the comment on Standard's `duel_eye`).
                 duel_eye: Vec3::new(0.0, 1.35, -1.5),
                 duel_target: Vec3::new(0.0, 0.8, 8.0),
+                // Same reasoning as Standard's `behind_pitcher_eye`, scaled
+                // to the shorter lawn pitch distance: 3 m behind the rubber
+                // clears the pitcher's own rig, and puts the sole umpire
+                // (z=-2.2) well outside the near-eye occlusion cone.
+                behind_pitcher_eye: Vec3::new(0.0, 2.0, 10.0 + 3.0),
+                behind_pitcher_target: Vec3::new(0.3, 0.9, 0.0),
+                // Same reasoning as Standard's `batting_zoom_eye`: behind and
+                // beside the batter's box, close enough behind the plate
+                // that the lone plate umpire (no catcher on the lawn) sits
+                // in the sightline and gets auto-hidden.
+                batting_zoom_eye: Vec3::new(0.8, 1.6, -2.6),
+                batting_zoom_target: Vec3::new(0.1, 0.9, 8.0),
                 scenery: Scenery::FrontYard,
             },
         }
@@ -334,6 +375,37 @@ mod tests {
                 f.duel_eye.y > 0.9 && f.duel_eye.y < 1.6,
                 "duel eye should sit at crouched-catcher eye height, not a standing/overhead one"
             );
+        }
+    }
+
+    #[test]
+    fn behind_pitcher_framing_looks_back_at_the_plate_from_the_mound() {
+        for id in [VariantId::Standard, VariantId::FrontYard] {
+            let f = id.field();
+            // The eye sits out past the rubber, looking back down the pipe
+            // toward home — the mirror image of the duel/batting views.
+            assert!(
+                f.behind_pitcher_eye.z > f.pitch_distance,
+                "behind-pitcher eye must stand behind the rubber, not in front of it"
+            );
+            assert!(
+                f.behind_pitcher_target.z <= 0.0,
+                "behind-pitcher target must look toward (or at) the plate"
+            );
+            assert!(f.behind_pitcher_eye.z > f.behind_pitcher_target.z);
+        }
+    }
+
+    #[test]
+    fn batting_zoom_framing_sits_behind_home_looking_toward_the_pitcher() {
+        for id in [VariantId::Standard, VariantId::FrontYard] {
+            let f = id.field();
+            // Same plate-corridor orientation as the duel view: eye behind
+            // home (z<0), target out toward the mound (z>0).
+            assert!(f.batting_zoom_eye.z < 0.0 && f.batting_zoom_target.z > 0.0);
+            // "Beside" the batter's box, not dead centre like the duel/pitcher
+            // views — this is what makes it a distinct framing.
+            assert!(f.batting_zoom_eye.x.abs() > 0.1);
         }
     }
 }

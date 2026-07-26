@@ -51,7 +51,7 @@ struct ControlsText;
 const CONTROLS_TEXT: &str =
     "A/Space: Pitch & Swing   Fielding: aim steers, base dir + A/Space throws   \
      Runners: hold Down = lead & steal (window: defense A = pickoff)   \
-     Batting: Down = send, Up = hold   Esc/P: Subs   C: Camera";
+     Batting: Down = send, Up = hold   Esc/P: Subs   C: Camera   V: At-bat view";
 
 /// One line of the board, painted by [`update_board`].
 #[derive(Component)]
