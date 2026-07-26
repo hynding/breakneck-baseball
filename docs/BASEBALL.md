@@ -46,10 +46,21 @@ the white 0.61 × 0.152 m rubber.
 - Batter's boxes: **4 ft × 6 ft** (1.22 × 1.83 m), drawn 6 in off each side
   of the plate; the batter stands *facing the plate*, side-on to the
   pitcher.
+- Foul lines run in chalk from home plate through first and third base and
+  on to the outfield fence — the bases themselves sit *in* fair territory,
+  so the line runs along their outer edge.
+- Chalk/paint line width: the Official Baseball Rules (2.01) call for lines
+  "not less than two nor more than four inches in width"; groundskeeping
+  guides describe the same 2–4 in range in practice, with pro crews often
+  striping toward the wider end (~4 in). The game uses **3 in** (0.076 m),
+  the middle of that range.
 
 In the game: `field::spawn_bases` uses 0.457 m bags and a 0.43 m plate slab;
 the batter rig stands in the right-handed box at x ≈ +0.7 facing −X (the
-plate), per `player::spawn_players`.
+plate), per `player::spawn_players`. `field::spawn_chalk_lines` paints both
+batter's-box outlines and the two foul lines (home → first/third → fence,
+direction taken from the live `FieldSpec::base_positions`, not a hardcoded
+45°) as flat chalk-white quads on the ground.
 
 ## Dirt, grass, and mowing (turface.com, mightygrass.com)
 
@@ -144,3 +155,6 @@ CLAUDE.md's architecture notes for how each maps.
 - [Baseball Training World — The 9 fundamentals of base running](https://baseballtrainingworld.com/the-9-fundamentals-of-base-running-in-baseball/)
 - [QC Baseball — Baserunning: tagging up](http://www.qcbaseball.com/skills/baserunning-tagging-up.aspx)
 - [Baseball Rules Academy — 5.06 Running the bases](https://baseballrulesacademy.com/official-rule/mlb/5-06-running-the-bases/)
+- [Baseball Rules Academy — 2.01 Layout of the field](https://baseballrulesacademy.com/official-rule/mlb/2-01-layout-field/) (line width, materials)
+- [Bat Flip Sports — How to chalk a baseball field like a pro](https://batflipsports.com/how-to-chalk-a-baseball-field/) (2–4 in chalk-line width)
+- [Fox Valley Paint — How to stripe a baseball field like a pro](https://foxvalleypaint.com/how-to-stripe-a-baseball-field/) (practical ~4 in foul-line width)

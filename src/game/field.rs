@@ -220,6 +220,7 @@ fn spawn_field(
         }
     }
     spawn_bases(&mut commands, &mut meshes, &mut materials, &field);
+    spawn_chalk_lines(&mut commands, &mut meshes, &mut materials, &field);
     spawn_strike_zone(&mut commands, &mut meshes, &mut materials);
     // The sun sits behind home plate in both parks so everything the
     // broadcast and duel cameras look at — players' backs, house fronts, the
@@ -365,7 +366,7 @@ fn spawn_bases(
         ..default()
     });
     let base_mesh = meshes.add(Cuboid::new(0.457, 0.09, 0.457));
-    let home_mesh = meshes.add(Cuboid::new(0.432, 0.02, 0.432));
+    let home_mesh = meshes.add(Cuboid::new(PLATE_WIDTH, 0.02, PLATE_WIDTH));
 
     let mut spawn = |index: Option<usize>, pos: Vec3, y: f32, mesh: Handle<Mesh>, mat| {
         commands.spawn((
@@ -388,6 +389,210 @@ fn spawn_bases(
             base_mesh.clone(),
             base_material.clone(),
         );
+    }
+}
+
+// ── Chalk lines ───────────────────────────────────────────────────────────────
+/// Home plate's width (17 in, docs/BASEBALL.md) — shared by `spawn_bases`'s
+/// plate slab and the batter's-box math below so the 6 in gap is measured
+/// from the plate's *actual* modeled edge rather than a second, independently
+/// duplicated literal.
+const PLATE_WIDTH: f32 = 0.432;
+const PLATE_HALF_WIDTH: f32 = PLATE_WIDTH / 2.0;
+
+/// Chalk line width: rulebooks call for lines "not less than 2 in nor more
+/// than 4 in" of lime/chalk/paint (Official Baseball Rules 2.01; batflipsports.com's
+/// groundskeeping guide gives the same 2–4 in range, and foxvalleypaint.com/
+/// baseballstandard.com note MLB crews commonly stripe foul lines at the wider
+/// end, ~4 in). We use 3 in (0.076 m), the middle of that range — see
+/// docs/BASEBALL.md.
+const CHALK_WIDTH: f32 = 0.076;
+/// Height chalk sits at: above every dirt/grass layer `spawn_stadium_ground`
+/// paints (dirt basepath 0.001, cutouts 0.0016, grass interior 0.0022), so
+/// lines never z-fight with the surfaces they're drawn on.
+const CHALK_Y: f32 = 0.003;
+
+/// Batter's box: 4 ft × 6 ft, long side toward the pitcher, drawn 6 in off
+/// each side of the plate (docs/BASEBALL.md).
+const BOX_HALF_WIDTH: f32 = 0.61; // 4 ft / 2, side-to-side of the plate
+const BOX_HALF_LENGTH: f32 = 0.915; // 6 ft / 2, toward the pitcher/catcher
+const BOX_PLATE_GAP: f32 = 0.152; // 6 in
+/// Centre-line x-offset of each batter's box from home plate: the plate's
+/// own half-width, plus the regulation gap, plus half the box (so its inner
+/// edge sits exactly `BOX_PLATE_GAP` off the plate).
+const BOX_CENTER_X: f32 = PLATE_HALF_WIDTH + BOX_PLATE_GAP + BOX_HALF_WIDTH;
+
+/// Perpendicular distance from `p` to the infinite line through `a` and `b`
+/// (both points in the ground's XZ plane, passed here as `Vec2(x, z)`).
+///
+/// Test-only: a geometry check on what `spawn_chalk_segment` paints, not
+/// something the spawn code itself needs at runtime (it places quads by
+/// direct translation/rotation math, not by testing points against a line).
+#[cfg(test)]
+fn distance_to_line(p: Vec2, a: Vec2, b: Vec2) -> f32 {
+    let dir = (b - a).normalize_or_zero();
+    if dir == Vec2::ZERO {
+        return p.distance(a);
+    }
+    let offset = p - a;
+    let along = dir * offset.dot(dir);
+    (offset - along).length()
+}
+
+/// Whether ground point `p` sits on the *hollow* rectangular chalk outline
+/// centred at `center` with half-extents `half` (x = side-to-side, y = toward
+/// the pitcher) and line width `width` — i.e. within `width / 2` of one of
+/// the four edges. A point deep in the box's interior, or outside it
+/// entirely, is not "on" the outline: `spawn_batters_box` paints a box, not a
+/// filled rectangle.
+///
+/// Test-only, same reasoning as `distance_to_line` above.
+#[cfg(test)]
+fn on_box_outline(p: Vec2, center: Vec2, half: Vec2, width: f32) -> bool {
+    let local = (p - center).abs();
+    let margin = width / 2.0;
+    if local.x > half.x + margin || local.y > half.y + margin {
+        return false;
+    }
+    let near_side_edge = (local.x - half.x).abs() <= margin;
+    let near_end_edge = (local.y - half.y).abs() <= margin;
+    near_side_edge || near_end_edge
+}
+
+/// One flat chalk quad lying on the ground: `size.x` along world X, `size.y`
+/// along world Z, centred at `(translation.x, CHALK_Y, translation.z)`. Used
+/// for the batter's-box edges, which are already axis-aligned and need no
+/// rotation.
+fn spawn_flat_chalk(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    chalk: &Handle<StandardMaterial>,
+    size: Vec2,
+    translation: Vec3,
+) {
+    commands.spawn((
+        GameplayEntity,
+        Mesh3d(meshes.add(Cuboid::new(size.x, 0.002, size.y))),
+        MeshMaterial3d(chalk.clone()),
+        Transform::from_xyz(translation.x, CHALK_Y, translation.z),
+    ));
+}
+
+/// A straight chalk line from `from` to `to` (both y = 0, ground plane),
+/// `width` metres wide — used for the foul lines, which run at whatever
+/// angle the base positions dictate rather than along a world axis.
+fn spawn_chalk_segment(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    chalk: &Handle<StandardMaterial>,
+    from: Vec3,
+    to: Vec3,
+    width: f32,
+) {
+    let delta = to - from;
+    let length = Vec2::new(delta.x, delta.z).length();
+    if length < f32::EPSILON {
+        return;
+    }
+    // Same yaw convention as `spawn_outfield_wall`'s chord panels: maps local
+    // +X onto the world-space direction of `delta`.
+    let yaw = (-delta.z).atan2(delta.x);
+    commands.spawn((
+        GameplayEntity,
+        Mesh3d(meshes.add(Cuboid::new(length, 0.002, width))),
+        MeshMaterial3d(chalk.clone()),
+        Transform {
+            translation: Vec3::new((from.x + to.x) / 2.0, CHALK_Y, (from.z + to.z) / 2.0),
+            rotation: Quat::from_rotation_y(yaw),
+            ..default()
+        },
+    ));
+}
+
+/// One batter's-box outline, `side_sign` +1 for the box at +X, -1 for the
+/// mirrored box at -X — four separate edges (not a filled rectangle) per
+/// `on_box_outline`'s membership test above.
+fn spawn_batters_box(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    chalk: &Handle<StandardMaterial>,
+    side_sign: f32,
+) {
+    let inner_x = side_sign * (BOX_CENTER_X - BOX_HALF_WIDTH);
+    let outer_x = side_sign * (BOX_CENTER_X + BOX_HALF_WIDTH);
+    let long_span = BOX_HALF_LENGTH * 2.0 + CHALK_WIDTH; // overlap the corners
+    for x in [inner_x, outer_x] {
+        spawn_flat_chalk(
+            commands,
+            meshes,
+            chalk,
+            Vec2::new(CHALK_WIDTH, long_span),
+            Vec3::new(x, 0.0, 0.0),
+        );
+    }
+    let short_span = (outer_x - inner_x).abs() + CHALK_WIDTH;
+    for z in [-BOX_HALF_LENGTH, BOX_HALF_LENGTH] {
+        spawn_flat_chalk(
+            commands,
+            meshes,
+            chalk,
+            Vec2::new(short_span, CHALK_WIDTH),
+            Vec3::new(side_sign * BOX_CENTER_X, 0.0, z),
+        );
+    }
+}
+
+/// The foul line running from home plate through the base at `base_index`
+/// and out to the fence in that exact direction (`rules::fence_at`) — the
+/// same function that places the outfield wall, so the chalk, the wall, and
+/// the home-run ruling all agree on where fair territory ends.
+fn spawn_foul_line(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    chalk: &Handle<StandardMaterial>,
+    field: &FieldSpec,
+    base_index: usize,
+) {
+    let base = field.base_positions[base_index];
+    let dir = Vec3::new(base.x, 0.0, base.z).normalize_or_zero();
+    if dir == Vec3::ZERO {
+        return;
+    }
+    let end = dir * rules::fence_at(dir, field);
+    spawn_chalk_segment(commands, meshes, chalk, Vec3::ZERO, end, CHALK_WIDTH);
+}
+
+/// Two batter's-box outlines flanking the plate and the foul lines from home
+/// through first and third base out to the fence, per docs/BASEBALL.md's
+/// groundskeeping notes.
+///
+/// These are geometry — thin flat quads lying on the ground — not a texture
+/// layer, unlike the mow-striped grass and speckled dirt above. Those
+/// textures tile every few metres (`FieldSurfaces::tiled`, e.g. 48 repeats
+/// across the 300 m ground slab), which is right for a repeating pattern but
+/// wrong for a single straight line that must land at one exact world
+/// position over 100+ m of fence distance: painting that into a small tiling
+/// texture would repeat the line every tile instead of drawing it once. Flat
+/// quads are the same technique `spawn_front_yard` already uses for its
+/// street markings, just applied to the plate area and reused across
+/// sceneries.
+fn spawn_chalk_lines(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    field: &FieldSpec,
+) {
+    let chalk = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.96, 0.96, 0.94),
+        emissive: LinearRgba::rgb(0.05, 0.05, 0.05),
+        perceptual_roughness: 0.85,
+        ..default()
+    });
+    for side_sign in [1.0_f32, -1.0] {
+        spawn_batters_box(commands, meshes, &chalk, side_sign);
+    }
+    for base_index in [0, field.base_count() - 1] {
+        spawn_foul_line(commands, meshes, &chalk, field, base_index);
     }
 }
 
@@ -754,6 +959,7 @@ fn spawn_lighting(commands: &mut Commands, yaw: f32, ambient_fraction: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::variant::VariantId;
 
     /// Mirrors the rotation + translation `spawn_stadium_ground` applies to
     /// the infield-dirt cuboid (`Transform::from_rotation_y(FRAC_PI_4)`
@@ -829,6 +1035,79 @@ mod tests {
                 "ambient {brightness} lux should stay a fraction of the sun ({SUN_ILLUMINANCE}), \
                  not wash shadows out entirely"
             );
+        }
+    }
+
+    /// Basic sanity check on `distance_to_line`'s geometry, independent of
+    /// any field const: zero exactly on the line, and the expected
+    /// perpendicular distance off it.
+    #[test]
+    fn distance_to_line_matches_geometry() {
+        let a = Vec2::ZERO;
+        let b = Vec2::new(10.0, 10.0);
+        assert!(distance_to_line(Vec2::new(5.0, 5.0), a, b) < 1e-5);
+        let want = 5.0 / std::f32::consts::SQRT_2;
+        assert!((distance_to_line(Vec2::new(0.0, 5.0), a, b) - want).abs() < 1e-4);
+    }
+
+    /// `on_box_outline` must flag a point on either the inner (plate-side) or
+    /// outer edge as "on" the outline, but reject both the box's own deep
+    /// interior and home plate itself — the chalk paints a hollow rectangle,
+    /// not a filled one, per `spawn_batters_box`.
+    #[test]
+    fn box_outline_flags_edges_not_interior_or_plate() {
+        let center = Vec2::new(BOX_CENTER_X, 0.0);
+        let half = Vec2::new(BOX_HALF_WIDTH, BOX_HALF_LENGTH);
+
+        let inner_edge = Vec2::new(BOX_CENTER_X - BOX_HALF_WIDTH, 0.0);
+        assert!(on_box_outline(inner_edge, center, half, CHALK_WIDTH));
+        let outer_edge = Vec2::new(BOX_CENTER_X + BOX_HALF_WIDTH, 0.0);
+        assert!(on_box_outline(outer_edge, center, half, CHALK_WIDTH));
+        let front_edge = Vec2::new(BOX_CENTER_X, BOX_HALF_LENGTH);
+        assert!(on_box_outline(front_edge, center, half, CHALK_WIDTH));
+
+        assert!(
+            !on_box_outline(center, center, half, CHALK_WIDTH),
+            "the box's own centre should read as interior, not outline"
+        );
+        assert!(
+            !on_box_outline(Vec2::ZERO, center, half, CHALK_WIDTH),
+            "home plate itself must sit clear of the box outline"
+        );
+    }
+
+    /// Regression guard: the batter's box must actually clear the plate by
+    /// the regulation 6 in gap (docs/BASEBALL.md), reading `PLATE_HALF_WIDTH`
+    /// and `BOX_PLATE_GAP` directly so a future edit that shrinks either
+    /// can't silently overlap the box onto the plate.
+    #[test]
+    fn batters_box_clears_the_plate() {
+        let inner_edge = BOX_CENTER_X - BOX_HALF_WIDTH;
+        assert!((inner_edge - (PLATE_HALF_WIDTH + BOX_PLATE_GAP)).abs() < 1e-6);
+        assert!(inner_edge > PLATE_HALF_WIDTH);
+    }
+
+    /// The foul lines `spawn_foul_line` paints must run exactly through the
+    /// real base positions on their way from home to the fence — derived
+    /// from `FieldSpec::base_positions`, not a hardcoded 45°, so this must
+    /// hold for both variants (Standard's diamond and FrontYard's lawn, which
+    /// uses a different `fair_half_angle` and base layout entirely).
+    #[test]
+    fn foul_lines_pass_through_first_and_third_base() {
+        for variant in [VariantId::Standard, VariantId::FrontYard] {
+            let field = variant.field();
+            for &base_index in &[0, field.base_count() - 1] {
+                let base = field.base_positions[base_index];
+                let base_xz = Vec2::new(base.x, base.z);
+                let dir = Vec3::new(base.x, 0.0, base.z).normalize_or_zero();
+                assert!(dir != Vec3::ZERO, "{variant:?} base {base_index} at origin");
+                let end = dir * rules::fence_at(dir, &field);
+                let dist = distance_to_line(base_xz, Vec2::ZERO, Vec2::new(end.x, end.z));
+                assert!(
+                    dist < 0.01,
+                    "{variant:?} base {base_index} at {base:?} is {dist} m off its foul line"
+                );
+            }
         }
     }
 }
