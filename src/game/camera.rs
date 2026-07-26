@@ -208,11 +208,14 @@ fn hide_occluders(
                 OCCLUSION_NEAR,
                 OCCLUSION_RADIUS,
             );
-        *visibility = if blocking {
+        let desired = if blocking {
             Visibility::Hidden
         } else {
             Visibility::Inherited
         };
+        if *visibility != desired {
+            *visibility = desired;
+        }
     }
 }
 
