@@ -26,9 +26,10 @@ SHOTS = {
     "CatcherCrouch": [0.5],
     "Dive": [0.95],
     "Slide": [0.95],
+    "BattingStance": [0.5],
     "BatterSwing": [0.25, 0.5, 0.95],
 }
-TOP_VIEW = {"BatterSwing", "RunCycle"}
+TOP_VIEW = {"BatterSwing", "RunCycle", "BattingStance"}
 
 rig = bpy.data.objects["PlayerRig"]
 
@@ -69,6 +70,13 @@ side = add_cam("QASide", (4, 0, 1.0), (math.radians(90), 0, math.radians(90)))
 top = add_cam("QATop", (0, 0, 4), (0, 0, math.radians(180)))
 
 for name, fractions in SHOTS.items():
+    # A bone with no fcurve in this action would otherwise keep whatever
+    # pose Python last wrote to it while baking (bake_clips resets before
+    # each action too, but that reset is invisible here since we're not
+    # re-running the bake) — reset first so untouched bones read as rest.
+    for pb in rig.pose.bones:
+        pb.rotation_euler = (0, 0, 0)
+        pb.location = (0, 0, 0)
     action = bpy.data.actions[name]
     rig.animation_data.action = action
     seconds = (action.frame_range[1] - 1) / FPS

@@ -41,6 +41,11 @@ pub enum AnimClip {
     /// The batter's arms drive through the swing (the bat pivot plays
     /// [`AnimClip::SwingBat`] in parallel — this is the body half).
     BatterSwing,
+    /// Held right-handed batting stance: knees softened, torso coiled
+    /// toward the catcher, both arms up holding the bat off the right
+    /// shoulder. Loops through the duel until the swing or the ball being
+    /// put in play releases it.
+    BattingStance,
     /// Neutral resting stance the glTF driver settles rigs into. Loops.
     Idle,
 }
@@ -60,6 +65,7 @@ impl AnimClip {
             AnimClip::Dive => 0.5,
             AnimClip::Slide => 0.6,
             AnimClip::BatterSwing => 0.42,
+            AnimClip::BattingStance => 1.2,
             AnimClip::Idle => 1.0,
         }
     }
@@ -68,7 +74,7 @@ impl AnimClip {
     pub fn looping(self) -> bool {
         matches!(
             self,
-            AnimClip::RunCycle | AnimClip::CatcherCrouch | AnimClip::Idle
+            AnimClip::RunCycle | AnimClip::CatcherCrouch | AnimClip::Idle | AnimClip::BattingStance
         )
     }
 }
@@ -247,7 +253,10 @@ fn limb_pose(clip: AnimClip, kind: LimbKind, f: f32) -> Quat {
                 LegL | LegR => Quat::IDENTITY,
             }
         }
-        SwingBat | RecoverSwing | Idle => Quat::IDENTITY,
+        // Blocky fallback: the two-handed grip is a glTF-only bone reposition
+        // (tools/build_player.py), so the procedural rig just holds Idle's
+        // neutral limb pose rather than approximating the stance.
+        SwingBat | RecoverSwing | Idle | BattingStance => Quat::IDENTITY,
     }
 }
 

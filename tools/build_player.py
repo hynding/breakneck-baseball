@@ -36,7 +36,12 @@ BONES = {
     "LowerLeg.L": ((0.10, 0, 0.50), (0.10, 0, 0.05), "UpperLeg.L"),
     "UpperLeg.R": ((-0.10, 0, 0.90), (-0.10, 0, 0.50), "Hips"),
     "LowerLeg.R": ((-0.10, 0, 0.50), (-0.10, 0, 0.05), "UpperLeg.R"),
-    "Bat":        ((-0.30, 0, 0.88), (-0.30, -0.35, 1.55), "LowerArm.R"),
+    # Knob coincides with the right hand (LowerArm.R's own tail) — a fixed
+    # offset here would put the knob that far from the hand in EVERY pose,
+    # not just at rest — with the barrel rising back over the right
+    # shoulder. BattingStance/BatterSwing raise the whole arm+bat assembly
+    # to chest height by rotating the arm chain; see the CLIPS entries below.
+    "Bat":        ((-0.24, -0.01, 0.885), (-0.18, 0.24, 1.55), "LowerArm.R"),
 }
 
 # Base colours are placeholders — the game re-tints JerseyBody/Cap per team.
@@ -62,9 +67,32 @@ PARTS = [
     ("cylinder",  (0.10, 0, 0.27),      (0.065, 0.065, 0.23),"JerseyBody", "LowerLeg.L", (0, 0, 0)),
     ("cylinder",  (-0.10, 0, 0.70),     (0.07, 0.07, 0.21),  "JerseyBody", "UpperLeg.R", (0, 0, 0)),
     ("cylinder",  (-0.10, 0, 0.27),     (0.065, 0.065, 0.23),"JerseyBody", "LowerLeg.R", (0, 0, 0)),
-    # Bat roughly along its bone (tilted forward-up out of the right hand).
-    ("cylinder",  (-0.30, -0.17, 1.21), (0.032, 0.032, 0.42),"Bat",        "Bat",        (math.radians(-27), 0, 0)),
 ]
+
+
+def _bat_mesh_part():
+    """Bat mesh part computed straight from the `Bat` bone's own head/tail so
+    a rest reposition never needs a hand-recomputed rotation: a cylinder
+    (local +Z along its length) centred on the bone and rotated to track it.
+    """
+    import mathutils
+
+    head, tail, _ = BONES["Bat"]
+    head, tail = mathutils.Vector(head), mathutils.Vector(tail)
+    direction = tail - head
+    midpoint = (head + tail) / 2
+    rot = direction.to_track_quat("Z", "Y").to_euler()
+    return (
+        "cylinder",
+        tuple(midpoint),
+        (0.032, 0.032, direction.length / 2),
+        "Bat",
+        "Bat",
+        (rot.x, rot.y, rot.z),
+    )
+
+
+PARTS.append(_bat_mesh_part())
 
 TAU = 2 * math.pi
 # clip: (seconds, loop, {bone: {channel: [(fraction, value), ...]}})
@@ -128,11 +156,54 @@ CLIPS = {
         # game root_pitch -0.85 lean-back => Blender Hips rx POSITIVE
         "Hips": {"dz": [(0, 0), (1, -0.30)], "rx": [(0, 0), (1, 0.85)]},
     }),
-    # Horizontal sweep = bone-local rz for a straight-down arm bone.
+    # Held right-handed stance: both arms raised, bat up off the right
+    # shoulder, knees softened, torso coiled toward the catcher — a subtle
+    # breathing sway (same pattern as CatcherCrouch) so the hold doesn't read
+    # as frozen. BatterSwing below starts from this same arm/leg posture.
+    # Both UpperArm channels below (rx forward-up pitch AND rz sideways
+    # swing — see the probe notes in this file's header) were grid-searched
+    # (a throwaway probe script, not committed) against LowerArm.L's tail vs
+    # Bat's head world position: this combo lands the hands within ~1 cm of
+    # the knob, well inside the brief's ~10 cm arcade-fidelity bar.
+    "BattingStance": (1.2, True, {
+        "UpperArm.R": {
+            "rx": [(0, -0.95), (0.25, -0.92), (0.5, -0.95), (0.75, -0.98), (1, -0.95)],
+            "rz": [(0, -0.8), (1, -0.8)],
+        },
+        "UpperArm.L": {
+            "rx": [(0, -0.95), (0.25, -0.92), (0.5, -0.95), (0.75, -0.98), (1, -0.95)],
+            "rz": [(0, 0.85), (1, 0.85)],
+        },
+        # The bat's own local rx tilts the barrel back up off the parent
+        # forearm's raised angle (without it the whole assembly reads flat
+        # and horizontal, not "up over the shoulder").
+        "Bat": {"rx": [(0, 0.6), (1, 0.6)]},
+        "UpperLeg.L": {"rx": [(0, 0.3), (1, 0.3)]},
+        "UpperLeg.R": {"rx": [(0, 0.3), (1, 0.3)]},
+        "LowerLeg.L": {"rx": [(0, -0.3), (1, -0.3)]},
+        "LowerLeg.R": {"rx": [(0, -0.3), (1, -0.3)]},
+        "Spine": {"ry": [(0, 0.25), (0.25, 0.29), (0.5, 0.25), (0.75, 0.21), (1, 0.25)]},
+    }),
+    # From the BattingStance hold (frac-0 keys match its constant values so
+    # the driver's cross-fade has nothing to fight): hips/torso lead the
+    # turn, both arms hold a LEVEL rx through the zone (0 to ~0.6 — the bat
+    # travels flat, not in an overhead chop) while rz drives the actual
+    # sweep, then rx lifts in the last stretch for a high follow-through.
+    # End-pose values (rx=-2.2, rz=+-0.8) are grid-searched the same way as
+    # the stance: hands stay within ~1 cm of the knob at the high finish
+    # too, not just at the start.
     "BatterSwing": (0.42, False, {
-        "UpperArm.L": {"rx": [(0, -0.5), (1, -0.5)], "rz": [(0, 0), (0.5, 1.9), (1, 0)]},
-        "UpperArm.R": {"rx": [(0, -0.5), (1, -0.5)], "rz": [(0, 0), (0.5, 1.9), (1, 0)]},
-        "Bat": {"rz": [(0, -1.7), (0.4, 1.7), (1, -0.5)]},
+        "Hips": {"ry": [(0, 0), (0.7, 0.55), (1, 0.8)]},
+        "Spine": {"ry": [(0, 0.25), (0.7, 0.7), (1, 0.95)]},
+        "UpperArm.R": {
+            "rx": [(0, -0.95), (0.7, -0.95), (1, -2.2)],
+            "rz": [(0, -0.8), (0.7, 0.8), (1, 0.8)],
+        },
+        "UpperArm.L": {
+            "rx": [(0, -0.95), (0.7, -0.95), (1, -2.2)],
+            "rz": [(0, 0.85), (0.7, -0.8), (1, -0.8)],
+        },
+        "Bat": {"rx": [(0, 0.6), (1, 0.4)]},
     }),
 }
 

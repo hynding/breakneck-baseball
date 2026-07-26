@@ -41,9 +41,15 @@ pub const CLIP_TABLE: &[(AnimClip, &str)] = &[
     (AnimClip::Dive, "Dive"),
     (AnimClip::Slide, "Slide"),
     (AnimClip::BatterSwing, "BatterSwing"),
+    (AnimClip::BattingStance, "BattingStance"),
 ];
 
 /// Clips without their own baked action fold onto the one that covers them.
+/// `SwingBat`/`RecoverSwing` keep aliasing `BatterSwing` here — the bat is a
+/// bone under the same skeleton as the arms now, so the one baked action
+/// still covers body and bat together; `BattingStance` gets its own row
+/// instead of folding onto `BatterSwing` because it's a genuinely distinct
+/// held pose (looping, no swing motion), not a body/bat split of one clip.
 pub fn node_for(clip: AnimClip) -> AnimClip {
     match clip {
         AnimClip::SwingBat | AnimClip::RecoverSwing => AnimClip::BatterSwing,

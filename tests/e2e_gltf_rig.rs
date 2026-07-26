@@ -334,3 +334,53 @@ fn shoulder_jersey_quads_share_the_same_mount_yaw() {
         }
     }
 }
+
+use breakneck_baseball::game::input::Intents;
+use common::DriveGame;
+
+/// Task 18: the plate batter holds the two-handed `BattingStance` loop
+/// through the duel — mirrors `catcher_crouch_reaches_the_graph` on the
+/// batting side of the plate — and pressing swing replaces it with
+/// `BatterSwing` (never `SwingBat`/`RecoverSwing`: those alias `BatterSwing`
+/// via `node_for`, so the batter's own `RigPlayer` never shows them).
+#[test]
+fn batting_stance_then_swing_reach_the_graph() {
+    let mut app = common::headless_app();
+    common::start_game(&mut app, KeyCode::Digit2);
+
+    // The duel starts immediately; batter_stance inserts BattingStance, and
+    // the driver must forward it to the batter's skeleton.
+    let stanced = common::run_until(&mut app, 4_000, |app| {
+        let world = app.world_mut();
+        world
+            .query_filtered::<&RigPlayer, With<Batter>>()
+            .iter(world)
+            .any(|rig| rig.current == Some(AnimClip::BattingStance))
+    });
+    assert!(
+        stanced.is_some(),
+        "driver never started BattingStance on the batter's skeleton"
+    );
+
+    // Press swing for the batting side every frame from here on (mirrors
+    // the DriveGame pattern the other e2e suites use to inject Intents
+    // after PreUpdate's keyboard clear) until the graph shows BatterSwing.
+    fn press_swing(mut intents: ResMut<Intents>, score: Res<ScoreBoard>) {
+        intents.get_mut(score.batting_team()).action = true;
+    }
+    app.add_systems(DriveGame, press_swing);
+
+    let swung = common::run_until(&mut app, 4_000, |app| {
+        let world = app.world_mut();
+        world
+            .query_filtered::<&RigPlayer, With<Batter>>()
+            .iter(world)
+            .any(|rig| rig.current == Some(AnimClip::BatterSwing))
+    });
+    assert!(
+        swung.is_some(),
+        "swing press never replaced BattingStance with BatterSwing on the batter's skeleton"
+    );
+}
+
+use breakneck_baseball::game::ScoreBoard;

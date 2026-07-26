@@ -163,9 +163,45 @@ impl Plugin for PlayerPlugin {
         app.add_systems(crate::game::game_start(), spawn_players)
             .add_systems(
                 Update,
-                (recolor_teams, recolor_gltf, trigger_swing, catcher_crouch)
+                (
+                    recolor_teams,
+                    recolor_gltf,
+                    batter_stance,
+                    trigger_swing,
+                    catcher_crouch,
+                )
+                    .chain()
                     .run_if(in_state(GameState::Playing)),
             );
+    }
+}
+
+/// Holds the plate batter (the `Batter`-marker rig) in the two-handed
+/// batting stance through the duel — the mirror of [`catcher_crouch`] on the
+/// other side of the plate — and releases it the moment the ball is in
+/// play, so the swap to the run-out rig (or a return to `Idle` between
+/// at-bats) can take over. Runs before [`trigger_swing`] (via `.chain()`) so
+/// a swing pressed on the very first duel frame still lands: even if this
+/// system's insert reaches the batter first, `trigger_swing`'s widened gate
+/// immediately replaces `BattingStance` with `BatterSwing` the same frame.
+fn batter_stance(
+    play: Res<Play>,
+    batters: Query<(Entity, Option<&Playing>), With<Batter>>,
+    mut commands: Commands,
+) {
+    let dueling = matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch);
+    for (entity, playing) in &batters {
+        match playing {
+            None if dueling => {
+                commands
+                    .entity(entity)
+                    .insert(Playing::new(AnimClip::BattingStance));
+            }
+            Some(playing) if !dueling && playing.clip == AnimClip::BattingStance => {
+                commands.entity(entity).remove::<Playing>();
+            }
+            _ => {}
+        }
     }
 }
 
@@ -548,7 +584,16 @@ fn trigger_swing(
         }
     }
     for (entity, playing) in &batters {
-        if playing.is_none() {
+        // The stance loop always plays through the duel now, so "nothing
+        // playing" is no longer the only swingable state: replacing
+        // `BattingStance` is fine (the driver's current-mismatch restart
+        // cross-fades it away), but a `BatterSwing` already in flight must
+        // never be interrupted by a second press.
+        let swingable = matches!(
+            playing.map(|p| p.clip),
+            None | Some(AnimClip::BattingStance)
+        );
+        if swingable {
             commands
                 .entity(entity)
                 .insert(Playing::new(AnimClip::BatterSwing));
