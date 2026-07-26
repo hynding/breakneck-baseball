@@ -29,7 +29,7 @@ use crate::game::GameState;
 
 // ── Mode ──────────────────────────────────────────────────────────────────────
 
-#[derive(Resource, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum CameraMode {
     #[default]
     Broadcast,
@@ -186,12 +186,21 @@ fn hide_occluders(
     view: Res<DuelView>,
     field: Res<FieldSpec>,
     play: Res<Play>,
+    mode: Res<CameraMode>,
     mut subjects: Query<(&Transform, &mut Visibility), Or<(With<CatcherRole>, With<PlateUmpire>)>>,
 ) {
     let dueling = matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch);
     let (eye, target, _) = view.framing(&field);
     for (transform, mut visibility) in &mut subjects {
+        // Occlusion only makes sense for the camera actually looking through
+        // this axis: in Orbit the player is free-looking with a completely
+        // different eye/target, so a rig hidden for a Broadcast duel view
+        // must not stay hidden just because the view resource hasn't
+        // changed — the system still runs every frame (unconditionally, not
+        // gated out entirely) so switching back to Broadcast, or into
+        // Orbit, both re-evaluate and settle on the right state immediately.
         let blocking = dueling
+            && *mode == CameraMode::Broadcast
             && occludes(
                 eye,
                 target,

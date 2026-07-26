@@ -8,7 +8,7 @@ mod common;
 
 use bevy::prelude::*;
 
-use breakneck_baseball::game::camera::DuelView;
+use breakneck_baseball::game::camera::{CameraMode, DuelView};
 use breakneck_baseball::game::flow::Phase;
 use breakneck_baseball::game::player::CatcherRole;
 
@@ -76,4 +76,45 @@ fn cycling_v_changes_view_and_toggles_the_catchers_visibility() {
     // V wraps back to catcher POV.
     tap_key(&mut app, KeyCode::KeyV);
     assert_eq!(*app.world().resource::<DuelView>(), DuelView::CatcherPov);
+}
+
+/// A rig hidden for a Broadcast-mode occluding view must not stay hidden
+/// once the player switches to Orbit: Orbit looks through a completely
+/// different eye/target, so the occlusion decision must be re-evaluated
+/// (and cleared) the moment the camera mode changes, not just when the
+/// `DuelView` changes.
+#[test]
+fn switching_to_orbit_restores_a_view_hidden_catcher() {
+    let mut app = headless_app();
+    start_game(&mut app, KeyCode::Digit2);
+
+    let ready = run_until(&mut app, MAX_FRAMES, |app| {
+        app.world()
+            .resource::<breakneck_baseball::game::flow::Play>()
+            .phase
+            == Phase::PrePitch
+    });
+    assert!(ready.is_some(), "never reached a PrePitch dead ball");
+
+    // Cycle to BattingZoom (CatcherPov -> BehindPitcher -> BattingZoom).
+    tap_key(&mut app, KeyCode::KeyV);
+    tap_key(&mut app, KeyCode::KeyV);
+    assert_eq!(*app.world().resource::<DuelView>(), DuelView::BattingZoom);
+    assert_eq!(
+        catcher_visibility(&mut app),
+        Visibility::Hidden,
+        "batting zoom should have hidden the catcher before the mode switch"
+    );
+
+    // C: Broadcast -> Orbit. The DuelView resource is untouched (still
+    // BattingZoom), but the active camera is no longer looking through its
+    // axis, so the catcher must come back.
+    tap_key(&mut app, KeyCode::KeyC);
+    assert_eq!(*app.world().resource::<CameraMode>(), CameraMode::Orbit);
+    assert_eq!(*app.world().resource::<DuelView>(), DuelView::BattingZoom);
+    assert_eq!(
+        catcher_visibility(&mut app),
+        Visibility::Inherited,
+        "orbit must restore real rig visibility even with an occluding DuelView still selected"
+    );
 }
