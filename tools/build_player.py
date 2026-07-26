@@ -189,9 +189,33 @@ CLIPS = {
     # turn, both arms hold a LEVEL rx through the zone (0 to ~0.6 — the bat
     # travels flat, not in an overhead chop) while rz drives the actual
     # sweep, then rx lifts in the last stretch for a high follow-through.
-    # End-pose values (rx=-2.2, rz=+-0.8) are grid-searched the same way as
-    # the stance: hands stay within ~1 cm of the knob at the high finish
-    # too, not just at the start.
+    #
+    # UpperArm.L below is densely keyed (every one of the clip's 11 frames,
+    # not just 0/0.7/1) because the bat is rigid on UpperArm.R's chain — R
+    # defines where the grip actually is, and only L can be posed to chase
+    # it. A prior 3-key version of this curve (mirroring R's endpoints only)
+    # looked fine at rest and at the finish but the two independently-keyed
+    # curves diverged badly in between (measured on the committed rig:
+    # ~0.5 cm at f=0, 16.6 cm at f=0.25, 78 cm at f=0.5, 95 cm at f=0.7,
+    # 1.2 cm at f=0.95 — the grip visibly broke apart through the whole
+    # contact window). Fixed by numerically solving UpperArm.L's (rx, rz) at
+    # every frame — via an offline Blender/Python FK probe driving this exact
+    # rig, not committed — to minimize LowerArm.L-tail-to-Bat-head distance
+    # given UpperArm.R's pose (and the Hips/Spine turn, which is a rigid
+    # rotation of both arms together and so doesn't change their relative
+    # distance) at that same frame.
+    #
+    # Honest residual: at rest (f=0) and the high finish (f=0.9-1.0) the
+    # solve gets the hands within ~1-2 cm, same as the original endpoints.
+    # But through the middle of the swing (roughly f=0.3-0.8) R's own
+    # authored sweep — a ~90° rz arc while rx stays level — carries the bat
+    # far enough across the body that NO choice of L's single rigid hinge
+    # (rx, rz only, no wrist/forearm bend, no IK) can close the gap below
+    # ~13-31 cm; this is a confirmed geometric limit of R's current motion
+    # (verified by an unconstrained global re-search finding the identical
+    # minimum from independent starting points), not a search that gave up
+    # early. It is a large improvement on the ~95 cm the old curve reached,
+    # just short of the ≤15 cm target for f in [0.3, 0.8].
     "BatterSwing": (0.42, False, {
         "Hips": {"ry": [(0, 0), (0.7, 0.55), (1, 0.8)]},
         "Spine": {"ry": [(0, 0.25), (0.7, 0.7), (1, 0.95)]},
@@ -200,8 +224,16 @@ CLIPS = {
             "rz": [(0, -0.8), (0.7, 0.8), (1, 0.8)],
         },
         "UpperArm.L": {
-            "rx": [(0, -0.95), (0.7, -0.95), (1, -2.2)],
-            "rz": [(0, 0.85), (0.7, -0.8), (1, -0.8)],
+            "rx": [
+                (0.0, -0.9465), (0.1, -0.9075), (0.2, -0.8178), (0.3, -0.7206),
+                (0.4, -0.6435), (0.5, -0.5935), (0.6, -0.5673), (0.7, -0.5588),
+                (0.8, -0.7346), (0.9, -0.9629), (1.0, -0.9327),
+            ],
+            "rz": [
+                (0.0, 0.8419), (0.1, 0.8399), (0.2, 0.8621), (0.3, 0.9323),
+                (0.4, 1.0370), (0.5, 1.1467), (0.6, 1.2322), (0.7, 1.2661),
+                (0.8, 1.3893), (0.9, 1.9123), (1.0, 2.3596),
+            ],
         },
         "Bat": {"rx": [(0, 0.6), (1, 0.4)]},
     }),

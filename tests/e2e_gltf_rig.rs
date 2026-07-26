@@ -336,6 +336,7 @@ fn shoulder_jersey_quads_share_the_same_mount_yaw() {
 }
 
 use breakneck_baseball::game::input::Intents;
+use breakneck_baseball::game::ScoreBoard;
 use common::DriveGame;
 
 /// Task 18: the plate batter holds the two-handed `BattingStance` loop
@@ -382,5 +383,3 @@ fn batting_stance_then_swing_reach_the_graph() {
         "swing press never replaced BattingStance with BatterSwing on the batter's skeleton"
     );
 }
-
-use breakneck_baseball::game::ScoreBoard;
