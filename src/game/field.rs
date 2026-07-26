@@ -280,10 +280,14 @@ fn spawn_stadium_ground(
     let dirt = FieldSurfaces::tiled(materials, &surfaces.dirt, 8.0);
     commands.spawn((
         GameplayEntity,
-        Mesh3d(meshes.add(Cuboid::new(INFIELD_HALF * 2.0, 0.001, INFIELD_HALF * 2.0))),
+        Mesh3d(meshes.add(Cuboid::new(
+            INFIELD_HALF * 2.0,
+            STADIUM_LAYER_HEIGHT,
+            INFIELD_HALF * 2.0,
+        ))),
         MeshMaterial3d(dirt.clone()),
         Transform {
-            translation: Vec3::new(0.0, 0.001, HALF_DIAGONAL),
+            translation: Vec3::new(0.0, STADIUM_DIRT_Y, HALF_DIAGONAL),
             rotation: Quat::from_rotation_y(std::f32::consts::FRAC_PI_4),
             ..default()
         },
@@ -291,7 +295,7 @@ fn spawn_stadium_ground(
 
     // Rounded dirt cutouts at the corner bags (the ~13 ft sliding pits) and
     // the home-plate circle.
-    let cutout = meshes.add(Cylinder::new(CUTOUT_RADIUS, 0.001));
+    let cutout = meshes.add(Cylinder::new(CUTOUT_RADIUS, STADIUM_LAYER_HEIGHT));
     let corners = [
         Vec3::ZERO,
         Vec3::new(-HALF_DIAGONAL, 0.0, HALF_DIAGONAL),
@@ -303,7 +307,7 @@ fn spawn_stadium_ground(
             GameplayEntity,
             Mesh3d(cutout.clone()),
             MeshMaterial3d(dirt.clone()),
-            Transform::from_translation(corner + Vec3::Y * 0.0016),
+            Transform::from_translation(corner + Vec3::Y * STADIUM_CUTOUT_Y),
         ));
     }
 
@@ -312,10 +316,14 @@ fn spawn_stadium_ground(
     let inner_half = INFIELD_HALF - BASEPATH_WIDTH;
     commands.spawn((
         GameplayEntity,
-        Mesh3d(meshes.add(Cuboid::new(inner_half * 2.0, 0.001, inner_half * 2.0))),
+        Mesh3d(meshes.add(Cuboid::new(
+            inner_half * 2.0,
+            STADIUM_LAYER_HEIGHT,
+            inner_half * 2.0,
+        ))),
         MeshMaterial3d(FieldSurfaces::tiled(materials, &surfaces.grass, 5.0)),
         Transform {
-            translation: Vec3::new(0.0, 0.0022, HALF_DIAGONAL),
+            translation: Vec3::new(0.0, STADIUM_GRASS_INTERIOR_Y, HALF_DIAGONAL),
             rotation: Quat::from_rotation_y(std::f32::consts::FRAC_PI_4),
             ..default()
         },
@@ -341,6 +349,33 @@ const INFIELD_HALF: f32 = BASE_DISTANCE / 2.0;
 const CUTOUT_RADIUS: f32 = 3.96;
 /// Width of the dirt basepath band framing the grass infield.
 const BASEPATH_WIDTH: f32 = 4.0;
+
+/// Full mesh height shared by every thin layered surface
+/// `spawn_stadium_ground` stacks over the ground slab (dirt basepath diamond,
+/// cutout circles, grass interior) — named so the chalk layer below can
+/// compute each one's top face (`translation_y + height / 2`) instead of
+/// re-deriving it from a duplicated literal.
+const STADIUM_LAYER_HEIGHT: f32 = 0.001;
+/// Dirt basepath diamond's y (lowest of the three layers).
+const STADIUM_DIRT_Y: f32 = 0.001;
+/// Dirt cutout circles' y — one layer above the basepath diamond so the bags
+/// and home plate read as distinct dirt patches rather than fighting it.
+const STADIUM_CUTOUT_Y: f32 = 0.0016;
+/// Grass interior's y — the topmost of the three, so it reads over the dirt
+/// diamond beneath it.
+const STADIUM_GRASS_INTERIOR_Y: f32 = 0.0022;
+/// Top face heights of all three stadium ground layers (`translation_y +
+/// height / 2`), read directly by the chalk-clearance test below.
+///
+/// Test-only: production only needs the front yard's (taller) topmost decal
+/// to size `CHALK_Y` (see its doc comment), but the test checks every layer
+/// in both variants individually.
+#[cfg(test)]
+const STADIUM_DIRT_TOP: f32 = STADIUM_DIRT_Y + STADIUM_LAYER_HEIGHT / 2.0;
+#[cfg(test)]
+const STADIUM_CUTOUT_TOP: f32 = STADIUM_CUTOUT_Y + STADIUM_LAYER_HEIGHT / 2.0;
+#[cfg(test)]
+const STADIUM_GRASS_INTERIOR_TOP: f32 = STADIUM_GRASS_INTERIOR_Y + STADIUM_LAYER_HEIGHT / 2.0;
 
 // ── Bases ─────────────────────────────────────────────────────────────────────
 /// Home plate at the origin plus one bag per spec base position.
@@ -407,10 +442,25 @@ const PLATE_HALF_WIDTH: f32 = PLATE_WIDTH / 2.0;
 /// end, ~4 in). We use 3 in (0.076 m), the middle of that range — see
 /// docs/BASEBALL.md.
 const CHALK_WIDTH: f32 = 0.076;
-/// Height chalk sits at: above every dirt/grass layer `spawn_stadium_ground`
-/// paints (dirt basepath 0.001, cutouts 0.0016, grass interior 0.0022), so
-/// lines never z-fight with the surfaces they're drawn on.
-const CHALK_Y: f32 = 0.003;
+/// Full mesh height of every chalk quad (`spawn_flat_chalk`,
+/// `spawn_chalk_segment`) — named so `CHALK_Y` below can derive the quads'
+/// actual *bottom* face and prove it clears every ground decal in both
+/// variants, not just its own translation.
+const CHALK_MESH_HEIGHT: f32 = 0.002;
+/// Gap left between the chalk quads' bottom face and the tallest ground
+/// decal's top face, in whichever variant that decal belongs to.
+const CHALK_CLEARANCE: f32 = 0.003;
+/// Height chalk sits at. Chalk is shared by both sceneries (`spawn_chalk_lines`
+/// runs regardless of `Scenery`), so it must clear every layer either one
+/// paints: the stadium's dirt basepath/cutouts/grass-interior (topmost
+/// `STADIUM_GRASS_INTERIOR_TOP`) *and* the front yard's street/sidewalk/
+/// centre-line decals (topmost `FRONTYARD_CENTERLINE_TOP`, which is taller —
+/// `spawn_front_yard`'s decals sit at y up to 0.004 vs. the stadium's
+/// 0.0022). A regression here (chalk derived only against the stadium's
+/// layers) let the front yard's foul lines z-fight the street and sidewalks
+/// where they cross them (z ≈ 20–32); `tests::chalk_clears_every_ground_decal_in_both_variants`
+/// guards it.
+const CHALK_Y: f32 = FRONTYARD_CENTERLINE_TOP + CHALK_CLEARANCE + CHALK_MESH_HEIGHT / 2.0;
 
 /// Batter's box: 4 ft × 6 ft, long side toward the pitcher, drawn 6 in off
 /// each side of the plate (docs/BASEBALL.md).
@@ -422,21 +472,23 @@ const BOX_PLATE_GAP: f32 = 0.152; // 6 in
 /// edge sits exactly `BOX_PLATE_GAP` off the plate).
 const BOX_CENTER_X: f32 = PLATE_HALF_WIDTH + BOX_PLATE_GAP + BOX_HALF_WIDTH;
 
-/// Perpendicular distance from `p` to the infinite line through `a` and `b`
-/// (both points in the ground's XZ plane, passed here as `Vec2(x, z)`).
+/// Perpendicular distance from `p` to the *segment* `a`→`b` — clamped to the
+/// segment rather than the infinite line through it, so a point beyond
+/// either endpoint is measured to that endpoint (both points in the ground's
+/// XZ plane, passed here as `Vec2(x, z)`).
 ///
 /// Test-only: a geometry check on what `spawn_chalk_segment` paints, not
 /// something the spawn code itself needs at runtime (it places quads by
 /// direct translation/rotation math, not by testing points against a line).
 #[cfg(test)]
-fn distance_to_line(p: Vec2, a: Vec2, b: Vec2) -> f32 {
-    let dir = (b - a).normalize_or_zero();
-    if dir == Vec2::ZERO {
+fn distance_point_to_segment(p: Vec2, a: Vec2, b: Vec2) -> f32 {
+    let dir = b - a;
+    let len_sq = dir.length_squared();
+    if len_sq < f32::EPSILON {
         return p.distance(a);
     }
-    let offset = p - a;
-    let along = dir * offset.dot(dir);
-    (offset - along).length()
+    let t = ((p - a).dot(dir) / len_sq).clamp(0.0, 1.0);
+    p.distance(a + dir * t)
 }
 
 /// Whether ground point `p` sits on the *hollow* rectangular chalk outline
@@ -472,7 +524,7 @@ fn spawn_flat_chalk(
 ) {
     commands.spawn((
         GameplayEntity,
-        Mesh3d(meshes.add(Cuboid::new(size.x, 0.002, size.y))),
+        Mesh3d(meshes.add(Cuboid::new(size.x, CHALK_MESH_HEIGHT, size.y))),
         MeshMaterial3d(chalk.clone()),
         Transform::from_xyz(translation.x, CHALK_Y, translation.z),
     ));
@@ -499,7 +551,7 @@ fn spawn_chalk_segment(
     let yaw = (-delta.z).atan2(delta.x);
     commands.spawn((
         GameplayEntity,
-        Mesh3d(meshes.add(Cuboid::new(length, 0.002, width))),
+        Mesh3d(meshes.add(Cuboid::new(length, CHALK_MESH_HEIGHT, width))),
         MeshMaterial3d(chalk.clone()),
         Transform {
             translation: Vec3::new((from.x + to.x) / 2.0, CHALK_Y, (from.z + to.z) / 2.0),
@@ -542,10 +594,27 @@ fn spawn_batters_box(
     }
 }
 
-/// The foul line running from home plate through the base at `base_index`
-/// and out to the fence in that exact direction (`rules::fence_at`) — the
-/// same function that places the outfield wall, so the chalk, the wall, and
-/// the home-run ruling all agree on where fair territory ends.
+/// The (start, end) points of the foul line running from home plate through
+/// the base at `base_index`, out to the fence in that exact direction
+/// (`rules::fence_at`) — the same function that places the outfield wall, so
+/// the chalk, the wall, and the home-run ruling all agree on where fair
+/// territory ends. `None` if the base sits exactly at the origin (nothing to
+/// aim through — never true for a real `FieldSpec`, but keeps this total).
+///
+/// Pure geometry, deliberately factored out of `spawn_foul_line` so the test
+/// module can exercise the *exact* span the spawn path paints, rather than
+/// re-deriving the same formula in a test (which would pass even if this
+/// function regressed).
+fn foul_line_span(field: &FieldSpec, base_index: usize) -> Option<(Vec3, Vec3)> {
+    let base = field.base_positions[base_index];
+    let dir = Vec3::new(base.x, 0.0, base.z).normalize_or_zero();
+    if dir == Vec3::ZERO {
+        return None;
+    }
+    Some((Vec3::ZERO, dir * rules::fence_at(dir, field)))
+}
+
+/// Spawns the chalk quad for `foul_line_span(field, base_index)`.
 fn spawn_foul_line(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
@@ -553,13 +622,9 @@ fn spawn_foul_line(
     field: &FieldSpec,
     base_index: usize,
 ) {
-    let base = field.base_positions[base_index];
-    let dir = Vec3::new(base.x, 0.0, base.z).normalize_or_zero();
-    if dir == Vec3::ZERO {
-        return;
+    if let Some((start, end)) = foul_line_span(field, base_index) {
+        spawn_chalk_segment(commands, meshes, chalk, start, end, CHALK_WIDTH);
     }
-    let end = dir * rules::fence_at(dir, field);
-    spawn_chalk_segment(commands, meshes, chalk, Vec3::ZERO, end, CHALK_WIDTH);
 }
 
 /// Two batter's-box outlines flanking the plate and the foul lines from home
@@ -638,6 +703,26 @@ fn spawn_stadium_mound(
 }
 
 // ── Front-yard scenery ────────────────────────────────────────────────────────
+/// Full mesh height shared by every flat street/sidewalk/centre-line decal
+/// `spawn_front_yard`'s `flat` closure paints — named for the same reason as
+/// `STADIUM_LAYER_HEIGHT`: so the chalk layer can prove it clears these top
+/// faces too, without re-deriving the height from a duplicated literal.
+const STREET_DECAL_HEIGHT: f32 = 0.004;
+/// Asphalt and both sidewalks sit at this y.
+const STREET_DECAL_Y: f32 = 0.002;
+/// The painted centre line sits one layer above the asphalt — the tallest of
+/// the front yard's ground decals.
+const CENTERLINE_DECAL_Y: f32 = 0.004;
+/// Top face heights of the front yard's ground decals, read directly by the
+/// chalk-clearance test below.
+///
+/// `FRONTYARD_STREET_TOP` is test-only (the asphalt/sidewalks aren't the
+/// tallest decal, so `CHALK_Y` doesn't need it); `FRONTYARD_CENTERLINE_TOP`
+/// *is* production-used, by `CHALK_Y` itself.
+#[cfg(test)]
+const FRONTYARD_STREET_TOP: f32 = STREET_DECAL_Y + STREET_DECAL_HEIGHT / 2.0;
+const FRONTYARD_CENTERLINE_TOP: f32 = CENTERLINE_DECAL_Y + STREET_DECAL_HEIGHT / 2.0;
+
 /// Suburban lot: the batter hits from the lawn out across the street. All
 /// dressing is visual-only (no colliders) so the analytic outcomes and the
 /// ball's flight are never blocked; only the ground and the pitching mat are
@@ -670,7 +755,7 @@ fn spawn_front_yard(
     let mut flat = |size: Vec2, pos: Vec3, color: Color| {
         commands.spawn((
             GameplayEntity,
-            Mesh3d(meshes.add(Cuboid::new(size.x, 0.004, size.y))),
+            Mesh3d(meshes.add(Cuboid::new(size.x, STREET_DECAL_HEIGHT, size.y))),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: color,
                 perceptual_roughness: 1.0,
@@ -683,14 +768,26 @@ fn spawn_front_yard(
     // The street runs the whole block, flanked by sidewalks.
     let asphalt = Color::srgb(0.32, 0.32, 0.34);
     let concrete = Color::srgb(0.62, 0.62, 0.60);
-    flat(Vec2::new(300.0, 8.0), Vec3::new(0.0, 0.002, 26.0), asphalt);
+    flat(
+        Vec2::new(300.0, 8.0),
+        Vec3::new(0.0, STREET_DECAL_Y, 26.0),
+        asphalt,
+    );
     flat(
         Vec2::new(300.0, 0.3),
-        Vec3::new(0.0, 0.004, 26.0),
+        Vec3::new(0.0, CENTERLINE_DECAL_Y, 26.0),
         Color::srgb(0.85, 0.75, 0.2), // painted centre line
     );
-    flat(Vec2::new(300.0, 2.0), Vec3::new(0.0, 0.002, 21.0), concrete);
-    flat(Vec2::new(300.0, 2.0), Vec3::new(0.0, 0.002, 31.0), concrete);
+    flat(
+        Vec2::new(300.0, 2.0),
+        Vec3::new(0.0, STREET_DECAL_Y, 21.0),
+        concrete,
+    );
+    flat(
+        Vec2::new(300.0, 2.0),
+        Vec3::new(0.0, STREET_DECAL_Y, 31.0),
+        concrete,
+    );
 
     let mut block = |size: Vec3, pos: Vec3, color: Color| {
         commands.spawn((
@@ -1038,16 +1135,23 @@ mod tests {
         }
     }
 
-    /// Basic sanity check on `distance_to_line`'s geometry, independent of
-    /// any field const: zero exactly on the line, and the expected
-    /// perpendicular distance off it.
+    /// Basic sanity check on `distance_point_to_segment`'s geometry,
+    /// independent of any field const: zero exactly on the segment, the
+    /// expected perpendicular distance off it (while still between the
+    /// endpoints), and clamped-to-endpoint distance for a point beyond it —
+    /// this is a *segment* distance, not an infinite line's.
     #[test]
-    fn distance_to_line_matches_geometry() {
+    fn distance_point_to_segment_matches_geometry() {
         let a = Vec2::ZERO;
         let b = Vec2::new(10.0, 10.0);
-        assert!(distance_to_line(Vec2::new(5.0, 5.0), a, b) < 1e-5);
+        assert!(distance_point_to_segment(Vec2::new(5.0, 5.0), a, b) < 1e-5);
         let want = 5.0 / std::f32::consts::SQRT_2;
-        assert!((distance_to_line(Vec2::new(0.0, 5.0), a, b) - want).abs() < 1e-4);
+        assert!((distance_point_to_segment(Vec2::new(0.0, 5.0), a, b) - want).abs() < 1e-4);
+        // Beyond `b`: the infinite line's perpendicular distance would still
+        // be small, but the segment must clamp to `b` itself.
+        let beyond = Vec2::new(20.0, 20.0);
+        let want_clamped = beyond.distance(b);
+        assert!((distance_point_to_segment(beyond, a, b) - want_clamped).abs() < 1e-4);
     }
 
     /// `on_box_outline` must flag a point on either the inner (plate-side) or
@@ -1087,27 +1191,66 @@ mod tests {
         assert!(inner_edge > PLATE_HALF_WIDTH);
     }
 
-    /// The foul lines `spawn_foul_line` paints must run exactly through the
-    /// real base positions on their way from home to the fence — derived
-    /// from `FieldSpec::base_positions`, not a hardcoded 45°, so this must
-    /// hold for both variants (Standard's diamond and FrontYard's lawn, which
-    /// uses a different `fair_half_angle` and base layout entirely).
+    /// The foul lines must run exactly through the real base positions on
+    /// their way from home to the fence — derived from
+    /// `FieldSpec::base_positions`, not a hardcoded 45°, so this must hold
+    /// for both variants (Standard's diamond and FrontYard's lawn, which uses
+    /// a different `fair_half_angle` and base layout entirely).
+    ///
+    /// Exercises `foul_line_span` — the exact function `spawn_foul_line`
+    /// calls to place the chalk — rather than re-deriving the direction/fence
+    /// formula inline, so a regression in the real spawn path actually fails
+    /// this test. Verified: temporarily changing `foul_line_span` to always
+    /// read `base_positions[0]` (ignoring `base_index`) made the third-base
+    /// assertions fail for both variants with a many-metres-off distance, as
+    /// expected; reverted after confirming the failure.
     #[test]
     fn foul_lines_pass_through_first_and_third_base() {
         for variant in [VariantId::Standard, VariantId::FrontYard] {
             let field = variant.field();
             for &base_index in &[0, field.base_count() - 1] {
                 let base = field.base_positions[base_index];
-                let base_xz = Vec2::new(base.x, base.z);
-                let dir = Vec3::new(base.x, 0.0, base.z).normalize_or_zero();
-                assert!(dir != Vec3::ZERO, "{variant:?} base {base_index} at origin");
-                let end = dir * rules::fence_at(dir, &field);
-                let dist = distance_to_line(base_xz, Vec2::ZERO, Vec2::new(end.x, end.z));
+                let (start, end) = foul_line_span(&field, base_index)
+                    .unwrap_or_else(|| panic!("{variant:?} base {base_index} at origin"));
+                let dist = distance_point_to_segment(
+                    Vec2::new(base.x, base.z),
+                    Vec2::new(start.x, start.z),
+                    Vec2::new(end.x, end.z),
+                );
                 assert!(
-                    dist < 0.01,
-                    "{variant:?} base {base_index} at {base:?} is {dist} m off its foul line"
+                    dist < CHALK_WIDTH / 2.0,
+                    "{variant:?} base {base_index} at {base:?} is {dist} m off its foul line \
+                     (chalk half-width {})",
+                    CHALK_WIDTH / 2.0
                 );
             }
+        }
+    }
+
+    /// Regression guard for the FrontYard z-fighting bug: `CHALK_Y` was
+    /// originally derived only against the stadium's own ground layers
+    /// (topmost `STADIUM_GRASS_INTERIOR_TOP` ≈ 0.0027), but `spawn_chalk_lines`
+    /// runs for *both* sceneries and the front yard's street/sidewalk/
+    /// centre-line decals sit higher (topmost `FRONTYARD_CENTERLINE_TOP` =
+    /// 0.006) — so a front-yard foul line crossing the street (z ≈ 20–32)
+    /// shared a z-plane with the centre line and z-fought. Checks the chalk
+    /// quads' actual *bottom* face (`CHALK_Y - CHALK_MESH_HEIGHT / 2`) clears
+    /// every named ground-decal top in both variants, reading the same consts
+    /// the spawn functions build their meshes from.
+    #[test]
+    fn chalk_clears_every_ground_decal_in_both_variants() {
+        let chalk_bottom = CHALK_Y - CHALK_MESH_HEIGHT / 2.0;
+        for (label, top) in [
+            ("stadium dirt basepath", STADIUM_DIRT_TOP),
+            ("stadium cutouts", STADIUM_CUTOUT_TOP),
+            ("stadium grass interior", STADIUM_GRASS_INTERIOR_TOP),
+            ("front yard street/sidewalks", FRONTYARD_STREET_TOP),
+            ("front yard centre line", FRONTYARD_CENTERLINE_TOP),
+        ] {
+            assert!(
+                chalk_bottom > top,
+                "chalk bottom {chalk_bottom} does not clear {label}'s top face {top}"
+            );
         }
     }
 }
