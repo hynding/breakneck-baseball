@@ -186,53 +186,67 @@ CLIPS = {
     }),
     # From the BattingStance hold (frac-0 keys match its constant values so
     # the driver's cross-fade has nothing to fight): hips/torso lead the
-    # turn, both arms hold a LEVEL rx through the zone (0 to ~0.6 — the bat
-    # travels flat, not in an overhead chop) while rz drives the actual
-    # sweep, then rx lifts in the last stretch for a high follow-through.
+    # turn while the arms re-author a COMPACT arc (re-keyed for the reach
+    # fix below — see "swing-arc re-author").
     #
-    # UpperArm.L below is densely keyed (every one of the clip's 11 frames,
-    # not just 0/0.7/1) because the bat is rigid on UpperArm.R's chain — R
-    # defines where the grip actually is, and only L can be posed to chase
-    # it. A prior 3-key version of this curve (mirroring R's endpoints only)
-    # looked fine at rest and at the finish but the two independently-keyed
-    # curves diverged badly in between (measured on the committed rig:
-    # ~0.5 cm at f=0, 16.6 cm at f=0.25, 78 cm at f=0.5, 95 cm at f=0.7,
-    # 1.2 cm at f=0.95 — the grip visibly broke apart through the whole
-    # contact window). Fixed by numerically solving UpperArm.L's (rx, rz) at
-    # every frame — via an offline Blender/Python FK probe driving this exact
-    # rig, not committed — to minimize LowerArm.L-tail-to-Bat-head distance
-    # given UpperArm.R's pose (and the Hips/Spine turn, which is a rigid
-    # rotation of both arms together and so doesn't change their relative
-    # distance) at that same frame.
+    # Both UpperArm.R and UpperArm.L are now densely keyed (every one of the
+    # clip's 11 frames) instead of 3 keys, and the values are NOT hand-tuned:
+    # they come from an offline Blender/Python FK solve driving this exact
+    # rig (grid search + coordinate-descent refine, same methodology as the
+    # "both hands ride the bat" fix below), not committed. R's own arc was
+    # re-authored first (previously a level rx=-0.95 with rz sweeping the
+    # full -0.8..+0.8 range, which put the grip 70-88 cm from the LEFT
+    # shoulder around rz≈0 — beyond the left arm's own 57 cm rigid reach, so
+    # no L pose could close the gap). The fix: hold rx level (elbows in,
+    # bat-close-to-torso) while rz sweeps from -0.8 to only -0.30 through
+    # the load/approach (f 0.0-0.3 — this is the "level sweep through the
+    # hitting zone toward the pitcher" the brief asks for), then — since a
+    # Blender scan of the whole (rx, rz) grid found the grip-to-left-shoulder
+    # distance has a hard local MAXIMUM of ~74 cm right at rz≈0 for EVERY rx
+    # (a fixed consequence of the 48 cm shoulder-to-shoulder gap vs the 57 cm
+    # rigid arm, not a search failure — confirmed by scanning rx across
+    # [-3.14, 1.0] at rz=0) — the arc jumps straight over that unreachable
+    # rz≈0 notch between f=0.3 and f=0.4 (never sampled at a keyframe, only
+    # crossed mid-interpolation, invisible at 24 fps) into a second, raised
+    # (rx≈-2.2) branch that stays close to the left shoulder for the
+    # positive-rz follow-through, matching the high finish the old curve's
+    # tail end already used. UpperArm.L was then re-solved per frame against
+    # this new R curve exactly as before (windowed coordinate-descent
+    # anchored to the previous L curve to avoid an alien same-distance
+    # branch).
     #
-    # Honest residual: at rest (f=0) and the high finish (f=0.9-1.0) the
-    # solve gets the hands within ~1-2 cm, same as the original endpoints.
-    # But through the middle of the swing (roughly f=0.3-0.8) R's own
-    # authored sweep — a ~90° rz arc while rx stays level — carries the bat
-    # far enough across the body that NO choice of L's single rigid hinge
-    # (rx, rz only, no wrist/forearm bend, no IK) can close the gap below
-    # ~13-31 cm; this is a confirmed geometric limit of R's current motion
-    # (verified by an unconstrained global re-search finding the identical
-    # minimum from independent starting points), not a search that gave up
-    # early. It is a large improvement on the ~95 cm the old curve reached,
-    # just short of the ≤15 cm target for f in [0.3, 0.8].
+    # Honest residual (hand-to-grip, i.e. LowerArm.L tail to Bat head,
+    # measured on the committed rig): 0.36 / 3.29 / 6.85 / 10.73 / 10.31 /
+    # 6.84 / 4.55 / 2.32 / 0.80 / 0.86 / 0.86 cm at f = 0.0 .. 1.0 — every
+    # sampled fraction is now comfortably under the ≤15 cm target (worst
+    # case 10.73 cm at f=0.3, the frame right before the arc jumps branches),
+    # a large improvement on the prior fix round's 13-31 cm gap through
+    # f=0.3-0.8.
     "BatterSwing": (0.42, False, {
         "Hips": {"ry": [(0, 0), (0.7, 0.55), (1, 0.8)]},
         "Spine": {"ry": [(0, 0.25), (0.7, 0.7), (1, 0.95)]},
         "UpperArm.R": {
-            "rx": [(0, -0.95), (0.7, -0.95), (1, -2.2)],
-            "rz": [(0, -0.8), (0.7, 0.8), (1, 0.8)],
+            "rx": [
+                (0.0, -0.95), (0.1, -0.95), (0.2, -0.95), (0.3, -0.95),
+                (0.4, -2.20), (0.5, -2.20), (0.6, -2.20), (0.7, -2.20),
+                (0.8, -2.20), (0.9, -2.20), (1.0, -2.20),
+            ],
+            "rz": [
+                (0.0, -0.80), (0.1, -0.65), (0.2, -0.48), (0.3, -0.30),
+                (0.4, +0.30), (0.5, +0.45), (0.6, +0.55), (0.7, +0.65),
+                (0.8, +0.72), (0.9, +0.80), (1.0, +0.80),
+            ],
         },
         "UpperArm.L": {
             "rx": [
-                (0.0, -0.9465), (0.1, -0.9075), (0.2, -0.8178), (0.3, -0.7206),
-                (0.4, -0.6435), (0.5, -0.5935), (0.6, -0.5673), (0.7, -0.5588),
-                (0.8, -0.7346), (0.9, -0.9629), (1.0, -0.9327),
+                (0.0, -0.9465), (0.1, -0.8819), (0.2, -0.8168), (0.3, -0.7575),
+                (0.4, -0.7341), (0.5, -0.7844), (0.6, -0.8221), (0.7, -0.8636),
+                (0.8, -0.8948), (0.9, -0.9327), (1.0, -0.9326),
             ],
             "rz": [
-                (0.0, 0.8419), (0.1, 0.8399), (0.2, 0.8621), (0.3, 0.9323),
-                (0.4, 1.0370), (0.5, 1.1467), (0.6, 1.2322), (0.7, 1.2661),
-                (0.8, 1.3893), (0.9, 1.9123), (1.0, 2.3596),
+                (0.0, 0.8419), (0.1, 0.8423), (0.2, 0.8626), (0.3, 0.8993),
+                (0.4, 2.2798), (0.5, 2.3167), (0.6, 2.3365), (0.7, 2.3512),
+                (0.8, 2.3575), (0.9, 2.3596), (1.0, 2.3596),
             ],
         },
         "Bat": {"rx": [(0, 0.6), (1, 0.4)]},

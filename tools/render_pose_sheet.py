@@ -27,7 +27,7 @@ SHOTS = {
     "Dive": [0.95],
     "Slide": [0.95],
     "BattingStance": [0.5],
-    "BatterSwing": [0.25, 0.5, 0.7, 0.8, 0.9, 0.95],
+    "BatterSwing": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
 }
 TOP_VIEW = {"BatterSwing", "RunCycle", "BattingStance"}
 
