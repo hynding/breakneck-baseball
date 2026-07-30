@@ -64,8 +64,10 @@ pub struct FoulPole;
 pub struct OutfieldWall;
 
 /// Marks a piece of the floating strike-zone box shown during the duel.
+/// Public so e2e tests can query its `Visibility` directly (the same pattern
+/// `player::CatcherRole` uses for `e2e_camera_views`).
 #[derive(Component)]
-struct StrikeZoneOverlay;
+pub struct StrikeZoneOverlay;
 
 /// The zone box's frame material plus enough to pulse and restore it: a
 /// contact worth celebrating (Solid/Perfect, Task B4) briefly tints the
@@ -193,11 +195,16 @@ impl Plugin for FieldPlugin {
         app.add_systems(crate::game::game_start(), spawn_field)
             .add_systems(
                 Update,
+                // trigger/restore before visibility: a same-frame contact
+                // must land in `ZoneFlash` before `strike_zone_visibility`
+                // reads it, or the box hides for the one frame the read
+                // beat the write — see that system's doc comment.
                 (
-                    strike_zone_visibility,
                     trigger_zone_flash,
                     restore_zone_flash,
+                    strike_zone_visibility,
                 )
+                    .chain()
                     .run_if(in_state(GameState::Playing)),
             );
     }
@@ -962,12 +969,17 @@ fn spawn_strike_zone(
 }
 
 /// The zone box belongs to the duel: shown while a pitch is coming, hidden
-/// the moment the ball is in play.
+/// the moment the ball is in play — except a live Task-B4 flash pulse holds
+/// it up a beat longer (`flash.timer.is_some()`) so the pulse that fires the
+/// same frame contact flips the phase to `InPlay` actually gets a chance to
+/// render, instead of being hidden the very frame it's set.
 fn strike_zone_visibility(
     play: Res<Play>,
+    flash: Res<ZoneFlash>,
     mut overlay: Query<&mut Visibility, With<StrikeZoneOverlay>>,
 ) {
-    let visible = matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch);
+    let visible = matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch)
+        || flash.timer.is_some();
     for mut visibility in &mut overlay {
         let desired = if visible {
             Visibility::Inherited
