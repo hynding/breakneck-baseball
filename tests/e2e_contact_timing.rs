@@ -25,8 +25,8 @@ use breakneck_baseball::game::{GameState, ScoreBoard};
 
 use common::{headless_app, run_until, start_game, DriveGame};
 
-/// Generous per-stage budget (steal windows can gate a pitch for 5 s once a
-/// runner reaches base).
+/// Generous per-stage budget (steal windows, `Ruleset::steal_window_secs`,
+/// gate the pitch once a runner reaches base).
 const STAGE_FRAMES: u64 = 15_000;
 
 #[derive(Resource, Default)]

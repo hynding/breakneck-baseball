@@ -12,12 +12,12 @@
 //!
 //! **Margin, not marginal (review fix):** Rapier/Bevy's multithreaded
 //! physics isn't bit-reproducible run-to-run, so a variety assertion at the
-//! game's *default* `cpu_timing_spread_ms` (70 ms) is knife-edge — most
-//! presses land `Perfect` and only a sliver reaches `Solid`, so a few ms of
+//! narrow `cpu_timing_spread_ms` is knife-edge — most presses land
+//! `Perfect` and only a sliver reaches `Solid`, so a few ms of
 //! nondeterministic jitter flips the result. This test instead forces
 //! `Ruleset::cpu_timing_spread_ms` to 200 ms right after kickoff — wide
 //! enough, now that `flow::late_swing_z` lets the swing window stay open the
-//! whole `foul_ms` (140 ms default), that `Perfect`/`Solid`/`FoulTip` are all
+//! whole `foul_ms` (forced to 140 ms below), that `Perfect`/`Solid`/`FoulTip` are all
 //! comfortably reachable regardless of scheduler ordering. The exact
 //! press-frame *logic* is pinned bit-for-bit by the synthetic-ramp unit
 //! tests in `ai.rs` (`ready_to_press_*`); this e2e only needs to prove the
@@ -35,8 +35,8 @@ use breakneck_baseball::game::{GameState, ScoreBoard, Team};
 
 use common::{headless_app, run_until, start_game, DriveGame};
 
-/// A forced spread much wider than the default (70 ms): with `foul_ms` at
-/// its default 140 ms, this comfortably spans Perfect/Solid/FoulTip so the
+/// A forced spread decoupled from the tuned default: with `foul_ms` forced
+/// to 140 ms below, this comfortably spans Perfect/Solid/FoulTip so the
 /// variety assertion has fat margin against run-to-run physics jitter
 /// instead of hinging on a handful of milliseconds.
 const FORCED_SPREAD_MS: f32 = 200.0;
