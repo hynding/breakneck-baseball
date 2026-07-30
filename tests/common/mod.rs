@@ -97,7 +97,17 @@ pub fn headless_app() -> App {
     .add_plugins((RapierPhysicsPlugin::<NoUserData>::default(), GamePlugin))
     .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
         DT,
-    )));
+    )))
+    // `juice.rs`'s hit-stop/slow-mo dials `Time<Virtual>`'s relative_speed
+    // on every Solid/Perfect ContactEvent. That scaling is NOT bypassed by
+    // ManualDuration — bevy_time's time_system still runs
+    // update_virtual_time, which multiplies the (manually-fixed) real
+    // delta by relative_speed exactly as under automatic real-time — so
+    // without this, any scripted swing in these tests that grades
+    // Solid/Perfect would genuinely slow the shared virtual clock every
+    // other timing-sensitive system reads. This insert is load-bearing,
+    // not just belt-and-braces.
+    .insert_resource(breakneck_baseball::game::juice::JuiceDisabled);
 
     app.init_schedule(DriveGame);
     app.world_mut()

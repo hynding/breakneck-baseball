@@ -14,6 +14,7 @@ pub mod flow;
 pub mod fx;
 pub mod input;
 pub mod jersey;
+pub mod juice;
 pub mod menu;
 pub mod model_assets;
 pub mod player;
@@ -38,6 +39,7 @@ use flow::FlowPlugin;
 use fx::FxPlugin;
 use input::InputPlugin;
 use jersey::JerseyPlugin;
+use juice::JuicePlugin;
 use menu::MenuPlugin;
 use model_assets::ModelAssetsPlugin;
 use player::PlayerPlugin;
@@ -237,7 +239,7 @@ impl Plugin for GamePlugin {
                 UiPlugin,
                 JerseyPlugin,
             ))
-            .add_plugins((SubsPlugin, settings::SettingsPlugin))
+            .add_plugins((SubsPlugin, settings::SettingsPlugin, JuicePlugin))
             // Fresh scoreboard/rosters each time a game starts from the menu;
             // tear the scene down once the game is over. Pausing stays inside
             // Playing ⇄ Paused and touches neither.
