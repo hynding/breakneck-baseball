@@ -1281,6 +1281,52 @@ pub fn is_game_over(score: &ScoreBoard, innings: u32) -> bool {
     false
 }
 
+// ── Contact quality ───────────────────────────────────────────────────────────
+// The batting-feel spine (docs/superpowers/specs/2026-07-30-batting-feel-design.md
+// §2): a swing's outcome is graded by how far off dead-on timing it lands,
+// not by contact-or-miss alone.
+
+/// How well-timed a swing was, from a whiff to a dead-on hit. Graded by
+/// [`contact_quality`] against the [`Ruleset`] timing windows.
+///
+/// `Weak` is never produced by [`contact_quality`] — the Classic timing
+/// windows below only ever yield the other four variants. It exists so the
+/// Plan-C PCI (plate-coverage-indicator) adapter, which grades contact by a
+/// shrunk timing window instead, has a quality to report without widening
+/// this enum later; keep matches on it exhaustive.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContactQuality {
+    /// No contact: the swing missed entirely.
+    Whiff,
+    /// Contact, but late/early enough it only ever fouls off.
+    FoulTip,
+    /// Weak contact (Plan-C PCI adapter only — see the enum doc comment).
+    Weak,
+    /// Solidly timed contact.
+    Solid,
+    /// Dead-on timing.
+    Perfect,
+}
+
+/// Grades a swing's timing error (`dt_ms`, milliseconds, signed so early
+/// swings are negative) into a [`ContactQuality`] using the active
+/// [`Ruleset`]'s windows (`perfect_ms`/`solid_ms`/`foul_ms`). Symmetric
+/// around zero: an early and a late swing of the same magnitude grade the
+/// same. Never yields `ContactQuality::Weak` — see that variant's doc
+/// comment.
+pub fn contact_quality(dt_ms: f32, rules: &Ruleset) -> ContactQuality {
+    let dt = dt_ms.abs();
+    if dt <= rules.perfect_ms {
+        ContactQuality::Perfect
+    } else if dt <= rules.solid_ms {
+        ContactQuality::Solid
+    } else if dt <= rules.foul_ms {
+        ContactQuality::FoulTip
+    } else {
+        ContactQuality::Whiff
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -2761,5 +2807,21 @@ mod tests {
             ..Default::default()
         };
         assert!(is_game_over(&score, 9));
+    }
+
+    // ── Contact quality ─────────────────────────────────────────────────────
+
+    #[test]
+    fn contact_quality_windows_are_data_driven() {
+        let r = std_rules();
+        use ContactQuality::*;
+        assert_eq!(contact_quality(0.0, &r), Perfect);
+        assert_eq!(contact_quality(-39.9, &r), Perfect);
+        assert_eq!(contact_quality(40.1, &r), Solid);
+        assert_eq!(contact_quality(-90.0, &r), Solid);
+        assert_eq!(contact_quality(90.1, &r), FoulTip);
+        assert_eq!(contact_quality(-140.0, &r), FoulTip);
+        assert_eq!(contact_quality(140.1, &r), Whiff);
+        assert_eq!(contact_quality(999.0, &r), Whiff);
     }
 }

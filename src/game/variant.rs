@@ -30,6 +30,37 @@ pub struct Ruleset {
     /// steal, the pitch is held this long while the leadoff/pickoff duel
     /// runs. Zero disables the window.
     pub steal_window_secs: f32,
+
+    // ── Batting-feel timing/contact tuning (per docs/superpowers/specs/
+    // 2026-07-30-batting-feel-design.md §2) ────────────────────────────────
+    // `rules::contact_quality` maps a swing's timing error (milliseconds,
+    // signed: negative = early) to a `ContactQuality` using these windows —
+    // data, not code, so each variant can feel different without touching
+    // `rules.rs`. The B7 balance harness is the tuning arbiter for these
+    // numbers: they start at the plan's defaults and only that harness
+    // should move them.
+    /// |dt| at or under this many ms is a `ContactQuality::Perfect`.
+    pub perfect_ms: f32,
+    /// |dt| at or under this many ms (and over `perfect_ms`) is a
+    /// `ContactQuality::Solid`.
+    pub solid_ms: f32,
+    /// |dt| at or under this many ms (and over `solid_ms`) is a
+    /// `ContactQuality::FoulTip`; beyond it, a `ContactQuality::Whiff`.
+    pub foul_ms: f32,
+    /// Exit-speed multiplier for `ContactQuality::Weak` contact. Weak is
+    /// never produced by these Classic windows — it's the Plan-C PCI
+    /// adapter's window-shrink outcome — but the multiplier lives here so
+    /// the adapter has a single place to tune it per variant.
+    pub exit_weak: f32,
+    /// Exit-speed multiplier for `ContactQuality::Solid` contact.
+    pub exit_solid: f32,
+    /// Exit-speed multiplier for `ContactQuality::Perfect` contact.
+    pub exit_perfect: f32,
+    /// Pull-side yaw offset (radians) applied per millisecond of signed
+    /// timing error on Solid/Perfect contact.
+    pub pull_yaw_per_ms: f32,
+    /// Standard deviation (ms) of the CPU batter's swing-timing scatter.
+    pub cpu_timing_spread_ms: f32,
 }
 
 /// Menu-selectable regulation game lengths.
@@ -146,6 +177,14 @@ impl VariantId {
                 innings: 9,
                 peg_outs: false,
                 steal_window_secs: 5.0,
+                perfect_ms: 40.0,
+                solid_ms: 90.0,
+                foul_ms: 140.0,
+                exit_weak: 0.65,
+                exit_solid: 1.0,
+                exit_perfect: 1.25,
+                pull_yaw_per_ms: 0.006,
+                cpu_timing_spread_ms: 70.0,
             },
             // Kid's rules: short games, outs by pegging the runner.
             VariantId::FrontYard => Ruleset {
@@ -155,6 +194,14 @@ impl VariantId {
                 innings: 3,
                 peg_outs: true,
                 steal_window_secs: 5.0,
+                perfect_ms: 40.0,
+                solid_ms: 90.0,
+                foul_ms: 140.0,
+                exit_weak: 0.65,
+                exit_solid: 1.0,
+                exit_perfect: 1.25,
+                pull_yaw_per_ms: 0.006,
+                cpu_timing_spread_ms: 70.0,
             },
         }
     }
