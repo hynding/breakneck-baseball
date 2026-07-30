@@ -147,6 +147,13 @@ pub struct Play {
     /// The last pitch ended untouched (take / swing-through): the ball is on
     /// its way to the catcher's mitt, and [`catcher_receives`] may stop it.
     pitch_taken: bool,
+    /// A pitch reached the catcher's glove before the take/swing was
+    /// logically judged (the timing window can stay open well past the
+    /// catcher now — see `late_swing_z`) and was hidden there for
+    /// presentation, ahead of the official freeze. Cleared whenever the ball
+    /// turns out *not* to be caught after all (a legitimately late hit, a
+    /// dropped third, HBP) so it can't linger invisible.
+    presentational_catch: bool,
     /// A call decided by the throw race but not yet announced: the ball is
     /// still in the air, and the play stays visually alive (the throw flies,
     /// the batter rounds the bases) until fielding reports it settled.
@@ -217,6 +224,7 @@ impl Default for Play {
             hold: Timer::from_seconds(0.0, TimerMode::Once),
             pickoff_cooldown: Timer::from_seconds(0.0, TimerMode::Once),
             pitch_taken: false,
+            presentational_catch: false,
             pending_call: None,
             contact_at: 0.0,
             wall_called: false,
@@ -447,6 +455,7 @@ fn pre_pitch(
         play.crossing = None;
         play.resolved = false;
         play.pitch_taken = false;
+        play.presentational_catch = false;
         // A lead still stretched at first movement sends the runner with the
         // delivery. It's only the no-throw-beats-it jump when the stretch
         // was made during the window — that's the extension that paid the
@@ -695,42 +704,101 @@ fn pitch_live(
 // ── The catcher receives ──────────────────────────────────────────────────────
 
 /// Stops an untouched pitch in the catcher's mitt instead of letting it sail
-/// to the backstop. Cosmetic — the call was already made at the crossing —
-/// but the ball really ends up in the glove, with the pop to prove it. Parks
-/// without a catcher (the front yard) let the ball fly as before.
+/// past. Parks without a catcher (the front yard) let the ball fly as before.
+///
+/// The take/swing-through judgment and the *visual* catch are deliberately
+/// on two different clocks now (review fix for the widened `late_swing_z`
+/// window): the timing dial needs the pitch to keep flying — untouched, at
+/// its true position — for a genuinely late press to still grade through
+/// `Solid`/`FoulTip` (see `late_swing_z`'s doc comment), but nobody should
+/// *see* it sail through the catcher and plate umpire while that's settled.
+/// So the ball is hidden **presentationally** the instant it reaches the
+/// glove's proximity, whichever phase the pitch is logically in — the catch
+/// pop plays right then — while the real flight (position, velocity) is left
+/// completely untouched underneath, so a still-possible late swing keeps
+/// reading the honest trajectory. Only once the pitch is *officially* judged
+/// (a take, or a swing that grades a whiff/foul tip) does the ball actually
+/// stop and park at the glove — invisibly, since it was already hidden, so
+/// there's no visible jump. A legitimately late hit (or a dropped third, or
+/// an HBP) un-hides it immediately: it was never really caught.
 #[allow(clippy::type_complexity)]
 fn catcher_receives(
     mut play: ResMut<Play>,
     catchers: Query<(Entity, &Transform), (With<CatcherRole>, Without<Baseball>)>,
-    mut ball_q: Query<(Entity, &mut Transform, &mut Velocity), (With<Baseball>, With<InFlight>)>,
+    mut ball_q: Query<
+        (Entity, &mut Transform, &mut Velocity, &mut Visibility),
+        (With<Baseball>, With<InFlight>),
+    >,
     mut caught: EventWriter<PitchCaughtEvent>,
     mut commands: Commands,
 ) {
-    if play.phase != Phase::Result || !play.pitch_taken {
-        return;
-    }
     let Some((catcher, catcher_tf)) = catchers.iter().next() else {
         return;
     };
-    let Ok((ball, mut ball_tf, mut vel)) = ball_q.get_single_mut() else {
+    let Ok((ball, mut ball_tf, mut vel, mut vis)) = ball_q.get_single_mut() else {
         return;
     };
     let pos = ball_tf.translation;
-    if pos.z > catcher_tf.translation.z + 0.6 || vel.linvel.z >= 0.0 {
-        return; // still on its way in
+    let approaching_glove = pos.z <= catcher_tf.translation.z + 0.6 && vel.linvel.z < 0.0;
+    let catchable_height = (0.12..=2.4).contains(&pos.y); // not in the dirt or sailing high
+
+    if play.phase == Phase::Result && play.pitch_taken {
+        // Officially judged: freeze it at the glove for real. If it was
+        // hidden already this is invisible — the transform simply now
+        // matches where the glove already showed it.
+        play.pitch_taken = false;
+        if !catchable_height {
+            *vis = Visibility::Inherited; // shouldn't have been hidden; make sure
+            return; // in the dirt or over everything: play it off the backstop
+        }
+        ball_tf.translation = catcher_tf.translation + Vec3::new(0.0, 0.5, 0.45);
+        vel.linvel = Vec3::ZERO;
+        vel.angvel = Vec3::ZERO;
+        *vis = Visibility::Inherited;
+        commands.entity(ball).remove::<InFlight>();
+        if !play.presentational_catch {
+            // No earlier presentational pop (the decision landed before the
+            // ball reached the glove) — this is the first and only catch.
+            commands
+                .entity(catcher)
+                .insert(Playing::new(AnimClip::GloveUp));
+            caught.send(PitchCaughtEvent);
+        }
+        play.presentational_catch = false;
+        return;
     }
-    play.pitch_taken = false;
-    if pos.y < 0.12 || pos.y > 2.4 {
-        return; // in the dirt or over everything: play it off the backstop
+
+    if play.phase == Phase::Pitch {
+        if play.presentational_catch {
+            return; // already hidden; still waiting on the official judgment
+        }
+        // Not judged yet — a swing could still land (the timing dial can
+        // reach well past the catcher). Hide it here, purely for show, the
+        // instant it's in glove range, so it never visibly sails through.
+        if !approaching_glove || !catchable_height {
+            return;
+        }
+        let cross = play.crossing.unwrap_or(Vec2::new(pos.x, pos.y));
+        if rules::hits_batter(cross) {
+            return; // headed for an HBP call: stays visible, plays through
+        }
+        *vis = Visibility::Hidden;
+        play.presentational_catch = true;
+        commands
+            .entity(catcher)
+            .insert(Playing::new(AnimClip::GloveUp));
+        caught.send(PitchCaughtEvent);
+        return;
     }
-    ball_tf.translation = catcher_tf.translation + Vec3::new(0.0, 0.5, 0.45);
-    vel.linvel = Vec3::ZERO;
-    vel.angvel = Vec3::ZERO;
-    commands.entity(ball).remove::<InFlight>();
-    commands
-        .entity(catcher)
-        .insert(Playing::new(AnimClip::GloveUp));
-    caught.send(PitchCaughtEvent);
+
+    // Anything else with the ball still tagged `InFlight` (a live hit, a
+    // dropped third, an HBP that already fired) is not a catch after all —
+    // never leave a presentational hide stuck on a ball that's actually
+    // still live.
+    if play.presentational_catch {
+        *vis = Visibility::Inherited;
+        play.presentational_catch = false;
+    }
 }
 
 // ── InPlay: the ball is live ──────────────────────────────────────────────────
@@ -888,7 +956,7 @@ fn result_phase(
     settled: Res<RunnersSettled>,
     mut overtime: Local<f32>,
     mut lead: ResMut<LeadState>,
-    mut ball_q: Query<(Entity, &mut Transform, &mut Velocity), With<Baseball>>,
+    mut ball_q: Query<(Entity, &mut Transform, &mut Velocity, &mut Visibility), With<Baseball>>,
     mut commands: Commands,
 ) {
     if play.phase != Phase::Result {
@@ -905,15 +973,20 @@ fn result_phase(
         return;
     }
     *overtime = 0.0;
-    if let Ok((entity, mut transform, mut vel)) = ball_q.get_single_mut() {
+    if let Ok((entity, mut transform, mut vel, mut vis)) = ball_q.get_single_mut() {
         transform.translation = rules::mound_reset_pos(field.pitch_distance);
         vel.linvel = Vec3::ZERO;
         vel.angvel = Vec3::ZERO;
         commands.entity(entity).remove::<InFlight>();
+        // Safety net: a presentational catch always restores visibility
+        // itself (see `catcher_receives`), but a stray edge case must never
+        // leave the ball invisible into the next pitch.
+        *vis = Visibility::Inherited;
     }
     play.phase = Phase::PrePitch;
     play.crossing = None;
     play.resolved = false;
+    play.presentational_catch = false;
     play.pending_pitch = None;
     play.live_kind = None;
     play.steal_armed = false;
