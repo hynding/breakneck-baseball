@@ -7,11 +7,13 @@
 //! write is visible the same frame.
 
 use bevy::prelude::*;
+use bevy_rapier3d::prelude::Velocity;
 
 use crate::game::ball::Baseball;
-use crate::game::flow::{LeadState, Phase, Play};
+use crate::game::flow::{swing_dt_ms, LeadState, Phase, Play};
 use crate::game::input::{Controllers, InputSource, Intents};
 use crate::game::rules::{steal_candidate, Bases};
+use crate::game::variant::Ruleset;
 use crate::game::ScoreBoard;
 
 /// A single knob for opponent difficulty (0.0 = easy, 1.0 = tough).
@@ -33,6 +35,15 @@ pub struct CpuState {
     pitch_delay: Timer,
     /// True once the AI batter has already committed a swing decision this pitch.
     decided_swing: bool,
+    /// Whether the AI batter has decided to offer at this pitch at all —
+    /// decided once, at the old trigger depth (in-zone/chase roll); the
+    /// timing of the *press* is separate, gated by `swing_target_dt` below.
+    will_swing: Option<bool>,
+    /// The swing-timing error (ms, same signed convention as
+    /// [`crate::game::flow::swing_dt_ms`]) the CPU is aiming for this pitch —
+    /// drawn once from deterministic noise so its swings scatter around
+    /// dead-on timing instead of always firing at a fixed ball depth.
+    swing_target_dt: Option<f32>,
     /// Whether the AI offense sends the runner this pitch — decided once at
     /// the start of the windup and held for the whole delivery.
     steal_call: Option<bool>,
@@ -46,6 +57,8 @@ impl Default for CpuState {
         Self {
             pitch_delay: Timer::from_seconds(0.9, TimerMode::Once),
             decided_swing: false,
+            will_swing: None,
+            swing_target_dt: None,
             steal_call: None,
             window_steal: None,
         }
@@ -149,8 +162,9 @@ pub fn cpu_offense(
     score: Res<ScoreBoard>,
     play: Res<Play>,
     bases: Res<Bases>,
+    rules: Res<Ruleset>,
     mut cpu: ResMut<CpuState>,
-    ball_q: Query<&Transform, With<Baseball>>,
+    ball_q: Query<(&Transform, &Velocity), With<Baseball>>,
     mut intents: ResMut<Intents>,
 ) {
     let team = score.batting_team();
@@ -166,6 +180,8 @@ pub fn cpu_offense(
     // runner was picked off) drops the plan.
     if play.phase == Phase::PrePitch {
         cpu.decided_swing = false;
+        cpu.will_swing = None;
+        cpu.swing_target_dt = None;
         cpu.steal_call = None;
         let extend = if steal_candidate(&bases).is_some() {
             if play.in_steal_window() {
@@ -194,6 +210,8 @@ pub fn cpu_offense(
     // with no candidate, nobody goes.
     if play.phase == Phase::WindUp {
         cpu.decided_swing = false;
+        cpu.will_swing = None;
+        cpu.swing_target_dt = None;
         let elapsed = time.elapsed_secs();
         let committed = cpu.window_steal == Some(true);
         let send = steal_candidate(&bases).is_some()
@@ -213,39 +231,61 @@ pub fn cpu_offense(
         intents.get_mut(team).action = false;
         return;
     }
-    let Ok(ball) = ball_q.get_single() else {
+    let Ok((ball, ball_vel)) = ball_q.get_single() else {
         return;
     };
     let pos = ball.translation;
-
     let t = time.elapsed_secs();
-    // The AI commits when the ball reaches its (noisy) trigger depth. A wider
-    // spread at lower skill means the CPU often mistimes — producing the weak
-    // pop-ups and grounders that make outs, so innings actually end.
-    let trigger_z = 0.45 + noise(t * 3.1) * 1.6 * (1.0 - cfg.skill);
-    if pos.z > trigger_z {
+
+    // Draw the swing's timing target once per pitch, deterministic on the
+    // pitch instant — the CPU's human-like timing scatter (Task B3). Same
+    // signed convention as `flow::swing_dt_ms`: negative is early, positive
+    // is late, drawn from ±`cpu_timing_spread_ms`.
+    let target_dt = *cpu
+        .swing_target_dt
+        .get_or_insert_with(|| noise(t * 11.9) * rules.cpu_timing_spread_ms);
+
+    // Whether to offer at this pitch at all is still decided once, at the
+    // old (noisy) trigger depth — only the *timing* of the press moved to
+    // `swing_target_dt`. A wider spread at lower skill means the CPU often
+    // chases or takes badly, and rarely a plain "no swing" is decided.
+    if cpu.will_swing.is_none() {
+        let trigger_z = 0.45 + noise(t * 3.1) * 1.6 * (1.0 - cfg.skill);
+        if pos.z > trigger_z {
+            intents.get_mut(team).action = false;
+            return;
+        }
+        // Is the pitch a strike as it nears the plate?
+        let in_zone = pos.x.abs() < 0.5 && (0.4..=1.6).contains(&pos.y);
+        let roll = hash01(t * 5.0);
+        let swing = if in_zone {
+            roll < 0.5 + 0.4 * cfg.skill // usually offers at strikes
+        } else {
+            roll < 0.28 * (1.0 - cfg.skill) // rarely chases balls
+        };
+        cpu.will_swing = Some(swing);
+        if !swing {
+            cpu.decided_swing = true;
+            intents.get_mut(team).action = false;
+            return;
+        }
+    }
+
+    // Committed to swinging: hold off pressing until the live timing error
+    // reaches the drawn target — `swing_dt_ms` rises from negative (ball
+    // still out front) toward positive (already past the plate) as the pitch
+    // approaches, so this fires on the first frame the swing is no longer
+    // early relative to the target.
+    let dt_ms = swing_dt_ms(pos.z, ball_vel.linvel.z);
+    if dt_ms < target_dt {
         intents.get_mut(team).action = false;
         return;
     }
 
     cpu.decided_swing = true;
-
-    // Is the pitch a strike as it nears the plate?
-    let in_zone = pos.x.abs() < 0.5 && (0.4..=1.6).contains(&pos.y);
-    let roll = hash01(t * 5.0);
-    let swing = if in_zone {
-        roll < 0.5 + 0.4 * cfg.skill // usually offers at strikes
-    } else {
-        roll < 0.28 * (1.0 - cfg.skill) // rarely chases balls
-    };
-
     let intent = intents.get_mut(team);
-    if swing {
-        intent.action = true;
-        // Spread the intended launch from low grounders to high flies so batted
-        // balls vary instead of all being squared-up line drives.
-        intent.aim = Vec2::new(noise(t * 7.0) * 0.6, -0.25 + hash01(t * 9.0) * 1.0);
-    } else {
-        intent.action = false;
-    }
+    intent.action = true;
+    // Spread the intended launch from low grounders to high flies so batted
+    // balls vary instead of all being squared-up line drives.
+    intent.aim = Vec2::new(noise(t * 7.0) * 0.6, -0.25 + hash01(t * 9.0) * 1.0);
 }
