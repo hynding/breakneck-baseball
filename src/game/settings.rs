@@ -380,19 +380,35 @@ pub fn settings_closed(open: Res<SettingsOpen>) -> bool {
     !open.0
 }
 
-/// **S** toggles the screen open/closed; **Esc** closes it. MainMenu only.
-fn toggle_settings(keyboard: Res<ButtonInput<KeyCode>>, mut open: ResMut<SettingsOpen>) {
-    if keyboard.just_pressed(KeyCode::KeyS) {
+/// **S** / gamepad **Select** toggles the screen open/closed; **Esc** /
+/// gamepad **East** (B) closes it while open. MainMenu only. `Select` is
+/// also `camera.rs`'s duel-view toggle, and `East` is `menu.rs`'s
+/// innings-cycle key — no clash: those systems run only in `Playing`
+/// (`Select`) or are gated `.run_if(settings_closed)` (`East`), so they
+/// never fire alongside this system's `MainMenu`-only, open-state-gated
+/// handling of the same buttons.
+fn toggle_settings(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    pads: Query<&Gamepad>,
+    mut open: ResMut<SettingsOpen>,
+) {
+    let toggle_pressed = keyboard.just_pressed(KeyCode::KeyS)
+        || pads.iter().any(|p| p.just_pressed(GamepadButton::Select));
+    let close_pressed = keyboard.just_pressed(KeyCode::Escape)
+        || pads.iter().any(|p| p.just_pressed(GamepadButton::East));
+    if toggle_pressed {
         open.0 = !open.0;
-    } else if open.0 && keyboard.just_pressed(KeyCode::Escape) {
+    } else if open.0 && close_pressed {
         open.0 = false;
     }
 }
 
-/// Up/Down move the row cursor; Left/Right cycle the batting style or nudge
-/// the volume (±0.1, clamped). No-op while the screen is closed.
+/// Up/Down (or gamepad DPad Up/Down) move the row cursor; Left/Right (or
+/// DPad Left/Right) cycle the batting style or nudge the volume (±0.1,
+/// clamped). No-op while the screen is closed.
 fn edit_settings(
     keyboard: Res<ButtonInput<KeyCode>>,
+    pads: Query<&Gamepad>,
     open: Res<SettingsOpen>,
     mut cursor: ResMut<SettingsCursorRow>,
     mut settings: ResMut<Settings>,
@@ -400,14 +416,22 @@ fn edit_settings(
     if !open.0 {
         return;
     }
-    if keyboard.just_pressed(KeyCode::ArrowUp) {
+    let up = keyboard.just_pressed(KeyCode::ArrowUp)
+        || pads.iter().any(|p| p.just_pressed(GamepadButton::DPadUp));
+    let down = keyboard.just_pressed(KeyCode::ArrowDown)
+        || pads.iter().any(|p| p.just_pressed(GamepadButton::DPadDown));
+    if up {
         cursor.0 = cursor.0.checked_sub(1).unwrap_or(2);
     }
-    if keyboard.just_pressed(KeyCode::ArrowDown) {
+    if down {
         cursor.0 = (cursor.0 + 1) % 3;
     }
-    let left = keyboard.just_pressed(KeyCode::ArrowLeft);
-    let right = keyboard.just_pressed(KeyCode::ArrowRight);
+    let left = keyboard.just_pressed(KeyCode::ArrowLeft)
+        || pads.iter().any(|p| p.just_pressed(GamepadButton::DPadLeft));
+    let right = keyboard.just_pressed(KeyCode::ArrowRight)
+        || pads
+            .iter()
+            .any(|p| p.just_pressed(GamepadButton::DPadRight));
     if !(left || right) {
         return;
     }
@@ -531,6 +555,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    // Keyboard path only: the harness has no gamepad-input injection
+    // precedent anywhere in the crate (no test presses a `GamepadButton`),
+    // so the gamepad half of `toggle_settings`/`edit_settings` isn't
+    // exercised in unit tests — the `Query<&Gamepad>` is simply empty here
+    // and both systems fall through to their keyboard branch unchanged.
     #[test]
     fn s_key_toggles_and_esc_closes() {
         let mut app = App::new();
