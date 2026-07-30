@@ -9,6 +9,19 @@
 //! Only the *pitch* is scripted (a human pitcher lobs straightaway
 //! changeups); every swing decision and its timing is the CPU's own, exactly
 //! like `e2e_cpu.rs`.
+//!
+//! **Margin, not marginal (review fix):** Rapier/Bevy's multithreaded
+//! physics isn't bit-reproducible run-to-run, so a variety assertion at the
+//! game's *default* `cpu_timing_spread_ms` (70 ms) is knife-edge — most
+//! presses land `Perfect` and only a sliver reaches `Solid`, so a few ms of
+//! nondeterministic jitter flips the result. This test instead forces
+//! `Ruleset::cpu_timing_spread_ms` to 200 ms right after kickoff — wide
+//! enough, now that `flow::late_swing_z` lets the swing window stay open the
+//! whole `foul_ms` (140 ms default), that `Perfect`/`Solid`/`FoulTip` are all
+//! comfortably reachable regardless of scheduler ordering. The exact
+//! press-frame *logic* is pinned bit-for-bit by the synthetic-ramp unit
+//! tests in `ai.rs` (`ready_to_press_*`); this e2e only needs to prove the
+//! wiring reaches the ECS/physics live, with a fat margin against jitter.
 
 mod common;
 
@@ -17,9 +30,16 @@ use bevy::prelude::*;
 use breakneck_baseball::game::flow::{ContactEvent, Phase, Play};
 use breakneck_baseball::game::input::Intents;
 use breakneck_baseball::game::rules::ContactQuality;
+use breakneck_baseball::game::variant::Ruleset;
 use breakneck_baseball::game::{GameState, ScoreBoard, Team};
 
 use common::{headless_app, run_until, start_game, DriveGame};
+
+/// A forced spread much wider than the default (70 ms): with `foul_ms` at
+/// its default 140 ms, this comfortably spans Perfect/Solid/FoulTip so the
+/// variety assertion has fat margin against run-to-run physics jitter
+/// instead of hinging on a handful of milliseconds.
+const FORCED_SPREAD_MS: f32 = 200.0;
 
 /// Generous headroom: 20 CPU-faced pitches, across possibly several
 /// half-innings if the CPU's side keeps making outs and the game keeps
@@ -86,6 +106,9 @@ fn cpu_batters_swing_with_varied_timing() {
     app.init_resource::<Qualities>();
     app.add_systems(DriveGame, (drive, capture));
     start_game(&mut app, KeyCode::Digit1);
+    app.world_mut()
+        .resource_mut::<Ruleset>()
+        .cpu_timing_spread_ms = FORCED_SPREAD_MS;
 
     run_until(&mut app, MAX_FRAMES, |app| {
         app.world().resource::<PitchCount>().seen >= TARGET_PITCHES

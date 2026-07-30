@@ -37,8 +37,10 @@ use crate::game::{GameState, ScoreBoard, Team};
 /// Z of home plate (the batter stands here).
 const PLATE_Z: f32 = 0.0;
 
-/// A swing connects while the ball is within this Z band of the plate.
-const SWING_LATE_Z: f32 = -1.2; // ball this far past the plate = window closed
+/// A swing connects while the ball is within this Z band of the plate. The
+/// early edge is a fixed distance (a swing started this far out never
+/// connects, whatever the timing model); the late edge is *not* fixed — see
+/// [`late_swing_z`].
 const SWING_EARLY_Z: f32 = 3.2; // ball this far in front = earliest contact
 /// Maximum horizontal miss the batter can still reach.
 const SWING_REACH_X: f32 = 1.8;
@@ -52,6 +54,23 @@ const SWING_REACH_X: f32 = 1.8;
 /// can't divide by zero. This is the seam [`rules::contact_quality`] grades.
 pub(crate) fn swing_dt_ms(ball_z: f32, vel_z: f32) -> f32 {
     1000.0 * (ball_z - PLATE_Z) / vel_z.min(-f32::EPSILON)
+}
+
+/// The Z at which a swing's timing error would read exactly `foul_ms` late —
+/// i.e. `swing_dt_ms(late_swing_z(vel_z, foul_ms), vel_z) == foul_ms` — solved
+/// by inverting [`swing_dt_ms`] at `dt_ms == foul_ms`. This *replaces* a fixed
+/// distance-past-the-plate constant as the swing window's late edge (docs/
+/// superpowers/specs/2026-07-30-batting-feel-design.md §2): a fixed cutoff
+/// can't track the tuned foul window or the live pitch speed, so at typical
+/// game speeds a constant like −1.2 m only ever reaches ~40 ms of lateness —
+/// no `cpu_timing_spread_ms` (or a genuinely late human press) could ever
+/// reach a timing-driven `FoulTip`/`Whiff`, because the window closed (and
+/// the pitch got judged a take) long before the timing math got there. The
+/// spatial band is now the geometric shadow of the timing model's own foul
+/// window, so it stays open exactly as long as a swing can still be graded
+/// by `contact_quality` — no longer, no shorter.
+pub(crate) fn late_swing_z(vel_z: f32, foul_ms: f32) -> f32 {
+    foul_ms * vel_z.min(-f32::EPSILON) / 1000.0
 }
 
 /// Seconds the result banner lingers before the next pitch.
@@ -520,13 +539,18 @@ fn pitch_live(
     let batter = score.batting_team();
     let intent = intents.get(batter);
 
+    // The late edge of the swing window is the geometric shadow of the foul
+    // window itself (see `late_swing_z`), recomputed off the ball's live
+    // z-speed every frame since it isn't a fixed distance.
+    let late_exit_z = late_swing_z(ball_vel.linvel.z, rules.foul_ms);
+
     if intent.action {
         // The spatial band is the OUTER eligibility gate: a ball out of the
         // batter's reach is a whiff regardless of timing. Within the band,
         // `contact_quality` grades the swing off its timing error — so a Whiff
         // now covers a band-miss AND a badly-mistimed in-band swing uniformly.
         let reachable =
-            pos.z >= SWING_LATE_Z && pos.z <= SWING_EARLY_Z && pos.x.abs() <= SWING_REACH_X;
+            pos.z >= late_exit_z && pos.z <= SWING_EARLY_Z && pos.x.abs() <= SWING_REACH_X;
         let dt_ms = swing_dt_ms(pos.z, ball_vel.linvel.z);
         let quality = if reachable {
             rules::contact_quality(dt_ms, &rules)
@@ -631,8 +655,9 @@ fn pitch_live(
         return;
     }
 
-    // No swing: once the ball is well past the plate, judge the take.
-    if pos.z < SWING_LATE_Z {
+    // No swing: once the ball is past the foul window's own late edge (a
+    // swing here couldn't grade as anything but a take anyway), judge it.
+    if pos.z < late_exit_z {
         let cross = play.crossing.unwrap_or(Vec2::new(pos.x, pos.y));
         if rules::hits_batter(cross) {
             // Dead ball: the batter takes first, forced runners move.
@@ -1120,5 +1145,43 @@ mod tests {
         // A stalled or forward-drifting ball is clamped, not a NaN/inf.
         assert!(swing_dt_ms(1.0, 0.0).is_finite());
         assert!(swing_dt_ms(1.0, 5.0).is_finite());
+    }
+
+    #[test]
+    fn late_swing_z_round_trips_through_swing_dt_ms() {
+        // The whole point: the Z it hands back reads back out at exactly
+        // `foul_ms` through the same swing_dt_ms the live check uses.
+        for vel_z in [-29.0_f32, -31.0, -33.0, -35.0, -38.0] {
+            for foul_ms in [90.0_f32, 140.0, 200.0] {
+                let z = late_swing_z(vel_z, foul_ms);
+                let dt = swing_dt_ms(z, vel_z);
+                assert!(
+                    (dt - foul_ms).abs() < 1e-3,
+                    "vel_z={vel_z} foul_ms={foul_ms}: late_swing_z={z} -> dt={dt}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn late_swing_z_reaches_far_past_the_old_fixed_cutoff() {
+        // The bug this replaces: a fixed −1.2 m cutoff only ever reaches
+        // ~40 ms of lateness at game pitch speeds, so no `foul_ms` (140 by
+        // default) worth of window was ever geometrically reachable. The
+        // derived Z must sit well past that fixed point for every pitch
+        // speed in the arsenal (29–38 m/s).
+        for vel_z in [-29.0_f32, -31.0, -33.0, -35.0, -38.0] {
+            let z = late_swing_z(vel_z, 140.0);
+            assert!(
+                z < -1.2,
+                "vel_z={vel_z}: late_swing_z={z} should reach past the old fixed −1.2 m cutoff"
+            );
+        }
+    }
+
+    #[test]
+    fn late_swing_z_never_divides_by_zero() {
+        assert!(late_swing_z(0.0, 140.0).is_finite());
+        assert!(late_swing_z(5.0, 140.0).is_finite());
     }
 }

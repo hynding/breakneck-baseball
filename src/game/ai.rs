@@ -77,6 +77,24 @@ pub(crate) fn noise(seed: f32) -> f32 {
     hash01(seed) * 2.0 - 1.0
 }
 
+/// Draws the per-pitch swing-timing target: signed milliseconds (same
+/// convention as [`crate::game::flow::swing_dt_ms`] — early negative, late
+/// positive), scaled by the configured spread. Pure so the press decision
+/// can be pinned by a synthetic `dt` ramp without booting the ECS (Task B3
+/// review fix).
+pub(crate) fn draw_target_dt(seed: f32, spread_ms: f32) -> f32 {
+    noise(seed) * spread_ms
+}
+
+/// Whether *this* frame is the one to press: the live timing error has
+/// reached (or passed) the drawn target. [`crate::game::flow::swing_dt_ms`]
+/// rises monotonically from negative (early) through zero to positive
+/// (late) as the pitch approaches, so this is a plain threshold crossing —
+/// the first frame it holds is the press frame.
+pub(crate) fn ready_to_press(dt_ms: f32, target_dt: f32) -> bool {
+    dt_ms >= target_dt
+}
+
 // ── Defense: the AI pitches ───────────────────────────────────────────────────
 
 #[allow(clippy::too_many_arguments)]
@@ -243,7 +261,7 @@ pub fn cpu_offense(
     // is late, drawn from ±`cpu_timing_spread_ms`.
     let target_dt = *cpu
         .swing_target_dt
-        .get_or_insert_with(|| noise(t * 11.9) * rules.cpu_timing_spread_ms);
+        .get_or_insert_with(|| draw_target_dt(t * 11.9, rules.cpu_timing_spread_ms));
 
     // Whether to offer at this pitch at all is still decided once, at the
     // old (noisy) trigger depth — only the *timing* of the press moved to
@@ -277,7 +295,7 @@ pub fn cpu_offense(
     // approaches, so this fires on the first frame the swing is no longer
     // early relative to the target.
     let dt_ms = swing_dt_ms(pos.z, ball_vel.linvel.z);
-    if dt_ms < target_dt {
+    if !ready_to_press(dt_ms, target_dt) {
         intents.get_mut(team).action = false;
         return;
     }
@@ -288,4 +306,61 @@ pub fn cpu_offense(
     // Spread the intended launch from low grounders to high flies so batted
     // balls vary instead of all being squared-up line drives.
     intent.aim = Vec2::new(noise(t * 7.0) * 0.6, -0.25 + hash01(t * 9.0) * 1.0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn draw_target_dt_is_deterministic_and_bounded() {
+        // Same seed always draws the same target (the CPU's decision has to
+        // be reproducible across frames via `get_or_insert_with`).
+        let a = draw_target_dt(12.34, 70.0);
+        let b = draw_target_dt(12.34, 70.0);
+        assert_eq!(a, b);
+        // noise() is in −1.0..1.0, so the draw never exceeds the spread.
+        assert!(a.abs() <= 70.0 + f32::EPSILON);
+
+        // A different seed generally draws a different target — spot-check
+        // a handful so this isn't a degenerate constant function.
+        let distinct = (0..8)
+            .map(|i| draw_target_dt(i as f32 * 11.9, 70.0))
+            .collect::<Vec<_>>();
+        assert!(
+            distinct.windows(2).any(|w| (w[0] - w[1]).abs() > 1.0),
+            "expected varying draws across seeds, got {distinct:?}"
+        );
+    }
+
+    #[test]
+    fn ready_to_press_fires_on_the_first_frame_dt_reaches_target() {
+        // A synthetic dt ramp standing in for `swing_dt_ms` sampled once per
+        // frame as a pitch approaches: monotonically increasing, early
+        // (negative) to late (positive), like the live ball's timing error.
+        let ramp: Vec<f32> = (0..50).map(|i| -100.0 + i as f32 * 4.0).collect();
+        let target = 37.0;
+
+        let fired = ramp.iter().position(|&dt| ready_to_press(dt, target));
+
+        // First dt >= 37.0 in the ramp (-100, -96, ..., step 4) is 40.0 at
+        // index 35 — pin the exact frame, not just "eventually fires".
+        assert_eq!(fired, Some(35));
+        assert!(ramp[35] >= target);
+        assert!(ramp[34] < target);
+    }
+
+    #[test]
+    fn ready_to_press_fires_immediately_for_an_already_past_target() {
+        // A target earlier than the current dt (the commit landed later
+        // than the drawn target) presses on the very same frame — a swing
+        // can't be un-pressed to wait for a target already behind it.
+        assert!(ready_to_press(-10.0, -50.0));
+        assert!(ready_to_press(0.0, 0.0));
+    }
+
+    #[test]
+    fn ready_to_press_holds_for_a_target_not_yet_reached() {
+        assert!(!ready_to_press(-20.0, 10.0));
+    }
 }
