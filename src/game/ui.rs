@@ -6,9 +6,9 @@
 
 use bevy::prelude::*;
 
-use crate::game::flow::{BannerTone, Phase, Play, PlayBanner};
+use crate::game::flow::{BannerTone, ContactEvent, Phase, Play, PlayBanner};
 use crate::game::roster::Rosters;
-use crate::game::rules::{Bases, BattingOrder, LINEUP_SIZE};
+use crate::game::rules::{Bases, BattingOrder, ContactQuality, LINEUP_SIZE};
 use crate::game::theme::Theme;
 use crate::game::variant::{FieldSpec, Ruleset};
 use crate::game::{GameState, GameplayEntity, ScoreBoard, Team};
@@ -47,6 +47,14 @@ struct BannerPill;
 /// The banner text inside the pill.
 #[derive(Component)]
 struct BannerText;
+
+/// The contact-quality stamp (PERFECT! / EARLY / LATE / FOUL TIP), painted at
+/// spawn near the zone-box screen area and shown by text mutation only — see
+/// the wasm UI rule on [`hidden_tint`]. Public so e2e tests can query its
+/// `Text` content directly (the same pattern `player::CatcherRole` uses for
+/// `e2e_camera_views`'s `Visibility` check).
+#[derive(Component)]
+pub struct ContactStampText;
 
 /// Root of one of the two duel cards flanking the catcher's-eye pitch view.
 #[derive(Component)]
@@ -87,6 +95,20 @@ impl Default for BannerTimer {
     }
 }
 
+/// How long the contact stamp (Task B4) stays up before clearing — quick
+/// enough to read as a reaction to *this* swing, gone well before the next.
+const CONTACT_STAMP_SECS: f32 = 0.8;
+
+/// How long the current contact stamp stays visible before clearing.
+#[derive(Resource)]
+struct ContactStampTimer(Timer);
+
+impl Default for ContactStampTimer {
+    fn default() -> Self {
+        Self(Timer::from_seconds(CONTACT_STAMP_SECS, TimerMode::Once))
+    }
+}
+
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
 pub struct UiPlugin;
@@ -94,6 +116,7 @@ pub struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BannerTimer>()
+            .init_resource::<ContactStampTimer>()
             .add_systems(crate::game::game_start(), spawn_hud)
             .add_systems(
                 Update,
@@ -105,6 +128,8 @@ impl Plugin for UiPlugin {
                     update_duel_panels,
                     show_banner,
                     fade_banner,
+                    show_contact_stamp,
+                    fade_contact_stamp,
                 )
                     .run_if(in_state(GameState::Playing)),
             );
@@ -253,6 +278,39 @@ fn spawn_hud(
                     TextColor(ui.text_primary),
                 ));
             });
+        });
+
+    // Contact stamp (Task B4): a bare text element (no pill chrome) sitting
+    // just below the banner row, over the zone-box screen area the
+    // catcher's-eye duel view frames the pitch in (`FieldSpec::duel_eye`).
+    // Painted at spawn with an empty string — same wasm-safe idiom as the
+    // banner above — then shown/blanked by mutating this one text node.
+    commands
+        .spawn((
+            GameplayEntity,
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Percent(38.0),
+                left: Val::Px(0.0),
+                width: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            // A container root with no renderable is never re-extracted on
+            // wasm/WebGL2 once the first frame culls it — a near-invisible
+            // background (never alpha 0, see `hidden_tint`) keeps it live.
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.01)),
+        ))
+        .with_children(|wrap| {
+            wrap.spawn((
+                ContactStampText,
+                Text::new(""),
+                TextFont {
+                    font_size: 34.0,
+                    ..default()
+                },
+                TextColor(ui.text_primary),
+            ));
         });
     // Controls help now lives in the pause dialog (see `subs.rs`) rather
     // than a bar pinned to the bottom of the screen during play.
@@ -569,6 +627,56 @@ fn fade_banner(
             border.0 = hidden_tint(border.0);
         }
         for (mut text, _color) in &mut text_q {
+            **text = String::new();
+        }
+    }
+}
+
+/// Stamps the graded swing timing over the zone-box area: `PERFECT!` for
+/// dead-on contact; `EARLY`/`LATE` for `Solid` (and the as-yet-unreachable
+/// `Weak`, per its doc comment in `rules.rs`) by `dt_ms`'s sign; `FOUL TIP`
+/// for a foul; nothing for `Whiff` — the classic strike/ball banner already
+/// covers a swing-and-miss.
+fn show_contact_stamp(
+    mut events: EventReader<ContactEvent>,
+    theme: Res<Theme>,
+    mut timer: ResMut<ContactStampTimer>,
+    mut text_q: Query<(&mut Text, &mut TextColor), With<ContactStampText>>,
+) {
+    let Some(ev) = events.read().last() else {
+        return;
+    };
+    let ui = &theme.ui;
+    let stamp = match ev.quality {
+        ContactQuality::Perfect => Some(("PERFECT!", ui.tone_epic)),
+        ContactQuality::Solid | ContactQuality::Weak => {
+            let label = if ev.dt_ms < 0.0 { "EARLY" } else { "LATE" };
+            Some((label, ui.tone_info))
+        }
+        ContactQuality::FoulTip => Some(("FOUL TIP", ui.tone_info)),
+        ContactQuality::Whiff => None,
+    };
+    let Some((label, color)) = stamp else {
+        return;
+    };
+    for (mut text, mut text_color) in &mut text_q {
+        **text = label.to_string();
+        text_color.0 = color;
+    }
+    timer.0 = Timer::from_seconds(CONTACT_STAMP_SECS, TimerMode::Once);
+}
+
+/// Blanks the contact stamp once its display time is up.
+fn fade_contact_stamp(
+    time: Res<Time>,
+    mut timer: ResMut<ContactStampTimer>,
+    mut text_q: Query<&mut Text, With<ContactStampText>>,
+) {
+    if timer.0.finished() {
+        return;
+    }
+    if timer.0.tick(time.delta()).just_finished() {
+        for mut text in &mut text_q {
             **text = String::new();
         }
     }

@@ -22,8 +22,9 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy_rapier3d::prelude::*;
 
 use crate::game::ai::hash01;
-use crate::game::flow::{Phase, Play};
+use crate::game::flow::{ContactEvent, Phase, Play};
 use crate::game::rules;
+use crate::game::rules::ContactQuality;
 use crate::game::variant::{FieldSpec, Scenery};
 use crate::game::{GameState, GameplayEntity};
 
@@ -65,6 +66,22 @@ pub struct OutfieldWall;
 /// Marks a piece of the floating strike-zone box shown during the duel.
 #[derive(Component)]
 struct StrikeZoneOverlay;
+
+/// The zone box's frame material plus enough to pulse and restore it: a
+/// contact worth celebrating (Solid/Perfect, Task B4) briefly tints the
+/// frame bars, then this ticks the pulse back to `base_color`. Rebuilt
+/// fresh in [`spawn_strike_zone`] every game start alongside the material
+/// it points at.
+#[derive(Resource)]
+struct ZoneFlash {
+    material: Handle<StandardMaterial>,
+    base_color: Color,
+    flash_color: Color,
+    timer: Option<Timer>,
+}
+
+/// How long the zone-frame flash pulse holds before fading back.
+const ZONE_FLASH_SECS: f32 = 0.18;
 
 // ── Procedural surfaces ───────────────────────────────────────────────────────
 // Runtime-generated textures, no asset files (the same philosophy as the
@@ -176,7 +193,12 @@ impl Plugin for FieldPlugin {
         app.add_systems(crate::game::game_start(), spawn_field)
             .add_systems(
                 Update,
-                strike_zone_visibility.run_if(in_state(GameState::Playing)),
+                (
+                    strike_zone_visibility,
+                    trigger_zone_flash,
+                    restore_zone_flash,
+                )
+                    .run_if(in_state(GameState::Playing)),
             );
     }
 }
@@ -221,7 +243,7 @@ fn spawn_field(
     }
     spawn_bases(&mut commands, &mut meshes, &mut materials, &field);
     spawn_chalk_lines(&mut commands, &mut meshes, &mut materials, &field);
-    spawn_strike_zone(&mut commands, &mut meshes, &mut materials);
+    spawn_strike_zone(&mut commands, &mut meshes, &mut materials, &theme);
     // The sun sits behind home plate in both parks so everything the
     // broadcast and duel cameras look at — players' backs, house fronts, the
     // outfield — is lit rather than silhouetted; ambient keeps shadow sides
@@ -879,6 +901,7 @@ fn spawn_strike_zone(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
+    theme: &crate::game::theme::Theme,
 ) {
     let width = rules::ZONE_HALF_WIDTH * 2.0;
     let height = rules::ZONE_HIGH - rules::ZONE_LOW;
@@ -892,8 +915,19 @@ fn spawn_strike_zone(
             ..default()
         })
     };
+    let frame_base_color = Color::srgba(1.0, 1.0, 1.0, 0.4);
     let fill = translucent(Color::srgba(1.0, 1.0, 1.0, 0.07));
-    let frame = translucent(Color::srgba(1.0, 1.0, 1.0, 0.4));
+    let frame = translucent(frame_base_color);
+
+    // Task B4: a Solid/Perfect contact pulses the frame bars toward the
+    // theme accent, then fades back to `frame_base_color` — presentation
+    // only, teaching the timing windows without touching the rules.
+    commands.insert_resource(ZoneFlash {
+        material: frame.clone(),
+        base_color: frame_base_color,
+        flash_color: theme.ui.accent.with_alpha(1.0),
+        timer: None,
+    });
 
     let mut part = |size: Vec3, pos: Vec3, mat: &Handle<StandardMaterial>| {
         commands.spawn((
@@ -943,6 +977,48 @@ fn strike_zone_visibility(
         if *visibility != desired {
             *visibility = desired;
         }
+    }
+}
+
+/// A judged Solid/Perfect swing pulses the zone frame toward the theme
+/// accent — `FoulTip`/`Whiff` leave it alone (a whiff already has its own
+/// strike banner; `Weak` is bucketed with `Solid`, see [`ZoneFlash`]'s doc).
+fn trigger_zone_flash(
+    mut contact_ev: EventReader<ContactEvent>,
+    mut flash: ResMut<ZoneFlash>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    for ev in contact_ev.read() {
+        if !matches!(
+            ev.quality,
+            ContactQuality::Perfect | ContactQuality::Solid | ContactQuality::Weak
+        ) {
+            continue;
+        }
+        if let Some(mat) = materials.get_mut(&flash.material) {
+            mat.base_color = flash.flash_color;
+        }
+        flash.timer = Some(Timer::from_seconds(ZONE_FLASH_SECS, TimerMode::Once));
+    }
+}
+
+/// Restores the zone frame's resting tint once the flash pulse timer expires.
+fn restore_zone_flash(
+    time: Res<Time>,
+    mut flash: ResMut<ZoneFlash>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let done = match flash.timer.as_mut() {
+        Some(timer) => timer.tick(time.delta()).finished(),
+        None => false,
+    };
+    if !done {
+        return;
+    }
+    let (material, base_color) = (flash.material.clone(), flash.base_color);
+    flash.timer = None;
+    if let Some(mat) = materials.get_mut(&material) {
+        mat.base_color = base_color;
     }
 }
 
