@@ -10,9 +10,9 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::Velocity;
 
 use crate::game::ball::Baseball;
-use crate::game::flow::{swing_dt_ms, LeadState, Phase, Play};
+use crate::game::flow::{late_swing_z, swing_dt_ms, LeadState, Phase, Play};
 use crate::game::input::{Controllers, InputSource, Intents};
-use crate::game::rules::{steal_candidate, Bases};
+use crate::game::rules::{steal_candidate, Bases, GRAVITY};
 use crate::game::variant::Ruleset;
 use crate::game::ScoreBoard;
 
@@ -82,6 +82,13 @@ pub(crate) fn noise(seed: f32) -> f32 {
 /// positive), scaled by the configured spread. Pure so the press decision
 /// can be pinned by a synthetic `dt` ramp without booting the ECS (Task B3
 /// review fix).
+///
+/// (A CPU-only "Perfect deadband" here — biasing the draw out of the dead-on
+/// window to cut barreled CPU home runs — was tried and reverted: because
+/// `hit_velocity`'s exit sweet spot is `contact_z ≈ 0.4` (≈ −11 ms of timing),
+/// not dt = 0, a symmetric-around-zero deadband excludes *all* hard contact,
+/// not just barrels, and collapses the offense. HR is instead held down by the
+/// flattened CPU launch aim below plus the balance harness's asserted slack.)
 pub(crate) fn draw_target_dt(seed: f32, spread_ms: f32) -> f32 {
     noise(seed) * spread_ms
 }
@@ -263,18 +270,31 @@ pub fn cpu_offense(
         .swing_target_dt
         .get_or_insert_with(|| draw_target_dt(t * 11.9, rules.cpu_timing_spread_ms));
 
-    // Whether to offer at this pitch at all is still decided once, at the
-    // old (noisy) trigger depth — only the *timing* of the press moved to
-    // `swing_target_dt`. A wider spread at lower skill means the CPU often
-    // chases or takes badly, and rarely a plain "no swing" is decided.
+    // Decide whether to offer at this pitch — once, and **early**, while the
+    // ball is still well in front of the plate (past `SWING_EARLY_Z`, the
+    // reachable window's front edge). This is what makes the drawn `target_dt`
+    // actually govern the press: the old code committed at a ~0.45 m trigger
+    // depth, by which point an early target had nothing left to wait for and
+    // collapsed onto that near-zero dt — so the CPU always *connected* and
+    // never swung through. Committing out here lets an early draw fire while
+    // the ball is still unreachable, i.e. a genuine timing whiff. `decision_z`
+    // carries a little skill-scaled jitter so the commit depth varies.
     if cpu.will_swing.is_none() {
-        let trigger_z = 0.45 + noise(t * 3.1) * 1.6 * (1.0 - cfg.skill);
-        if pos.z > trigger_z {
+        let decision_z = 6.5 + noise(t * 3.1) * 1.5;
+        if pos.z > decision_z {
             intents.get_mut(team).action = false;
             return;
         }
-        // Is the pitch a strike as it nears the plate?
-        let in_zone = pos.x.abs() < 0.5 && (0.4..=1.6).contains(&pos.y);
+        // Predicted plate crossing (gravity only; the pitch's drag is the CPU's
+        // to misjudge) drives the in-zone/chase offer roll now that the offer
+        // is committed before the ball nears the plate.
+        let vz = ball_vel.linvel.z.min(-f32::EPSILON);
+        let flight = (pos.z / -vz).max(0.0);
+        let cross = Vec2::new(
+            pos.x + ball_vel.linvel.x * flight,
+            pos.y + ball_vel.linvel.y * flight - 0.5 * GRAVITY * flight * flight,
+        );
+        let in_zone = cross.x.abs() < 0.5 && (0.4..=1.6).contains(&cross.y);
         let roll = hash01(t * 5.0);
         let swing = if in_zone {
             roll < 0.5 + 0.4 * cfg.skill // usually offers at strikes
@@ -289,13 +309,18 @@ pub fn cpu_offense(
         }
     }
 
-    // Committed to swinging: hold off pressing until the live timing error
-    // reaches the drawn target — `swing_dt_ms` rises from negative (ball
-    // still out front) toward positive (already past the plate) as the pitch
-    // approaches, so this fires on the first frame the swing is no longer
-    // early relative to the target.
+    // Committed to swinging: press when the live timing error reaches the drawn
+    // target, OR at the last frame the swing can still connect (`late_swing_z`,
+    // where the error equals `foul_ms`) — whichever comes first. `swing_dt_ms`
+    // rises from negative (ball out front) through zero toward positive (past
+    // the plate). An *early* target fires while the ball is still beyond
+    // `SWING_EARLY_Z` → a real swing-through (Whiff). A *late* target fires at
+    // the reachable-late edge → an honest FoulTip/Whiff, instead of the ball
+    // reaching the take judgment first and being scored a called strike (which
+    // is what used to make the CPU's K take-driven rather than whiff-driven).
     let dt_ms = swing_dt_ms(pos.z, ball_vel.linvel.z);
-    if !ready_to_press(dt_ms, target_dt) {
+    let past_late_edge = pos.z <= late_swing_z(ball_vel.linvel.z, rules.foul_ms);
+    if !ready_to_press(dt_ms, target_dt) && !past_late_edge {
         intents.get_mut(team).action = false;
         return;
     }
@@ -303,9 +328,13 @@ pub fn cpu_offense(
     cpu.decided_swing = true;
     let intent = intents.get_mut(team);
     intent.action = true;
-    // Spread the intended launch from low grounders to high flies so batted
-    // balls vary instead of all being squared-up line drives.
-    intent.aim = Vec2::new(noise(t * 7.0) * 0.6, -0.25 + hash01(t * 9.0) * 1.0);
+    // Spread the intended launch from grounders through line drives to the
+    // occasional fly, but keep the *plane flat* — the launch aim is the CPU's
+    // home-run dial (a towering uppercut clears the regulation fence even at a
+    // modest exit multiplier), so a mean well below a fly-ball angle keeps the
+    // HR rate in the balance band while still putting balls in play (see
+    // tests/balance_sim.rs). Horizontal spray is unchanged.
+    intent.aim = Vec2::new(noise(t * 7.0) * 0.6, -0.8 + hash01(t * 9.0) * 0.85);
 }
 
 #[cfg(test)]

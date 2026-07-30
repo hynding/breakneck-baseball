@@ -25,7 +25,7 @@ use breakneck_baseball::game::{GameState, ScoreBoard};
 use common::{headless_app, run_until, start_game, DriveGame};
 
 /// Generous per-milestone budget (~60 sim-seconds — pitches wait out the
-/// 5-second steal window whenever runners are aboard).
+/// steal window, `Ruleset::steal_window_secs`, whenever runners are aboard).
 const STAGE_FRAMES: u64 = 15_000;
 
 #[derive(Resource, Default)]
