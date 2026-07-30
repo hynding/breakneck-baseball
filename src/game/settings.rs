@@ -132,6 +132,46 @@ fn write_store(text: &str) -> Result<(), String> {
         .map_err(|_| "localStorage set_item failed".into())
 }
 
+/// Whether the settings screen is currently shown (toggled with **S** on
+/// the main menu). A resource so menu systems can suppress their own
+/// hotkeys while the screen is open.
+#[derive(Resource, Default)]
+pub struct SettingsOpen(pub bool);
+
+/// Loads persisted settings at startup, mirrors [`Settings::volume`] into
+/// the audio mixer, and persists every change back to the store.
+pub struct SettingsPlugin;
+
+impl Plugin for SettingsPlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_resource(load_settings())
+            .init_resource::<SettingsOpen>()
+            // `MinimalPlugins` (used in tests) doesn't register `AudioPlugin`,
+            // so `GlobalVolume` wouldn't otherwise exist; initializing it here
+            // makes the plugin self-sufficient and harmless alongside the
+            // real `AudioPlugin`, which also inserts it (default 1.0) before
+            // `apply_volume` ever runs.
+            .init_resource::<bevy::audio::GlobalVolume>()
+            .add_systems(Update, (apply_volume, persist_settings));
+    }
+}
+
+/// Mirrors [`Settings::volume`] into the audio mixer. `is_changed` is true
+/// on insertion, so the loaded value applies on the first frame too.
+fn apply_volume(settings: Res<Settings>, mut volume: ResMut<bevy::audio::GlobalVolume>) {
+    if settings.is_changed() {
+        *volume = bevy::audio::GlobalVolume::new(settings.volume.clamp(0.0, 1.0));
+    }
+}
+
+/// Writes every change to the store — cheap (tiny JSON) and forgetting to
+/// save is worse than the extra writes.
+fn persist_settings(settings: Res<Settings>) {
+    if settings.is_changed() && !settings.is_added() {
+        save_settings(&settings);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,10 +232,40 @@ mod tests {
 
     #[test]
     fn clamped_bounds_volume() {
-        let mut s = Settings::default();
-        s.volume = 1.7;
+        let mut s = Settings {
+            volume: 1.7,
+            ..Default::default()
+        };
         assert!((s.clamped().volume - 1.0).abs() < f32::EPSILON);
         s.volume = -0.3;
         assert!(s.clamped().volume.abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn plugin_loads_applies_and_persists() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join(format!("bb-plugin-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::env::set_var("BREAKNECK_SETTINGS_PATH", &path);
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_plugins(SettingsPlugin);
+        app.update();
+        // Loaded default volume applied to GlobalVolume.
+        let gv = app.world().resource::<bevy::audio::GlobalVolume>();
+        assert!((gv.volume.get() - 0.7).abs() < 1e-5);
+
+        // Mutate → persisted + volume follows.
+        app.world_mut().resource_mut::<Settings>().volume = 0.25;
+        app.update();
+        let gv = app.world().resource::<bevy::audio::GlobalVolume>();
+        assert!((gv.volume.get() - 0.25).abs() < 1e-5);
+        let on_disk: Settings =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!((on_disk.volume - 0.25).abs() < 1e-5);
+
+        std::env::remove_var("BREAKNECK_SETTINGS_PATH");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

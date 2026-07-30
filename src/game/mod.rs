@@ -237,7 +237,7 @@ impl Plugin for GamePlugin {
                 UiPlugin,
                 JerseyPlugin,
             ))
-            .add_plugins(SubsPlugin)
+            .add_plugins((SubsPlugin, settings::SettingsPlugin))
             // Fresh scoreboard/rosters each time a game starts from the menu;
             // tear the scene down once the game is over. Pausing stays inside
             // Playing ⇄ Paused and touches neither.
