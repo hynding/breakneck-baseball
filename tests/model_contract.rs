@@ -4,7 +4,8 @@
 use std::collections::HashSet;
 
 use breakneck_baseball::game::model_assets::{
-    ATTACH_BONES, CLIP_TABLE, JERSEY_MATERIAL, MAX_BONES, MAX_GLB_BYTES, MAX_TRIANGLES, PLAYER_GLB,
+    ATTACH_BONES, BAT_MATERIAL, CAP_MATERIAL, CLIP_TABLE, JERSEY_MATERIAL, MAX_BONES,
+    MAX_GLB_BYTES, MAX_TRIANGLES, PLAYER_GLB,
 };
 
 #[test]
@@ -33,10 +34,15 @@ fn player_glb_satisfies_contract() {
         .materials()
         .filter_map(|m| m.name().map(str::to_owned))
         .collect();
-    assert!(
-        material_names.iter().any(|n| n == JERSEY_MATERIAL),
-        "missing material {JERSEY_MATERIAL}; found {material_names:?}"
-    );
+    // Every named material `build_rig_animations` looks up must really be
+    // present — an `unwrap_or_default()` fallback there degrades silently
+    // (caps stop tinting, the bat shows on every rig) instead of failing.
+    for material in [JERSEY_MATERIAL, CAP_MATERIAL, BAT_MATERIAL] {
+        assert!(
+            material_names.iter().any(|n| n == material),
+            "missing material {material}; found {material_names:?}"
+        );
+    }
 
     let skin = doc.skins().next().expect("model must be skinned");
     let bone_names: HashSet<String> = skin

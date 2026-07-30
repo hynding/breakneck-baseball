@@ -1,9 +1,11 @@
 //! Procedural rig animation — the single pathway through which rigs move.
 //!
 //! Systems never rotate rig parts directly; they insert a [`Playing`] clip on
-//! a rig root (or the bat pivot) and [`sample_clips`] poses it every frame.
-//! This boundary is deliberate: a future `AnimationGraph` backend replaces the
-//! sampler without touching any caller. Likewise all locomotion goes through
+//! a rig root (or the bat pivot) and a backend poses it every frame: glTF
+//! rigs (`RigPlayer`-tagged) drive an `AnimationGraph`'s `AnimationPlayer` via
+//! [`drive_graph_rigs`], while `Blocky` rigs keep the procedural [`sample_clips`]
+//! sampler — the two backends never touch the same entity, so callers only
+//! ever see the one [`Playing`] protocol. Likewise all locomotion goes through
 //! [`MoveIntent`], so a human controller can later drive a fielder by writing
 //! the same component the CPU choreography writes.
 
@@ -420,7 +422,7 @@ fn locomote(
 /// Cross-fade length between clips — the production-blending upgrade.
 const BLEND: Duration = Duration::from_millis(150);
 
-/// Starts `node` on a rig's AnimationPlayer with a cross-fade, applying the
+/// Starts `clip` on a rig's AnimationPlayer with a cross-fade, applying the
 /// speed factor and loop mode. The one place transitions are touched.
 fn start_clip(
     anims: &RigAnimations,

@@ -190,6 +190,14 @@ pub struct GltfJerseyMesh {
     pub part: GltfPart,
 }
 
+/// Marker inserted once [`build_rig_animations`] hits a permanently missing
+/// clip, so the `run_if` gate below stops retrying it: the Gltf asset is
+/// already loaded and named_animations won't grow a clip on a later frame,
+/// so without this the system would `error!` every single frame forever
+/// instead of once.
+#[derive(Resource)]
+struct RigAnimationsFailed;
+
 /// Polls until the Gltf is in, then builds the graph by CLIP_TABLE name
 /// lookup (never by animation index — export order is not part of the
 /// contract). Runs behind a run_if so it costs nothing once built.
@@ -209,6 +217,7 @@ fn build_rig_animations(
     for (_, name) in CLIP_TABLE {
         let Some(h) = gltf.named_animations.get(*name) else {
             error!("player.glb is missing clip {name} — model contract violated");
+            commands.insert_resource(RigAnimationsFailed);
             return;
         };
         handles.push(h.clone());
@@ -395,7 +404,12 @@ impl Plugin for ModelAssetsPlugin {
         app.add_systems(Startup, load_player_model)
             .add_systems(
                 Update,
-                build_rig_animations.run_if(|r: Option<Res<RigAnimations>>| r.is_none()),
+                build_rig_animations.run_if(
+                    |built: Option<Res<RigAnimations>>,
+                     failed: Option<Res<RigAnimationsFailed>>| {
+                        built.is_none() && failed.is_none()
+                    },
+                ),
             )
             .add_systems(Update, retint_gltf_team_materials)
             .add_systems(

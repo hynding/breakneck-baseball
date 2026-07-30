@@ -424,8 +424,11 @@ fn run_out_pending_call(
     }
 
     // The run-out ghost becomes the real runner and keeps going for the
-    // extra bases while the ball is in the air.
-    let batter_dest = (hit_bases as usize).min(count) - 1;
+    // extra bases while the ball is in the air. `hit_bases` is provably >= 1
+    // here (`pending_hit()` only ever surfaces `Outcome::Hit(n)` with n >= 1
+    // — see rules.rs's `resolve_catch`/`resolve_thrown` construction sites),
+    // but saturate rather than trust that invariant across future callers.
+    let batter_dest = (hit_bases as usize).min(count).saturating_sub(1);
     if let Some(ghost) = ghosts.iter().next() {
         commands
             .entity(ghost)
