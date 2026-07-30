@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::log::warn;
 
+use bevy::color::Alpha;
+
 use crate::game::theme::Theme;
 use crate::game::ui::hidden_tint;
 use crate::game::GameState;
@@ -198,6 +200,13 @@ fn persist_settings(settings: Res<Settings>) {
 #[derive(Component)]
 struct SettingsUi;
 
+/// The screen's inner card — the opaque panel that occludes the menu behind
+/// it while open (mirrors `subs.rs`'s `SubsUi`/`SubsCard` split: the menu
+/// isn't a 3D backdrop like gameplay, so the overlay needs its own solid
+/// panel rather than relying on world geometry to read as "in front").
+#[derive(Component)]
+struct SettingsCard;
+
 /// The screen's title line ("SETTINGS" while open).
 #[derive(Component)]
 struct SettingsTitle;
@@ -231,55 +240,74 @@ fn spawn_settings_screen(mut commands: Commands, theme: Res<Theme>) {
                 top: Val::Px(0.0),
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
-                row_gap: Val::Px(10.0),
                 ..default()
             },
             BackgroundColor(hidden_tint(ui.panel_bg)),
         ))
         .with_children(|root| {
             root.spawn((
-                SettingsTitle,
-                Text::new(""),
-                TextFont {
-                    font_size: 34.0,
+                SettingsCard,
+                Node {
+                    padding: UiRect::axes(Val::Px(40.0), Val::Px(28.0)),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: Val::Px(10.0),
+                    border: UiRect::all(Val::Px(1.5)),
                     ..default()
                 },
-                TextColor(ui.accent),
-            ));
-            for i in 0..3 {
-                root.spawn((
-                    SettingsRowLabel(i),
+                BackgroundColor(hidden_tint(ui.panel_bg)),
+                BorderColor(hidden_tint(ui.panel_border)),
+                BorderRadius::all(Val::Px(16.0)),
+            ))
+            .with_children(|card| {
+                card.spawn((
+                    SettingsTitle,
                     Text::new(""),
                     TextFont {
-                        font_size: 20.0,
+                        font_size: 34.0,
                         ..default()
                     },
-                    TextColor(ui.text_primary),
+                    TextColor(ui.accent),
                 ));
-                root.spawn((
-                    SettingsRowText(i),
-                    Text::new(""),
-                    TextFont {
-                        font_size: 18.0,
-                        ..default()
-                    },
-                    TextColor(ui.text_dim),
-                ));
-            }
+                for i in 0..3 {
+                    card.spawn((
+                        SettingsRowLabel(i),
+                        Text::new(""),
+                        TextFont {
+                            font_size: 20.0,
+                            ..default()
+                        },
+                        TextColor(ui.text_primary),
+                    ));
+                    card.spawn((
+                        SettingsRowText(i),
+                        Text::new(""),
+                        TextFont {
+                            font_size: 18.0,
+                            ..default()
+                        },
+                        TextColor(ui.text_dim),
+                    ));
+                }
+            });
         });
 }
 
 /// Paints the screen every frame from state: blank/hidden when closed, full
-/// content when open (child mutation only — wasm rule, see `subs.rs`).
-#[allow(clippy::type_complexity)]
+/// content when open (child mutation only — wasm rule, see `subs.rs`). The
+/// root dims to a translucent scrim and the card goes opaque while open so
+/// the settings content fully occludes the menu behind it (the menu has no
+/// 3D backdrop the way gameplay does, so the overlay must paint its own).
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn paint_settings_screen(
     open: Res<SettingsOpen>,
     cursor: Res<SettingsCursorRow>,
     settings: Res<Settings>,
     theme: Res<Theme>,
+    mut roots: Query<&mut BackgroundColor, (With<SettingsUi>, Without<SettingsCard>)>,
+    mut cards: Query<(&mut BackgroundColor, &mut BorderColor), With<SettingsCard>>,
     mut title: Query<
         (&mut Text, &mut TextColor),
         (
@@ -300,7 +328,15 @@ fn paint_settings_screen(
     let Ok((mut title_text, mut title_color)) = title.get_single_mut() else {
         return;
     };
+    let ui = &theme.ui;
     if !open.0 {
+        for mut bg in &mut roots {
+            bg.0 = hidden_tint(ui.panel_bg);
+        }
+        for (mut bg, mut border) in &mut cards {
+            bg.0 = hidden_tint(ui.panel_bg);
+            border.0 = hidden_tint(ui.panel_border);
+        }
         **title_text = String::new();
         for (_, mut text, _) in &mut labels {
             **text = String::new();
@@ -310,7 +346,13 @@ fn paint_settings_screen(
         }
         return;
     }
-    let ui = &theme.ui;
+    for mut bg in &mut roots {
+        bg.0 = ui.panel_bg.with_alpha(0.9);
+    }
+    for (mut bg, mut border) in &mut cards {
+        bg.0 = ui.panel_bg;
+        border.0 = ui.panel_border;
+    }
     **title_text = "SETTINGS".to_string();
     title_color.0 = ui.accent;
     for (label, mut text, mut color) in &mut labels {
