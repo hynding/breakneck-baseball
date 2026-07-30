@@ -25,6 +25,22 @@ use common::{headless_app, run_until, start_game, tap_key, DriveGame};
 /// the full walk-off trot (the play must end before the game can).
 const MAX_FRAMES: u64 = 100_000;
 
+/// Restores the "classic" batting-feel windows this script was written
+/// against (a dead-red uppercut at the plate = a Perfect home run). The
+/// *shipped* Standard windows are the B7 balance harness's to tune
+/// (`tests/balance_sim.rs` / `variant.rs`); this scenario asserts *rule/flow*
+/// behaviour, not the balance economy, so it pins the contact windows it
+/// depends on instead of inheriting the tunable defaults. Same decoupling
+/// pattern as `e2e_cpu_timing`'s forced `cpu_timing_spread_ms`.
+fn pin_classic_contact_windows(app: &mut App) {
+    let mut r = app.world_mut().resource_mut::<Ruleset>();
+    r.perfect_ms = 40.0;
+    r.solid_ms = 90.0;
+    r.foul_ms = 140.0;
+    r.exit_solid = 1.0;
+    r.exit_perfect = 1.25;
+}
+
 fn drive(
     state: Res<State<GameState>>,
     mut intents: ResMut<Intents>,
@@ -72,6 +88,7 @@ fn one_inning_game_plays_to_completion() {
     // two-player game so the test scripts both teams.
     tap_key(&mut app, KeyCode::KeyI);
     start_game(&mut app, KeyCode::Digit2);
+    pin_classic_contact_windows(&mut app);
 
     let finished = run_until(&mut app, MAX_FRAMES, |app| {
         *app.world().resource::<State<GameState>>().get() == GameState::GameOver

@@ -106,9 +106,18 @@ fn cpu_batters_swing_with_varied_timing() {
     app.init_resource::<Qualities>();
     app.add_systems(DriveGame, (drive, capture));
     start_game(&mut app, KeyCode::Digit1);
-    app.world_mut()
-        .resource_mut::<Ruleset>()
-        .cpu_timing_spread_ms = FORCED_SPREAD_MS;
+    {
+        // Force a wide spread and pin the "classic" contact windows this test's
+        // margin reasoning (below) assumes. The shipped Standard windows are the
+        // B7 balance harness's to tune (`tests/balance_sim.rs` / `variant.rs`);
+        // this test proves the *timing-dial wiring* reaches the ECS, not the
+        // balance economy, so it owns the windows it depends on.
+        let mut r = app.world_mut().resource_mut::<Ruleset>();
+        r.cpu_timing_spread_ms = FORCED_SPREAD_MS;
+        r.perfect_ms = 40.0;
+        r.solid_ms = 90.0;
+        r.foul_ms = 140.0;
+    }
 
     run_until(&mut app, MAX_FRAMES, |app| {
         app.world().resource::<PitchCount>().seen >= TARGET_PITCHES

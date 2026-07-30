@@ -2853,7 +2853,16 @@ mod tests {
 
     #[test]
     fn contact_quality_windows_are_data_driven() {
-        let r = std_rules();
+        // Explicit windows pin the dt→quality *mapping* independent of the
+        // shipped Standard tuning: those numbers live in `variant.rs` and are
+        // the B7 balance harness's to move (tests/balance_sim.rs), so this test
+        // must not double as a snapshot of them.
+        let r = Ruleset {
+            perfect_ms: 40.0,
+            solid_ms: 90.0,
+            foul_ms: 140.0,
+            ..std_rules()
+        };
         use ContactQuality::*;
         assert_eq!(contact_quality(0.0, &r), Perfect);
         assert_eq!(contact_quality(-39.9, &r), Perfect);
@@ -2869,13 +2878,17 @@ mod tests {
     fn perfect_contact_is_faster_than_solid() {
         let r = std_rules();
         // Identical base vector, different quality: Perfect's exit multiplier
-        // (>1) must beat Solid's (=1).
+        // must beat Solid's (whatever the shipped tuning sets them to, Perfect
+        // is always the harder-hit ball — see `variant.rs`/tests/balance_sim.rs).
         let base = hit_velocity(0.4, Vec2::ZERO);
         let perfect = apply_contact_quality(base, ContactQuality::Perfect, 0.0, &r);
         let solid = apply_contact_quality(base, ContactQuality::Solid, 0.0, &r);
         assert!(perfect.length() > solid.length());
-        // Dead-on (dt = 0) leaves the launch direction untouched.
-        assert!((solid - base).length() < 1e-4);
+        // Dead-on (dt = 0) leaves the launch *direction* untouched — the
+        // quality only scales exit speed, it doesn't add pull yaw at zero
+        // timing error. (Magnitude is scaled by the exit multiplier, which the
+        // balance tuning may set to anything, so compare directions.)
+        assert!((solid.normalize() - base.normalize()).length() < 1e-4);
     }
 
     #[test]
