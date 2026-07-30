@@ -478,6 +478,18 @@ pub fn runner_break(outs: u32, forced: bool, contact: ContactClass) -> RunnerBre
     }
 }
 
+/// Whether a fair ball's first-bounce landing is past the infield — the
+/// "does it get through" read a `Halfway` runner (see [`runner_break`]) makes
+/// off a ground ball or catchable fly that hits the dirt/grass instead of a
+/// glove. Reuses [`INFIELD_GATHER_RADIUS`] (scaled by `field.hit_scale`), the
+/// same infield-range radius the live-throw race already treats as "an out at
+/// first is only contested on infield balls" — a landing at or beyond it is
+/// through the infield for the same reason a gather out there is a lost
+/// cause for the defense. Per docs/BASEBALL.md "Baserunning after contact".
+pub fn landed_past_infield(landing: Vec3, field: &FieldSpec) -> bool {
+    Vec2::new(landing.x, landing.z).length() >= INFIELD_GATHER_RADIUS * field.hit_scale
+}
+
 /// Whether the runner on (0-indexed) `base` is *forced* to advance: every base
 /// behind him back toward home is occupied, so the batter reaching first
 /// pushes the whole chain. The runner on first is always forced. Per
@@ -1980,6 +1992,25 @@ mod tests {
         assert_eq!(
             contact_class(landing, hang, &std_field()),
             ContactClass::DeepFly
+        );
+    }
+
+    #[test]
+    fn landed_past_infield_reads_the_infield_gather_radius() {
+        let field = std_field();
+        // Well short of the infield-gather radius: an infield chopper, not
+        // through.
+        let shallow = Vec3::new(0.0, 0.0, 10.0);
+        assert!(!landed_past_infield(shallow, &field), "shallow {shallow:?}");
+        // Comfortably beyond it: a ball through to the outfield grass.
+        let deep = Vec3::new(0.0, 0.0, INFIELD_GATHER_RADIUS * field.hit_scale + 5.0);
+        assert!(landed_past_infield(deep, &field), "deep {deep:?}");
+        // Exactly at the boundary counts as past (>=, matching the gather
+        // race's own "infield" cutoff).
+        let boundary = Vec3::new(0.0, 0.0, INFIELD_GATHER_RADIUS * field.hit_scale);
+        assert!(
+            landed_past_infield(boundary, &field),
+            "boundary {boundary:?}"
         );
     }
 

@@ -45,10 +45,20 @@ the white 0.61 × 0.152 m rubber.
   8.5 in, pointed back extending toward the catcher.
 - Batter's boxes: **4 ft × 6 ft** (1.22 × 1.83 m), drawn 6 in off each side
   of the plate; the batter stands *facing the plate*, side-on to the
-  pitcher.
+  pitcher. Lengthwise the box is **centred** on home plate's centre, not
+  offset toward the pitcher: groundskeeperu.com's field-layout guide puts
+  the box's back line 3 ft from the plate's centre, and the box is 6 ft
+  long — i.e. the front line sits the same 3 ft ahead, symmetric either
+  way. (A pre-research assumption for this task guessed a small forward
+  offset toward the pitcher; the sourced groundskeeping template disagrees,
+  so the game keeps the box centred — see `field.rs`'s `BOX_HALF_LENGTH`.)
 - Foul lines run in chalk from home plate through first and third base and
-  on to the outfield fence — the bases themselves sit *in* fair territory,
-  so the line runs along their outer edge.
+  on to the outfield fence. Per the Official Baseball Rules (Rule 2.03,
+  "the first and third base bags shall be entirely within the infield" —
+  i.e. fair territory) and groundskeeperu.com's field-layout guide ("the
+  foul edge of the foul line will line up exactly with the foul edge of the
+  base"): the bases sit *in* fair territory, and the line's fair-side edge
+  runs along the bag's *outer* edge — not through the bag's centre.
 - Chalk/paint line width: the Official Baseball Rules (2.01) call for lines
   "not less than two nor more than four inches in width"; groundskeeping
   guides describe the same 2–4 in range in practice, with pro crews often
@@ -60,7 +70,10 @@ the batter rig stands in the right-handed box at x ≈ +0.7 facing −X (the
 plate), per `player::spawn_players`. `field::spawn_chalk_lines` paints both
 batter's-box outlines and the two foul lines (home → first/third → fence,
 direction taken from the live `FieldSpec::base_positions`, not a hardcoded
-45°) as flat chalk-white quads on the ground.
+45°) as flat chalk-white quads on the ground; `field::foul_line_span` offsets
+each line perpendicular to that direction by the bag's half-width
+(`BASE_HALF_WIDTH`, 0.229 m) so its fair-side edge kisses the bag's outer
+edge rather than passing through its centre.
 
 ## Dirt, grass, and mowing (turface.com, mightygrass.com)
 
@@ -111,12 +124,19 @@ runner-rig choreography — never the call):
    you know if they are willing to give up a run for the out or not" — QC
    Baseball). In this game's ground-out model every runner advances a base on a
    grounder (`rules::advance_trailing`), so the "read" is the unforced runner
-   edging halfway and committing once the ball is down.
+   edging halfway and committing once the ball is down — `rules::landed_past_infield`
+   judges "got through or past the infield" against the same infield-gather
+   radius the live-throw race already uses for "an out at first is only
+   contested on infield balls" (`INFIELD_GATHER_RADIUS`, scaled by the park's
+   `hit_scale`); a fair ball that drops but stays inside that radius is read
+   like a catch — the runner retreats.
 3. **Fewer than two outs, catchable fly — go halfway.** "The tag-up rule is the
    primary reason behind the strategy of base runners advancing halfway on a
    fly ball. Baserunners study the fielder and advance only far enough from the
    base to ensure that they can return safely if the ball is caught" — i.e. edge
-   out, continue if it drops, retreat if it is caught.
+   out, continue if it drops, retreat if it is caught. The same
+   `rules::landed_past_infield` through-the-infield read applies here too: a
+   shallow catchable fly that falls in still sends the runner back.
 4. **Fewer than two outs, deep fly — tag up.** On a catch a runner must retouch
    his starting base ("tag up") before advancing; a deep fly gives him the time
    to tag and take the next base — the **sacrifice fly**. "On long fly ball outs,

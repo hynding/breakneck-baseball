@@ -226,16 +226,21 @@ fn spawn_field(
     // broadcast and duel cameras look at — players' backs, house fronts, the
     // outfield — is lit rather than silhouetted; ambient keeps shadow sides
     // readable up close.
+    // `ambient_fraction` retuned for contrast (Task 20 polish sweep): the
+    // physically-derived 0.25/0.35 read washed-out and pastel against the
+    // 50,000 lux sun — deeper shadows read better than a technically
+    // accurate flat fill. A taste call, not a units fix (see
+    // `spawn_lighting`'s doc comment for the units scheme itself).
     match field.scenery {
         Scenery::Stadium => spawn_lighting(
             &mut commands,
             std::f32::consts::PI - std::f32::consts::FRAC_PI_6,
-            0.25,
+            0.15,
         ),
         Scenery::FrontYard => spawn_lighting(
             &mut commands,
             std::f32::consts::PI + std::f32::consts::FRAC_PI_6,
-            0.35,
+            0.20,
         ),
     }
 }
@@ -400,7 +405,7 @@ fn spawn_bases(
         perceptual_roughness: 0.7,
         ..default()
     });
-    let base_mesh = meshes.add(Cuboid::new(0.457, 0.09, 0.457));
+    let base_mesh = meshes.add(Cuboid::new(BASE_SIZE, 0.09, BASE_SIZE));
     let home_mesh = meshes.add(Cuboid::new(PLATE_WIDTH, 0.02, PLATE_WIDTH));
 
     let mut spawn = |index: Option<usize>, pos: Vec3, y: f32, mesh: Handle<Mesh>, mat| {
@@ -435,6 +440,12 @@ fn spawn_bases(
 const PLATE_WIDTH: f32 = 0.432;
 const PLATE_HALF_WIDTH: f32 = PLATE_WIDTH / 2.0;
 
+/// Regulation base size since the 2023 rule change: 18 in square (0.457 m,
+/// docs/BASEBALL.md) — shared by `spawn_bases`'s bag mesh above and the foul
+/// line's outward offset below (`foul_line_span`).
+const BASE_SIZE: f32 = 0.457;
+const BASE_HALF_WIDTH: f32 = BASE_SIZE / 2.0;
+
 /// Chalk line width: rulebooks call for lines "not less than 2 in nor more
 /// than 4 in" of lime/chalk/paint (Official Baseball Rules 2.01; batflipsports.com's
 /// groundskeeping guide gives the same 2–4 in range, and foxvalleypaint.com/
@@ -463,7 +474,12 @@ const CHALK_CLEARANCE: f32 = 0.003;
 const CHALK_Y: f32 = FRONTYARD_CENTERLINE_TOP + CHALK_CLEARANCE + CHALK_MESH_HEIGHT / 2.0;
 
 /// Batter's box: 4 ft × 6 ft, long side toward the pitcher, drawn 6 in off
-/// each side of the plate (docs/BASEBALL.md).
+/// each side of the plate (docs/BASEBALL.md). Lengthwise the box is spawned
+/// *centred* on home plate (z = 0 below), not offset toward the pitcher:
+/// researched for this task (groundskeeperu.com's field-layout guide and
+/// corroborating groundskeeping references) puts the box's back line 3 ft
+/// from the plate's centre and the front line 3 ft ahead of it — exactly
+/// half the 6 ft box length each way, i.e. symmetric. See docs/BASEBALL.md.
 const BOX_HALF_WIDTH: f32 = 0.61; // 4 ft / 2, side-to-side of the plate
 const BOX_HALF_LENGTH: f32 = 0.915; // 6 ft / 2, toward the pitcher/catcher
 const BOX_PLATE_GAP: f32 = 0.152; // 6 in
@@ -601,6 +617,15 @@ fn spawn_batters_box(
 /// territory ends. `None` if the base sits exactly at the origin (nothing to
 /// aim through — never true for a real `FieldSpec`, but keeps this total).
 ///
+/// Per MLB Rule 2.03 ("The first and third base bags shall be entirely
+/// within the infield" — i.e. fair territory) and groundskeeperu.com's
+/// field-layout guide ("the foul edge of the foul line will line up exactly
+/// with the foul edge of the base"): the line's fair-side edge runs along the
+/// bag's *outer* (foul-side) edge, not through its centre. Modelled as a
+/// parallel offset of the home→fence ray, perpendicular to `dir` and away
+/// from the fair wedge's axis of symmetry (x = 0, see `rules::is_fair`), by
+/// exactly the bag's half-width (`BASE_HALF_WIDTH`) — see docs/BASEBALL.md.
+///
 /// Pure geometry, deliberately factored out of `spawn_foul_line` so the test
 /// module can exercise the *exact* span the spawn path paints, rather than
 /// re-deriving the same formula in a test (which would pass even if this
@@ -611,7 +636,13 @@ fn foul_line_span(field: &FieldSpec, base_index: usize) -> Option<(Vec3, Vec3)> 
     if dir == Vec3::ZERO {
         return None;
     }
-    Some((Vec3::ZERO, dir * rules::fence_at(dir, field)))
+    // The perpendicular to `dir` whose x-component shares `dir.x`'s sign —
+    // i.e. points away from x = 0, out toward the foul side, for either the
+    // first- or third-base line alike.
+    let perp = Vec3::new(-dir.z, 0.0, dir.x);
+    let outward = if perp.x * dir.x > 0.0 { perp } else { -perp };
+    let offset = outward * BASE_HALF_WIDTH;
+    Some((offset, dir * rules::fence_at(dir, field) + offset))
 }
 
 /// Spawns the chalk quad for `foul_line_span(field, base_index)`.
@@ -1109,17 +1140,18 @@ mod tests {
     }
 
     /// Regression for a units bug: `spawn_lighting`'s `ambient_fraction`
-    /// call sites (0.25 Stadium, 0.35 FrontYard) were passed straight
+    /// call sites (0.15 Stadium, 0.20 FrontYard — retuned for contrast in
+    /// the Task 20 polish sweep, previously 0.25/0.35) were passed straight
     /// through as `AmbientLight::brightness` — fine under Bevy's pre-0.14
     /// small-multiplier semantics, but in 0.15 `brightness` is an absolute
-    /// lux-like value (`AmbientLight::default()` is 80.0), so 0.25 was
+    /// lux-like value (`AmbientLight::default()` is 80.0), so a raw 0.25 was
     /// indistinguishable from "no ambient light at all" next to a 50,000 lux
     /// sun. Every scenery's resulting ambient must clear Bevy's own default
     /// fill (else it's *darker* than doing nothing) and stay a sane fraction
     /// of the sun rather than approaching or exceeding it.
     #[test]
     fn ambient_fraction_scales_with_sun_illuminance_not_raw() {
-        for ambient_fraction in [0.25_f32, 0.35] {
+        for ambient_fraction in [0.15_f32, 0.20] {
             let brightness = ambient_fraction * SUN_ILLUMINANCE;
             assert!(
                 brightness > AmbientLight::default().brightness,
@@ -1191,11 +1223,14 @@ mod tests {
         assert!(inner_edge > PLATE_HALF_WIDTH);
     }
 
-    /// The foul lines must run exactly through the real base positions on
-    /// their way from home to the fence — derived from
-    /// `FieldSpec::base_positions`, not a hardcoded 45°, so this must hold
-    /// for both variants (Standard's diamond and FrontYard's lawn, which uses
-    /// a different `fair_half_angle` and base layout entirely).
+    /// The foul lines must run along the real bases' *outer* edge on their
+    /// way from home to the fence — offset from `FieldSpec::base_positions`
+    /// by exactly the bag's half-width, not through the centre (MLB Rule
+    /// 2.03 / groundskeeperu.com, see `foul_line_span`'s doc comment and
+    /// docs/BASEBALL.md) — derived from the base positions themselves, not a
+    /// hardcoded 45°, so this must hold for both variants (Standard's
+    /// diamond and FrontYard's lawn, which uses a different `fair_half_angle`
+    /// and base layout entirely).
     ///
     /// Exercises `foul_line_span` — the exact function `spawn_foul_line`
     /// calls to place the chalk — rather than re-deriving the direction/fence
@@ -1218,10 +1253,10 @@ mod tests {
                     Vec2::new(end.x, end.z),
                 );
                 assert!(
-                    dist < CHALK_WIDTH / 2.0,
-                    "{variant:?} base {base_index} at {base:?} is {dist} m off its foul line \
-                     (chalk half-width {})",
-                    CHALK_WIDTH / 2.0
+                    (dist - BASE_HALF_WIDTH).abs() < 1e-4,
+                    "{variant:?} base {base_index} at {base:?} is {dist} m off its foul line, \
+                     want exactly the bag half-width ({BASE_HALF_WIDTH} m) — not zero (through \
+                     the centre) and not the old chalk-half-width tolerance",
                 );
             }
         }

@@ -492,8 +492,11 @@ fn break_runners(
 }
 
 /// Halfway runners read the fly: a catch turns them around (`Retreat` to the
-/// bag), a fair landing commits them (`GoNow` for the next base). Only active
-/// while the ball is live and uncalled.
+/// bag); a fair landing commits them (`GoNow`) only once it's actually
+/// through the infield (`rules::landed_past_infield`) — a fair ball that
+/// drops but stays in the infield is the same "it got down but I can't make
+/// it" read as a catch, so it also sends the runner back (`Retreat`). Only
+/// active while the ball is live and uncalled.
 fn read_break_reads(
     mut events: EventReader<LiveBallEvent>,
     play: Res<Play>,
@@ -507,7 +510,13 @@ fn read_break_reads(
     for ev in events.read() {
         let commit = match *ev {
             LiveBallEvent::Caught { .. } => Some(Breaking::Retreat),
-            LiveBallEvent::Landed { pos } if rules::is_fair(pos, &field) => Some(Breaking::GoNow),
+            LiveBallEvent::Landed { pos } if rules::is_fair(pos, &field) => {
+                Some(if rules::landed_past_infield(pos, &field) {
+                    Breaking::GoNow
+                } else {
+                    Breaking::Retreat
+                })
+            }
             _ => None,
         };
         let Some(commit) = commit else { continue };

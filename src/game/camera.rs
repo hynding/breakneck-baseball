@@ -79,10 +79,15 @@ impl DuelView {
         }
     }
 
-    /// This view's eye, look-at target, and vertical FOV for the given park.
-    fn framing(self, field: &FieldSpec) -> (Vec3, Vec3, f32) {
+    /// This view's eye, look-at target, and vertical FOV for the given park
+    /// and camera `aspect` ratio (width / height).
+    fn framing(self, field: &FieldSpec, aspect: f32) -> (Vec3, Vec3, f32) {
         match self {
-            DuelView::CatcherPov => (field.duel_eye, field.duel_target, DUEL_FOV),
+            DuelView::CatcherPov => (
+                field.duel_eye,
+                field.duel_target,
+                aspect_safe_duel_vfov(DUEL_FOV, aspect),
+            ),
             DuelView::BehindPitcher => (
                 field.behind_pitcher_eye,
                 field.behind_pitcher_target,
@@ -128,6 +133,33 @@ const BROADCAST_FOV: f32 = std::f32::consts::FRAC_PI_3;
 /// reads far more prominent than the old far-back framing ever did, since
 /// its screen size comes from eye proximity, not FOV.
 const DUEL_FOV: f32 = 80.0_f32.to_radians();
+
+/// The aspect ratio `DUEL_FOV` was tuned and validated at (see its doc
+/// comment) — a 16:9 window. `aspect_safe_duel_vfov` below treats this as the
+/// reference the batter must stay framed at; narrower windows widen the
+/// vertical FOV to compensate, wider ones are left alone.
+const DUEL_REFERENCE_ASPECT: f32 = 16.0 / 9.0;
+
+/// The duel-phase vertical FOV to actually apply for a camera whose viewport
+/// has the given `aspect` (width / height), so the *horizontal* field of view
+/// never shrinks below what `target_vfov` gives at the 16:9 reference the
+/// duel framing was tuned at. `PerspectiveProjection::fov` is vertical, so a
+/// narrower-than-16:9 viewport (a portrait-ish window, or a narrow wasm
+/// canvas under `fit_canvas_to_parent`) crops horizontally at a fixed
+/// vertical FOV — exactly what put the batter at risk of clipping out of
+/// frame in the tight catcher-POV shot. Converts `target_vfov` to the
+/// horizontal FOV it gives at the 16:9 reference, then re-derives the
+/// vertical FOV that reproduces *that* horizontal FOV at the real `aspect`;
+/// identity at 16:9, wider (more vertical coverage) below it, and left at
+/// `target_vfov` above it (ultrawide already has FOV to spare, so it's left
+/// untouched rather than narrowed).
+pub fn aspect_safe_duel_vfov(target_vfov: f32, aspect: f32) -> f32 {
+    if aspect >= DUEL_REFERENCE_ASPECT {
+        return target_vfov;
+    }
+    let target_hfov = 2.0 * ((target_vfov / 2.0).tan() * DUEL_REFERENCE_ASPECT).atan();
+    2.0 * ((target_hfov / 2.0).tan() / aspect).atan()
+}
 
 /// Vertical FOV for the behind-pitcher view: a long, narrow "pitcher cam"
 /// shot from well behind the mound, so a tighter lens than the broadcast
@@ -190,7 +222,10 @@ fn hide_occluders(
     mut subjects: Query<(&Transform, &mut Visibility), Or<(With<CatcherRole>, With<PlateUmpire>)>>,
 ) {
     let dueling = matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch);
-    let (eye, target, _) = view.framing(&field);
+    // The FOV this call computes is discarded (occlusion only cares about the
+    // eye/target axis), so the aspect passed through doesn't matter — the
+    // reference aspect keeps this a no-op correction.
+    let (eye, target, _) = view.framing(&field, DUEL_REFERENCE_ASPECT);
     for (transform, mut visibility) in &mut subjects {
         // Occlusion only makes sense for the camera actually looking through
         // this axis: in Orbit the player is free-looking with a completely
@@ -369,13 +404,24 @@ fn broadcast_camera(
     mut rig: ResMut<BroadcastRig>,
     mut cam_q: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
 ) {
+    // The camera's actual aspect ratio (width / height), read before the
+    // framing decision so the duel FOV can correct for it — see
+    // `aspect_safe_duel_vfov`. Falls back to the reference aspect (a no-op
+    // correction) before the camera exists.
+    let aspect = match cam_q.get_single() {
+        Ok((_, Projection::Perspective(persp))) => persp.aspect_ratio,
+        _ => DUEL_REFERENCE_ASPECT,
+    };
+
     // Pick the framing the current phase wants.
     let (desired_eye, desired_target, desired_fov) = match (play.phase, ball_q.get_single()) {
         // Fresh contact: hold the plate framing for a beat — the swing, the
         // crack, the batter breaking from the box — before chasing the ball.
-        (Phase::InPlay, Ok(_)) if play.since_contact(time.elapsed_secs()) < BALL_FOLLOW_DELAY => {
-            (field.duel_eye, field.duel_target, DUEL_FOV)
-        }
+        (Phase::InPlay, Ok(_)) if play.since_contact(time.elapsed_secs()) < BALL_FOLLOW_DELAY => (
+            field.duel_eye,
+            field.duel_target,
+            aspect_safe_duel_vfov(DUEL_FOV, aspect),
+        ),
         // A live, uncalled play: cut to where the ball is coming down. The
         // eye stations itself between home and the predicted landing spot —
         // a medium shot of the drop zone, so the chasing fielder and the
@@ -424,7 +470,7 @@ fn broadcast_camera(
         // Result pause: settle on the wide home framing.
         (Phase::Result, _) => (field.broadcast_eye, field.broadcast_target, BROADCAST_FOV),
         // The duel: whichever at-bat view the player has cycled to with V.
-        _ => view.framing(&field),
+        _ => view.framing(&field, aspect),
     };
 
     // Critically-damped-ish smoothing so framing changes glide, never cut.
@@ -539,6 +585,36 @@ mod tests {
         assert_eq!(v, DuelView::CatcherPov);
     }
 
+    /// At the 16:9 reference aspect the duel FOV was tuned at, the correction
+    /// must be an identity (no crop was ever a problem here).
+    #[test]
+    fn aspect_safe_duel_vfov_is_identity_at_reference_aspect() {
+        let vfov = aspect_safe_duel_vfov(DUEL_FOV, DUEL_REFERENCE_ASPECT);
+        assert!(
+            (vfov - DUEL_FOV).abs() < 1e-4,
+            "16:9 should reproduce DUEL_FOV exactly, got {vfov}"
+        );
+    }
+
+    /// A narrower-than-16:9 window (e.g. 4:3) must widen the vertical FOV so
+    /// the horizontal coverage doesn't shrink and crop the batter.
+    #[test]
+    fn aspect_safe_duel_vfov_widens_for_a_narrower_aspect() {
+        let vfov = aspect_safe_duel_vfov(DUEL_FOV, 4.0 / 3.0);
+        assert!(
+            vfov > DUEL_FOV,
+            "4:3 should widen the vertical FOV, got {vfov} vs DUEL_FOV {DUEL_FOV}"
+        );
+    }
+
+    /// A wider-than-16:9 (ultrawide) window already has FOV to spare — the
+    /// duel FOV must be left untouched, not narrowed.
+    #[test]
+    fn aspect_safe_duel_vfov_unchanged_for_ultrawide() {
+        let vfov = aspect_safe_duel_vfov(DUEL_FOV, 21.0 / 9.0);
+        assert_eq!(vfov, DUEL_FOV);
+    }
+
     #[test]
     fn subject_behind_the_eye_never_occludes() {
         // Same axis as in front, but placed behind the eye (negative along).
@@ -607,7 +683,7 @@ mod tests {
                 .map(|p| *p + Vec3::Y * 0.6);
             let umpire = f.umpire_positions.first().map(|p| *p + Vec3::Y * 0.6);
 
-            let (bz_eye, bz_target, _) = DuelView::BattingZoom.framing(&f);
+            let (bz_eye, bz_target, _) = DuelView::BattingZoom.framing(&f, DUEL_REFERENCE_ASPECT);
             if let Some(catcher) = catcher {
                 assert!(
                     occludes(bz_eye, bz_target, catcher, OCCLUSION_NEAR, OCCLUSION_RADIUS),
@@ -621,7 +697,7 @@ mod tests {
                 );
             }
 
-            let (bp_eye, bp_target, _) = DuelView::BehindPitcher.framing(&f);
+            let (bp_eye, bp_target, _) = DuelView::BehindPitcher.framing(&f, DUEL_REFERENCE_ASPECT);
             if let Some(catcher) = catcher {
                 assert!(
                     !occludes(bp_eye, bp_target, catcher, OCCLUSION_NEAR, OCCLUSION_RADIUS),
