@@ -20,6 +20,7 @@ pub mod player;
 pub mod roster;
 pub mod rules;
 pub mod runner;
+pub mod settings;
 pub mod subs;
 pub mod theme;
 pub mod ui;
