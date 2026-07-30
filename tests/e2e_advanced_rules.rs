@@ -105,8 +105,10 @@ fn drive_scenario(
         // S5: plunk the Home batter.
         5 => (Vec2::new(-1.0, 0.0), false, None),
         // S6: hit-and-run — runner goes, batter slaps a low single;
-        // the jump sends him first-to-third.
-        6 => (Vec2::ZERO, true, Some((0.3, 0.8, Vec2::new(0.0, -1.0)))),
+        // the jump sends him first-to-third. Contact is timed dead on the
+        // plate (Perfect, zero pull yaw) so the exit multiplier lands a
+        // centred single, not extra bases.
+        6 => (Vec2::ZERO, true, Some((-0.1, 0.05, Vec2::new(0.0, -1.0)))),
         _ => (Vec2::ZERO, false, None),
     };
 

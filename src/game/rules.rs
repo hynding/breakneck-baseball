@@ -1327,6 +1327,46 @@ pub fn contact_quality(dt_ms: f32, rules: &Ruleset) -> ContactQuality {
     }
 }
 
+/// Shapes a batted-ball velocity by how well the swing was timed: scales the
+/// exit speed by the quality's multiplier and rotates the launch toward the
+/// pull side by `pull_yaw_per_ms · dt_ms`.
+///
+/// `base` is the raw vector from [`hit_velocity`] (aim + contact-point launch);
+/// `dt_ms` is the signed swing timing (early = negative — see
+/// `flow::swing_dt_ms`). The yaw is applied about the vertical (Y) axis in the
+/// same sense as [`hit_velocity`]'s `spray` angle, where a *negative* horizontal
+/// component is world −X. First base is at −X and `aim.x` is negated in the
+/// hit mapping (see CLAUDE.md), so −X is the right-handed batter's pull side:
+/// an early (negative `dt_ms`) swing yields a negative yaw that rotates the ball
+/// toward −X, i.e. pulls it. Late (positive) contact pushes the other way.
+///
+/// `Whiff`/`FoulTip` never reach here (they put no ball in play); they return
+/// `base` unchanged so the match stays exhaustive.
+pub fn apply_contact_quality(
+    base: Vec3,
+    quality: ContactQuality,
+    dt_ms: f32,
+    rules: &Ruleset,
+) -> Vec3 {
+    let exit_mult = match quality {
+        ContactQuality::Perfect => rules.exit_perfect,
+        ContactQuality::Solid => rules.exit_solid,
+        ContactQuality::Weak => rules.exit_weak,
+        ContactQuality::Whiff | ContactQuality::FoulTip => return base,
+    };
+    let scaled = base * exit_mult;
+    // Rotate the horizontal (x, z) launch about +Y by the pull yaw. Matching
+    // `hit_velocity`'s spray convention (x = h·sin θ, z = h·cos θ), a positive
+    // yaw increases θ (toward +X) and a negative yaw decreases it (toward −X).
+    let yaw = rules.pull_yaw_per_ms * dt_ms;
+    let (s, c) = yaw.sin_cos();
+    Vec3::new(
+        scaled.x * c + scaled.z * s,
+        scaled.y,
+        scaled.z * c - scaled.x * s,
+    )
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -2823,5 +2863,41 @@ mod tests {
         assert_eq!(contact_quality(-140.0, &r), FoulTip);
         assert_eq!(contact_quality(140.1, &r), Whiff);
         assert_eq!(contact_quality(999.0, &r), Whiff);
+    }
+
+    #[test]
+    fn perfect_contact_is_faster_than_solid() {
+        let r = std_rules();
+        // Identical base vector, different quality: Perfect's exit multiplier
+        // (>1) must beat Solid's (=1).
+        let base = hit_velocity(0.4, Vec2::ZERO);
+        let perfect = apply_contact_quality(base, ContactQuality::Perfect, 0.0, &r);
+        let solid = apply_contact_quality(base, ContactQuality::Solid, 0.0, &r);
+        assert!(perfect.length() > solid.length());
+        // Dead-on (dt = 0) leaves the launch direction untouched.
+        assert!((solid - base).length() < 1e-4);
+    }
+
+    #[test]
+    fn early_contact_pulls_toward_minus_x() {
+        let r = std_rules();
+        // A straightaway base vector (aim.x = 0, contact on the plate): purely
+        // +Z, no side component.
+        let base = hit_velocity(0.4, Vec2::ZERO);
+        assert!(base.x.abs() < 1e-4, "base swing must start straightaway");
+        // Early (negative dt) is the right-handed batter's pull: −X.
+        let early = apply_contact_quality(base, ContactQuality::Solid, -80.0, &r);
+        assert!(
+            early.x < 0.0,
+            "an early swing must pull toward −X (got x = {})",
+            early.x
+        );
+        // Late (positive dt) pushes the opposite way: +X.
+        let late = apply_contact_quality(base, ContactQuality::Solid, 80.0, &r);
+        assert!(
+            late.x > 0.0,
+            "a late swing must push toward +X (got x = {})",
+            late.x
+        );
     }
 }

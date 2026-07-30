@@ -30,7 +30,7 @@ use crate::game::rules::{
 };
 use crate::game::runner::RunnersSettled;
 use crate::game::variant::{FieldSpec, Ruleset};
-use crate::game::{GameState, ScoreBoard};
+use crate::game::{GameState, ScoreBoard, Team};
 
 // ── Tuning constants ──────────────────────────────────────────────────────────
 
@@ -42,6 +42,17 @@ const SWING_LATE_Z: f32 = -1.2; // ball this far past the plate = window closed
 const SWING_EARLY_Z: f32 = 3.2; // ball this far in front = earliest contact
 /// Maximum horizontal miss the batter can still reach.
 const SWING_REACH_X: f32 = 1.8;
+
+/// Signed swing-timing error, in milliseconds, at the instant the batter
+/// commits: how far the ball is from the plate converted to time by its own
+/// z-speed, signed so an **early** swing (ball still out in front, `z > PLATE_Z`)
+/// is **negative** and a **late** swing (ball already past, `z < PLATE_Z`) is
+/// positive. `vel_z` is the ball's z-velocity — negative, since it travels
+/// toward the plate at −Z — and is clamped away from zero so a stalled ball
+/// can't divide by zero. This is the seam [`rules::contact_quality`] grades.
+pub(crate) fn swing_dt_ms(ball_z: f32, vel_z: f32) -> f32 {
+    1000.0 * (ball_z - PLATE_Z) / vel_z.min(-f32::EPSILON)
+}
 
 /// Seconds the result banner lingers before the next pitch.
 const RESULT_SECS: f32 = 1.2;
@@ -271,6 +282,19 @@ pub enum LiveBallEvent {
 #[derive(Event, Clone, Copy)]
 pub struct PitchCaughtEvent;
 
+/// A judged swing: fired on *every* swing the batter offers at a pitch,
+/// whiffs included. Carries the graded [`rules::ContactQuality`], who was
+/// batting, and the signed swing timing (`dt_ms`, early = negative) so
+/// presentation systems (fx/audio/camera, later tasks) can react without
+/// re-deriving the timing. The rules/physics consequence is applied at the
+/// swing site in [`pitch_live`]; this event is a read-only report.
+#[derive(Event, Clone, Copy)]
+pub struct ContactEvent {
+    pub quality: rules::ContactQuality,
+    pub batting_team: Team,
+    pub dt_ms: f32,
+}
+
 /// A transient on-screen message (e.g. "STRIKE!", "BALL", "HOME RUN!").
 #[derive(Event, Clone)]
 pub struct PlayBanner {
@@ -302,6 +326,7 @@ impl Plugin for FlowPlugin {
             .add_event::<BallInPlayEvent>()
             .add_event::<LiveBallEvent>()
             .add_event::<PitchCaughtEvent>()
+            .add_event::<ContactEvent>()
             .add_event::<PlayBanner>()
             .add_systems(crate::game::game_start(), reset_flow)
             .add_systems(
@@ -468,9 +493,10 @@ fn pitch_live(
     field: Res<FieldSpec>,
     mut score: ResMut<ScoreBoard>,
     mut bases: ResMut<Bases>,
-    ball_q: Query<&Transform, With<Baseball>>,
+    ball_q: Query<(&Transform, &Velocity), With<Baseball>>,
     mut hit_ev: EventWriter<HitEvent>,
     mut in_play_ev: EventWriter<BallInPlayEvent>,
+    mut contact_ev: EventWriter<ContactEvent>,
     mut banner: EventWriter<PlayBanner>,
     mut order: ResMut<BattingOrder>,
     mut next_state: ResMut<NextState<GameState>>,
@@ -478,7 +504,7 @@ fn pitch_live(
     if play.phase != Phase::Pitch || play.resolved {
         return;
     }
-    let Ok(ball) = ball_q.get_single() else {
+    let Ok((ball, ball_vel)) = ball_q.get_single() else {
         return;
     };
     let pos = ball.translation;
@@ -495,72 +521,111 @@ fn pitch_live(
     let intent = intents.get(batter);
 
     if intent.action {
+        // The spatial band is the OUTER eligibility gate: a ball out of the
+        // batter's reach is a whiff regardless of timing. Within the band,
+        // `contact_quality` grades the swing off its timing error — so a Whiff
+        // now covers a band-miss AND a badly-mistimed in-band swing uniformly.
         let reachable =
             pos.z >= SWING_LATE_Z && pos.z <= SWING_EARLY_Z && pos.x.abs() <= SWING_REACH_X;
-        if reachable {
-            let velocity = rules::hit_velocity(pos.z, intent.aim);
-            hit_ev.send(HitEvent { velocity });
-            let (landing, hang_time) = rules::predict_landing(
-                velocity,
-                rules::hit_spin(velocity),
-                crate::game::ball::BALL_DRAG_FACTOR,
-                crate::game::ball::MAGNUS_FACTOR,
-            );
-            let kind = rules::classify_contact(landing, &field);
-            let contact_class = rules::contact_class(landing, hang_time, &field);
-            in_play_ev.send(BallInPlayEvent {
-                kind,
-                landing,
-                contact_class,
-            });
-            play.contact_at = time.elapsed_secs();
-            play.phase = Phase::InPlay;
-            match kind {
-                // Only a ball over the fence is settled at contact.
-                rules::ContactKind::HomeRun => {
-                    let going = play.steal_armed;
-                    resolve_contact(
-                        Outcome::HomeRun,
-                        &mut score,
-                        &mut bases,
-                        &rules,
-                        &mut banner,
-                        going,
-                    );
-                    order.advance(batter);
-                    play.timer = Timer::from_seconds(
-                        (hang_time + INPLAY_BUFFER).clamp(INPLAY_MIN, INPLAY_MAX),
-                        TimerMode::Once,
-                    );
-                    play.resolved = true;
-                }
-                // Everything else stays live: the fielders' chase and the
-                // runner races decide the call in `resolve_live_play`.
-                rules::ContactKind::Live { .. } => {
-                    play.timer = Timer::from_seconds(
-                        (hang_time + LIVE_PLAY_BUFFER).clamp(LIVE_PLAY_MIN, LIVE_PLAY_MAX),
-                        TimerMode::Once,
-                    );
-                    play.resolved = false;
-                }
-            }
+        let dt_ms = swing_dt_ms(pos.z, ball_vel.linvel.z);
+        let quality = if reachable {
+            rules::contact_quality(dt_ms, &rules)
         } else {
-            // Swinging through a curveball in the dirt with first base open:
-            // the catcher can't hold strike three and the batter runs.
-            let dropped =
-                play.live_kind == Some(rules::PitchKind::Curveball) && !bases.is_occupied(0);
-            let call = add_strike(&mut score, &mut bases, &rules, &mut banner, true, dropped);
-            // The catcher gloves everything except the strike three that got
-            // away (that one is in the dirt by definition).
-            play.pitch_taken = call != StrikeCall::DroppedThird;
-            if call != StrikeCall::Strike {
-                order.advance(batter);
+            rules::ContactQuality::Whiff
+        };
+        // Fired on every judged swing (whiffs included) for later presentation
+        // systems; the rules/physics consequence follows below.
+        contact_ev.send(ContactEvent {
+            quality,
+            batting_team: batter,
+            dt_ms,
+        });
+        match quality {
+            // A ball in play, shaped by the quality's exit multiplier and the
+            // timing-driven pull yaw. (`Weak` never comes from the Classic
+            // windows — it's the Plan-C PCI adapter's outcome — but it belongs
+            // on this arm so the match stays exhaustive and Plan C is a no-op.)
+            rules::ContactQuality::Perfect
+            | rules::ContactQuality::Solid
+            | rules::ContactQuality::Weak => {
+                let base = rules::hit_velocity(pos.z, intent.aim);
+                let velocity = rules::apply_contact_quality(base, quality, dt_ms, &rules);
+                hit_ev.send(HitEvent { velocity });
+                let (landing, hang_time) = rules::predict_landing(
+                    velocity,
+                    rules::hit_spin(velocity),
+                    crate::game::ball::BALL_DRAG_FACTOR,
+                    crate::game::ball::MAGNUS_FACTOR,
+                );
+                let kind = rules::classify_contact(landing, &field);
+                let contact_class = rules::contact_class(landing, hang_time, &field);
+                in_play_ev.send(BallInPlayEvent {
+                    kind,
+                    landing,
+                    contact_class,
+                });
+                play.contact_at = time.elapsed_secs();
+                play.phase = Phase::InPlay;
+                match kind {
+                    // Only a ball over the fence is settled at contact.
+                    rules::ContactKind::HomeRun => {
+                        let going = play.steal_armed;
+                        resolve_contact(
+                            Outcome::HomeRun,
+                            &mut score,
+                            &mut bases,
+                            &rules,
+                            &mut banner,
+                            going,
+                        );
+                        order.advance(batter);
+                        play.timer = Timer::from_seconds(
+                            (hang_time + INPLAY_BUFFER).clamp(INPLAY_MIN, INPLAY_MAX),
+                            TimerMode::Once,
+                        );
+                        play.resolved = true;
+                    }
+                    // Everything else stays live: the fielders' chase and the
+                    // runner races decide the call in `resolve_live_play`.
+                    rules::ContactKind::Live { .. } => {
+                        play.timer = Timer::from_seconds(
+                            (hang_time + LIVE_PLAY_BUFFER).clamp(LIVE_PLAY_MIN, LIVE_PLAY_MAX),
+                            TimerMode::Once,
+                        );
+                        play.resolved = false;
+                    }
+                }
             }
-            // The catcher has the ball: a sent runner must survive the throw.
-            if play.steal_armed {
-                resolve_steal(&play, &mut score, &mut bases, &rules, &mut banner);
+            // A foul tip: a strike (never the third — see `rules::foul`). The
+            // ball is dead, so runners hold (no steal is resolved) and the
+            // at-bat continues. The pull-side sign rides along on the
+            // ContactEvent for later presentation.
+            rules::ContactQuality::FoulTip => {
+                rules::foul(&mut score, &rules);
+                banner.send(PlayBanner::new("FOUL", BannerTone::Info));
+                play.pitch_taken = true; // the catcher gloves the tipped ball
+                end_pitch(&mut play);
             }
-            end_pitch(&mut play);
+            // A swing and miss — exactly today's whiff path.
+            rules::ContactQuality::Whiff => {
+                // Swinging through a curveball in the dirt with first base
+                // open: the catcher can't hold strike three and the batter
+                // runs.
+                let dropped =
+                    play.live_kind == Some(rules::PitchKind::Curveball) && !bases.is_occupied(0);
+                let call = add_strike(&mut score, &mut bases, &rules, &mut banner, true, dropped);
+                // The catcher gloves everything except the strike three that
+                // got away (that one is in the dirt by definition).
+                play.pitch_taken = call != StrikeCall::DroppedThird;
+                if call != StrikeCall::Strike {
+                    order.advance(batter);
+                }
+                // The catcher has the ball: a sent runner must survive the throw.
+                if play.steal_armed {
+                    resolve_steal(&play, &mut score, &mut bases, &rules, &mut banner);
+                }
+                end_pitch(&mut play);
+            }
         }
         maybe_end_game(&score, &rules, &mut next_state);
         return;
@@ -1032,4 +1097,28 @@ fn end_pitch(play: &mut Play) {
     play.phase = Phase::Result;
     play.timer = Timer::from_seconds(RESULT_SECS, TimerMode::Once);
     play.resolved = true;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn swing_dt_ms_is_signed_early_negative() {
+        // Ball travels toward the plate at −Z (vel_z < 0).
+        let vel_z = -30.0;
+        // Out in front of the plate (z > PLATE_Z): the swing is early → negative.
+        assert!(swing_dt_ms(2.0, vel_z) < 0.0);
+        // Already past the plate (z < PLATE_Z): late → positive.
+        assert!(swing_dt_ms(-1.0, vel_z) > 0.0);
+        // Dead on the plate: zero.
+        assert!(swing_dt_ms(PLATE_Z, vel_z).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn swing_dt_ms_never_divides_by_zero() {
+        // A stalled or forward-drifting ball is clamped, not a NaN/inf.
+        assert!(swing_dt_ms(1.0, 0.0).is_finite());
+        assert!(swing_dt_ms(1.0, 5.0).is_finite());
+    }
 }

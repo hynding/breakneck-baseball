@@ -104,13 +104,15 @@ fn top_a_grounder(
         Phase::Pitch => {
             if let Ok(t) = ball.get_single() {
                 let z = t.translation.z;
-                if (0.3..=0.8).contains(&z) {
+                if (-0.1..=0.05).contains(&z) {
                     // A low ball up the middle that gets down and stays live
                     // (fielded and thrown, not lined straight at a fielder for
                     // an instant catch) — the same low-single swing the
-                    // hit-and-run scenario uses. The play must stay live long
-                    // enough for the runner's break to show; the outcome
-                    // itself is beside the point here.
+                    // hit-and-run scenario uses. Timed dead on the plate
+                    // (Perfect, zero pull yaw) so the exit multiplier keeps it
+                    // a centred single. The play must stay live long enough for
+                    // the runner's break to show; the outcome itself is beside
+                    // the point here.
                     let intent = intents.get_mut(batting);
                     intent.aim = Vec2::new(0.0, -1.0);
                     intent.action = true;
