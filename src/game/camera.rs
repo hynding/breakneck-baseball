@@ -120,6 +120,27 @@ const BROADCAST_EYE: Vec3 = Vec3::new(0.0, 13.0, -21.0);
 /// ball — long enough to watch the swing land and the batter break.
 const BALL_FOLLOW_DELAY: f32 = 1.0;
 
+/// Home-run trot orbit: during the result pause of a home run the broadcast
+/// rig sweeps around the diamond instead of holding the static wide plate, so
+/// the trot is shot from a moving camera. Distance/height of the orbiting eye
+/// and the radians-per-second it sweeps.
+const TROT_ORBIT_DIST: f32 = 26.0;
+const TROT_ORBIT_HEIGHT: f32 = 11.0;
+const TROT_ORBIT_RATE: f32 = 0.7;
+
+/// The broadcast eye for the home-run trot orbit: a point on a circle of
+/// radius [`TROT_ORBIT_DIST`] at height [`TROT_ORBIT_HEIGHT`] around `focus`,
+/// swept to `azimuth` radians. Same sin/cos parameterization as
+/// [`orbit_transform`], so the trot shot reuses the free camera's orbit math.
+fn trot_orbit_eye(focus: Vec3, azimuth: f32) -> Vec3 {
+    focus
+        + Vec3::new(
+            TROT_ORBIT_DIST * azimuth.sin(),
+            TROT_ORBIT_HEIGHT,
+            TROT_ORBIT_DIST * azimuth.cos(),
+        )
+}
+
 /// Vertical FOV used everywhere except the duel (unchanged from the single
 /// FOV this camera used to run at everywhere).
 const BROADCAST_FOV: f32 = std::f32::consts::FRAC_PI_3;
@@ -467,6 +488,14 @@ fn broadcast_camera(
                 );
             (eye, target, BROADCAST_FOV)
         }
+        // Result pause of a home run: orbit the diamond while the batter
+        // trots the bases — a sweeping victory-lap shot that lerps in from the
+        // ball-follow and back out to the duel framing at phase end.
+        (Phase::Result, _) if play.is_home_run() => {
+            let focus = Vec3::new(field.broadcast_target.x, 1.4, field.broadcast_target.z);
+            let eye = trot_orbit_eye(focus, time.elapsed_secs() * TROT_ORBIT_RATE);
+            (eye, focus, BROADCAST_FOV)
+        }
         // Result pause: settle on the wide home framing.
         (Phase::Result, _) => (field.broadcast_eye, field.broadcast_target, BROADCAST_FOV),
         // The duel: whichever at-bat view the player has cycled to with V.
@@ -613,6 +642,32 @@ mod tests {
     fn aspect_safe_duel_vfov_unchanged_for_ultrawide() {
         let vfov = aspect_safe_duel_vfov(DUEL_FOV, 21.0 / 9.0);
         assert_eq!(vfov, DUEL_FOV);
+    }
+
+    /// The trot orbit eye stays on a fixed-radius, fixed-height circle around
+    /// the focus for every azimuth, and actually sweeps (distinct eyes at
+    /// distinct azimuths) — the "sweeping victory lap" the Result-phase branch
+    /// lerps toward.
+    #[test]
+    fn trot_orbit_eye_rides_a_fixed_circle_and_sweeps() {
+        let focus = Vec3::new(2.0, 1.4, 9.0);
+        let mut prev: Option<Vec3> = None;
+        for step in 0..8 {
+            let azim = step as f32 * std::f32::consts::FRAC_PI_4;
+            let eye = trot_orbit_eye(focus, azim);
+            // Fixed height above the focus.
+            assert!((eye.y - (focus.y + TROT_ORBIT_HEIGHT)).abs() < 1e-4);
+            // Fixed horizontal radius from the focus.
+            let horiz = Vec2::new(eye.x - focus.x, eye.z - focus.z).length();
+            assert!(
+                (horiz - TROT_ORBIT_DIST).abs() < 1e-3,
+                "azim {azim}: radius {horiz} != {TROT_ORBIT_DIST}"
+            );
+            if let Some(p) = prev {
+                assert!(p.distance(eye) > 1e-3, "the orbit must actually move");
+            }
+            prev = Some(eye);
+        }
     }
 
     #[test]

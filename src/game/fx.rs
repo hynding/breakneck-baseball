@@ -8,8 +8,8 @@ use crate::game::ai::{hash01, noise};
 use crate::game::ball::{
     Baseball, HitEvent, InFlight, WallBangEvent, BALL_DRAG_FACTOR, MAGNUS_FACTOR,
 };
-use crate::game::flow::{Phase, Play};
-use crate::game::rules;
+use crate::game::flow::{BallInPlayEvent, Phase, Play};
+use crate::game::rules::{self, ContactKind, ContactQuality};
 use crate::game::theme::Theme;
 use crate::game::{GameState, GameplayEntity};
 
@@ -61,8 +61,12 @@ struct Particle {
 struct FxAssets {
     spark_mesh: Handle<Mesh>,
     dust_mesh: Handle<Mesh>,
+    /// A fatter mote for fireworks, so the show reads from the outfield.
+    firework_mesh: Handle<Mesh>,
     spark: Handle<StandardMaterial>,
     dust: Handle<StandardMaterial>,
+    /// A small bright palette the fireworks pick from, burst by burst.
+    firework: Vec<Handle<StandardMaterial>>,
 }
 
 fn build_fx_assets(
@@ -71,9 +75,26 @@ fn build_fx_assets(
     mut materials: ResMut<Assets<StandardMaterial>>,
     theme: Res<Theme>,
 ) {
+    let firework = [
+        Color::srgb(1.0, 0.85, 0.30),
+        Color::srgb(1.0, 0.35, 0.35),
+        Color::srgb(0.45, 0.70, 1.0),
+        Color::srgb(0.60, 1.0, 0.55),
+        Color::srgb(1.0, 0.55, 0.90),
+    ]
+    .into_iter()
+    .map(|base_color| {
+        materials.add(StandardMaterial {
+            base_color,
+            unlit: true,
+            ..default()
+        })
+    })
+    .collect();
     commands.insert_resource(FxAssets {
         spark_mesh: meshes.add(Sphere::new(0.07)),
         dust_mesh: meshes.add(Sphere::new(0.14)),
+        firework_mesh: meshes.add(Sphere::new(0.18)),
         spark: materials.add(StandardMaterial {
             base_color: theme.ball.trail,
             unlit: true,
@@ -84,7 +105,10 @@ fn build_fx_assets(
             unlit: true,
             ..default()
         }),
+        firework,
     });
+    // A fresh show state each game (this system runs on `game_start()`).
+    commands.insert_resource(Fireworks::default());
 }
 
 // ── Landing ring ──────────────────────────────────────────────────────────────
@@ -231,6 +255,109 @@ fn wall_bang_burst(
     }
 }
 
+// ── Home-run fireworks ──────────────────────────────────────────────────────────
+
+/// Seconds a home-run show keeps launching bursts — long enough to ride the
+/// trot through the result pause (the play holds the next at-bat until the
+/// runners settle, so the trot window is real).
+const FIREWORKS_SECS: f32 = 5.0;
+/// Delay between bursts; a dead-on Perfect launches them faster and denser.
+const FIREWORKS_BURST_SECS: f32 = 0.32;
+const FIREWORKS_BURST_SECS_PERFECT: f32 = 0.20;
+/// Sparks per burst (more for a Perfect).
+const FIREWORKS_SPARKS: usize = 20;
+const FIREWORKS_SPARKS_PERFECT: usize = 34;
+
+/// A single firework mote — a [`Particle`] tagged so the home-run show can be
+/// told apart from the incidental contact/wall/dust sparks (the e2e test reads
+/// this; nothing gameplay does). Purely cosmetic.
+#[derive(Component)]
+pub struct FireworkSpark;
+
+/// The live state of a home-run fireworks show: bursts keep launching over the
+/// outfield until `remaining` runs out, faster and denser after a Perfect
+/// swing. Reset fresh each game in [`build_fx_assets`].
+#[derive(Resource, Default)]
+struct Fireworks {
+    active: bool,
+    remaining: Timer,
+    next: Timer,
+    perfect: bool,
+}
+
+/// The home run is a moment: on a ball over the fence, launch a fireworks show
+/// over the outfield — brighter and faster off a dead-on Perfect swing
+/// (`Play::last_contact_quality`) — that keeps bursting for the length of the
+/// trot. Scales up the same spark burst the wall bang uses; like every fx
+/// system it only spawns cosmetic motes and never touches the score.
+fn home_run_fireworks(
+    mut in_play: EventReader<BallInPlayEvent>,
+    play: Res<Play>,
+    assets: Option<Res<FxAssets>>,
+    time: Res<Time>,
+    mut show: ResMut<Fireworks>,
+    mut commands: Commands,
+) {
+    let Some(assets) = assets else { return };
+    for ev in in_play.read() {
+        if matches!(ev.kind, ContactKind::HomeRun) {
+            show.active = true;
+            show.perfect = play.last_contact_quality() == Some(ContactQuality::Perfect);
+            show.remaining = Timer::from_seconds(FIREWORKS_SECS, TimerMode::Once);
+            show.next = Timer::from_seconds(0.0, TimerMode::Once); // first burst at once
+        }
+    }
+    if !show.active {
+        return;
+    }
+    if show.remaining.tick(time.delta()).finished() {
+        show.active = false;
+        return;
+    }
+    if !show.next.tick(time.delta()).finished() {
+        return;
+    }
+    let interval = if show.perfect {
+        FIREWORKS_BURST_SECS_PERFECT
+    } else {
+        FIREWORKS_BURST_SECS
+    };
+    show.next = Timer::from_seconds(interval, TimerMode::Once);
+
+    // A launch point high over the outfield, spread across the field.
+    let s = time.elapsed_secs();
+    let center = Vec3::new(
+        noise(s * 3.1) * 26.0,
+        13.0 + hash01(s * 5.7) * 8.0,
+        42.0 + hash01(s * 2.3) * 34.0,
+    );
+    let palette = &assets.firework;
+    let material =
+        palette[(hash01(s * 7.9) * palette.len() as f32) as usize % palette.len()].clone();
+    let sparks = if show.perfect {
+        FIREWORKS_SPARKS_PERFECT
+    } else {
+        FIREWORKS_SPARKS
+    };
+    for i in 0..sparks {
+        let seed = s * 17.3 + i as f32 * 1.618;
+        let dir = Vec3::new(noise(seed), noise(seed * 1.3), noise(seed * 1.7)).normalize_or_zero();
+        commands.spawn((
+            Particle {
+                vel: dir * (5.0 + hash01(seed * 2.1) * 4.0),
+                timer: Timer::from_seconds(0.9, TimerMode::Once),
+                gravity: 3.0,
+                grow: -1.0,
+            },
+            FireworkSpark,
+            GameplayEntity,
+            Mesh3d(assets.firework_mesh.clone()),
+            MeshMaterial3d(material.clone()),
+            Transform::from_translation(center),
+        ));
+    }
+}
+
 /// Threshold impact speed for a dust puff (m/s).
 const DUST_MIN_SPEED: f32 = 4.0;
 
@@ -311,6 +438,7 @@ pub struct FxPlugin;
 impl Plugin for FxPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<HitStop>()
+            .init_resource::<Fireworks>()
             .add_systems(
                 crate::game::game_start(),
                 (build_fx_assets, spawn_landing_ring),
@@ -322,6 +450,7 @@ impl Plugin for FxPlugin {
                     end_hit_stop,
                     contact_burst,
                     wall_bang_burst,
+                    home_run_fireworks,
                     bounce_dust,
                     update_landing_ring,
                     tick_particles,

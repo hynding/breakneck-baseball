@@ -17,11 +17,16 @@ use bevy::prelude::*;
 use crate::game::ai::hash01;
 use crate::game::flow::{BallInPlayEvent, ContactEvent, LiveBallEvent, PitchCaughtEvent};
 use crate::game::flow::{BannerTone, PlayBanner};
-use crate::game::rules::{ContactClass, ContactQuality};
+use crate::game::rules::{ContactClass, ContactKind, ContactQuality};
 use crate::game::{ball::WallBangEvent, game_start, GameState, GameplayEntity};
 
 /// Mono synthesis rate — plenty for percussive game sounds, tiny in memory.
 const SAMPLE_RATE: u32 = 22_050;
+
+/// Roar playback gain: the standard swell (Perfect swing / deep fly), and the
+/// crowd *peak* a home run over the fence earns — the same roar, louder.
+const ROAR_GAIN: f32 = 0.7;
+const ROAR_PEAK_GAIN: f32 = 1.0;
 
 /// The banner text `flow::add_strike` fires on the final strike — matched
 /// against in [`play_event_sounds`] to tell a swinging strikeout apart from
@@ -234,6 +239,8 @@ fn play_event_sounds(
 ) {
     let Some(bank) = bank else { return };
     let mut roar = false;
+    // A home run peaks the crowd above the ordinary roar.
+    let mut crowd_peak = false;
     // A swing that whiffed this frame — `ContactEvent` never fires for a
     // called (non-swinging) strike, so pairing it with the `STRIKEOUT!`
     // banner below (fired from the same `pitch_live` call) identifies a
@@ -271,12 +278,18 @@ fn play_event_sounds(
         }
     }
     for event in in_play.read() {
-        if event.contact_class == ContactClass::DeepFly {
+        if matches!(event.kind, ContactKind::HomeRun) {
+            crowd_peak = true;
+        } else if event.contact_class == ContactClass::DeepFly {
             roar = true;
         }
     }
-    if roar {
-        play(&mut commands, &bank.roar, 0.7);
+    // A home run peaks the crowd; otherwise the standard swell, if earned.
+    // Only one roar plays — the peak subsumes the ordinary one.
+    if crowd_peak {
+        play(&mut commands, &bank.roar, ROAR_PEAK_GAIN);
+    } else if roar {
+        play(&mut commands, &bank.roar, ROAR_GAIN);
     }
     for banner in banners.read() {
         if banner.tone == BannerTone::Epic {
@@ -492,6 +505,27 @@ mod tests {
         });
         app.update();
         assert_eq!(audio_players(&app).len(), before + 1, "roar only, no crack");
+    }
+
+    /// A ball over the fence peaks the crowd: exactly one roar (the peak
+    /// subsumes the ordinary deep-fly roar, so a HR whose flight also grades
+    /// a deep fly never double-roars), and no crack (the crack comes off the
+    /// separate ContactEvent, not sent here).
+    #[test]
+    fn home_run_plays_a_single_crowd_peak_roar() {
+        let mut app = test_app();
+        let before = audio_players(&app).len();
+        app.world_mut().send_event(BallInPlayEvent {
+            kind: ContactKind::HomeRun,
+            landing: Vec3::new(0.0, 0.0, 120.0),
+            contact_class: ContactClass::DeepFly,
+        });
+        app.update();
+        assert_eq!(
+            audio_players(&app).len(),
+            before + 1,
+            "a home run plays exactly one (peak) roar"
+        );
     }
 
     #[test]

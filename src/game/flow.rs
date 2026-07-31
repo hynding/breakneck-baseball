@@ -162,6 +162,13 @@ pub struct Play {
     contact_at: f32,
     /// A wall carom has already been called this play (one banner per play).
     wall_called: bool,
+    /// The quality of the most recent judged swing this at-bat (any swing,
+    /// whiff included), stashed for presentation — the HR fireworks scale up
+    /// off a dead-on Perfect. Cleared at reset (per at-bat).
+    last_contact_quality: Option<rules::ContactQuality>,
+    /// This play is a home run: set at contact, held through the trot and the
+    /// result pause (so the camera can orbit the trot), cleared at reset.
+    home_run: bool,
 }
 
 impl Play {
@@ -199,6 +206,18 @@ impl Play {
             _ => None,
         }
     }
+
+    /// The most recent judged swing's quality this at-bat (any swing), or
+    /// `None` before the first swing. Read by the home-run fireworks.
+    pub fn last_contact_quality(&self) -> Option<rules::ContactQuality> {
+        self.last_contact_quality
+    }
+
+    /// Whether the live/just-finished play is a home run — held from contact
+    /// through the trot and the result pause so the camera can orbit it.
+    pub fn is_home_run(&self) -> bool {
+        self.home_run
+    }
 }
 
 /// The live leadoff state, shared with the runner visuals and the CPU: the
@@ -228,6 +247,8 @@ impl Default for Play {
             pending_call: None,
             contact_at: 0.0,
             wall_called: false,
+            last_contact_quality: None,
+            home_run: false,
         }
     }
 }
@@ -405,7 +426,6 @@ fn pre_pitch(
     mut lead: ResMut<LeadState>,
     mut banner: EventWriter<PlayBanner>,
     pitcher_q: Query<Entity, With<Pitcher>>,
-    mut next_state: ResMut<NextState<GameState>>,
     mut commands: Commands,
 ) {
     if play.phase != Phase::PrePitch {
@@ -437,7 +457,6 @@ fn pre_pitch(
                     // pause as any other out (banner linger + runners
                     // settling) before the next window can open.
                     end_pitch(&mut play);
-                    maybe_end_game(&score, &rules_res, &mut next_state);
                 }
                 rules::PickoffResult::SafeBack => {
                     banner.send(PlayBanner::new("BACK IN TIME", BannerTone::Info));
@@ -527,7 +546,6 @@ fn pitch_live(
     mut contact_ev: EventWriter<ContactEvent>,
     mut banner: EventWriter<PlayBanner>,
     mut order: ResMut<BattingOrder>,
-    mut next_state: ResMut<NextState<GameState>>,
 ) {
     if play.phase != Phase::Pitch || play.resolved {
         return;
@@ -573,6 +591,9 @@ fn pitch_live(
             batting_team: batter,
             dt_ms,
         });
+        // Remember this swing's grade for presentation — the home-run
+        // fireworks scale up off a dead-on Perfect (see fx.rs).
+        play.last_contact_quality = Some(quality);
         match quality {
             // A ball in play, shaped by the quality's exit multiplier and the
             // timing-driven pull yaw. (`Weak` never comes from the Classic
@@ -602,6 +623,7 @@ fn pitch_live(
                 match kind {
                     // Only a ball over the fence is settled at contact.
                     rules::ContactKind::HomeRun => {
+                        play.home_run = true;
                         let going = play.steal_armed;
                         resolve_contact(
                             Outcome::HomeRun,
@@ -660,7 +682,6 @@ fn pitch_live(
                 end_pitch(&mut play);
             }
         }
-        maybe_end_game(&score, &rules, &mut next_state);
         return;
     }
 
@@ -697,7 +718,6 @@ fn pitch_live(
             }
         }
         end_pitch(&mut play);
-        maybe_end_game(&score, &rules, &mut next_state);
     }
 }
 
@@ -835,7 +855,6 @@ fn resolve_live_play(
     mut order: ResMut<BattingOrder>,
     mut banner: EventWriter<PlayBanner>,
     ball_q: Query<&Transform, With<Baseball>>,
-    mut next_state: ResMut<NextState<GameState>>,
 ) {
     if play.phase != Phase::InPlay {
         events.clear();
@@ -862,7 +881,6 @@ fn resolve_live_play(
             }
             play.phase = Phase::Result;
             play.timer = Timer::from_seconds(RESULT_SECS, TimerMode::Once);
-            maybe_end_game(&score, &rules_res, &mut next_state);
         }
         return;
     }
@@ -941,7 +959,6 @@ fn resolve_live_play(
     play.resolved = true;
     play.phase = Phase::Result;
     play.timer = Timer::from_seconds(RESULT_SECS, TimerMode::Once);
-    maybe_end_game(&score, &rules_res, &mut next_state);
 }
 
 // ── Result: brief pause, then reset for the next pitch ────────────────────────
@@ -953,9 +970,11 @@ fn result_phase(
     field: Res<FieldSpec>,
     rules_res: Res<Ruleset>,
     bases: Res<Bases>,
+    score: Res<ScoreBoard>,
     settled: Res<RunnersSettled>,
     mut overtime: Local<f32>,
     mut lead: ResMut<LeadState>,
+    mut next_state: ResMut<NextState<GameState>>,
     mut ball_q: Query<(Entity, &mut Transform, &mut Velocity, &mut Visibility), With<Baseball>>,
     mut commands: Commands,
 ) {
@@ -973,6 +992,15 @@ fn result_phase(
         return;
     }
     *overtime = 0.0;
+    // The play has fully finished on screen — banner shown, runners settled
+    // (the walk-off home-run trot included). Only now, once the play looks
+    // over, does a decided game actually end: a walk-off's fireworks, slow-mo,
+    // and trot all play out before GAME OVER instead of being cut off at
+    // contact. Every game-ending call routes through this one Result gate.
+    if rules::is_game_over(&score, rules_res.innings) {
+        next_state.set(GameState::GameOver);
+        return;
+    }
     if let Ok((entity, mut transform, mut vel, mut vis)) = ball_q.get_single_mut() {
         transform.translation = rules::mound_reset_pos(field.pitch_distance);
         vel.linvel = Vec3::ZERO;
@@ -995,6 +1023,8 @@ fn result_phase(
     play.pitch_taken = false;
     play.pending_call = None;
     play.wall_called = false;
+    play.home_run = false;
+    play.last_contact_quality = None;
     // A runner in stealing position opens the duel window for the next at-bat.
     play.hold = steal_window_for(&bases, &rules_res);
     lead.extended = false;
@@ -1183,12 +1213,6 @@ fn add_strike(
         }
     }
     call
-}
-
-fn maybe_end_game(score: &ScoreBoard, rules: &Ruleset, next_state: &mut NextState<GameState>) {
-    if rules::is_game_over(score, rules.innings) {
-        next_state.set(GameState::GameOver);
-    }
 }
 
 fn end_pitch(play: &mut Play) {
