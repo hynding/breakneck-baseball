@@ -379,13 +379,21 @@ impl Plugin for FlowPlugin {
             .add_systems(crate::game::game_start(), reset_flow)
             .add_systems(
                 Update,
-                // CPU intent is written first so pitching/batting see it this frame.
+                // CPU intent is written first so pitching/batting see it this
+                // frame. `adapt_swings` sits after `wind_up` (not right after
+                // `cpu_offense`) so it reads the *post-flip* phase on the
+                // exact frame `wind_up` moves WindUp -> Pitch — otherwise a
+                // human's one-frame `action` edge lands while the adapter
+                // still sees the stale WindUp phase and gets silently
+                // dropped (pitch_live used to run after wind_up too, so this
+                // restores that same-frame delivery). It still reads
+                // `cpu_offense`'s intent write from earlier this frame.
                 (
                     cpu_defense,
                     cpu_offense,
-                    crate::game::batting::adapt_swings,
                     pre_pitch,
                     wind_up,
+                    crate::game::batting::adapt_swings,
                     pitch_live,
                     catcher_receives,
                     in_play,
