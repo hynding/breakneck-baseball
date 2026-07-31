@@ -22,11 +22,14 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy_rapier3d::prelude::*;
 
 use crate::game::ai::hash01;
+use crate::game::batting::{style_for, PciState};
 use crate::game::flow::{ContactEvent, Phase, Play};
+use crate::game::input::Controllers;
 use crate::game::rules;
 use crate::game::rules::ContactQuality;
+use crate::game::settings::{BattingStyle, Settings};
 use crate::game::variant::{FieldSpec, Scenery};
-use crate::game::{GameState, GameplayEntity};
+use crate::game::{GameState, GameplayEntity, ScoreBoard};
 
 // ── Distances in metres ───────────────────────────────────────────────────────
 /// Distance between consecutive bases (90 ft).
@@ -68,6 +71,14 @@ pub struct OutfieldWall;
 /// `player::CatcherRole` uses for `e2e_camera_views`).
 #[derive(Component)]
 pub struct StrikeZoneOverlay;
+
+/// Marks the PCI aiming cursor — the small quad a PCI batter steers around the
+/// zone plane. Public so e2e tests can query its `Visibility`, like
+/// [`StrikeZoneOverlay`]. Shown only while a human PCI batter is up (see
+/// [`pci_cursor_visibility`]); a non-rig marker, so its transform is moved
+/// directly (like `fx.rs`'s landing ring).
+#[derive(Component)]
+pub struct PciCursorMarker;
 
 /// The zone box's frame material plus enough to pulse and restore it: a
 /// contact worth celebrating (Solid/Perfect, Task B4) briefly tints the
@@ -203,6 +214,7 @@ impl Plugin for FieldPlugin {
                     trigger_zone_flash,
                     restore_zone_flash,
                     strike_zone_visibility,
+                    pci_cursor_visibility,
                 )
                     .chain()
                     .run_if(in_state(GameState::Playing)),
@@ -966,6 +978,20 @@ fn spawn_strike_zone(
             &frame,
         );
     }
+
+    // The PCI aiming cursor: a small unlit quad sitting a hair in front of the
+    // zone plane (toward the behind-home camera) so it reads over the fill.
+    // Hidden at spawn, revealed only for a human PCI batter (wasm UI rule: the
+    // scene spawns at game start and shows/hides — never respawns).
+    let cursor_mat = translucent(theme.ui.accent.with_alpha(0.9));
+    commands.spawn((
+        PciCursorMarker,
+        GameplayEntity,
+        Mesh3d(meshes.add(Cuboid::new(0.06, 0.06, 0.004))),
+        MeshMaterial3d(cursor_mat),
+        Transform::from_translation(Vec3::new(0.0, mid_y, -0.02)),
+        Visibility::Hidden,
+    ));
 }
 
 /// The zone box belongs to the duel: shown while a pitch is coming, hidden
@@ -988,6 +1014,40 @@ fn strike_zone_visibility(
         };
         if *visibility != desired {
             *visibility = desired;
+        }
+    }
+}
+
+/// The PCI cursor belongs to the batting side's duel: shown only while a
+/// *human* batter set to [`BattingStyle::PciCursor`] is up and a pitch is
+/// coming, and parked at the live cursor position ([`PciState::cursor`]) each
+/// frame. A CPU batter always routes Classic (so [`style_for`] never returns
+/// PCI for it), which keeps the marker hidden on defense/CPU at-bats.
+fn pci_cursor_visibility(
+    play: Res<Play>,
+    score: Res<ScoreBoard>,
+    controllers: Res<Controllers>,
+    settings: Res<Settings>,
+    pci: Res<PciState>,
+    mut marker: Query<(&mut Visibility, &mut Transform), With<PciCursorMarker>>,
+) {
+    let batting = score.batting_team();
+    let show = controllers.player_index(batting).is_some()
+        && style_for(batting, &controllers, &settings) == BattingStyle::PciCursor
+        && matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch);
+    let cursor = pci.cursor(batting);
+    for (mut visibility, mut transform) in &mut marker {
+        let desired = if show {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        if *visibility != desired {
+            *visibility = desired;
+        }
+        if show {
+            transform.translation.x = cursor.x;
+            transform.translation.y = cursor.y;
         }
     }
 }

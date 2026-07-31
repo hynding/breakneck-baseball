@@ -587,10 +587,21 @@ fn pitch_live(
         let reachable =
             pos.z >= late_exit_z && pos.z <= SWING_EARLY_Z && pos.x.abs() <= SWING_REACH_X;
         let dt_ms = swing_dt_ms(pos.z, ball_vel.linvel.z);
-        let quality = if reachable {
-            rules::contact_quality(dt_ms, &rules)
-        } else {
+        // Classic/Meter grade on timing alone; PCI also folds in how far the
+        // aiming cursor sat from the ball at the contact point (spec §3).
+        let quality = if !reachable {
             rules::ContactQuality::Whiff
+        } else if let Some(cursor) = swing.pci_offset {
+            let miss = cursor.distance(Vec2::new(pos.x, pos.y));
+            rules::pci_contact_quality(dt_ms, miss, &rules)
+        } else {
+            rules::contact_quality(dt_ms, &rules)
+        };
+        // Direction: PCI derives it from the contact-point offset (spec §3);
+        // Classic/Meter use the raw aim held at the swing.
+        let aim = match swing.pci_offset {
+            Some(cursor) => rules::pci_aim(cursor - Vec2::new(pos.x, pos.y)),
+            None => swing.aim,
         };
         // Fired on every judged swing (whiffs included) for later presentation
         // systems; the rules/physics consequence follows below.
@@ -610,7 +621,7 @@ fn pitch_live(
             rules::ContactQuality::Perfect
             | rules::ContactQuality::Solid
             | rules::ContactQuality::Weak => {
-                let base = rules::hit_velocity(pos.z, swing.aim);
+                let base = rules::hit_velocity(pos.z, aim);
                 let velocity = rules::apply_contact_quality(base, quality, dt_ms, &rules);
                 hit_ev.send(HitEvent { velocity });
                 let (landing, hang_time) = rules::predict_landing(

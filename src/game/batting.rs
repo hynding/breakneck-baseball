@@ -8,6 +8,7 @@ use bevy_rapier3d::prelude::Velocity;
 use crate::game::ball::Baseball;
 use crate::game::flow::{Phase, Play};
 use crate::game::input::{Controllers, Intents};
+use crate::game::rules;
 use crate::game::settings::{BattingStyle, Settings};
 use crate::game::variant::Ruleset;
 use crate::game::{ScoreBoard, Team};
@@ -78,6 +79,50 @@ impl MeterState {
 /// it. Always 0 for Classic/PCI batters and whenever no load is open.
 #[derive(Resource, Default)]
 pub struct MeterLoad(pub f32);
+
+/// The PCI cursor's per-team position on the zone plane, in zone coordinates
+/// (`x` = world x in meters, `y` = height in meters). Only the human PCI arm of
+/// [`adapt_swings`] moves it; every other style leaves it at rest. Reset to the
+/// zone center between pitches (see [`adapt_swings`]'s early-return path); the
+/// field-side marker reads it via [`PciState::cursor`].
+#[derive(Resource)]
+pub struct PciState {
+    home: Vec2,
+    away: Vec2,
+}
+
+impl PciState {
+    /// The zone-center resting position: horizontally centered, vertically at
+    /// the midpoint of the called zone.
+    fn center() -> Vec2 {
+        Vec2::new(0.0, (rules::ZONE_LOW + rules::ZONE_HIGH) / 2.0)
+    }
+
+    /// `team`'s current cursor position (zone coordinates).
+    pub fn cursor(&self, team: Team) -> Vec2 {
+        match team {
+            Team::Home => self.home,
+            Team::Away => self.away,
+        }
+    }
+
+    fn cursor_mut(&mut self, team: Team) -> &mut Vec2 {
+        match team {
+            Team::Home => &mut self.home,
+            Team::Away => &mut self.away,
+        }
+    }
+}
+
+impl Default for PciState {
+    fn default() -> Self {
+        let center = Self::center();
+        Self {
+            home: center,
+            away: center,
+        }
+    }
+}
 
 /// What the Swing Meter arm does this frame, given `held` (the action button
 /// held now), `was_loading` (a load was already open), and `ball_past` (the
@@ -153,6 +198,7 @@ pub fn adapt_swings(
     mut commands: ResMut<SwingCommands>,
     mut meter: ResMut<MeterState>,
     mut load: ResMut<MeterLoad>,
+    mut pci: ResMut<PciState>,
 ) {
     let now = time.elapsed_secs();
     let team = score.batting_team();
@@ -161,8 +207,11 @@ pub fn adapt_swings(
     *commands = SwingCommands::default();
     if play.phase != Phase::Pitch {
         // Between pitches the meter is idle: forget any dangling hold so the
-        // next at-bat starts from an empty bar (and presentation reads 0).
+        // next at-bat starts from an empty bar (and presentation reads 0). The
+        // PCI cursor likewise re-centers so every at-bat opens from the middle
+        // of the zone.
         *meter = MeterState::default();
+        *pci = PciState::default();
         load.0 = 0.0;
         return;
     }
@@ -206,15 +255,33 @@ pub fn adapt_swings(
                 );
             }
         }
-        // The PCI arm lands in C4; until then it falls through to Classic so
-        // the game stays playable in that style.
+        // Move the aiming cursor with the stick (a *velocity*, so it is
+        // keyboard-playable — a held direction glides it), press to swing at
+        // the barrel's current spot. The swing's direction comes from where the
+        // cursor sat relative to the ball (`pitch_live` reads `pci_offset`), not
+        // from raw aim.
         BattingStyle::PciCursor => {
+            // Glide: aim is a velocity, not a position. Stick-right moves the
+            // cursor toward screen-right; from the behind-home camera that is
+            // world −X (first base side), matching the pitch-aim mapping's
+            // negation (CLAUDE.md). Note the stick does double duty this frame:
+            // the Down-hold runner-send read (`wants_send` in flow.rs) also
+            // watches aim, so steering the cursor and sending a runner mid-pitch
+            // share the stick by design — but the leadoff send decision
+            // (`steal_armed`) is committed pre-delivery, so the real conflict
+            // window is small.
+            const PCI_SPEED_MPS: f32 = 1.6;
+            let c = pci.cursor_mut(team);
+            c.x -= intent.aim.x * PCI_SPEED_MPS * time.delta_secs();
+            c.y += intent.aim.y * PCI_SPEED_MPS * time.delta_secs();
+            c.x = c.x.clamp(-rules::ZONE_HALF_WIDTH, rules::ZONE_HALF_WIDTH);
+            c.y = c.y.clamp(rules::ZONE_LOW, rules::ZONE_HIGH);
             if intent.action {
                 commands.set(
                     team,
                     SwingInput {
                         aim: intent.aim,
-                        pci_offset: None,
+                        pci_offset: Some(*c),
                     },
                 );
             }
@@ -234,7 +301,8 @@ impl Plugin for BattingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SwingCommands>()
             .init_resource::<MeterState>()
-            .init_resource::<MeterLoad>();
+            .init_resource::<MeterLoad>()
+            .init_resource::<PciState>();
     }
 }
 
