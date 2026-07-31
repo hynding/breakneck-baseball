@@ -7,6 +7,7 @@ pub mod ai;
 pub mod animation;
 pub mod audio;
 pub mod ball;
+pub mod batting;
 pub mod camera;
 pub mod field;
 pub mod fielding;
@@ -32,6 +33,7 @@ use bevy::prelude::*;
 use animation::AnimationPlugin;
 use audio::SoundPlugin;
 use ball::BallPlugin;
+use batting::BattingPlugin;
 use camera::CameraPlugin;
 use field::FieldPlugin;
 use fielding::FieldingPlugin;
@@ -230,6 +232,7 @@ impl Plugin for GamePlugin {
                 ModelAssetsPlugin,
                 PlayerPlugin,
                 AnimationPlugin,
+                BattingPlugin,
                 FlowPlugin,
                 FxPlugin,
                 SoundPlugin,
@@ -237,9 +240,13 @@ impl Plugin for GamePlugin {
                 RunnerPlugin,
                 CameraPlugin,
                 UiPlugin,
-                JerseyPlugin,
             ))
-            .add_plugins((SubsPlugin, settings::SettingsPlugin, JuicePlugin))
+            .add_plugins((
+                JerseyPlugin,
+                SubsPlugin,
+                settings::SettingsPlugin,
+                JuicePlugin,
+            ))
             // Fresh scoreboard/rosters each time a game starts from the menu;
             // tear the scene down once the game is over. Pausing stays inside
             // Playing ⇄ Paused and touches neither.

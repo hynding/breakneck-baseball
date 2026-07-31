@@ -383,6 +383,7 @@ impl Plugin for FlowPlugin {
                 (
                     cpu_defense,
                     cpu_offense,
+                    crate::game::batting::adapt_swings,
                     pre_pitch,
                     wind_up,
                     pitch_live,
@@ -535,7 +536,7 @@ fn wind_up(
 fn pitch_live(
     time: Res<Time>,
     mut play: ResMut<Play>,
-    intents: Res<Intents>,
+    mut swing_commands: ResMut<crate::game::batting::SwingCommands>,
     rules: Res<Ruleset>,
     field: Res<FieldSpec>,
     mut score: ResMut<ScoreBoard>,
@@ -564,14 +565,13 @@ fn pitch_live(
     // order advances for the team whose batter just finished, not whoever
     // bats next.
     let batter = score.batting_team();
-    let intent = intents.get(batter);
 
     // The late edge of the swing window is the geometric shadow of the foul
     // window itself (see `late_swing_z`), recomputed off the ball's live
     // z-speed every frame since it isn't a fixed distance.
     let late_exit_z = late_swing_z(ball_vel.linvel.z, rules.foul_ms);
 
-    if intent.action {
+    if let Some(swing) = swing_commands.take(batter) {
         // The spatial band is the OUTER eligibility gate: a ball out of the
         // batter's reach is a whiff regardless of timing. Within the band,
         // `contact_quality` grades the swing off its timing error — so a Whiff
@@ -602,7 +602,7 @@ fn pitch_live(
             rules::ContactQuality::Perfect
             | rules::ContactQuality::Solid
             | rules::ContactQuality::Weak => {
-                let base = rules::hit_velocity(pos.z, intent.aim);
+                let base = rules::hit_velocity(pos.z, swing.aim);
                 let velocity = rules::apply_contact_quality(base, quality, dt_ms, &rules);
                 hit_ev.send(HitEvent { velocity });
                 let (landing, hang_time) = rules::predict_landing(
