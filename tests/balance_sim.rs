@@ -367,20 +367,38 @@ fn run_sim(n: u32) -> Aggregate {
 //    is bounded by the bands rather than removed.
 //
 // N=40 (up from 20, funded by the single-threaded speedup) averages that spread
-// down where it can. K% and HR/9 tighten well and their bands have teeth. runs/9
-// is the leveraged, chaotic signal that barely tightens (a run scores off a
-// *chain* of decisions), so its band stays the widest — and its floor sits below
-// the historically-observed 1.35 draw (the flake this test used to throw), which
-// is the honest floor for a signal this volatile, not slack for its own sake.
+// down where it can. At N=40 one chaotic game moves the aggregate only ~0.11
+// runs/9 / ~0.11 HR/9, so a per-process seed change nudges the mean — it cannot
+// drag it across a full band. Reaching a floor therefore means a *systematic*
+// regression (the offense collapsed), which is exactly what the floors catch.
 //
-// Measured at N=40 across processes: K% 17.2..21.9, runs/9 2.8..4.4, HR/9
-// 2.0..2.6 (this binary); wider draws seen at N=20 / other binaries inform the
-// margins. HR still centres high — the regulation fence + `rules::hit_velocity`
-// make squared-up contact at the spec `exit_solid`≈1.0 HR-prone, held down only
-// by the CPU's flattened launch aim (`ai.rs`).
+// **Every edge is anchored to the N=40 pipeline's own measured spread, not the
+// old N=20 multi-threaded distribution** — that older distribution was strictly
+// wider (it still carried the executor jitter this harness removed), so its
+// draws (e.g. the 1.35 runs/9 this test used to flake on) are not samples of the
+// pipeline under test and do not set floors here. Each edge below states the
+// risk it favors (flaky-gate if too tight vs toothless-gate if too loose) and
+// its anchor. Measured at N=40 across processes (this binary): K% 17.2..21.9,
+// runs/9 2.8..4.4, HR/9 1.9..2.7.
+//
+//  * K% 13..27 — anchored to obs 17.2..21.9, ±~4 of margin each side (a chaotic
+//    game moves it ~0.3). Favors neither risk; symmetric because K% is stable.
+//  * runs/9 2.0..7.5 — floor 2.0 sits ~0.8 below the measured min 2.8, catching
+//    a real offensive collapse without flaking on seed noise (a seed change
+//    can't reach it). Ceiling 7.5 is generous vs the max 4.4 — runs is the
+//    leveraged, chaotic signal (a run is a *chain* of decisions) so the high
+//    tail is the widest; the ceiling favors avoiding a flaky gate.
+//  * HR/9 1.3..3.2 — floor 1.3 sits ~0.6 below the measured min 1.9, so an
+//    HR-death regression trips it instead of passing. The park centres HR high
+//    (the regulation fence + `rules::hit_velocity` make squared-up contact at
+//    the spec `exit_solid`≈1.0 HR-prone, held down only by the CPU's flattened
+//    launch aim in `ai.rs`), so the ceiling 3.2 keeps headroom over the 2.7 max
+//    — but if it ever trips, the fix is an HR-retune ticket (CPU-side levers:
+//    `cpu_timing_spread_ms` / the `ai.rs` launch-aim distribution), NOT a wider
+//    band. The frozen human-facing `Ruleset` exits stay put.
 const K_PCT_BAND: std::ops::RangeInclusive<f64> = 13.0..=27.0; // nominal 15..30
-const RUNS9_BAND: std::ops::RangeInclusive<f64> = 1.2..=7.5; // nominal 3.0..8.0
-const HR9_BAND: std::ops::RangeInclusive<f64> = 0.8..=3.2; // nominal 0.5..2.5
+const RUNS9_BAND: std::ops::RangeInclusive<f64> = 2.0..=7.5; // nominal 3.0..8.0
+const HR9_BAND: std::ops::RangeInclusive<f64> = 1.3..=3.2; // nominal 0.5..2.5
 
 fn assert_bands(agg: &Aggregate) {
     assert!(
