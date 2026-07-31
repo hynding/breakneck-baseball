@@ -1367,6 +1367,48 @@ pub fn apply_contact_quality(
     )
 }
 
+/// PCI contact grading (spec §3): the timing windows shrink linearly with the
+/// cursor's miss distance. `frac = miss/radius`; effective perfect =
+/// `perfect_ms·(1−frac)` (0 at the radius), effective solid =
+/// `solid_ms·(1−frac/2)` (halved at the radius). Timing inside the FULL solid
+/// window but outside the shrunk one is clipped contact → `Weak` (the only
+/// source of Weak in the game). Beyond the radius the bat's sweet spot never
+/// reaches the ball: best case FoulTip on timing alone.
+pub fn pci_contact_quality(dt_ms: f32, miss_m: f32, rules: &Ruleset) -> ContactQuality {
+    let dt = dt_ms.abs();
+    if dt > rules.foul_ms {
+        return ContactQuality::Whiff;
+    }
+    let frac = (miss_m / rules.pci_radius_m).max(0.0);
+    if frac > 1.0 {
+        return ContactQuality::FoulTip;
+    }
+    let perfect_eff = rules.perfect_ms * (1.0 - frac);
+    let solid_eff = rules.solid_ms * (1.0 - frac / 2.0);
+    if dt <= perfect_eff {
+        ContactQuality::Perfect
+    } else if dt <= solid_eff {
+        ContactQuality::Solid
+    } else if dt <= rules.solid_ms {
+        ContactQuality::Weak
+    } else {
+        ContactQuality::FoulTip
+    }
+}
+
+/// PCI hit direction (spec §3): derived from the contact-point offset, not
+/// raw aim. Normalized against the cursor-radius scale so a half-radius miss
+/// is a half-strength aim; components clamp to the aim domain. Signs: cursor
+/// under the ball lofts (+y); the x component keeps raw-aim's sense (the −X
+/// pull negation lives in `hit_velocity`, per CLAUDE.md).
+pub fn pci_aim(offset: Vec2) -> Vec2 {
+    const PCI_AIM_SCALE_M: f32 = 0.20;
+    Vec2::new(
+        (offset.x / PCI_AIM_SCALE_M).clamp(-1.0, 1.0),
+        (-offset.y / PCI_AIM_SCALE_M).clamp(-1.0, 1.0),
+    )
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -2850,6 +2892,58 @@ mod tests {
     }
 
     // ── Contact quality ─────────────────────────────────────────────────────
+
+    #[test]
+    fn pci_dead_center_keeps_full_windows() {
+        let r = Ruleset {
+            perfect_ms: 40.0,
+            solid_ms: 90.0,
+            foul_ms: 130.0,
+            pci_radius_m: 0.20,
+            ..std_rules()
+        };
+        assert_eq!(pci_contact_quality(30.0, 0.0, &r), ContactQuality::Perfect);
+        assert_eq!(pci_contact_quality(80.0, 0.0, &r), ContactQuality::Solid);
+    }
+
+    #[test]
+    fn pci_at_radius_perfect_vanishes_and_solid_halves() {
+        let r = Ruleset {
+            perfect_ms: 40.0,
+            solid_ms: 90.0,
+            foul_ms: 130.0,
+            pci_radius_m: 0.20,
+            ..std_rules()
+        };
+        assert_eq!(pci_contact_quality(10.0, 0.20, &r), ContactQuality::Solid); // no Perfect left
+        assert_eq!(pci_contact_quality(80.0, 0.20, &r), ContactQuality::Weak); // outside solid/2=45 → clipped
+        assert_eq!(pci_contact_quality(40.0, 0.20, &r), ContactQuality::Solid); // inside 45
+    }
+
+    #[test]
+    fn pci_beyond_radius_caps_at_foul_tip() {
+        let r = Ruleset {
+            perfect_ms: 40.0,
+            solid_ms: 90.0,
+            foul_ms: 130.0,
+            pci_radius_m: 0.20,
+            ..std_rules()
+        };
+        assert_eq!(pci_contact_quality(10.0, 0.35, &r), ContactQuality::FoulTip);
+        assert_eq!(pci_contact_quality(200.0, 0.35, &r), ContactQuality::Whiff);
+        // timing still whiffs
+    }
+
+    #[test]
+    fn pci_aim_signs_loft_and_pull() {
+        // Cursor UNDER the ball (offset.y negative) undercuts → lofts (aim.y +).
+        assert!(pci_aim(Vec2::new(0.0, -0.1)).y > 0.0);
+        // Cursor toward +x of the ball: same sense as raw aim.x (the −X pull
+        // negation happens inside hit_velocity, exactly as for raw aim).
+        assert!(pci_aim(Vec2::new(0.1, 0.0)).x > 0.0);
+        // Saturates to the aim domain.
+        assert!(pci_aim(Vec2::new(9.0, -9.0)).length() <= std::f32::consts::SQRT_2 + 1e-5);
+    }
 
     #[test]
     fn contact_quality_windows_are_data_driven() {

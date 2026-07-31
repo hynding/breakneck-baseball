@@ -61,6 +61,8 @@ pub struct Ruleset {
     pub pull_yaw_per_ms: f32,
     /// Standard deviation (ms) of the CPU batter's swing-timing scatter.
     pub cpu_timing_spread_ms: f32,
+    /// PCI cursor radius (metres) — where timing windows shrink to zero per spec §3.
+    pub pci_radius_m: f32,
 }
 
 /// Menu-selectable regulation game lengths.
@@ -185,6 +187,7 @@ impl VariantId {
                 exit_perfect: 1.28,
                 pull_yaw_per_ms: 0.006,
                 cpu_timing_spread_ms: 225.0,
+                pci_radius_m: 0.20,
             },
             // Kid's rules: short games, outs by pegging the runner.
             VariantId::FrontYard => Ruleset {
@@ -202,6 +205,7 @@ impl VariantId {
                 exit_perfect: 1.28,
                 pull_yaw_per_ms: 0.006,
                 cpu_timing_spread_ms: 225.0,
+                pci_radius_m: 0.20,
             },
         }
     }
