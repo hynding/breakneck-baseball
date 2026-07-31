@@ -44,6 +44,12 @@ struct BaseIndicator(usize);
 #[derive(Component)]
 struct BannerPill;
 
+/// The Swing Meter's load bar: a slim vertical track beside the count HUD. The
+/// [`MeterFill`] child's height follows the batting team's meter load; the
+/// track shell stays painted (dim) per the wasm UI rule — never despawned.
+#[derive(Component)]
+struct MeterFill;
+
 /// The banner text inside the pill.
 #[derive(Component)]
 struct BannerText;
@@ -124,6 +130,7 @@ impl Plugin for UiPlugin {
                     update_inning_text,
                     update_score_text,
                     update_count_dots,
+                    update_meter_bar,
                     update_base_ring,
                     update_duel_panels,
                     show_banner,
@@ -230,6 +237,41 @@ fn spawn_hud(
                     });
                 }
             });
+        });
+
+    // Swing Meter load bar: a slim vertical track to the left of the
+    // scoreboard card. Painted (dim shell, accent fill) at spawn per the wasm
+    // UI rule; the fill's height is driven each frame from `MeterLoad`, and a
+    // zero-height fill is the hidden state (never despawned).
+    commands
+        .spawn((
+            GameplayEntity,
+            Node {
+                position_type: PositionType::Absolute,
+                bottom: Val::Px(14.0),
+                right: Val::Px(210.0),
+                width: Val::Px(14.0),
+                height: Val::Px(120.0),
+                border: UiRect::all(Val::Px(1.5)),
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::FlexEnd, // fill grows from the base
+                ..default()
+            },
+            BackgroundColor(hidden_tint(ui.panel_bg)),
+            BorderColor(hidden_tint(ui.panel_border)),
+            BorderRadius::all(Val::Px(6.0)),
+        ))
+        .with_children(|track| {
+            track.spawn((
+                MeterFill,
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(0.0),
+                    ..default()
+                },
+                BackgroundColor(ui.accent),
+                BorderRadius::all(Val::Px(5.0)),
+            ));
         });
 
     spawn_base_ring(&mut commands, field.base_count(), &theme);
@@ -561,6 +603,21 @@ fn update_count_dots(
         } else {
             theme.ui.pip_off
         };
+    }
+}
+
+/// Drives the Swing Meter fill height from the batting team's live load. Height
+/// 0 is the hidden state (Classic/PCI, or between holds); the shell stays
+/// painted so the element is never a fresh mid-`Playing` root (wasm UI rule).
+fn update_meter_bar(
+    load: Res<crate::game::batting::MeterLoad>,
+    theme: Res<Theme>,
+    mut query: Query<(&mut Node, &mut BackgroundColor), With<MeterFill>>,
+) {
+    let frac = load.0.clamp(0.0, 1.0);
+    for (mut node, mut color) in &mut query {
+        node.height = Val::Percent(frac * 100.0);
+        color.0 = theme.ui.accent;
     }
 }
 

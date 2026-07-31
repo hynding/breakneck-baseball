@@ -383,6 +383,20 @@ fn settle_removed(
     }
 }
 
+/// The Swing Meter's visible load: the batter's stance deepens as the meter
+/// fills — a bounded root sink composed over `RigBaseY`, owned here because
+/// animation.rs owns rig root height. Runs last so it wins the frame over the
+/// settle systems that restore the batter root to `RigBaseY`.
+const METER_SINK_M: f32 = 0.12;
+fn meter_stance_sink(
+    load: Res<crate::game::batting::MeterLoad>,
+    mut batters: Query<(&mut Transform, &RigBaseY), With<crate::game::player::Batter>>,
+) {
+    for (mut tf, base) in &mut batters {
+        tf.translation.y = base.0 - load.0 * METER_SINK_M;
+    }
+}
+
 /// Distance that counts as "arrived".
 const ARRIVE_EPS: f32 = 0.2;
 
@@ -530,6 +544,10 @@ impl Plugin for AnimationPlugin {
                 idle_graph_rigs,
                 sample_clips,
                 settle_removed,
+                // Composes the meter's stance-sink over `RigBaseY` last, so it
+                // wins the batter root's y after `settle_removed`/`sample_clips`
+                // have restored it.
+                meter_stance_sink,
             )
                 .chain()
                 .run_if(in_state(GameState::Playing)),
