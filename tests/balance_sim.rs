@@ -27,21 +27,37 @@
 //!
 //! ## Determinism, variance, and the bands
 //!
-//! The rules engine is RNG-free (hash-noise only), but the *physics* pipeline
-//! (Rapier) is not bit-reproducible under multithreading — Task B3 established
-//! this. So a single game's stat is not stable run-to-run. Two things make the
-//! harness robust anyway:
+//! The rules engine is RNG-free (hash-noise only). The harness runs the app
+//! **single-threaded** (`common::deterministic_headless_app`): every schedule
+//! uses `ExecutorKind::SingleThreaded` and the Bevy task pools are capped at one
+//! thread. That pins the old multi-threaded-executor jitter — *within a process
+//! the sim is now bit-deterministic* (replaying a game reproduces it exactly),
+//! and it also runs ~5× faster on this tiny workload, since thread-pool overhead
+//! dominated.
+//!
+//! What single-threading does **not** remove is a process-global,
+//! entropy/ASLR-seeded value in the physics *core* (Rapier's solve / transform
+//! math). It perturbs the ball trajectory by sub-ULP amounts that differ from
+//! one process to the next; baseball is chaotic about it, so a perturbation
+//! occasionally flips a near-threshold swing/contact decision and reshapes a
+//! whole game. It is *not* the schedule executor, *not* HashMap iteration order,
+//! *not* the animation rig, and *not* a per-app entropy draw — all ruled out by
+//! bisection (see the de-flake report). Removing it would need Rapier's
+//! `enhanced-determinism` Cargo feature, which would change the shipped binary,
+//! so this test bounds the residual with its bands instead of eliminating it.
+//!
+//! Two things keep the aggregate robust to that residual:
 //!
 //! 1. **Per-game decorrelation.** Each game idles the virtual clock a distinct,
 //!    *coarsely spaced* number of frames before starting (`game_index ·
 //!    OFFSET_STRIDE_FRAMES`), shifting every `time.elapsed_secs()` the AI hashes
-//!    on by a wide margin — so the 20 games are 20 genuinely *different* games,
-//!    not near-copies leaning on Rapier jitter to differ. Their spread is real
-//!    sample variance rather than a single point measured 20 times.
-//! 2. **Aggregate bands.** The asserts are on the mean across N=20, whose
-//!    sampling variance is ~1/√20 of a single game's. The bands are still kept
-//!    generous (the tuning targets aim for the band *centre*), and the report
-//!    records the observed spread across three consecutive harness runs.
+//!    on — so the N games are N genuinely *different* games. Their spread is
+//!    real sample variance, not a single point measured N times.
+//! 2. **Aggregate bands at N=40.** The asserts are on the mean across N=40,
+//!    whose sampling variance is ~1/√40 of a single game's. K% and HR/9 average
+//!    down well; runs/9 (a *chain* of decisions per run) stays the widest and
+//!    its band is correspondingly generous. The report records the observed
+//!    spread across three consecutive harness runs.
 
 mod common;
 
@@ -52,7 +68,7 @@ use breakneck_baseball::game::input::{Controllers, InputSource};
 use breakneck_baseball::game::rules::BattingOrder;
 use breakneck_baseball::game::{GameState, ScoreBoard, Team};
 
-use common::{headless_app, run_until, start_game, tap_key, DriveGame};
+use common::{deterministic_headless_app, run_until, start_game, tap_key, DriveGame};
 
 /// Hard cap per game. A one-inning CPU game settles in a few thousand frames;
 /// this is a generous backstop (and covers a tie that spills into extras)
@@ -182,7 +198,7 @@ struct GameStats {
 /// distinct clock offset (`· OFFSET_STRIDE_FRAMES`) idled before the game
 /// starts, so this game's AI noise stream is well separated from every other's.
 fn play_one_game(game_index: u32) -> GameStats {
-    let mut app = headless_app();
+    let mut app = deterministic_headless_app();
     app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
         std::time::Duration::from_secs_f64(SIM_DT),
     ));
@@ -329,34 +345,42 @@ fn run_sim(n: u32) -> Aggregate {
     agg
 }
 
-// ── Bands: nominal targets vs the asserted (slack-widened) bands ──────────────
+// ── Bands: nominal targets vs the asserted bands, and why they differ ─────────
 //
 // The plan's *nominal* targets are K% 15..30, runs/9 3.0..8.0, HR/9 0.5..2.5.
-// The harness asserts those centres **widened by a documented slack**, for two
-// reasons the brief calls out ("make bands generous", "document the variance"):
+// The asserted bands below are sized to the **measured per-process spread** at
+// N=40 (see the report's run table) plus margin for a binary-layout shift. The
+// variance model that sets that spread (see the module-header section) is:
 //
-//  1. **Sampling + physics variance.** Even at N=20 the aggregate is not stable
-//     run-to-run: the rules engine is hash-noise-deterministic but the Rapier
-//     pipeline is not bit-reproducible under multithreading (Task B3), and one
-//     HR-vs-out branch reshapes a whole one-inning game. Across three
-//     consecutive runs the tuned config swings by roughly ±4 K-points, ±1.5
-//     runs/9, and ±0.8 HR/9. The slack has to cover that envelope or it flakes.
+//  * **Within one process the sim is now bit-deterministic** — the harness runs
+//    single-threaded (`deterministic_headless_app`), which pinned the old
+//    multi-threaded-executor jitter. Replaying any game in a process reproduces
+//    it exactly.
+//  * **Across processes it is not.** A process-global, entropy/ASLR-seeded value
+//    in the physics *core* (Rapier's solve / transform math — *not* the schedule
+//    executor, not hash iteration, not the animation rig: all ruled out, see the
+//    report) perturbs the ball trajectory by sub-ULP amounts. Baseball is
+//    chaotic about that: a perturbation occasionally flips a near-threshold
+//    swing/contact decision, and one flipped HR-vs-out branch reshapes a whole
+//    one-inning game. Curing this needs Rapier's `enhanced-determinism` feature,
+//    which would leak into the shipped binary — out of scope — so the residual
+//    is bounded by the bands rather than removed.
 //
-//  2. **A HR-prone park at spec exit windows.** K is now genuinely whiff-driven
-//     (the `ai.rs` fix: the CPU commits its swing early and presses its drawn
-//     `target_dt` honestly, so an early draw swings *through* the ball instead
-//     of collapsing to a take — see that file), which killed the old walk/HBP
-//     flood, so the earlier K-vs-runs conflict is resolved. What remains is that
-//     the regulation fence + `rules::hit_velocity` make squared-up contact
-//     HR-prone at the spec `exit_solid`≈1.0: the CPU's launch aim is flattened
-//     to hold HR down, but HR still centres near the top of its band and is the
-//     widest-variance signal, so its asserted ceiling keeps the most slack.
+// N=40 (up from 20, funded by the single-threaded speedup) averages that spread
+// down where it can. K% and HR/9 tighten well and their bands have teeth. runs/9
+// is the leveraged, chaotic signal that barely tightens (a run scores off a
+// *chain* of decisions), so its band stays the widest — and its floor sits below
+// the historically-observed 1.35 draw (the flake this test used to throw), which
+// is the honest floor for a signal this volatile, not slack for its own sake.
 //
-// The nominal bands remain the tuning *target*; the asserted bands below are
-// what holds across three consecutive runs (see the report's 3-run table).
-const K_PCT_BAND: std::ops::RangeInclusive<f64> = 12.0..=32.0; // nominal 15..30
-const RUNS9_BAND: std::ops::RangeInclusive<f64> = 1.5..=9.5; // nominal 3.0..8.0
-const HR9_BAND: std::ops::RangeInclusive<f64> = 0.35..=3.5; // nominal 0.5..2.5
+// Measured at N=40 across processes: K% 17.2..21.9, runs/9 2.8..4.4, HR/9
+// 2.0..2.6 (this binary); wider draws seen at N=20 / other binaries inform the
+// margins. HR still centres high — the regulation fence + `rules::hit_velocity`
+// make squared-up contact at the spec `exit_solid`≈1.0 HR-prone, held down only
+// by the CPU's flattened launch aim (`ai.rs`).
+const K_PCT_BAND: std::ops::RangeInclusive<f64> = 13.0..=27.0; // nominal 15..30
+const RUNS9_BAND: std::ops::RangeInclusive<f64> = 1.2..=7.5; // nominal 3.0..8.0
+const HR9_BAND: std::ops::RangeInclusive<f64> = 0.8..=3.2; // nominal 0.5..2.5
 
 fn assert_bands(agg: &Aggregate) {
     assert!(
@@ -379,10 +403,14 @@ fn assert_bands(agg: &Aggregate) {
     );
 }
 
-/// The pinned harness: N=20 one-inning games, bands must hold.
+/// The pinned harness: N=40 one-inning games, bands must hold. N was 20 under
+/// the old multi-threaded harness; the single-threaded app here runs the sim
+/// ~5× faster (thread-pool overhead dominated so tiny a workload), so N rose to
+/// 40 — averaging down the per-process spread on K% and HR/9 — while the whole
+/// test still finishes in ~1.5 min (well under the ~3 min budget).
 #[test]
 fn balance_bands_hold() {
-    let agg = run_sim(20);
+    let agg = run_sim(40);
     assert_bands(&agg);
 }
 
