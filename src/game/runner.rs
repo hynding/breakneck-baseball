@@ -4,9 +4,9 @@
 use bevy::prelude::*;
 
 use crate::game::animation::{AnimClip, MoveIntent, Playing};
-use crate::game::flow::{BallInPlayEvent, LeadState, Phase, Play};
-use crate::game::player::{spawn_rig, Batter, RigMeshes, RigUnit, TeamPalette};
-use crate::game::rules::{self, Bases, ContactKind};
+use crate::game::flow::{BallInPlayEvent, LeadState, LiveBallEvent, Phase, Play};
+use crate::game::player::{spawn_rig, Batter, RigModel, RigUnit, TeamPalette};
+use crate::game::rules::{self, Bases, ContactKind, RunnerBreak};
 use crate::game::variant::FieldSpec;
 use crate::game::{GameState, ScoreBoard};
 
@@ -36,10 +36,11 @@ impl Default for RunnersSettled {
     }
 }
 
-/// A rig standing on (or running to) 0-indexed base `base`.
+/// A rig standing on (or running to) 0-indexed base `base`. Public so headless
+/// tests can read rig positions against the bags; the field itself is private.
 #[derive(Component)]
-struct Runner {
-    base: usize,
+pub struct Runner {
+    pub base: usize,
 }
 
 /// Waypoints the rig visits in order (fed one at a time into `MoveIntent`).
@@ -60,9 +61,12 @@ struct DespawnAtPathEnd;
 #[derive(Component)]
 struct RunDelay(Timer);
 
-/// Seconds the batter holds the box after fair contact before the run-out
-/// rig breaks for first (≈ the runner reaction time the race math charges).
-const RUN_OUT_DELAY: f32 = 0.4;
+/// Seconds the batter holds the box after fair contact before the run-out rig
+/// breaks for first. Kept small (≤ 0.2 s) so the batter is running almost the
+/// instant he makes contact — just long enough to see the swing follow-through
+/// and bat drop before the seamless swap to the run-out rig. Purely visual: it
+/// does not feed the race math (the umpire charges its own reaction delay).
+const RUN_OUT_DELAY: f32 = 0.15;
 /// A home run earns a longer look before the trot starts.
 const TROT_DELAY: f32 = 0.9;
 
@@ -71,6 +75,22 @@ const TROT_DELAY: f32 = 0.9;
 /// position so the runner doesn't teleport back to the plate.
 #[derive(Component)]
 struct BatterGhost;
+
+/// How a runner aboard is currently breaking off contact, before the umpire's
+/// call arrives (see [`rules::runner_break`]). A runner *without* this
+/// component is holding his bag (a tag-up, or nobody in a position to run) —
+/// [`take_leadoffs`] parks him there. The runner's `base` is left untouched
+/// while breaking, so resolution ([`run_out_pending_call`] / [`sync_runners`])
+/// re-paths from his true origin bag.
+#[derive(Component, Clone, Copy, PartialEq)]
+enum Breaking {
+    /// Running for the next bag on contact.
+    GoNow,
+    /// Halfway off, reading the fly.
+    Halfway,
+    /// Read a catch — retreating to the origin bag.
+    Retreat,
+}
 
 fn base_pos(field: &FieldSpec, base: usize) -> Vec3 {
     field.base_positions[base] + Vec3::Y * RIG_Y
@@ -143,7 +163,10 @@ fn take_leadoffs(
     lead: Res<LeadState>,
     bases: Res<Bases>,
     field: Res<FieldSpec>,
-    mut runners: Query<(&Runner, &Transform, &mut MoveIntent), Without<BasePath>>,
+    mut runners: Query<
+        (&Runner, &Transform, &mut MoveIntent),
+        (Without<BasePath>, Without<Breaking>),
+    >,
 ) {
     let dueling = matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch);
     let candidate = rules::steal_candidate(&bases);
@@ -206,7 +229,7 @@ fn sync_runners(
     bases: Res<Bases>,
     field: Res<FieldSpec>,
     score: Res<ScoreBoard>,
-    rig_meshes: Option<Res<RigMeshes>>,
+    rig_model: Option<Res<RigModel>>,
     palette: Option<Res<TeamPalette>>,
     mut runners: Query<(Entity, &mut Runner)>,
     ghosts: Query<(Entity, &Transform), With<BatterGhost>>,
@@ -215,7 +238,7 @@ fn sync_runners(
     if !bases.is_changed() {
         return;
     }
-    let (Some(rig_meshes), Some(palette)) = (rig_meshes, palette) else {
+    let (Some(rig_model), Some(palette)) = (rig_model, palette) else {
         return;
     };
 
@@ -253,14 +276,7 @@ fn sync_runners(
             tf.translation
         });
         let mats = palette.for_team(score.batting_team());
-        let entity = spawn_rig(
-            &mut commands,
-            &rig_meshes,
-            RigUnit::Batter,
-            mats,
-            start,
-            1.0,
-        );
+        let entity = spawn_rig(&mut commands, &rig_model, RigUnit::Batter, mats, start, 1.0);
         commands.entity(entity).insert((
             Runner { base: target },
             BasePath {
@@ -292,12 +308,12 @@ fn batter_runs(
     mut events: EventReader<BallInPlayEvent>,
     field: Res<FieldSpec>,
     score: Res<ScoreBoard>,
-    rig_meshes: Option<Res<RigMeshes>>,
+    rig_model: Option<Res<RigModel>>,
     palette: Option<Res<TeamPalette>>,
     mut commands: Commands,
 ) {
     for ev in events.read() {
-        let (Some(rig_meshes), Some(palette)) = (&rig_meshes, &palette) else {
+        let (Some(rig_model), Some(palette)) = (&rig_model, &palette) else {
             return;
         };
 
@@ -320,7 +336,7 @@ fn batter_runs(
         let mats = palette.for_team(score.batting_team());
         let entity = spawn_rig(
             &mut commands,
-            rig_meshes,
+            rig_model,
             RigUnit::Batter,
             mats,
             PLATE_START,
@@ -408,8 +424,11 @@ fn run_out_pending_call(
     }
 
     // The run-out ghost becomes the real runner and keeps going for the
-    // extra bases while the ball is in the air.
-    let batter_dest = (hit_bases as usize).min(count) - 1;
+    // extra bases while the ball is in the air. `hit_bases` is provably >= 1
+    // here (`pending_hit()` only ever surfaces `Outcome::Hit(n)` with n >= 1
+    // — see rules.rs's `resolve_catch`/`resolve_thrown` construction sites),
+    // but saturate rather than trust that invariant across future callers.
+    let batter_dest = (hit_bases as usize).min(count).saturating_sub(1);
     if let Some(ghost) = ghosts.iter().next() {
         commands
             .entity(ghost)
@@ -423,6 +442,135 @@ fn run_out_pending_call(
                 next: 0,
             });
         }
+    }
+}
+
+/// World position of the bag one past `base` — home plate once the runner is
+/// rounding the last base.
+fn next_bag_pos(field: &FieldSpec, base: usize) -> Vec3 {
+    if base + 1 >= field.base_count() {
+        Vec3::new(0.0, RIG_Y, 0.0)
+    } else {
+        base_pos(field, base + 1)
+    }
+}
+
+/// On fair contact, each runner aboard breaks off the bat per the real-baseball
+/// read ([`rules::runner_break`]): a forced grounder or any two-out ball is a
+/// break for the next bag; a catchable fly (or an unforced grounder) edges
+/// halfway to read the play; a deep fly holds to tag up. The runner's `base`
+/// is left as-is — this only starts the rig moving; the umpire's call still
+/// comes from the live-play races and is reconciled at resolution. Home runs
+/// (already resolved) and fouls are left to the trot / reset paths.
+fn break_runners(
+    mut events: EventReader<BallInPlayEvent>,
+    score: Res<ScoreBoard>,
+    bases: Res<Bases>,
+    mut runners: Query<(Entity, &Runner)>,
+    mut commands: Commands,
+) {
+    for ev in events.read() {
+        if !matches!(ev.kind, ContactKind::Live { fair: true }) {
+            continue;
+        }
+        for (entity, runner) in &mut runners {
+            let forced = rules::is_forced(&bases, runner.base);
+            match rules::runner_break(score.outs, forced, ev.contact_class) {
+                RunnerBreak::GoNow => {
+                    commands.entity(entity).insert(Breaking::GoNow);
+                }
+                RunnerBreak::Halfway => {
+                    commands.entity(entity).insert(Breaking::Halfway);
+                }
+                // Tag-ups hold the bag; take_leadoffs parks them there.
+                RunnerBreak::TagUp => {
+                    commands.entity(entity).remove::<Breaking>();
+                }
+            }
+        }
+    }
+}
+
+/// Halfway runners read the fly: a catch turns them around (`Retreat` to the
+/// bag); a fair landing commits them (`GoNow`) only once it's actually
+/// through the infield (`rules::landed_past_infield`) — a fair ball that
+/// drops but stays in the infield is the same "it got down but I can't make
+/// it" read as a catch, so it also sends the runner back (`Retreat`). Only
+/// active while the ball is live and uncalled.
+fn read_break_reads(
+    mut events: EventReader<LiveBallEvent>,
+    play: Res<Play>,
+    field: Res<FieldSpec>,
+    mut breaking: Query<&mut Breaking>,
+) {
+    if play.phase != Phase::InPlay {
+        events.clear();
+        return;
+    }
+    for ev in events.read() {
+        let commit = match *ev {
+            LiveBallEvent::Caught { .. } => Some(Breaking::Retreat),
+            LiveBallEvent::Landed { pos } if rules::is_fair(pos, &field) => {
+                Some(if rules::landed_past_infield(pos, &field) {
+                    Breaking::GoNow
+                } else {
+                    Breaking::Retreat
+                })
+            }
+            _ => None,
+        };
+        let Some(commit) = commit else { continue };
+        for mut b in &mut breaking {
+            if *b == Breaking::Halfway {
+                *b = commit;
+            }
+        }
+    }
+}
+
+/// Drives the rigs of runners currently breaking off contact toward the target
+/// their read implies — the next bag (GoNow), the midpoint (Halfway), or back
+/// to the origin bag (Retreat). All motion is a [`MoveIntent`]; the runner's
+/// `base` stays put so resolution can re-path from the true origin. Runners
+/// already handed an authoritative [`BasePath`] (a decided call) are left to it.
+#[allow(clippy::type_complexity)]
+fn drive_breaks(
+    field: Res<FieldSpec>,
+    mut runners: Query<(&Runner, &Breaking, &Transform, &mut MoveIntent), Without<BasePath>>,
+) {
+    for (runner, breaking, tf, mut intent) in &mut runners {
+        let bag = base_pos(&field, runner.base);
+        let next = next_bag_pos(&field, runner.base);
+        let target = match breaking {
+            Breaking::GoNow => next,
+            Breaking::Halfway => bag.lerp(next, 0.5),
+            Breaking::Retreat => bag,
+        };
+        if (tf.translation - target).length() > 0.25 {
+            intent.target = Some(target);
+            intent.speed = RUN_SPEED;
+        }
+    }
+}
+
+/// Clears the breaking state once it no longer applies: the play left `InPlay`
+/// (reset for the next at-bat), or the runner was handed a real [`BasePath`] by
+/// the resolution — from there the normal path/leadoff machinery takes over.
+#[allow(clippy::type_complexity)]
+fn clear_breaks(
+    play: Res<Play>,
+    breaking: Query<Entity, With<Breaking>>,
+    pathed: Query<Entity, (With<Breaking>, With<BasePath>)>,
+    mut commands: Commands,
+) {
+    if play.phase != Phase::InPlay {
+        for entity in &breaking {
+            commands.entity(entity).remove::<Breaking>();
+        }
+        return;
+    }
+    for entity in &pathed {
+        commands.entity(entity).remove::<Breaking>();
     }
 }
 
@@ -446,9 +594,13 @@ impl Plugin for RunnerPlugin {
             Update,
             (
                 batter_runs,
+                break_runners,
                 tick_run_delays,
                 run_out_pending_call,
                 sync_runners,
+                clear_breaks,
+                read_break_reads,
+                drive_breaks,
                 advance_paths,
                 take_leadoffs,
                 slide_into_base,

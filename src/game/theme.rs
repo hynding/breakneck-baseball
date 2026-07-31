@@ -10,15 +10,26 @@
 use bevy::color::LinearRgba;
 use bevy::prelude::{Color, Resource};
 
+/// Which glTF model asset a rig uses; the path is resolved by
+/// `model_assets::player_model_path` and friends. New models = new arms.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModelId {
+    Player,
+}
+
 /// Which rig construction builds the player bodies. The animation seam
 /// ([`crate::game::animation::AnimClip`] + `MoveIntent` + the root
 /// drop/pitch channels) is model-agnostic, so a richer humanoid model plugs
-/// in as a new arm here plus its own mesh/pose builders — no system changes.
+/// in as a new arm here — the graph driver behind the shared `AnimClip`
+/// names is the actual seam, not the mesh construction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum PlayerModelId {
-    /// The built-in capsule-and-cylinder rig.
+    /// The built-in capsule-and-cylinder rig — kept as the fallback arm and
+    /// the escape hatch if a model asset regresses.
     #[default]
     Blocky,
+    /// A skinned, clip-animated glTF humanoid.
+    Gltf(ModelId),
 }
 
 /// The full presentation bundle, inserted as a resource.
@@ -143,7 +154,7 @@ impl ThemeId {
                     trail: Color::srgba(1.0, 1.0, 0.9, 0.35),
                 },
                 sky: Color::srgb(0.48, 0.67, 0.88),
-                player_model: PlayerModelId::Blocky,
+                player_model: PlayerModelId::Gltf(ModelId::Player),
             },
             // Night-game arcade look: black glass, cyan accents, cyan-vs-
             // magenta teams, a neon ball that reads at any distance.
@@ -182,7 +193,7 @@ impl ThemeId {
                     trail: Color::srgba(1.0, 0.95, 0.4, 0.4),
                 },
                 sky: Color::srgb(0.02, 0.03, 0.08),
-                player_model: PlayerModelId::Blocky,
+                player_model: PlayerModelId::Gltf(ModelId::Player),
             },
         }
     }

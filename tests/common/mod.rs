@@ -5,7 +5,8 @@
 use std::time::Duration;
 
 use bevy::app::{MainScheduleOrder, PluginsState};
-use bevy::ecs::schedule::ScheduleLabel;
+use bevy::core::{TaskPoolOptions, TaskPoolPlugin};
+use bevy::ecs::schedule::{ExecutorKind, ScheduleLabel};
 use bevy::prelude::*;
 use bevy::render::settings::{RenderCreation, WgpuSettings};
 use bevy::render::RenderPlugin;
@@ -71,33 +72,72 @@ pub fn start_game(app: &mut App, select_key: KeyCode) {
 
 /// Builds the headless app. Add driver systems to the [`DriveGame`] schedule
 /// afterwards: `app.add_systems(DriveGame, drive)`.
+#[allow(dead_code)]
 pub fn headless_app() -> App {
+    build_headless_app(false)
+}
+
+/// Like [`headless_app`], but pins **single-threaded, run-to-run deterministic**
+/// execution: every schedule runs on one thread in a fixed topological order
+/// (`ExecutorKind::SingleThreaded`) and the Bevy task pools are capped at one
+/// thread. Bevy's default multi-threaded executor resolves ambiguous system
+/// orderings by worker-timing — non-reproducible across runs, and (because the
+/// tie-break rides type-id hashing) across binary layouts too — which is what
+/// made the balance sim's aggregates jitter. This constructor removes that
+/// source; the physics step is already single-threaded here (Rapier is built
+/// with `simd-stable`, not the rayon `parallel` feature). Opt-in: only the
+/// balance sim uses it, so the other e2e harnesses keep the faster default.
+#[allow(dead_code)]
+pub fn deterministic_headless_app() -> App {
+    build_headless_app(true)
+}
+
+fn build_headless_app(single_threaded: bool) -> App {
     let mut app = App::new();
-    app.add_plugins(
-        DefaultPlugins
-            // No window, no winit event loop, and no GPU at all: CI runners
-            // have no adapter, so rendering is disabled outright. The
-            // finish()/cleanup() below still runs every plugin's late setup
-            // (e.g. CapturedScreenshots), which is what the main-app render
-            // systems need to no-op safely.
-            .set(WindowPlugin {
-                primary_window: None,
-                exit_condition: bevy::window::ExitCondition::DontExit,
-                close_when_requested: false,
-            })
-            .set(RenderPlugin {
-                render_creation: RenderCreation::Automatic(WgpuSettings {
-                    backends: None,
-                    ..default()
-                }),
+    let default_plugins = DefaultPlugins
+        // No window, no winit event loop, and no GPU at all: CI runners
+        // have no adapter, so rendering is disabled outright. The
+        // finish()/cleanup() below still runs every plugin's late setup
+        // (e.g. CapturedScreenshots), which is what the main-app render
+        // systems need to no-op safely.
+        .set(WindowPlugin {
+            primary_window: None,
+            exit_condition: bevy::window::ExitCondition::DontExit,
+            close_when_requested: false,
+        })
+        .set(RenderPlugin {
+            render_creation: RenderCreation::Automatic(WgpuSettings {
+                backends: None,
                 ..default()
-            })
-            .disable::<WinitPlugin>(),
-    )
-    .add_plugins((RapierPhysicsPlugin::<NoUserData>::default(), GamePlugin))
-    .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
-        DT,
-    )));
+            }),
+            ..default()
+        })
+        .disable::<WinitPlugin>();
+    // Deterministic mode caps every Bevy task pool at a single thread, so the
+    // (single-threaded) executor below never contends for workers and any
+    // schedule that slips through still runs its tasks in a fixed order.
+    let default_plugins = if single_threaded {
+        default_plugins.set(TaskPoolPlugin {
+            task_pool_options: TaskPoolOptions::with_num_threads(1),
+        })
+    } else {
+        default_plugins
+    };
+    app.add_plugins(default_plugins)
+        .add_plugins((RapierPhysicsPlugin::<NoUserData>::default(), GamePlugin))
+        .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
+            DT,
+        )))
+        // `juice.rs`'s hit-stop/slow-mo dials `Time<Virtual>`'s relative_speed
+        // on every Solid/Perfect ContactEvent. That scaling is NOT bypassed by
+        // ManualDuration — bevy_time's time_system still runs
+        // update_virtual_time, which multiplies the (manually-fixed) real
+        // delta by relative_speed exactly as under automatic real-time — so
+        // without this, any scripted swing in these tests that grades
+        // Solid/Perfect would genuinely slow the shared virtual clock every
+        // other timing-sensitive system reads. This insert is load-bearing,
+        // not just belt-and-braces.
+        .insert_resource(breakneck_baseball::game::juice::JuiceDisabled);
 
     app.init_schedule(DriveGame);
     app.world_mut()
@@ -114,6 +154,17 @@ pub fn headless_app() -> App {
     }
     app.finish();
     app.cleanup();
+
+    // Force a fixed, single-threaded run order on every schedule now that the
+    // full plugin graph (and its state-transition schedules) exists. The
+    // multi-threaded executor is the last remaining non-determinism source once
+    // the physics step is scalar/SIMD-serial; `SingleThreaded` runs each
+    // schedule's systems in its fixed topological order, identical run-to-run.
+    if single_threaded {
+        for (_, schedule) in app.world_mut().resource_mut::<Schedules>().iter_mut() {
+            schedule.set_executor_kind(ExecutorKind::SingleThreaded);
+        }
+    }
     app
 }
 

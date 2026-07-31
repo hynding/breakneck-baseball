@@ -6,9 +6,9 @@
 
 use bevy::prelude::*;
 
-use crate::game::flow::{BannerTone, Phase, Play, PlayBanner};
+use crate::game::flow::{BannerTone, ContactEvent, Phase, Play, PlayBanner};
 use crate::game::roster::Rosters;
-use crate::game::rules::{Bases, BattingOrder, LINEUP_SIZE};
+use crate::game::rules::{Bases, BattingOrder, ContactQuality, LINEUP_SIZE};
 use crate::game::theme::Theme;
 use crate::game::variant::{FieldSpec, Ruleset};
 use crate::game::{GameState, GameplayEntity, ScoreBoard, Team};
@@ -44,9 +44,23 @@ struct BaseIndicator(usize);
 #[derive(Component)]
 struct BannerPill;
 
+/// The Swing Meter's load bar: a slim vertical track beside the count HUD. The
+/// [`MeterFill`] child's height follows the batting team's meter load; the
+/// track shell stays painted (dim) per the wasm UI rule — never despawned.
+#[derive(Component)]
+struct MeterFill;
+
 /// The banner text inside the pill.
 #[derive(Component)]
 struct BannerText;
+
+/// The contact-quality stamp (PERFECT! / EARLY / LATE / FOUL TIP), painted at
+/// spawn near the zone-box screen area and shown by text mutation only — see
+/// the wasm UI rule on [`hidden_tint`]. Public so e2e tests can query its
+/// `Text` content directly (the same pattern `player::CatcherRole` uses for
+/// `e2e_camera_views`'s `Visibility` check).
+#[derive(Component)]
+pub struct ContactStampText;
 
 /// Root of one of the two duel cards flanking the catcher's-eye pitch view.
 #[derive(Component)]
@@ -87,6 +101,20 @@ impl Default for BannerTimer {
     }
 }
 
+/// How long the contact stamp (Task B4) stays up before clearing — quick
+/// enough to read as a reaction to *this* swing, gone well before the next.
+const CONTACT_STAMP_SECS: f32 = 0.8;
+
+/// How long the current contact stamp stays visible before clearing.
+#[derive(Resource)]
+struct ContactStampTimer(Timer);
+
+impl Default for ContactStampTimer {
+    fn default() -> Self {
+        Self(Timer::from_seconds(CONTACT_STAMP_SECS, TimerMode::Once))
+    }
+}
+
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
 pub struct UiPlugin;
@@ -94,6 +122,7 @@ pub struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BannerTimer>()
+            .init_resource::<ContactStampTimer>()
             .add_systems(crate::game::game_start(), spawn_hud)
             .add_systems(
                 Update,
@@ -101,10 +130,13 @@ impl Plugin for UiPlugin {
                     update_inning_text,
                     update_score_text,
                     update_count_dots,
+                    update_meter_bar,
                     update_base_ring,
                     update_duel_panels,
                     show_banner,
                     fade_banner,
+                    show_contact_stamp,
+                    fade_contact_stamp,
                 )
                     .run_if(in_state(GameState::Playing)),
             );
@@ -121,14 +153,14 @@ fn spawn_hud(
 ) {
     let ui = &theme.ui;
 
-    // Scoreboard card (top-left).
+    // Scoreboard card (bottom-right).
     commands
         .spawn((
             GameplayEntity,
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Px(14.0),
-                left: Val::Px(14.0),
+                bottom: Val::Px(14.0),
+                right: Val::Px(14.0),
                 padding: UiRect::axes(Val::Px(16.0), Val::Px(12.0)),
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(6.0),
@@ -207,6 +239,41 @@ fn spawn_hud(
             });
         });
 
+    // Swing Meter load bar: a slim vertical track to the left of the
+    // scoreboard card. Painted (dim shell, accent fill) at spawn per the wasm
+    // UI rule; the fill's height is driven each frame from `MeterLoad`, and a
+    // zero-height fill is the hidden state (never despawned).
+    commands
+        .spawn((
+            GameplayEntity,
+            Node {
+                position_type: PositionType::Absolute,
+                bottom: Val::Px(14.0),
+                right: Val::Px(210.0),
+                width: Val::Px(14.0),
+                height: Val::Px(120.0),
+                border: UiRect::all(Val::Px(1.5)),
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::FlexEnd, // fill grows from the base
+                ..default()
+            },
+            BackgroundColor(hidden_tint(ui.panel_bg)),
+            BorderColor(hidden_tint(ui.panel_border)),
+            BorderRadius::all(Val::Px(6.0)),
+        ))
+        .with_children(|track| {
+            track.spawn((
+                MeterFill,
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(0.0),
+                    ..default()
+                },
+                BackgroundColor(ui.accent),
+                BorderRadius::all(Val::Px(5.0)),
+            ));
+        });
+
     spawn_base_ring(&mut commands, field.base_count(), &theme);
     spawn_duel_panels(&mut commands, &theme);
 
@@ -255,33 +322,46 @@ fn spawn_hud(
             });
         });
 
-    // Controls hint (bottom-centre).
-    commands.spawn((
-        GameplayEntity,
-        Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(10.0),
-            width: Val::Percent(100.0),
-            justify_content: JustifyContent::Center,
-            ..default()
-        },
-        Text::new(
-            "A/Space: Pitch & Swing   Fielding: aim steers, base dir + A/Space throws   \
-             Runners: hold Down = lead & steal (window: defense A = pickoff)   \
-             Batting: Down = send, Up = hold   Esc/P: Subs   C: Camera",
-        ),
-        TextFont {
-            font_size: 13.0,
-            ..default()
-        },
-        TextColor(ui.text_dim),
-        TextLayout::new_with_justify(JustifyText::Center),
-    ));
+    // Contact stamp (Task B4): a bare text element (no pill chrome) sitting
+    // just below the banner row, over the zone-box screen area the
+    // catcher's-eye duel view frames the pitch in (`FieldSpec::duel_eye`).
+    // Painted at spawn with an empty string — same wasm-safe idiom as the
+    // banner above — then shown/blanked by mutating this one text node.
+    commands
+        .spawn((
+            GameplayEntity,
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Percent(38.0),
+                left: Val::Px(0.0),
+                width: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            // A container root with no renderable is never re-extracted on
+            // wasm/WebGL2 once the first frame culls it — a near-invisible
+            // background (never alpha 0, see `hidden_tint`) keeps it live.
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.01)),
+        ))
+        .with_children(|wrap| {
+            wrap.spawn((
+                ContactStampText,
+                Text::new(""),
+                TextFont {
+                    font_size: 34.0,
+                    ..default()
+                },
+                TextColor(ui.text_primary),
+            ));
+        });
+    // Controls help now lives in the pause dialog (see `subs.rs`) rather
+    // than a bar pinned to the bottom of the screen during play.
 }
 
-/// The two cards flanking the catcher's-eye duel view: the batter card on the
-/// left, the pitcher card (with the pitch-selection legend) on the right —
-/// visible only during the pitch duel, hidden while the ball is in play.
+/// The two cards anchored to the bottom-left (batter/"AT BAT") and top-right
+/// (pitcher/"PITCHING", with the pitch-selection legend) corners — visible
+/// only during the pitch duel, hidden while the ball is in play. Corners are
+/// fixed regardless of which team is batting or fielding.
 ///
 /// Both roots are painted at spawn and shown/hidden by mutating colours and
 /// text (never alpha 0 / despawn): on wasm/WebGL2 an element extracted fully
@@ -315,7 +395,6 @@ fn spawn_duel_panels(commands: &mut Commands, theme: &Theme) {
     for (side, (kinds, _)) in lines.into_iter().enumerate() {
         let mut node = Node {
             position_type: PositionType::Absolute,
-            top: Val::Percent(38.0),
             padding: UiRect::axes(Val::Px(14.0), Val::Px(12.0)),
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(5.0),
@@ -324,8 +403,12 @@ fn spawn_duel_panels(commands: &mut Commands, theme: &Theme) {
             ..default()
         };
         if side == 0 {
+            // Batter/"AT BAT" card: bottom-left corner.
+            node.bottom = Val::Px(14.0);
             node.left = Val::Px(14.0);
         } else {
+            // Pitcher/"PITCHING" card: top-right corner.
+            node.top = Val::Px(14.0);
             node.right = Val::Px(14.0);
         }
         commands
@@ -427,7 +510,7 @@ fn update_duel_panels(
     }
 }
 
-/// A 96×96 px ring of base pips (top-right): one pip per base, laid out like
+/// A 96×96 px ring of base pips (top-left): one pip per base, laid out like
 /// the field — home at the bottom, first base to the right, counter-clockwise.
 fn spawn_base_ring(commands: &mut Commands, base_count: usize, theme: &Theme) {
     const BOX: f32 = 96.0;
@@ -440,7 +523,7 @@ fn spawn_base_ring(commands: &mut Commands, base_count: usize, theme: &Theme) {
             Node {
                 position_type: PositionType::Absolute,
                 top: Val::Px(14.0),
-                right: Val::Px(14.0),
+                left: Val::Px(14.0),
                 width: Val::Px(BOX),
                 height: Val::Px(BOX),
                 border: UiRect::all(Val::Px(1.5)),
@@ -523,6 +606,21 @@ fn update_count_dots(
     }
 }
 
+/// Drives the Swing Meter fill height from the batting team's live load. Height
+/// 0 is the hidden state (Classic/PCI, or between holds); the shell stays
+/// painted so the element is never a fresh mid-`Playing` root (wasm UI rule).
+fn update_meter_bar(
+    load: Res<crate::game::batting::MeterLoad>,
+    theme: Res<Theme>,
+    mut query: Query<(&mut Node, &mut BackgroundColor), With<MeterFill>>,
+) {
+    let frac = load.0.clamp(0.0, 1.0);
+    for (mut node, mut color) in &mut query {
+        node.height = Val::Percent(frac * 100.0);
+        color.0 = theme.ui.accent;
+    }
+}
+
 fn update_base_ring(
     bases: Res<Bases>,
     theme: Res<Theme>,
@@ -586,6 +684,56 @@ fn fade_banner(
             border.0 = hidden_tint(border.0);
         }
         for (mut text, _color) in &mut text_q {
+            **text = String::new();
+        }
+    }
+}
+
+/// Stamps the graded swing timing over the zone-box area: `PERFECT!` for
+/// dead-on contact; `EARLY`/`LATE` for `Solid` (and the as-yet-unreachable
+/// `Weak`, per its doc comment in `rules.rs`) by `dt_ms`'s sign; `FOUL TIP`
+/// for a foul; nothing for `Whiff` — the classic strike/ball banner already
+/// covers a swing-and-miss.
+fn show_contact_stamp(
+    mut events: EventReader<ContactEvent>,
+    theme: Res<Theme>,
+    mut timer: ResMut<ContactStampTimer>,
+    mut text_q: Query<(&mut Text, &mut TextColor), With<ContactStampText>>,
+) {
+    let Some(ev) = events.read().last() else {
+        return;
+    };
+    let ui = &theme.ui;
+    let stamp = match ev.quality {
+        ContactQuality::Perfect => Some(("PERFECT!", ui.tone_epic)),
+        ContactQuality::Solid | ContactQuality::Weak => {
+            let label = if ev.dt_ms < 0.0 { "EARLY" } else { "LATE" };
+            Some((label, ui.tone_info))
+        }
+        ContactQuality::FoulTip => Some(("FOUL TIP", ui.tone_info)),
+        ContactQuality::Whiff => None,
+    };
+    let Some((label, color)) = stamp else {
+        return;
+    };
+    for (mut text, mut text_color) in &mut text_q {
+        **text = label.to_string();
+        text_color.0 = color;
+    }
+    timer.0 = Timer::from_seconds(CONTACT_STAMP_SECS, TimerMode::Once);
+}
+
+/// Blanks the contact stamp once its display time is up.
+fn fade_contact_stamp(
+    time: Res<Time>,
+    mut timer: ResMut<ContactStampTimer>,
+    mut text_q: Query<&mut Text, With<ContactStampText>>,
+) {
+    if timer.0.finished() {
+        return;
+    }
+    if timer.0.tick(time.delta()).just_finished() {
+        for mut text in &mut text_q {
             **text = String::new();
         }
     }

@@ -30,6 +30,39 @@ pub struct Ruleset {
     /// steal, the pitch is held this long while the leadoff/pickoff duel
     /// runs. Zero disables the window.
     pub steal_window_secs: f32,
+
+    // ── Batting-feel timing/contact tuning (per docs/superpowers/specs/
+    // 2026-07-30-batting-feel-design.md §2) ────────────────────────────────
+    // `rules::contact_quality` maps a swing's timing error (milliseconds,
+    // signed: negative = early) to a `ContactQuality` using these windows —
+    // data, not code, so each variant can feel different without touching
+    // `rules.rs`. The B7 balance harness is the tuning arbiter for these
+    // numbers: they start at the plan's defaults and only that harness
+    // should move them.
+    /// |dt| at or under this many ms is a `ContactQuality::Perfect`.
+    pub perfect_ms: f32,
+    /// |dt| at or under this many ms (and over `perfect_ms`) is a
+    /// `ContactQuality::Solid`.
+    pub solid_ms: f32,
+    /// |dt| at or under this many ms (and over `solid_ms`) is a
+    /// `ContactQuality::FoulTip`; beyond it, a `ContactQuality::Whiff`.
+    pub foul_ms: f32,
+    /// Exit-speed multiplier for `ContactQuality::Weak` contact. Weak is
+    /// never produced by these Classic windows — it's the Plan-C PCI
+    /// adapter's window-shrink outcome — but the multiplier lives here so
+    /// the adapter has a single place to tune it per variant.
+    pub exit_weak: f32,
+    /// Exit-speed multiplier for `ContactQuality::Solid` contact.
+    pub exit_solid: f32,
+    /// Exit-speed multiplier for `ContactQuality::Perfect` contact.
+    pub exit_perfect: f32,
+    /// Pull-side yaw offset (radians) applied per millisecond of signed
+    /// timing error on Solid/Perfect contact.
+    pub pull_yaw_per_ms: f32,
+    /// Standard deviation (ms) of the CPU batter's swing-timing scatter.
+    pub cpu_timing_spread_ms: f32,
+    /// PCI cursor radius (metres) — where timing windows shrink to zero per spec §3.
+    pub pci_radius_m: f32,
 }
 
 /// Menu-selectable regulation game lengths.
@@ -76,9 +109,21 @@ pub struct FieldSpec {
     pub broadcast_eye: Vec3,
     /// Broadcast-camera resting look-at point.
     pub broadcast_target: Vec3,
-    /// Tight at-bat framing used during the pitch/swing duel.
+    /// Tight at-bat framing used during the pitch/swing duel (catcher POV,
+    /// the default [`crate::game::camera::DuelView`]).
     pub duel_eye: Vec3,
     pub duel_target: Vec3,
+    /// The reference "pitcher cam": behind and above the mound, looking out
+    /// at the batter. Far enough from the plate that the catcher/plate
+    /// umpire are never auto-hidden here — they're meant to stay in frame.
+    pub behind_pitcher_eye: Vec3,
+    pub behind_pitcher_target: Vec3,
+    /// A tight zoom from behind and beside the batter's box, looking across
+    /// the zone toward the pitcher — close enough behind the plate that the
+    /// catcher (and the umpire behind him) sit in the sightline and get
+    /// auto-hidden.
+    pub batting_zoom_eye: Vec3,
+    pub batting_zoom_target: Vec3,
     /// Which scenery routine dresses the set.
     pub scenery: Scenery,
 }
@@ -133,7 +178,16 @@ impl VariantId {
                 outs_per_half: 3,
                 innings: 9,
                 peg_outs: false,
-                steal_window_secs: 5.0,
+                steal_window_secs: 1.5,
+                perfect_ms: 40.0,
+                solid_ms: 90.0,
+                foul_ms: 130.0,
+                exit_weak: 0.65,
+                exit_solid: 0.95,
+                exit_perfect: 1.28,
+                pull_yaw_per_ms: 0.006,
+                cpu_timing_spread_ms: 225.0,
+                pci_radius_m: 0.20,
             },
             // Kid's rules: short games, outs by pegging the runner.
             VariantId::FrontYard => Ruleset {
@@ -142,7 +196,16 @@ impl VariantId {
                 outs_per_half: 3,
                 innings: 3,
                 peg_outs: true,
-                steal_window_secs: 5.0,
+                steal_window_secs: 1.5,
+                perfect_ms: 40.0,
+                solid_ms: 90.0,
+                foul_ms: 130.0,
+                exit_weak: 0.65,
+                exit_solid: 0.95,
+                exit_perfect: 1.28,
+                pull_yaw_per_ms: 0.006,
+                cpu_timing_spread_ms: 225.0,
+                pci_radius_m: 0.20,
             },
         }
     }
@@ -188,13 +251,40 @@ impl VariantId {
                 bounds: 220.0,
                 broadcast_eye: Vec3::new(0.0, 13.0, -21.0),
                 broadcast_target: Vec3::new(0.0, 1.2, 9.0),
-                // The catcher's point of view: just over the crouched
-                // catcher's helmet (the plate umpire peers in from behind
-                // the camera), looking out at the pitcher — batter and zone
-                // filling the bottom of frame, the delivery coming straight
-                // in at eye level.
-                duel_eye: Vec3::new(0.0, 2.3, -4.4),
+                // The catcher's own point of view: the lens sits at his
+                // crouched eye height, just in front of his head, so no
+                // part of his rig renders (it's all behind the near plane)
+                // — the plate umpire, further back at z=-3.0, stays hidden
+                // too. Catcher spot is (0,0,-1.5) (see `fielder_positions`
+                // below); the rig's capsule collider (radius 0.4, matching
+                // `Collider::capsule_y` in player.rs) puts his forward-most
+                // surface at about z=-1.1, so z=-0.9 clears him with a
+                // ~0.2 m margin. Crouched eye height: the rig is authored
+                // 1.85 m tall (tools/build_player.py), head centred at
+                // Blender Z=1.66 standing; `CatcherCrouch` only translates
+                // the whole Hips chain down 0.22 m (no separate spine
+                // lean — see the clip's `Hips: {"dz": ...}` entry), so the
+                // crouched head sits at ~1.44 m, not the ~1.1 m a folded
+                // crouch might suggest.
+                duel_eye: Vec3::new(0.0, 1.4, -0.9),
                 duel_target: Vec3::new(0.0, 0.85, 15.0),
+                // Behind and above the mound (rubber at z=`pitch_distance`),
+                // looking back at the batter's box — the reference
+                // pitcher-cam shot. 3 m of standoff behind the rubber keeps
+                // the pitcher's own rig out of the near clip; at that
+                // distance the catcher (z=-1.5) and plate umpire (z=-3.0)
+                // are ~21-23 m from the eye, far outside the near-eye
+                // occlusion cone (`OCCLUSION_NEAR`), so they stay visible —
+                // exactly what the reference shot wants.
+                behind_pitcher_eye: Vec3::new(0.0, 2.2, PITCH_DISTANCE + 3.0),
+                behind_pitcher_target: Vec3::new(0.3, 1.0, 0.0),
+                // Behind and beside the batter's box, elevated a touch above
+                // and behind the plate umpire — a tight "zone cam" close
+                // enough that the catcher (and the umpire behind him) sit
+                // right in the sightline down the pipe, so they're the ones
+                // auto-hidden here (see `camera::hide_occluders`).
+                batting_zoom_eye: Vec3::new(0.8, 1.7, -3.2),
+                batting_zoom_target: Vec3::new(0.1, 1.0, 12.0),
                 scenery: Scenery::Stadium,
             },
             // A front lawn: four bases across the lawn corners, the defense
@@ -225,10 +315,28 @@ impl VariantId {
                 bounds: 90.0,
                 broadcast_eye: Vec3::new(0.0, 7.0, -12.0),
                 broadcast_target: Vec3::new(0.0, 1.0, 5.0),
-                // Same catcher's-eye framing, scaled to the short lawn duel
-                // (the lone umpire crouches at z = -2.2, ahead of the lens).
-                duel_eye: Vec3::new(0.0, 2.2, -3.8),
+                // No catcher on the lawn (see `fielder_positions` above —
+                // none sits at z<0), so the crouching figure to clear here
+                // is the lone plate umpire (z=-2.2, same rig, same
+                // CatcherCrouch pose). Same reasoning as the standard
+                // park's `duel_eye`: his capsule's front surface sits at
+                // about z=-1.8, so z=-1.5 clears him with a margin, and the
+                // eye height matches the same ~1.4 m crouched head derived
+                // there (see the comment on Standard's `duel_eye`).
+                duel_eye: Vec3::new(0.0, 1.35, -1.5),
                 duel_target: Vec3::new(0.0, 0.8, 8.0),
+                // Same reasoning as Standard's `behind_pitcher_eye`, scaled
+                // to the shorter lawn pitch distance: 3 m behind the rubber
+                // clears the pitcher's own rig, and puts the sole umpire
+                // (z=-2.2) well outside the near-eye occlusion cone.
+                behind_pitcher_eye: Vec3::new(0.0, 2.0, 10.0 + 3.0),
+                behind_pitcher_target: Vec3::new(0.3, 0.9, 0.0),
+                // Same reasoning as Standard's `batting_zoom_eye`: behind and
+                // beside the batter's box, close enough behind the plate
+                // that the lone plate umpire (no catcher on the lawn) sits
+                // in the sightline and gets auto-hidden.
+                batting_zoom_eye: Vec3::new(0.8, 1.6, -2.6),
+                batting_zoom_target: Vec3::new(0.1, 0.9, 8.0),
                 scenery: Scenery::FrontYard,
             },
         }
@@ -310,6 +418,45 @@ mod tests {
                 f.duel_eye.z > f.broadcast_eye.z,
                 "duel eye must be closer to the plate than the wide framing"
             );
+            // Catcher's-eye height: the rig crouches to about 1.44 m (see
+            // the comment on `duel_eye` above), well below both a standing
+            // eye line and the old high broadcast-style duel camera
+            // (y=2.3/2.2) — this guards against a regression back to that.
+            assert!(
+                f.duel_eye.y > 0.9 && f.duel_eye.y < 1.6,
+                "duel eye should sit at crouched-catcher eye height, not a standing/overhead one"
+            );
+        }
+    }
+
+    #[test]
+    fn behind_pitcher_framing_looks_back_at_the_plate_from_the_mound() {
+        for id in [VariantId::Standard, VariantId::FrontYard] {
+            let f = id.field();
+            // The eye sits out past the rubber, looking back down the pipe
+            // toward home — the mirror image of the duel/batting views.
+            assert!(
+                f.behind_pitcher_eye.z > f.pitch_distance,
+                "behind-pitcher eye must stand behind the rubber, not in front of it"
+            );
+            assert!(
+                f.behind_pitcher_target.z <= 0.0,
+                "behind-pitcher target must look toward (or at) the plate"
+            );
+            assert!(f.behind_pitcher_eye.z > f.behind_pitcher_target.z);
+        }
+    }
+
+    #[test]
+    fn batting_zoom_framing_sits_behind_home_looking_toward_the_pitcher() {
+        for id in [VariantId::Standard, VariantId::FrontYard] {
+            let f = id.field();
+            // Same plate-corridor orientation as the duel view: eye behind
+            // home (z<0), target out toward the mound (z>0).
+            assert!(f.batting_zoom_eye.z < 0.0 && f.batting_zoom_target.z > 0.0);
+            // "Beside" the batter's box, not dead centre like the duel/pitcher
+            // views — this is what makes it a distinct framing.
+            assert!(f.batting_zoom_eye.x.abs() > 0.1);
         }
     }
 }

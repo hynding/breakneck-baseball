@@ -29,6 +29,9 @@ pub struct TeamIntent {
     pub aim: Vec2,
     /// Primary button was pressed this frame (pitch release / swing).
     pub action: bool,
+    /// Primary button is currently held (the Swing Meter's load state —
+    /// `action` is the edge, this is the level).
+    pub action_held: bool,
 }
 
 /// Normalized intent for both teams, rebuilt every frame.
@@ -104,6 +107,17 @@ impl Controllers {
             Team::Away => self.away,
         }
     }
+
+    /// Which settings slot (P1 = 0, P2 = 1) drives this team, or `None` for
+    /// the CPU. Home is always P1's team when human; Away is P2's (or the
+    /// solo player's opponent).
+    pub fn player_index(&self, team: Team) -> Option<usize> {
+        match (team, self.source(team)) {
+            (_, InputSource::Cpu) => None,
+            (Team::Home, _) => Some(0),
+            (Team::Away, _) => Some(1),
+        }
+    }
 }
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
@@ -161,6 +175,7 @@ fn gamepad_intent(pad: &Gamepad) -> TeamIntent {
     TeamIntent {
         aim,
         action: pad.just_pressed(GamepadButton::South),
+        action_held: pad.pressed(GamepadButton::South),
     }
 }
 
@@ -199,6 +214,7 @@ fn keyboard_intent(keyboard: &ButtonInput<KeyCode>, scheme: KeyScheme) -> TeamIn
     TeamIntent {
         aim,
         action: keyboard.just_pressed(action),
+        action_held: keyboard.pressed(action),
     }
 }
 
@@ -298,5 +314,14 @@ mod tests {
         let c = assign_controllers(GameMode::TwoPlayers, &[pad(0), pad(1)]);
         assert_eq!(c.home, InputSource::Gamepad(pad(0)));
         assert_eq!(c.away, InputSource::Gamepad(pad(1)));
+    }
+
+    #[test]
+    fn player_index_maps_p1_p2_and_cpu() {
+        let one = assign_controllers(GameMode::OnePlayer, &[]);
+        assert_eq!(one.player_index(Team::Home), Some(0));
+        assert_eq!(one.player_index(Team::Away), None);
+        let two = assign_controllers(GameMode::TwoPlayers, &[]);
+        assert_eq!(two.player_index(Team::Away), Some(1));
     }
 }

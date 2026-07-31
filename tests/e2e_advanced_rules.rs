@@ -19,12 +19,13 @@ use breakneck_baseball::game::ball::Baseball;
 use breakneck_baseball::game::flow::{Phase, Play};
 use breakneck_baseball::game::input::Intents;
 use breakneck_baseball::game::rules::Bases;
+use breakneck_baseball::game::variant::Ruleset;
 use breakneck_baseball::game::{GameState, ScoreBoard};
 
 use common::{headless_app, run_until, start_game, DriveGame};
 
 /// Generous per-milestone budget (~60 sim-seconds — pitches wait out the
-/// 5-second steal window whenever runners are aboard).
+/// steal window, `Ruleset::steal_window_secs`, whenever runners are aboard).
 const STAGE_FRAMES: u64 = 15_000;
 
 #[derive(Resource, Default)]
@@ -33,6 +34,18 @@ struct Stage(usize);
 fn start_two_player_game(app: &mut App) {
     app.init_resource::<Stage>();
     start_game(app, KeyCode::Digit2);
+    // These staged scenarios script swings against the "classic" contact
+    // windows (a squared-up swing = a base hit, etc.). The *shipped* Standard
+    // windows are the B7 balance harness's to tune (`tests/balance_sim.rs` /
+    // `variant.rs`); this test asserts *rule/flow* behaviour, not the balance
+    // economy, so it pins the windows it depends on rather than inheriting the
+    // tunable defaults — same decoupling as `e2e_cpu_timing`'s forced spread.
+    let mut r = app.world_mut().resource_mut::<Ruleset>();
+    r.perfect_ms = 40.0;
+    r.solid_ms = 90.0;
+    r.foul_ms = 140.0;
+    r.exit_solid = 1.0;
+    r.exit_perfect = 1.25;
 }
 
 fn bases(app: &mut App) -> &Bases {
@@ -105,8 +118,10 @@ fn drive_scenario(
         // S5: plunk the Home batter.
         5 => (Vec2::new(-1.0, 0.0), false, None),
         // S6: hit-and-run — runner goes, batter slaps a low single;
-        // the jump sends him first-to-third.
-        6 => (Vec2::ZERO, true, Some((0.3, 0.8, Vec2::new(0.0, -1.0)))),
+        // the jump sends him first-to-third. Contact is timed dead on the
+        // plate (Perfect, zero pull yaw) so the exit multiplier lands a
+        // centred single, not extra bases.
+        6 => (Vec2::ZERO, true, Some((-0.1, 0.05, Vec2::new(0.0, -1.0)))),
         _ => (Vec2::ZERO, false, None),
     };
 

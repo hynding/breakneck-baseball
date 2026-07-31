@@ -1,14 +1,19 @@
 //! Procedural rig animation — the single pathway through which rigs move.
 //!
 //! Systems never rotate rig parts directly; they insert a [`Playing`] clip on
-//! a rig root (or the bat pivot) and [`sample_clips`] poses it every frame.
-//! This boundary is deliberate: a future `AnimationGraph` backend replaces the
-//! sampler without touching any caller. Likewise all locomotion goes through
+//! a rig root (or the bat pivot) and a backend poses it every frame: glTF
+//! rigs (`RigPlayer`-tagged) drive an `AnimationGraph`'s `AnimationPlayer` via
+//! [`drive_graph_rigs`], while `Blocky` rigs keep the procedural [`sample_clips`]
+//! sampler — the two backends never touch the same entity, so callers only
+//! ever see the one [`Playing`] protocol. Likewise all locomotion goes through
 //! [`MoveIntent`], so a human controller can later drive a fielder by writing
 //! the same component the CPU choreography writes.
 
+use std::time::Duration;
+
 use bevy::prelude::*;
 
+use crate::game::model_assets::{RigAnimations, RigPlayer};
 use crate::game::GameState;
 
 /// Every animation the game can play, by name.
@@ -38,6 +43,13 @@ pub enum AnimClip {
     /// The batter's arms drive through the swing (the bat pivot plays
     /// [`AnimClip::SwingBat`] in parallel — this is the body half).
     BatterSwing,
+    /// Held right-handed batting stance: knees softened, torso coiled
+    /// toward the catcher, both arms up holding the bat off the right
+    /// shoulder. Loops through the duel until the swing or the ball being
+    /// put in play releases it.
+    BattingStance,
+    /// Neutral resting stance the glTF driver settles rigs into. Loops.
+    Idle,
 }
 
 impl AnimClip {
@@ -55,12 +67,17 @@ impl AnimClip {
             AnimClip::Dive => 0.5,
             AnimClip::Slide => 0.6,
             AnimClip::BatterSwing => 0.42,
+            AnimClip::BattingStance => 1.2,
+            AnimClip::Idle => 1.0,
         }
     }
 
     /// Clips that repeat until the component is removed.
     pub fn looping(self) -> bool {
-        matches!(self, AnimClip::RunCycle | AnimClip::CatcherCrouch)
+        matches!(
+            self,
+            AnimClip::RunCycle | AnimClip::CatcherCrouch | AnimClip::Idle | AnimClip::BattingStance
+        )
     }
 }
 
@@ -238,7 +255,10 @@ fn limb_pose(clip: AnimClip, kind: LimbKind, f: f32) -> Quat {
                 LegL | LegR => Quat::IDENTITY,
             }
         }
-        SwingBat | RecoverSwing => Quat::IDENTITY,
+        // Blocky fallback: the two-handed grip is a glTF-only bone reposition
+        // (tools/build_player.py), so the procedural rig just holds Idle's
+        // neutral limb pose rather than approximating the stance.
+        SwingBat | RecoverSwing | Idle | BattingStance => Quat::IDENTITY,
     }
 }
 
@@ -281,6 +301,7 @@ type PlayingRigs<'w, 's> = Query<
         Option<&'static Children>,
         Option<&'static RigBaseY>,
     ),
+    Without<RigPlayer>,
 >;
 
 fn sample_clips(
@@ -326,6 +347,16 @@ fn sample_clips(
     }
 }
 
+/// Query alias for `settle_removed`'s root lookup (keeps clippy's
+/// type-complexity check happy) — Blocky rig roots only, glTF rigs settle via
+/// [`settle_graph_removed`] instead.
+type SettledRoots<'w, 's> = Query<
+    'w,
+    's,
+    (&'static mut Transform, &'static RigBaseY),
+    (Without<RigLimb>, Without<RigPlayer>),
+>;
+
 /// Returns limbs to neutral and the root to its resting height whenever a
 /// clip stops (covers both the sampler's own removal and choreography
 /// removing `RunCycle` mid-loop).
@@ -333,7 +364,7 @@ fn settle_removed(
     mut removed: RemovedComponents<Playing>,
     children_q: Query<&Children>,
     mut limb_q: Query<(&RigLimb, &mut Transform)>,
-    mut root_q: Query<(&mut Transform, &RigBaseY), Without<RigLimb>>,
+    mut root_q: SettledRoots,
 ) {
     for entity in removed.read() {
         if let Ok(children) = children_q.get(entity) {
@@ -352,6 +383,20 @@ fn settle_removed(
     }
 }
 
+/// The Swing Meter's visible load: the batter's stance deepens as the meter
+/// fills — a bounded root sink composed over `RigBaseY`, owned here because
+/// animation.rs owns rig root height. Runs last so it wins the frame over the
+/// settle systems that restore the batter root to `RigBaseY`.
+const METER_SINK_M: f32 = 0.12;
+fn meter_stance_sink(
+    load: Res<crate::game::batting::MeterLoad>,
+    mut batters: Query<(&mut Transform, &RigBaseY), With<crate::game::player::Batter>>,
+) {
+    for (mut tf, base) in &mut batters {
+        tf.translation.y = base.0 - load.0 * METER_SINK_M;
+    }
+}
+
 /// Distance that counts as "arrived".
 const ARRIVE_EPS: f32 = 0.2;
 
@@ -365,6 +410,17 @@ fn locomote(
     let dt = time.delta_secs();
     for (entity, mut transform, mut intent, playing) in &mut movers {
         let Some(target) = intent.target else {
+            // No target to run to: shed any lingering RunCycle so the rig
+            // settles instead of jogging in place forever. `RunCycle` is
+            // locomote's own clip, so locomote is what takes it back off —
+            // and it must do so whenever the target is gone, not only on the
+            // frame the mover happens to arrive. Otherwise a target cleared
+            // by another system (e.g. a fielder pulled off a cover as the play
+            // ends) strands the clip: nothing else removes RunCycle, and a
+            // stuck runner (like the catcher) never re-crouches for the duel.
+            if playing.is_some_and(|p| p.clip == AnimClip::RunCycle) {
+                commands.entity(entity).remove::<Playing>();
+            }
             continue;
         };
         let mut to = target - transform.translation;
@@ -388,6 +444,91 @@ fn locomote(
     }
 }
 
+/// Cross-fade length between clips — the production-blending upgrade.
+const BLEND: Duration = Duration::from_millis(150);
+
+/// Starts `clip` on a rig's AnimationPlayer with a cross-fade, applying the
+/// speed factor and loop mode. The one place transitions are touched.
+fn start_clip(
+    anims: &RigAnimations,
+    players: &mut Query<(&mut AnimationPlayer, &mut AnimationTransitions)>,
+    rig: &mut RigPlayer,
+    clip: AnimClip,
+) {
+    let Ok((mut player, mut transitions)) = players.get_mut(rig.player) else {
+        return;
+    };
+    let (node, speed) = anims.node(clip);
+    let anim = transitions.play(&mut player, node, BLEND);
+    anim.set_speed(speed);
+    if clip.looping() {
+        anim.repeat();
+    }
+    rig.current = Some(clip);
+}
+
+/// The glTF backend of the `Playing` protocol: reacts to clip changes,
+/// ticks the same timer/chaining semantics `sample_clips` keeps for Blocky
+/// rigs, and removes finished one-shots.
+fn drive_graph_rigs(
+    time: Res<Time>,
+    anims: Option<Res<RigAnimations>>,
+    mut commands: Commands,
+    mut rigs: Query<(Entity, &mut Playing, &mut RigPlayer)>,
+    mut players: Query<(&mut AnimationPlayer, &mut AnimationTransitions)>,
+) {
+    let Some(anims) = anims else {
+        return;
+    };
+    for (entity, mut playing, mut rig) in &mut rigs {
+        if rig.current != Some(playing.clip) {
+            start_clip(&anims, &mut players, &mut rig, playing.clip);
+        }
+        playing.timer.tick(time.delta());
+        if playing.timer.finished() && !playing.clip.looping() {
+            if let Some(next) = playing.next.take() {
+                playing.clip = next;
+                playing.timer = Timer::from_seconds(next.duration(), TimerMode::Once);
+                // The mismatch with rig.current starts `next` (with blend)
+                // on the next pass.
+            } else {
+                commands.entity(entity).remove::<Playing>();
+            }
+        }
+    }
+}
+
+/// Rigs with nothing to play settle into the looping Idle — covers both
+/// freshly wired rigs and clip removal (runs after `settle_graph_removed`,
+/// which has already cleared `current` for anything dropped this frame, so
+/// each removal starts Idle exactly once instead of twice).
+fn idle_graph_rigs(
+    anims: Option<Res<RigAnimations>>,
+    mut rigs: Query<&mut RigPlayer, Without<Playing>>,
+    mut players: Query<(&mut AnimationPlayer, &mut AnimationTransitions)>,
+) {
+    let Some(anims) = anims else {
+        return;
+    };
+    for mut rig in &mut rigs {
+        if rig.current != Some(AnimClip::Idle) {
+            start_clip(&anims, &mut players, &mut rig, AnimClip::Idle);
+        }
+    }
+}
+
+/// The glTF half of settle: when choreography removes `Playing` mid-loop
+/// (e.g. `RunCycle` on arrival), forget the clip so `idle_graph_rigs` (which
+/// runs right after, in the same frame) starts Idle exactly once instead of
+/// this system clobbering a start it already made.
+fn settle_graph_removed(mut removed: RemovedComponents<Playing>, mut rigs: Query<&mut RigPlayer>) {
+    for entity in removed.read() {
+        if let Ok(mut rig) = rigs.get_mut(entity) {
+            rig.current = None;
+        }
+    }
+}
+
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
 pub struct AnimationPlugin;
@@ -396,7 +537,18 @@ impl Plugin for AnimationPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (locomote, sample_clips, settle_removed)
+            (
+                locomote,
+                drive_graph_rigs,
+                settle_graph_removed,
+                idle_graph_rigs,
+                sample_clips,
+                settle_removed,
+                // Composes the meter's stance-sink over `RigBaseY` last, so it
+                // wins the batter root's y after `settle_removed`/`sample_clips`
+                // have restored it.
+                meter_stance_sink,
+            )
                 .chain()
                 .run_if(in_state(GameState::Playing)),
         );

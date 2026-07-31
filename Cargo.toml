@@ -17,20 +17,30 @@ bevy = { version = "0.15", features = ["wav"] }
 # 3D physics (features are target-specific, see below)
 bevy_rapier3d = { version = "0.28", features = ["debug-render-3d"] }
 
+# Serialization (used by Settings)
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
 # ── Native-only: enable SIMD acceleration for Rapier ──────────────────────────
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 bevy_rapier3d = { version = "0.28", features = ["simd-stable", "debug-render-3d"] }
+dirs = "5"
 
 # ── WASM-only: pull in wasm-bindgen for the web target ────────────────────────
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
 getrandom = { version = "0.3", features = ["wasm_js"] }
+web-sys = { version = "0.3", features = ["Window", "Storage"] }
+
+[dev-dependencies]
+# Parses the committed player.glb in the model-contract test (no Bevy needed).
+gltf = "1"
 
 [features]
 default = []
 
 # Enable this for faster iteration in development (loads Bevy as a dynamic library)
-dev = ["bevy/dynamic_linking"]
+dev = ["bevy/dynamic_linking", "bevy/file_watcher"]
 
 [profile.dev]
 opt-level = 1

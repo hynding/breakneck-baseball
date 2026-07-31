@@ -33,7 +33,13 @@ impl Plugin for MenuPlugin {
             .add_systems(OnExit(GameState::MainMenu), despawn::<MenuUi>)
             .add_systems(
                 Update,
-                (update_controller_status, cycle_options, menu_select)
+                (
+                    update_controller_status,
+                    // S must not fight T/F/I or the mode-select keys while
+                    // the settings screen is open.
+                    cycle_options.run_if(crate::game::settings::settings_closed),
+                    menu_select.run_if(crate::game::settings::settings_closed),
+                )
                     .run_if(in_state(GameState::MainMenu)),
             )
             .add_systems(OnEnter(GameState::GameOver), spawn_game_over)
@@ -161,7 +167,7 @@ fn build_menu(commands: &mut Commands, config: &GameConfig, theme: &Theme) {
                     ));
                     card.spawn((
                         Text::new(
-                            "Controller: A pitch/swing, stick to aim\nKeyboard: WASD + Space (P1), Arrows + Right-Ctrl (P2)\nBatting: hold Down through the windup to send the runner",
+                            "Controller: A pitch/swing, stick to aim\nKeyboard: WASD + Space (P1), Arrows + Right-Ctrl (P2)\nBatting: hold Down through the windup to send the runner\nSettings: S / gamepad Select opens batting style & volume options",
                         ),
                         TextFont {
                             font_size: 13.0,

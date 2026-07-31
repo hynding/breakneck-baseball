@@ -7,6 +7,7 @@ pub mod ai;
 pub mod animation;
 pub mod audio;
 pub mod ball;
+pub mod batting;
 pub mod camera;
 pub mod field;
 pub mod fielding;
@@ -14,11 +15,14 @@ pub mod flow;
 pub mod fx;
 pub mod input;
 pub mod jersey;
+pub mod juice;
 pub mod menu;
+pub mod model_assets;
 pub mod player;
 pub mod roster;
 pub mod rules;
 pub mod runner;
+pub mod settings;
 pub mod subs;
 pub mod theme;
 pub mod ui;
@@ -29,6 +33,7 @@ use bevy::prelude::*;
 use animation::AnimationPlugin;
 use audio::SoundPlugin;
 use ball::BallPlugin;
+use batting::BattingPlugin;
 use camera::CameraPlugin;
 use field::FieldPlugin;
 use fielding::FieldingPlugin;
@@ -36,7 +41,9 @@ use flow::FlowPlugin;
 use fx::FxPlugin;
 use input::InputPlugin;
 use jersey::JerseyPlugin;
+use juice::JuicePlugin;
 use menu::MenuPlugin;
+use model_assets::ModelAssetsPlugin;
 use player::PlayerPlugin;
 use roster::Rosters;
 use runner::RunnerPlugin;
@@ -215,14 +222,17 @@ impl Plugin for GamePlugin {
                 ..default()
             })
             .init_resource::<Rosters>()
-            // Sub-plugins (input/menu first so their resources exist for the rest)
+            // Sub-plugins (input/menu first so their resources exist for the
+            // rest); split across two tuples — `add_plugins` tops out at 15.
             .add_plugins((
                 InputPlugin,
                 MenuPlugin,
                 FieldPlugin,
                 BallPlugin,
+                ModelAssetsPlugin,
                 PlayerPlugin,
                 AnimationPlugin,
+                BattingPlugin,
                 FlowPlugin,
                 FxPlugin,
                 SoundPlugin,
@@ -230,8 +240,12 @@ impl Plugin for GamePlugin {
                 RunnerPlugin,
                 CameraPlugin,
                 UiPlugin,
+            ))
+            .add_plugins((
                 JerseyPlugin,
                 SubsPlugin,
+                settings::SettingsPlugin,
+                JuicePlugin,
             ))
             // Fresh scoreboard/rosters each time a game starts from the menu;
             // tear the scene down once the game is over. Pausing stays inside
