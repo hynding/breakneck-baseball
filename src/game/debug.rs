@@ -49,9 +49,171 @@ impl Plugin for DebugPlugin {
             .init_resource::<ForcedContact>()
             .add_plugins(EguiPlugin)
             .add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin)
+            .add_plugins(bevy_rapier3d::render::RapierDebugRenderPlugin::default().disabled())
             .add_systems(Update, toggle_panel)
-            .add_systems(Update, debug_panel.run_if(panel_open));
+            .add_systems(Update, debug_panel.run_if(panel_open))
+            .add_systems(
+                Update,
+                (
+                    zone_gizmo,
+                    trajectory_gizmo,
+                    intercept_gizmo,
+                    throw_target_gizmo,
+                    runner_target_gizmo,
+                    pci_gizmo,
+                )
+                    .run_if(in_state(crate::game::GameState::Playing)),
+            );
     }
+}
+
+fn zone_gizmo(state: Res<DebugState>, mut gizmos: Gizmos) {
+    if !state.gizmos.zone {
+        return;
+    }
+    use crate::game::rules::{ZONE_HALF_WIDTH, ZONE_HIGH, ZONE_LOW};
+    let center = Vec3::new(0.0, (ZONE_LOW + ZONE_HIGH) / 2.0, 0.0);
+    gizmos.rect(
+        Isometry3d::new(center, Quat::IDENTITY),
+        Vec2::new(ZONE_HALF_WIDTH * 2.0, ZONE_HIGH - ZONE_LOW),
+        bevy::color::palettes::css::AQUA,
+    );
+}
+
+fn trajectory_gizmo(
+    state: Res<DebugState>,
+    ball: Query<(&Transform, &bevy_rapier3d::prelude::Velocity), With<crate::game::ball::InFlight>>,
+    mut gizmos: Gizmos,
+) {
+    if !state.gizmos.trajectory {
+        return;
+    }
+    let Ok((tf, vel)) = ball.get_single() else {
+        return;
+    };
+    use crate::game::ball::{BALL_DRAG_FACTOR, MAGNUS_FACTOR};
+    let (landing, _hang) = crate::game::rules::predict_landing_from(
+        tf.translation,
+        vel.linvel,
+        vel.angvel,
+        BALL_DRAG_FACTOR,
+        MAGNUS_FACTOR,
+    );
+    // A sightline + landing circle reads the play; exact touchdown already
+    // lives in fx.rs's landing ring.
+    gizmos.line(
+        tf.translation,
+        landing + Vec3::Y * 0.02,
+        bevy::color::palettes::css::ORANGE,
+    );
+    gizmos.circle(
+        Isometry3d::new(
+            landing + Vec3::Y * 0.02,
+            Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2),
+        ),
+        0.5,
+        bevy::color::palettes::css::ORANGE,
+    );
+}
+
+fn intercept_gizmo(
+    state: Res<DebugState>,
+    fielders: Query<(&Transform, &crate::game::animation::MoveIntent)>,
+    mut gizmos: Gizmos,
+) {
+    if !state.gizmos.intercept {
+        return;
+    }
+    for (tf, intent) in &fielders {
+        if let Some(target) = intent.target {
+            gizmos.line(
+                tf.translation + Vec3::Y * 0.1,
+                target + Vec3::Y * 0.1,
+                bevy::color::palettes::css::YELLOW,
+            );
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn throw_target_gizmo(
+    state: Res<DebugState>,
+    play: Res<crate::game::flow::Play>,
+    bases: Res<crate::game::rules::Bases>,
+    ruleset: Res<crate::game::variant::Ruleset>,
+    field: Res<crate::game::variant::FieldSpec>,
+    time: Res<Time>,
+    ball: Query<&Transform, With<crate::game::ball::Baseball>>,
+    mut gizmos: Gizmos,
+) {
+    if !state.gizmos.intercept || play.phase != crate::game::flow::Phase::InPlay {
+        return;
+    }
+    let Ok(tf) = ball.get_single() else {
+        return;
+    };
+    let race = play.since_contact(time.elapsed_secs());
+    // Same call fielding.rs makes at the throw (fielding.rs:356).
+    let target = crate::game::rules::throw_target(
+        tf.translation,
+        race,
+        &bases,
+        play.runners_going(),
+        &field,
+        &ruleset.pace,
+    );
+    let pos = field
+        .base_positions
+        .get(target)
+        .copied()
+        .unwrap_or(Vec3::ZERO);
+    gizmos.circle(
+        Isometry3d::new(
+            pos + Vec3::Y * 0.05,
+            Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2),
+        ),
+        1.0,
+        bevy::color::palettes::css::YELLOW,
+    );
+}
+
+fn runner_target_gizmo(
+    state: Res<DebugState>,
+    field: Res<crate::game::variant::FieldSpec>,
+    runners: Query<(&Transform, &crate::game::runner::Runner)>,
+    mut gizmos: Gizmos,
+) {
+    if !state.gizmos.runner_targets {
+        return;
+    }
+    for (tf, runner) in &runners {
+        if let Some(bag) = field.base_positions.get(runner.base) {
+            gizmos.line(
+                tf.translation,
+                *bag + Vec3::Y * 0.05,
+                bevy::color::palettes::css::LIMEGREEN,
+            );
+        }
+    }
+}
+
+fn pci_gizmo(
+    state: Res<DebugState>,
+    ruleset: Res<crate::game::variant::Ruleset>,
+    cursor: Query<&Transform, With<crate::game::field::PciCursorMarker>>,
+    mut gizmos: Gizmos,
+) {
+    if !state.gizmos.pci {
+        return;
+    }
+    let Ok(tf) = cursor.get_single() else {
+        return;
+    };
+    gizmos.circle(
+        Isometry3d::new(tf.translation, Quat::IDENTITY),
+        ruleset.batting.pci_radius_m,
+        bevy::color::palettes::css::MAGENTA,
+    );
 }
 
 fn panel_open(state: Res<DebugState>) -> bool {
@@ -235,7 +397,21 @@ fn debug_panel(world: &mut World) {
                     }
                 }
                 DebugTab::Gizmos => {
-                    ui.label("Gizmos — Task 9");
+                    let mut gizmos = world.resource::<DebugState>().gizmos;
+                    ui.checkbox(&mut gizmos.zone, "Strike zone");
+                    ui.checkbox(&mut gizmos.trajectory, "Ball trajectory + landing");
+                    ui.checkbox(&mut gizmos.intercept, "Fielder intercepts + throw target");
+                    ui.checkbox(&mut gizmos.pci, "PCI radius ring");
+                    ui.checkbox(&mut gizmos.runner_targets, "Runner target lines");
+                    if ui
+                        .checkbox(&mut gizmos.colliders, "Rapier colliders")
+                        .changed()
+                    {
+                        world
+                            .resource_mut::<bevy_rapier3d::render::DebugRenderContext>()
+                            .enabled = gizmos.colliders;
+                    }
+                    world.resource_mut::<DebugState>().gizmos = gizmos;
                 }
                 DebugTab::Time => {
                     ui.label("Time — Task 10");
