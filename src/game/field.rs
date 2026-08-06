@@ -920,14 +920,16 @@ const ZONE_DRAWN_HALF_WIDTH: f32 = rules::PLATE_HALF_WIDTH_M;
 /// The zone volume is as deep as home plate (17 in front edge to point,
 /// docs/BASEBALL.md) — the rulebook zone is a prism *over the plate*.
 const ZONE_DEPTH: f32 = PLATE_WIDTH;
-/// Darker wireframe per the design ask: near-black steel, readable against
-/// grass and sky without washing out the PCI cursor or the ball.
-const ZONE_FRAME_COLOR: Color = Color::srgba(0.10, 0.11, 0.14, 0.85);
+/// Darker wireframe per the design ask: near-black steel at half opacity,
+/// readable against grass and sky without dominating the plate or washing
+/// out the PCI cursor and the ball.
+const ZONE_FRAME_COLOR: Color = Color::srgba(0.10, 0.11, 0.14, 0.50);
 /// A whisper of dark tint on the near face only — enough for the PCI
 /// cursor to read against, never a bright pane.
 const ZONE_FILL_COLOR: Color = Color::srgba(0.05, 0.06, 0.08, 0.10);
-/// Wireframe bar thickness.
-const ZONE_BAR: f32 = 0.02;
+/// Wireframe bar thickness — thin rails, closer to a broadcast K-zone
+/// overlay than scaffolding.
+const ZONE_BAR: f32 = 0.008;
 
 /// A floating 3D wireframe box over the plate showing the zone the umpire
 /// calls ([`rules::ZONE_LOW`]..[`rules::ZONE_HIGH`], plate-wide and
@@ -1408,7 +1410,14 @@ mod tests {
             c.red < 0.5 && c.green < 0.5 && c.blue < 0.5,
             "the wireframe should read dark, got {c:?}"
         );
-        assert!(c.alpha > 0.0, "wasm rule: never spawn at alpha 0");
+        // Designer-reviewed look: half-opacity rails, thin like a broadcast
+        // K-zone overlay rather than scaffolding (and never alpha 0 — wasm
+        // rule).
+        assert!(
+            (c.alpha - 0.5).abs() < 1e-6,
+            "frame should sit at 50% opacity"
+        );
+        assert!(ZONE_BAR <= 0.01, "rails should stay thin, got {ZONE_BAR}");
         let f = ZONE_FILL_COLOR.to_srgba();
         assert!(f.alpha > 0.0 && f.alpha < 0.2, "fill stays a whisper");
     }
