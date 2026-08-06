@@ -34,7 +34,8 @@ pub struct DebugState {
     pub gizmos: GizmoToggles,
     pub last_error: Option<&'static str>,
     pub custom: crate::game::scenario::Scenario,
-    pub step_pending: bool,
+    /// Frames remaining in an in-flight single-step (see `finish_step`).
+    pub step_frames: u8,
 }
 
 /// Pins every judged swing's grade — deterministic swing-outcome testing.
@@ -222,38 +223,41 @@ fn panel_open(state: Res<DebugState>) -> bool {
     state.open
 }
 
-/// Re-pauses after a single-step frame: `step` in the Time tab unpauses
-/// `Time<Virtual>` for exactly one `Update`, and this `Last`-schedule system
-/// pauses it back before the next frame starts.
+/// Single-step countdown: `step` (Time tab) unpauses `Time<Virtual>` and
+/// sets `step_frames` to 2, then this `Last`-schedule system decrements it
+/// every frame and re-pauses once it hits 0. Two frames, not one, because
+/// Bevy's `time_system` advances virtual time in `First` — the old
+/// same-frame approach (unpause in `Update`, pause in that same frame's
+/// `Last`) raced ahead of the *next* frame's `First` tick and never let any
+/// virtual time elapse. Counting down across a full frame boundary
+/// guarantees `First` gets to advance the clock at least once while
+/// unpaused before this system pauses it back.
 fn finish_step(mut state: ResMut<DebugState>, mut virt: ResMut<Time<Virtual>>) {
-    if state.step_pending {
-        virt.pause();
-        state.step_pending = false;
-    }
-}
-
-/// F1 opens/closes; number keys 1–5 switch tabs while the panel is open.
-fn toggle_panel(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<DebugState>) {
-    if keys.just_pressed(KeyCode::F1) {
-        state.open = !state.open;
-    }
-    if !state.open {
-        return;
-    }
-    for (key, tab) in [
-        (KeyCode::Digit1, DebugTab::Tune),
-        (KeyCode::Digit2, DebugTab::Scenario),
-        (KeyCode::Digit3, DebugTab::State),
-        (KeyCode::Digit4, DebugTab::Gizmos),
-        (KeyCode::Digit5, DebugTab::Time),
-    ] {
-        if keys.just_pressed(key) {
-            state.tab = tab;
+    if state.step_frames > 0 {
+        state.step_frames -= 1;
+        if state.step_frames == 0 {
+            virt.pause();
         }
     }
 }
 
+/// F1 opens/closes regardless of egui focus or game state. Tab hotkeys
+/// (1–5) are handled in `debug_panel`, which already holds the egui
+/// context needed to gate them on keyboard focus (see its doc comment).
+fn toggle_panel(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<DebugState>) {
+    if keys.just_pressed(KeyCode::F1) {
+        state.open = !state.open;
+    }
+}
+
 /// Exclusive: the inspector widgets need `&mut World` alongside the egui ctx.
+///
+/// Tab hotkeys 1–5 are handled here (not in `toggle_panel`, a plain system
+/// with no egui access) because switching tabs must be gated on
+/// `egui::Context::wants_keyboard_input` — otherwise typing a digit into an
+/// inspector drag-value or spinner also switches tabs — and on the game not
+/// being on `GameState::MainMenu`, where 1/2 are menu.rs's own variant/
+/// innings-cycle shortcuts and would collide.
 fn debug_panel(world: &mut World) {
     let Ok(ctx) = world
         .query_filtered::<&mut EguiContext, With<PrimaryWindow>>()
@@ -262,6 +266,24 @@ fn debug_panel(world: &mut World) {
     else {
         return;
     };
+    let not_main_menu = *world.resource::<State<crate::game::GameState>>().get()
+        != crate::game::GameState::MainMenu;
+    if !ctx.wants_keyboard_input() && not_main_menu {
+        let keys = world.resource::<ButtonInput<KeyCode>>();
+        let pressed_tab = [
+            (KeyCode::Digit1, DebugTab::Tune),
+            (KeyCode::Digit2, DebugTab::Scenario),
+            (KeyCode::Digit3, DebugTab::State),
+            (KeyCode::Digit4, DebugTab::Gizmos),
+            (KeyCode::Digit5, DebugTab::Time),
+        ]
+        .into_iter()
+        .find(|(key, _)| keys.just_pressed(*key))
+        .map(|(_, tab)| tab);
+        if let Some(tab) = pressed_tab {
+            world.resource_mut::<DebugState>().tab = tab;
+        }
+    }
     egui::Window::new("Debug")
         .default_width(340.0)
         .show(&ctx, |ui| {
@@ -447,7 +469,7 @@ fn debug_panel(world: &mut World) {
                         }
                         if ui.button("step").clicked() {
                             world.resource_mut::<Time<Virtual>>().unpause();
-                            world.resource_mut::<DebugState>().step_pending = true;
+                            world.resource_mut::<DebugState>().step_frames = 2;
                         }
                     });
                 }

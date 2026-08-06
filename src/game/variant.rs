@@ -625,6 +625,65 @@ mod tests {
         assert!(s.starts_with("// VariantId::Standard overrides:"));
     }
 
+    /// `diff_literal`'s `diff!` field list is hand-maintained and can
+    /// silently miss a field added to `Ruleset` (or a sub-struct) in the
+    /// future. Guard it with reflection instead of a second hand-maintained
+    /// list: flip every leaf field `Ruleset` reflects away from its default,
+    /// and require `diff_literal` to emit exactly that many lines. A field
+    /// missing a `diff!` arm shows up as a line-count mismatch here.
+    #[test]
+    fn diff_literal_covers_every_reflected_field() {
+        use bevy::reflect::{PartialReflect, ReflectMut, ReflectRef};
+
+        fn count_leaf_fields(value: &dyn PartialReflect) -> usize {
+            match value.reflect_ref() {
+                ReflectRef::Struct(s) => (0..s.field_len())
+                    .map(|i| count_leaf_fields(s.field_at(i).unwrap()))
+                    .sum(),
+                _ => 1,
+            }
+        }
+
+        fn perturb_every_field(value: &mut dyn PartialReflect) {
+            match value.reflect_mut() {
+                ReflectMut::Struct(s) => {
+                    for i in 0..s.field_len() {
+                        perturb_every_field(s.field_at_mut(i).unwrap());
+                    }
+                }
+                _ => {
+                    if let Some(v) = value.try_downcast_mut::<f32>() {
+                        *v += 1.0;
+                    } else if let Some(v) = value.try_downcast_mut::<u32>() {
+                        *v += 1;
+                    } else if let Some(v) = value.try_downcast_mut::<bool>() {
+                        *v = !*v;
+                    } else {
+                        panic!(
+                            "diff_literal completeness test: unhandled leaf field type on \
+                             Ruleset; add a case to perturb_every_field (and a matching \
+                             diff! arm in diff_literal)"
+                        );
+                    }
+                }
+            }
+        }
+
+        let expected = count_leaf_fields(VariantId::Standard.rules().as_partial_reflect());
+
+        let mut all_changed = VariantId::Standard.rules();
+        perturb_every_field(all_changed.as_partial_reflect_mut());
+
+        let diff = all_changed.diff_literal(VariantId::Standard);
+        let emitted = diff.lines().filter(|l| !l.starts_with("//")).count();
+
+        assert_eq!(
+            emitted, expected,
+            "diff_literal emitted {emitted} line(s) but Ruleset reflects {expected} leaf \
+             field(s) — a field is missing a diff! arm in diff_literal"
+        );
+    }
+
     #[test]
     fn batting_zoom_framing_sits_behind_home_looking_toward_the_pitcher() {
         for id in [VariantId::Standard, VariantId::FrontYard] {

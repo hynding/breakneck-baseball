@@ -48,6 +48,14 @@ impl Default for Scenario {
 #[derive(Resource, Default)]
 pub struct PitchOverride(pub Option<PitchKind>);
 
+/// Fired once `apply_to_world` finishes rewriting the world. No system
+/// consumes it today — by design, not an oversight: `ScoreBoard`, `Bases`,
+/// and `Play` are all `Resource`s, so runner rigs, HUD, and jerseys already
+/// re-mirror them through their own change detection without needing to
+/// react to this event directly. It's kept as the documented seam for a
+/// future consumer that wants to react to a scenario jump specifically
+/// (e.g. a debug-panel toast, or an e2e test asserting a jump happened)
+/// rather than to the resource changes it causes.
 #[derive(Event)]
 pub struct ScenarioAppliedEvent {
     pub name: &'static str,
