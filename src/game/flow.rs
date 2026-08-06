@@ -154,6 +154,12 @@ pub struct Play {
     /// turns out *not* to be caught after all (a legitimately late hit, a
     /// dropped third, HBP) so it can't linger invisible.
     presentational_catch: bool,
+    /// The catcher received this at-bat's last pitch in the mitt (either
+    /// the presentational glove-hide or the official freeze) — the camera
+    /// holds the tight at-bat framing through the result pause instead of
+    /// zooming out. Never set by dirt balls, sailed pitches, HBP, or
+    /// anything hit; cleared at the PrePitch reset.
+    pitch_gloved: bool,
     /// A call decided by the throw race but not yet announced: the ball is
     /// still in the air, and the play stays visually alive (the throw flies,
     /// the batter rounds the bases) until fielding reports it settled.
@@ -218,6 +224,23 @@ impl Play {
     pub fn is_home_run(&self) -> bool {
         self.home_run
     }
+
+    /// Whether the catcher gloved this at-bat's last pitch — read by the
+    /// camera to hold the at-bat framing through the result pause.
+    pub fn pitch_gloved(&self) -> bool {
+        self.pitch_gloved
+    }
+
+    /// Test-only constructor for camera/flow unit tests that need a `Play`
+    /// in a given phase without driving the whole machine there.
+    #[cfg(test)]
+    pub fn test_play(phase: Phase, pitch_gloved: bool) -> Self {
+        Self {
+            phase,
+            pitch_gloved,
+            ..Self::default()
+        }
+    }
 }
 
 /// The live leadoff state, shared with the runner visuals and the CPU: the
@@ -244,6 +267,7 @@ impl Default for Play {
             pickoff_cooldown: Timer::from_seconds(0.0, TimerMode::Once),
             pitch_taken: false,
             presentational_catch: false,
+            pitch_gloved: false,
             pending_call: None,
             contact_at: 0.0,
             wall_called: false,
@@ -794,6 +818,9 @@ fn catcher_receives(
         vel.linvel = Vec3::ZERO;
         vel.angvel = Vec3::ZERO;
         *vis = Visibility::Inherited;
+        // Officially in the mitt (whether or not the presentational pop
+        // already played) — the camera holds the at-bat framing on it.
+        play.pitch_gloved = true;
         commands.entity(ball).remove::<InFlight>();
         if !play.presentational_catch {
             // No earlier presentational pop (the decision landed before the
@@ -823,6 +850,7 @@ fn catcher_receives(
         }
         *vis = Visibility::Hidden;
         play.presentational_catch = true;
+        play.pitch_gloved = true;
         commands
             .entity(catcher)
             .insert(Playing::new(AnimClip::GloveUp));
@@ -833,10 +861,12 @@ fn catcher_receives(
     // Anything else with the ball still tagged `InFlight` (a live hit, a
     // dropped third, an HBP that already fired) is not a catch after all —
     // never leave a presentational hide stuck on a ball that's actually
-    // still live.
+    // still live, and never leave the camera holding a "gloved" framing on
+    // a ball that got away.
     if play.presentational_catch {
         *vis = Visibility::Inherited;
         play.presentational_catch = false;
+        play.pitch_gloved = false;
     }
 }
 
@@ -1034,6 +1064,7 @@ fn result_phase(
     play.crossing = None;
     play.resolved = false;
     play.presentational_catch = false;
+    play.pitch_gloved = false;
     play.pending_pitch = None;
     play.live_kind = None;
     play.steal_armed = false;
@@ -1243,6 +1274,17 @@ fn end_pitch(play: &mut Play) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A gloved pitch is remembered through the result pause (the camera
+    /// holds the duel framing on it — `camera::duel_framing_wanted`) and a
+    /// fresh `Play` starts unglooved.
+    #[test]
+    fn pitch_gloved_defaults_false_and_reads_back() {
+        let play = Play::default();
+        assert!(!play.pitch_gloved());
+        let play = Play::test_play(Phase::Result, true);
+        assert!(play.pitch_gloved());
+    }
 
     #[test]
     fn swing_dt_ms_is_signed_early_negative() {

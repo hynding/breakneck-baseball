@@ -249,15 +249,18 @@ pub fn occludes(eye: Vec3, target: Vec3, subject: Vec3, near: f32, radius: f32) 
 }
 
 /// The phases during which the broadcast rig wants (or is still holding)
-/// the tight duel framing: the duel itself and the post-contact plate hold.
-/// Shared between [`broadcast_camera`]'s framing choice and
-/// [`hide_occluders`]'s catcher-POV arm so the catcher can never pop into
-/// a lens that is still parked inside his silhouette.
+/// the tight duel framing: the duel itself, the post-contact plate hold,
+/// and the result pause of a pitch the catcher gloved — a called strike or
+/// ball doesn't deserve a zoom-out; only balls the mitt missed (hits, dirt
+/// balls, dropped thirds, HBP) release the camera. Shared between
+/// [`broadcast_camera`]'s framing choice and [`hide_occluders`]'s
+/// catcher-POV arm so the catcher can never pop into a lens that is still
+/// parked inside his silhouette.
 fn duel_framing_wanted(play: &Play, now: f32) -> bool {
     match play.phase {
         Phase::PrePitch | Phase::WindUp | Phase::Pitch => true,
         Phase::InPlay => play.since_contact(now) < BALL_FOLLOW_DELAY,
-        Phase::Result => false,
+        Phase::Result => play.pitch_gloved() && !play.is_home_run(),
     }
 }
 
@@ -544,6 +547,11 @@ fn broadcast_camera(
             let eye = trot_orbit_eye(focus, time.elapsed_secs() * TROT_ORBIT_RATE);
             (eye, focus, BROADCAST_FOV)
         }
+        // Result pause of a gloved pitch (called strike/ball, strikeout
+        // into the mitt): stay in the at-bat view — the umpire's call
+        // doesn't deserve a zoom-out. Everything the mitt missed (hits,
+        // dirt balls, dropped thirds, HBP) falls through to the wide shot.
+        (Phase::Result, _) if play.pitch_gloved() => view.framing(&field, aspect),
         // Result pause: settle on the wide home framing.
         (Phase::Result, _) => (field.broadcast_eye, field.broadcast_target, BROADCAST_FOV),
         // The duel: whichever at-bat view the player has cycled to with V.
@@ -743,6 +751,33 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The result pause holds the duel framing only for a pitch the catcher
+    /// gloved (called strikes/balls, strikeouts into the mitt end tight on
+    /// the plate); everything the mitt missed — hits, dirt balls, dropped
+    /// thirds, HBP — releases the camera to the wide shot. The duel phases
+    /// always want the tight framing; the post-contact plate hold expires
+    /// with `BALL_FOLLOW_DELAY`.
+    #[test]
+    fn duel_framing_holds_result_only_for_gloved_pitches() {
+        use crate::game::flow::Play;
+        assert!(duel_framing_wanted(
+            &Play::test_play(Phase::Result, true),
+            10.0
+        ));
+        assert!(!duel_framing_wanted(
+            &Play::test_play(Phase::Result, false),
+            10.0
+        ));
+        assert!(duel_framing_wanted(
+            &Play::test_play(Phase::PrePitch, false),
+            10.0
+        ));
+        assert!(duel_framing_wanted(
+            &Play::test_play(Phase::Pitch, false),
+            10.0
+        ));
     }
 
     #[test]
