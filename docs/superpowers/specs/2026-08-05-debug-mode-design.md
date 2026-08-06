@@ -39,17 +39,58 @@ Non-goals: cheat codes in shipped builds, replay recording, network debugging.
 - **`src/game/scenario.rs` is always compiled** (lib target, no feature
   gate): the headless tests consume it and run without the feature. The
   `debug` feature gates only UI, gizmos, and time controls.
-- **F1** toggles the panel. A `DebugState` resource holds panel visibility
-  and per-gizmo toggles. The panel works in `Playing` and `Paused` alike.
+- **F1** toggles the panel. A `DebugState` resource holds panel visibility,
+  the active tab, and per-gizmo toggles. The panel works in `Playing` and
+  `Paused` alike.
 - CI adds `cargo check --features debug` for native **and**
   `wasm32-unknown-unknown`, so the feature can't rot on either target.
+
+### Navigation
+
+The panel is a single egui window with a **top-level tab bar** — one tap to
+any area, no scrolling through unrelated controls:
+
+```
+[ Tune ] [ Scenario ] [ State ] [ Gizmos ] [ Time ]
+```
+
+- **Tune** — the tuning surface, itself categorized into collapsible
+  sections (see §2): Counts & Rules, Batting Feel, Pace & Races, Flow
+  Timing, Field & Camera.
+- **Scenario** — presets, custom builder, forced-contact override.
+- **State** — read-only live internals.
+- **Gizmos** — one checkbox per overlay.
+- **Time** — speed presets and single-step.
+
+`DebugState` remembers the active tab and each section's collapsed state
+across panel toggles within a session, so returning to a control you were
+just using never costs re-navigation. Number keys **1–5** switch tabs while
+the panel is focused.
 
 ## 2. Tuning surface
 
 Tunable constants are **promoted into `Ruleset`** — already "the data that
 makes a game of baseball *this* game" — not into a parallel debug-only
 resource that could drift. They become variant data with defaults equal to
-today's consts, nested in a `pace` sub-struct to keep `Ruleset` readable:
+today's consts.
+
+To make the Tune tab navigable, the categories live in the *data*:
+`Ruleset` is restructured into named sub-structs, which
+`bevy-inspector-egui` renders as separate collapsible sections
+automatically — the UI taxonomy is the struct taxonomy, and a future field
+lands in the right section by construction:
+
+- `counts: CountRules` — `balls_per_walk`, `strikes_per_out`,
+  `outs_per_half`, `innings`, `peg_outs`, `steal_window_secs`.
+- `batting: BattingTuning` — `perfect_ms`, `solid_ms`, `foul_ms`,
+  `exit_weak`/`exit_solid`/`exit_perfect`, `pull_yaw_per_ms`,
+  `cpu_timing_spread_ms`, `pci_radius_m`.
+- `pace: PaceTuning` — the promoted speed/race constants below.
+- Flow-timing promotions join `pace` (they are race/pacing values).
+- **Field & Camera** is simply the `FieldSpec` resource in its own
+  section — no restructuring needed.
+
+Promotion list:
 
 | From | Promoted constants |
 |---|---|
@@ -62,9 +103,14 @@ the arbiter for every promoted value. Staying put: zone geometry
 (`ZONE_*`) and ball mass/radius (regulation facts per docs/BASEBALL.md),
 and camera framing (already variant data in `FieldSpec`).
 
-**Tune tab:** derive `Reflect` on `Ruleset` and `FieldSpec` and hand both to
-`bevy-inspector-egui` — every field becomes a drag-slider, and any future
-field added to either struct appears in the UI with zero UI code.
+**Tune tab:** derive `Reflect` on `Ruleset` (and its sub-structs) and
+`FieldSpec` and hand both to `bevy-inspector-egui` — every field becomes a
+drag-slider grouped under its sub-struct's collapsible section header
+(Counts & Rules / Batting Feel / Pace & Races / Field & Camera), and any
+future field added to any struct appears in the right section with zero UI
+code. Restructuring `Ruleset` into sub-structs touches its construction
+sites (`variant.rs` literals, unit tests) mechanically; the compiler walks
+through all of them.
 
 **Dump diff:** a button prints only the fields differing from the active
 variant's defaults as a paste-ready Rust literal labeled with the
