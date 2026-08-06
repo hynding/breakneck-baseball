@@ -12,9 +12,17 @@ use bevy::prelude::Resource;
 
 use crate::game::field::{HALF_DIAGONAL, PITCH_DISTANCE};
 
-/// Countable-rule knobs read by the rules engine and game flow.
+/// Countable-rule knobs read by the rules engine and game flow, grouped so
+/// the debug inspector renders each group as its own collapsible section.
 #[derive(Resource, Clone, Debug)]
 pub struct Ruleset {
+    pub counts: CountRules,
+    pub batting: BattingTuning,
+}
+
+/// Count thresholds and window rules.
+#[derive(Clone, Debug)]
+pub struct CountRules {
     /// Balls that walk the batter.
     pub balls_per_walk: u32,
     /// Strikes that retire the batter.
@@ -30,15 +38,19 @@ pub struct Ruleset {
     /// steal, the pitch is held this long while the leadoff/pickoff duel
     /// runs. Zero disables the window.
     pub steal_window_secs: f32,
+}
 
-    // ── Batting-feel timing/contact tuning (per docs/superpowers/specs/
-    // 2026-07-30-batting-feel-design.md §2) ────────────────────────────────
-    // `rules::contact_quality` maps a swing's timing error (milliseconds,
-    // signed: negative = early) to a `ContactQuality` using these windows —
-    // data, not code, so each variant can feel different without touching
-    // `rules.rs`. The B7 balance harness is the tuning arbiter for these
-    // numbers: they start at the plan's defaults and only that harness
-    // should move them.
+/// Batting-feel timing/contact tuning (see the batting-feel spec §2).
+// ── Batting-feel timing/contact tuning (per docs/superpowers/specs/
+// 2026-07-30-batting-feel-design.md §2) ────────────────────────────────
+// `rules::contact_quality` maps a swing's timing error (milliseconds,
+// signed: negative = early) to a `ContactQuality` using these windows —
+// data, not code, so each variant can feel different without touching
+// `rules.rs`. The B7 balance harness is the tuning arbiter for these
+// numbers: they start at the plan's defaults and only that harness
+// should move them.
+#[derive(Clone, Debug)]
+pub struct BattingTuning {
     /// |dt| at or under this many ms is a `ContactQuality::Perfect`.
     pub perfect_ms: f32,
     /// |dt| at or under this many ms (and over `perfect_ms`) is a
@@ -173,39 +185,47 @@ impl VariantId {
     pub fn rules(self) -> Ruleset {
         match self {
             VariantId::Standard => Ruleset {
-                balls_per_walk: 4,
-                strikes_per_out: 3,
-                outs_per_half: 3,
-                innings: 9,
-                peg_outs: false,
-                steal_window_secs: 1.5,
-                perfect_ms: 40.0,
-                solid_ms: 90.0,
-                foul_ms: 130.0,
-                exit_weak: 0.65,
-                exit_solid: 0.95,
-                exit_perfect: 1.28,
-                pull_yaw_per_ms: 0.006,
-                cpu_timing_spread_ms: 225.0,
-                pci_radius_m: 0.20,
+                counts: CountRules {
+                    balls_per_walk: 4,
+                    strikes_per_out: 3,
+                    outs_per_half: 3,
+                    innings: 9,
+                    peg_outs: false,
+                    steal_window_secs: 1.5,
+                },
+                batting: BattingTuning {
+                    perfect_ms: 40.0,
+                    solid_ms: 90.0,
+                    foul_ms: 130.0,
+                    exit_weak: 0.65,
+                    exit_solid: 0.95,
+                    exit_perfect: 1.28,
+                    pull_yaw_per_ms: 0.006,
+                    cpu_timing_spread_ms: 225.0,
+                    pci_radius_m: 0.20,
+                },
             },
             // Kid's rules: short games, outs by pegging the runner.
             VariantId::FrontYard => Ruleset {
-                balls_per_walk: 4,
-                strikes_per_out: 3,
-                outs_per_half: 3,
-                innings: 3,
-                peg_outs: true,
-                steal_window_secs: 1.5,
-                perfect_ms: 40.0,
-                solid_ms: 90.0,
-                foul_ms: 130.0,
-                exit_weak: 0.65,
-                exit_solid: 0.95,
-                exit_perfect: 1.28,
-                pull_yaw_per_ms: 0.006,
-                cpu_timing_spread_ms: 225.0,
-                pci_radius_m: 0.20,
+                counts: CountRules {
+                    balls_per_walk: 4,
+                    strikes_per_out: 3,
+                    outs_per_half: 3,
+                    innings: 3,
+                    peg_outs: true,
+                    steal_window_secs: 1.5,
+                },
+                batting: BattingTuning {
+                    perfect_ms: 40.0,
+                    solid_ms: 90.0,
+                    foul_ms: 130.0,
+                    exit_weak: 0.65,
+                    exit_solid: 0.95,
+                    exit_perfect: 1.28,
+                    pull_yaw_per_ms: 0.006,
+                    cpu_timing_spread_ms: 225.0,
+                    pci_radius_m: 0.20,
+                },
             },
         }
     }
@@ -353,14 +373,14 @@ mod tests {
         let (r, f) = (VariantId::Standard.rules(), VariantId::Standard.field());
         assert_eq!(
             (
-                r.balls_per_walk,
-                r.strikes_per_out,
-                r.outs_per_half,
-                r.innings
+                r.counts.balls_per_walk,
+                r.counts.strikes_per_out,
+                r.counts.outs_per_half,
+                r.counts.innings
             ),
             (4, 3, 3, 9)
         );
-        assert!(!r.peg_outs);
+        assert!(!r.counts.peg_outs);
         assert_eq!(f.base_count(), 3);
         assert_eq!(f.pitch_distance, 18.44);
         assert_eq!(f.scenery, Scenery::Stadium);
@@ -380,8 +400,8 @@ mod tests {
     #[test]
     fn front_yard_is_four_bases_with_pegging() {
         let (r, f) = (VariantId::FrontYard.rules(), VariantId::FrontYard.field());
-        assert!(r.peg_outs);
-        assert_eq!(r.innings, 3);
+        assert!(r.counts.peg_outs);
+        assert_eq!(r.counts.innings, 3);
         assert_eq!(f.base_count(), 4);
         assert_eq!(f.fielder_positions.len(), 3); // + the pitcher = 4-player team
         assert!(f.peg_radius > 0.0);

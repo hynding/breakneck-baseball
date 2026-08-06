@@ -117,7 +117,7 @@ impl Default for GameConfig {
         let variant = VariantId::default();
         Self {
             mode: GameMode::default(),
-            innings: variant.rules().innings,
+            innings: variant.rules().counts.innings,
             variant,
             theme: ThemeId::default(),
         }

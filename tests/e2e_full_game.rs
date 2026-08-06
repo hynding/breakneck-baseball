@@ -35,11 +35,11 @@ const MAX_FRAMES: u64 = 100_000;
 /// pattern as `e2e_cpu_timing`'s forced `cpu_timing_spread_ms`.
 fn pin_classic_contact_windows(app: &mut App) {
     let mut r = app.world_mut().resource_mut::<Ruleset>();
-    r.perfect_ms = 40.0;
-    r.solid_ms = 90.0;
-    r.foul_ms = 140.0;
-    r.exit_solid = 1.0;
-    r.exit_perfect = 1.25;
+    r.batting.perfect_ms = 40.0;
+    r.batting.solid_ms = 90.0;
+    r.batting.foul_ms = 140.0;
+    r.batting.exit_solid = 1.0;
+    r.batting.exit_perfect = 1.25;
 }
 
 fn drive(
@@ -120,7 +120,10 @@ fn one_inning_game_plays_to_completion() {
         score.balls,
         score.strikes
     );
-    assert_eq!(rules.innings, 1, "menu innings setting was not applied");
+    assert_eq!(
+        rules.counts.innings, 1,
+        "menu innings setting was not applied"
+    );
     // Scripted game: Away takes three strikeouts, Home walks it off in the
     // bottom of the 1st. The walk-off must end the game inside inning 1.
     assert_eq!(score.inning, 1, "a 1-inning game must end in inning 1");

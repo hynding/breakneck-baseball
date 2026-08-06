@@ -268,7 +268,7 @@ pub fn cpu_offense(
     // is late, drawn from ±`cpu_timing_spread_ms`.
     let target_dt = *cpu
         .swing_target_dt
-        .get_or_insert_with(|| draw_target_dt(t * 11.9, rules.cpu_timing_spread_ms));
+        .get_or_insert_with(|| draw_target_dt(t * 11.9, rules.batting.cpu_timing_spread_ms));
 
     // Decide whether to offer at this pitch — once, and **early**, while the
     // ball is still well in front of the plate (past `SWING_EARLY_Z`, the
@@ -323,7 +323,7 @@ pub fn cpu_offense(
     // reaching the take judgment first and being scored a called strike (which
     // is what used to make the CPU's K take-driven rather than whiff-driven).
     let dt_ms = swing_dt_ms(pos.z, ball_vel.linvel.z);
-    let past_late_edge = pos.z <= late_swing_z(ball_vel.linvel.z, rules.foul_ms);
+    let past_late_edge = pos.z <= late_swing_z(ball_vel.linvel.z, rules.batting.foul_ms);
     if !ready_to_press(dt_ms, target_dt) && !past_late_edge {
         intents.get_mut(team).action = false;
         return;

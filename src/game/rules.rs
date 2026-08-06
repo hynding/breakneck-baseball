@@ -595,7 +595,7 @@ pub fn resolve_gathered(
     let from_home = Vec2::new(pos.x, pos.z).length();
     if from_home < INFIELD_GATHER_RADIUS * field.hit_scale && !safe(1) {
         // Beaten to the bag (or, on the front lawn, beaned on the way).
-        return Outcome::Out(if rules.peg_outs {
+        return Outcome::Out(if rules.counts.peg_outs {
             OutKind::Pegged
         } else {
             OutKind::Ground
@@ -745,7 +745,7 @@ pub fn resolve_thrown(
     {
         if target == 0 {
             // The sure out at first: just the batter.
-            return Outcome::Out(if rules.peg_outs {
+            return Outcome::Out(if rules.counts.peg_outs {
                 OutKind::Pegged
             } else {
                 OutKind::Ground
@@ -941,7 +941,7 @@ pub fn apply_hit(score: &mut ScoreBoard, bases: &mut Bases, hit_bases: u32, jump
 /// ends the at-bat.
 pub fn call_ball(score: &mut ScoreBoard, bases: &mut Bases, rules: &Ruleset) -> BallCall {
     score.balls += 1;
-    if score.balls >= rules.balls_per_walk {
+    if score.balls >= rules.counts.balls_per_walk {
         let runs = advance_walk(bases);
         score.add_runs(runs);
         reset_count(score);
@@ -961,7 +961,7 @@ pub fn call_strike(
     dropped_third: bool,
 ) -> StrikeCall {
     score.strikes += 1;
-    if score.strikes >= rules.strikes_per_out {
+    if score.strikes >= rules.counts.strikes_per_out {
         if dropped_third {
             reset_count(score);
             bases.set(0, true);
@@ -977,7 +977,7 @@ pub fn call_strike(
 
 /// Records a foul ball: a strike, unless it would be the last one.
 pub fn foul(score: &mut ScoreBoard, rules: &Ruleset) {
-    if score.strikes + 1 < rules.strikes_per_out {
+    if score.strikes + 1 < rules.counts.strikes_per_out {
         score.strikes += 1;
     }
 }
@@ -987,7 +987,7 @@ pub fn foul(score: &mut ScoreBoard, rules: &Ruleset) {
 /// the count, since the interrupted batter starts over next half.
 pub fn charge_out(score: &mut ScoreBoard, bases: &mut Bases, rules: &Ruleset) {
     score.outs += 1;
-    if score.outs >= rules.outs_per_half {
+    if score.outs >= rules.counts.outs_per_half {
         score.outs = 0;
         reset_count(score);
         bases.clear();
@@ -1033,7 +1033,7 @@ pub fn apply_batted_out(
     kind: OutKind,
     runners_going: bool,
 ) -> OutPlay {
-    let outs_left = rules.outs_per_half.saturating_sub(score.outs);
+    let outs_left = rules.counts.outs_per_half.saturating_sub(score.outs);
     let mut play = OutPlay {
         outs: 1,
         runs: 0,
@@ -1086,7 +1086,7 @@ pub fn apply_batted_out(
 /// the inning — identical base math to the old fiat double play. With one
 /// out remaining only the force counts (the inning ends on it).
 pub fn apply_double_play(score: &mut ScoreBoard, bases: &mut Bases, rules: &Ruleset) -> OutPlay {
-    let outs_left = rules.outs_per_half.saturating_sub(score.outs);
+    let outs_left = rules.counts.outs_per_half.saturating_sub(score.outs);
     let mut play = OutPlay {
         outs: 2.min(outs_left),
         runs: 0,
@@ -1114,7 +1114,7 @@ pub fn apply_fielders_choice(
     rules: &Ruleset,
     out_base: usize,
 ) -> OutPlay {
-    let outs_left = rules.outs_per_half.saturating_sub(score.outs);
+    let outs_left = rules.counts.outs_per_half.saturating_sub(score.outs);
     let play = OutPlay {
         outs: 1,
         runs: 0,
@@ -1342,11 +1342,11 @@ pub enum ContactQuality {
 /// comment.
 pub fn contact_quality(dt_ms: f32, rules: &Ruleset) -> ContactQuality {
     let dt = dt_ms.abs();
-    if dt <= rules.perfect_ms {
+    if dt <= rules.batting.perfect_ms {
         ContactQuality::Perfect
-    } else if dt <= rules.solid_ms {
+    } else if dt <= rules.batting.solid_ms {
         ContactQuality::Solid
-    } else if dt <= rules.foul_ms {
+    } else if dt <= rules.batting.foul_ms {
         ContactQuality::FoulTip
     } else {
         ContactQuality::Whiff
@@ -1375,16 +1375,16 @@ pub fn apply_contact_quality(
     rules: &Ruleset,
 ) -> Vec3 {
     let exit_mult = match quality {
-        ContactQuality::Perfect => rules.exit_perfect,
-        ContactQuality::Solid => rules.exit_solid,
-        ContactQuality::Weak => rules.exit_weak,
+        ContactQuality::Perfect => rules.batting.exit_perfect,
+        ContactQuality::Solid => rules.batting.exit_solid,
+        ContactQuality::Weak => rules.batting.exit_weak,
         ContactQuality::Whiff | ContactQuality::FoulTip => return base,
     };
     let scaled = base * exit_mult;
     // Rotate the horizontal (x, z) launch about +Y by the pull yaw. Matching
     // `hit_velocity`'s spray convention (x = h·sin θ, z = h·cos θ), a positive
     // yaw increases θ (toward +X) and a negative yaw decreases it (toward −X).
-    let yaw = rules.pull_yaw_per_ms * dt_ms;
+    let yaw = rules.batting.pull_yaw_per_ms * dt_ms;
     let (s, c) = yaw.sin_cos();
     Vec3::new(
         scaled.x * c + scaled.z * s,
@@ -1402,20 +1402,20 @@ pub fn apply_contact_quality(
 /// reaches the ball: best case FoulTip on timing alone.
 pub fn pci_contact_quality(dt_ms: f32, miss_m: f32, rules: &Ruleset) -> ContactQuality {
     let dt = dt_ms.abs();
-    if dt > rules.foul_ms {
+    if dt > rules.batting.foul_ms {
         return ContactQuality::Whiff;
     }
-    let frac = (miss_m / rules.pci_radius_m).max(0.0);
+    let frac = (miss_m / rules.batting.pci_radius_m).max(0.0);
     if frac > 1.0 {
         return ContactQuality::FoulTip;
     }
-    let perfect_eff = rules.perfect_ms * (1.0 - frac);
-    let solid_eff = rules.solid_ms * (1.0 - frac / 2.0);
+    let perfect_eff = rules.batting.perfect_ms * (1.0 - frac);
+    let solid_eff = rules.batting.solid_ms * (1.0 - frac / 2.0);
     if dt <= perfect_eff {
         ContactQuality::Perfect
     } else if dt <= solid_eff {
         ContactQuality::Solid
-    } else if dt <= rules.solid_ms {
+    } else if dt <= rules.batting.solid_ms {
         ContactQuality::Weak
     } else {
         ContactQuality::FoulTip
@@ -1442,7 +1442,7 @@ mod tests {
     use super::*;
     use crate::game::ball::BALL_DRAG_FACTOR;
 
-    use crate::game::variant::VariantId;
+    use crate::game::variant::{BattingTuning, CountRules, VariantId};
 
     fn std_rules() -> Ruleset {
         VariantId::Standard.rules()
@@ -1781,7 +1781,10 @@ mod tests {
     #[test]
     fn custom_out_threshold_flips_half_inning() {
         let rules = Ruleset {
-            outs_per_half: 4,
+            counts: CountRules {
+                outs_per_half: 4,
+                ..std_rules().counts
+            },
             ..std_rules()
         };
         let mut score = ScoreBoard {
@@ -2956,10 +2959,13 @@ mod tests {
     #[test]
     fn pci_dead_center_keeps_full_windows() {
         let r = Ruleset {
-            perfect_ms: 40.0,
-            solid_ms: 90.0,
-            foul_ms: 130.0,
-            pci_radius_m: 0.20,
+            batting: BattingTuning {
+                perfect_ms: 40.0,
+                solid_ms: 90.0,
+                foul_ms: 130.0,
+                pci_radius_m: 0.20,
+                ..std_rules().batting
+            },
             ..std_rules()
         };
         assert_eq!(pci_contact_quality(30.0, 0.0, &r), ContactQuality::Perfect);
@@ -2969,10 +2975,13 @@ mod tests {
     #[test]
     fn pci_at_radius_perfect_vanishes_and_solid_halves() {
         let r = Ruleset {
-            perfect_ms: 40.0,
-            solid_ms: 90.0,
-            foul_ms: 130.0,
-            pci_radius_m: 0.20,
+            batting: BattingTuning {
+                perfect_ms: 40.0,
+                solid_ms: 90.0,
+                foul_ms: 130.0,
+                pci_radius_m: 0.20,
+                ..std_rules().batting
+            },
             ..std_rules()
         };
         assert_eq!(pci_contact_quality(10.0, 0.20, &r), ContactQuality::Solid); // no Perfect left
@@ -2983,10 +2992,13 @@ mod tests {
     #[test]
     fn pci_beyond_radius_caps_at_foul_tip() {
         let r = Ruleset {
-            perfect_ms: 40.0,
-            solid_ms: 90.0,
-            foul_ms: 130.0,
-            pci_radius_m: 0.20,
+            batting: BattingTuning {
+                perfect_ms: 40.0,
+                solid_ms: 90.0,
+                foul_ms: 130.0,
+                pci_radius_m: 0.20,
+                ..std_rules().batting
+            },
             ..std_rules()
         };
         assert_eq!(pci_contact_quality(10.0, 0.35, &r), ContactQuality::FoulTip);
@@ -3012,9 +3024,12 @@ mod tests {
         // the B7 balance harness's to move (tests/balance_sim.rs), so this test
         // must not double as a snapshot of them.
         let r = Ruleset {
-            perfect_ms: 40.0,
-            solid_ms: 90.0,
-            foul_ms: 140.0,
+            batting: BattingTuning {
+                perfect_ms: 40.0,
+                solid_ms: 90.0,
+                foul_ms: 140.0,
+                ..std_rules().batting
+            },
             ..std_rules()
         };
         use ContactQuality::*;

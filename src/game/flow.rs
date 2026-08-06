@@ -282,7 +282,7 @@ impl Default for Play {
 /// nothing otherwise — a runner parked on third alone gates no pitch.
 fn steal_window_for(bases: &Bases, rules: &Ruleset) -> Timer {
     let secs = if rules::steal_candidate(bases).is_some() {
-        rules.steal_window_secs
+        rules.counts.steal_window_secs
     } else {
         0.0
     };
@@ -601,7 +601,7 @@ fn pitch_live(
     // The late edge of the swing window is the geometric shadow of the foul
     // window itself (see `late_swing_z`), recomputed off the ball's live
     // z-speed every frame since it isn't a fixed distance.
-    let late_exit_z = late_swing_z(ball_vel.linvel.z, rules.foul_ms);
+    let late_exit_z = late_swing_z(ball_vel.linvel.z, rules.batting.foul_ms);
 
     if let Some(swing) = swing_commands.take(batter) {
         // The spatial band is the OUTER eligibility gate: a ball out of the
@@ -1046,7 +1046,7 @@ fn result_phase(
     // over, does a decided game actually end: a walk-off's fireworks, slow-mo,
     // and trot all play out before GAME OVER instead of being cut off at
     // contact. Every game-ending call routes through this one Result gate.
-    if rules::is_game_over(&score, rules_res.innings) {
+    if rules::is_game_over(&score, rules_res.counts.innings) {
         next_state.set(GameState::GameOver);
         return;
     }

@@ -113,10 +113,10 @@ fn cpu_batters_swing_with_varied_timing() {
         // this test proves the *timing-dial wiring* reaches the ECS, not the
         // balance economy, so it owns the windows it depends on.
         let mut r = app.world_mut().resource_mut::<Ruleset>();
-        r.cpu_timing_spread_ms = FORCED_SPREAD_MS;
-        r.perfect_ms = 40.0;
-        r.solid_ms = 90.0;
-        r.foul_ms = 140.0;
+        r.batting.cpu_timing_spread_ms = FORCED_SPREAD_MS;
+        r.batting.perfect_ms = 40.0;
+        r.batting.solid_ms = 90.0;
+        r.batting.foul_ms = 140.0;
     }
 
     run_until(&mut app, MAX_FRAMES, |app| {

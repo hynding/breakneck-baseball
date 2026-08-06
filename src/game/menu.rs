@@ -221,7 +221,7 @@ fn cycle_options(
     if field_pressed {
         config.variant = config.variant.next();
         // A new park brings its own regulation length; I re-cycles from there.
-        config.innings = config.variant.rules().innings;
+        config.innings = config.variant.rules().counts.innings;
     }
     if innings_pressed {
         config.innings = variant::next_innings(config.innings);
@@ -273,7 +273,7 @@ fn menu_select(
     // game's rules and park; the menu's game-length choice overrides the
     // variant's default.
     *rules = config.variant.rules();
-    rules.innings = config.innings;
+    rules.counts.innings = config.innings;
     *field = config.variant.field();
     next_state.set(GameState::Playing);
 }

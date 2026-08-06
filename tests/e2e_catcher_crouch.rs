@@ -37,11 +37,11 @@ fn start_two_player_game(app: &mut App) {
     app.init_resource::<Mode>();
     start_game(app, KeyCode::Digit2);
     let mut r = app.world_mut().resource_mut::<Ruleset>();
-    r.perfect_ms = 40.0;
-    r.solid_ms = 90.0;
-    r.foul_ms = 140.0;
-    r.exit_solid = 1.0;
-    r.exit_perfect = 1.25;
+    r.batting.perfect_ms = 40.0;
+    r.batting.solid_ms = 90.0;
+    r.batting.foul_ms = 140.0;
+    r.batting.exit_solid = 1.0;
+    r.batting.exit_perfect = 1.25;
 }
 
 /// Drives a leadoff at-bat toward the duel; goes quiet in idle mode so the

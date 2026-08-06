@@ -235,7 +235,8 @@ pub fn adapt_swings(
         // whiff", with no new flow logic.
         BattingStyle::SwingMeter => {
             let ball_past = ball_q.get_single().is_ok_and(|(tf, vel)| {
-                tf.translation.z < crate::game::flow::late_swing_z(vel.linvel.z, rules.foul_ms)
+                tf.translation.z
+                    < crate::game::flow::late_swing_z(vel.linvel.z, rules.batting.foul_ms)
             });
             let was = meter.loading(team);
             let (now_loading, fire) = meter_step(intent.action_held, was, ball_past);
