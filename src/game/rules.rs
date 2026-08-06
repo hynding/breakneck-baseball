@@ -180,6 +180,15 @@ impl BattingOrder {
         };
         *slot = (*slot + 1) % LINEUP_SIZE;
     }
+
+    /// Debug/scenario seam: force `team`'s current (1-based) lineup slot.
+    pub fn set_current(&mut self, team: Team, slot: u32) {
+        let v = slot.saturating_sub(1) % LINEUP_SIZE;
+        match team {
+            Team::Home => self.home = v,
+            Team::Away => self.away = v,
+        }
+    }
 }
 
 /// Flavour of an out. `Fly::deep` also drives the tag-up rule.
@@ -306,6 +315,18 @@ impl PitchKind {
             PitchKind::Curveball
         } else {
             PitchKind::Changeup
+        }
+    }
+
+    /// The aim whose [`PitchKind::from_aim`] decode is exactly this pitch —
+    /// the scenario library's forced-pitch seam.
+    pub fn canonical_aim(self) -> Vec2 {
+        match self {
+            PitchKind::Fastball => Vec2::new(0.0, 0.6),
+            PitchKind::Curveball => Vec2::new(0.0, -0.6),
+            PitchKind::Slider => Vec2::new(-0.6, 0.0),
+            PitchKind::Sinker => Vec2::new(0.6, 0.0),
+            PitchKind::Changeup => Vec2::ZERO,
         }
     }
 }

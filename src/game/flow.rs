@@ -246,6 +246,25 @@ impl Play {
             ..Self::default()
         }
     }
+
+    /// Test-only: force the phase directly, without driving the machine
+    /// there — used to exercise `scenario_safe`'s refusal while live.
+    #[cfg(test)]
+    pub fn force_phase_for_test(&mut self, phase: Phase) {
+        self.phase = phase;
+    }
+
+    /// The ball is dead: a scenario may safely rewrite the game state.
+    pub fn scenario_safe(&self) -> bool {
+        matches!(self.phase, Phase::PrePitch | Phase::Result)
+    }
+
+    /// Resets to a fresh at-bat over the given base state — the scenario
+    /// library's seam ([`crate::game::scenario::apply_to_world`]).
+    pub fn reset_for_scenario(&mut self, bases: &Bases, rules: &Ruleset) {
+        *self = Play::default();
+        self.hold = steal_window_for(bases, rules);
+    }
 }
 
 /// The live leadoff state, shared with the runner visuals and the CPU: the

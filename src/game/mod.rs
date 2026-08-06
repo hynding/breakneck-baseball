@@ -24,6 +24,7 @@ pub mod player;
 pub mod roster;
 pub mod rules;
 pub mod runner;
+pub mod scenario;
 pub mod settings;
 pub mod subs;
 pub mod theme;
@@ -226,6 +227,8 @@ impl Plugin for GamePlugin {
                 ..default()
             })
             .init_resource::<Rosters>()
+            .init_resource::<scenario::PitchOverride>()
+            .add_event::<scenario::ScenarioAppliedEvent>()
             // Sub-plugins (input/menu first so their resources exist for the
             // rest); split across two tuples — `add_plugins` tops out at 15.
             .add_plugins((

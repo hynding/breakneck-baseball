@@ -13,6 +13,7 @@ use crate::game::ball::Baseball;
 use crate::game::flow::{late_swing_z, swing_dt_ms, LeadState, Phase, Play};
 use crate::game::input::{Controllers, InputSource, Intents};
 use crate::game::rules::{steal_candidate, Bases, GRAVITY};
+use crate::game::scenario::PitchOverride;
 use crate::game::variant::Ruleset;
 use crate::game::ScoreBoard;
 
@@ -114,6 +115,7 @@ pub fn cpu_defense(
     lead: Res<LeadState>,
     mut cpu: ResMut<CpuState>,
     mut intents: ResMut<Intents>,
+    mut pitch_override: ResMut<PitchOverride>,
 ) {
     let team = score.fielding_team();
     if controllers.source(team) != InputSource::Cpu {
@@ -148,21 +150,25 @@ pub fn cpu_defense(
         // gets a pitch-selection bias: held-aim direction is what picks the
         // kind (see `PitchKind::from_aim`), so shifting the aim is how the
         // CPU "calls" its pitch — heaters up, benders down, sweepers wide.
-        let spread = 0.55 * (1.0 - cfg.skill) + 0.12;
-        let mut aim = Vec2::new(noise(t * 1.7) * spread, noise(t * 2.3) * spread * 0.5);
-        let roll = hash01(t * 4.3);
-        if roll < 0.40 {
-            aim.y += 0.55; // fastball
-        } else if roll < 0.65 {
-            // changeup: neutral
-        } else if roll < 0.85 {
-            aim.y -= 0.55; // curveball
-        } else if roll < 0.925 {
-            aim.x -= 0.6; // slider, sweeping in
+        let aim = if let Some(kind) = pitch_override.0.take() {
+            kind.canonical_aim()
         } else {
-            aim.x += 0.6; // sinker, running away
-        }
-        aim = aim.clamp(Vec2::splat(-1.0), Vec2::splat(1.0));
+            let spread = 0.55 * (1.0 - cfg.skill) + 0.12;
+            let mut aim = Vec2::new(noise(t * 1.7) * spread, noise(t * 2.3) * spread * 0.5);
+            let roll = hash01(t * 4.3);
+            if roll < 0.40 {
+                aim.y += 0.55; // fastball
+            } else if roll < 0.65 {
+                // changeup: neutral
+            } else if roll < 0.85 {
+                aim.y -= 0.55; // curveball
+            } else if roll < 0.925 {
+                aim.x -= 0.6; // slider, sweeping in
+            } else {
+                aim.x += 0.6; // sinker, running away
+            }
+            aim.clamp(Vec2::splat(-1.0), Vec2::splat(1.0))
+        };
 
         let intent = intents.get_mut(team);
         intent.action = true;
