@@ -17,6 +17,17 @@ pub enum DebugTab {
     Time,
 }
 
+/// Sub-tabs within the Tune tab — one per `Ruleset` sub-struct plus the
+/// `FieldSpec` resource, so the field list never towers past the window.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub enum TuneSection {
+    #[default]
+    Counts,
+    Batting,
+    Pace,
+    Field,
+}
+
 #[derive(Clone, Copy, Default)]
 pub struct GizmoToggles {
     pub zone: bool,
@@ -31,6 +42,7 @@ pub struct GizmoToggles {
 pub struct DebugState {
     pub open: bool,
     pub tab: DebugTab,
+    pub tune_section: TuneSection,
     pub gizmos: GizmoToggles,
     pub last_error: Option<&'static str>,
     pub custom: crate::game::scenario::Scenario,
@@ -47,6 +59,14 @@ pub struct DebugPlugin;
 
 impl Plugin for DebugPlugin {
     fn build(&self, app: &mut App) {
+        // The reflection widgets for builtin leaf types (f32, u32, bool,
+        // Vec3, …) live in `InspectorEguiImpl` type data that only this
+        // plugin registers — without it every Tune-tab field renders as an
+        // error label instead of a drag-value. Guarded like the crate's own
+        // quick plugins, in case a future caller adds it first.
+        if !app.is_plugin_added::<bevy_inspector_egui::DefaultInspectorConfigPlugin>() {
+            app.add_plugins(bevy_inspector_egui::DefaultInspectorConfigPlugin);
+        }
         app.init_resource::<DebugState>()
             .init_resource::<ForcedContact>()
             .add_plugins(EguiPlugin)
@@ -286,6 +306,11 @@ fn debug_panel(world: &mut World) {
     }
     egui::Window::new("Debug")
         .default_width(340.0)
+        // Cap the height and scroll inside: the Tune tab's field list is
+        // taller than most screens, and an uncapped egui window happily
+        // grows past the bottom edge.
+        .default_height(460.0)
+        .vscroll(true)
         .show(&ctx, |ui| {
             let mut tab = world.resource::<DebugState>().tab;
             ui.horizontal(|ui| {
@@ -303,14 +328,58 @@ fn debug_panel(world: &mut World) {
             ui.separator();
             match tab {
                 DebugTab::Tune => {
-                    bevy_inspector_egui::bevy_inspector::ui_for_resource::<
-                        crate::game::variant::Ruleset,
-                    >(world, ui);
-                    egui::CollapsingHeader::new("Field & Camera").show(ui, |ui| {
-                        bevy_inspector_egui::bevy_inspector::ui_for_resource::<
-                            crate::game::variant::FieldSpec,
-                        >(world, ui);
+                    let mut section = world.resource::<DebugState>().tune_section;
+                    ui.horizontal(|ui| {
+                        for (label, s) in [
+                            ("Counts", TuneSection::Counts),
+                            ("Batting", TuneSection::Batting),
+                            ("Pace", TuneSection::Pace),
+                            ("Field & Camera", TuneSection::Field),
+                        ] {
+                            ui.selectable_value(&mut section, s, label);
+                        }
                     });
+                    world.resource_mut::<DebugState>().tune_section = section;
+                    ui.separator();
+                    match section {
+                        TuneSection::Field => {
+                            bevy_inspector_egui::bevy_inspector::ui_for_resource::<
+                                crate::game::variant::FieldSpec,
+                            >(world, ui);
+                        }
+                        _ => {
+                            world.resource_scope(
+                                |world, mut ruleset: Mut<crate::game::variant::Ruleset>| {
+                                    let r = ruleset.bypass_change_detection();
+                                    let changed = match section {
+                                        TuneSection::Counts => {
+                                            bevy_inspector_egui::bevy_inspector::ui_for_value(
+                                                &mut r.counts,
+                                                ui,
+                                                world,
+                                            )
+                                        }
+                                        TuneSection::Batting => {
+                                            bevy_inspector_egui::bevy_inspector::ui_for_value(
+                                                &mut r.batting,
+                                                ui,
+                                                world,
+                                            )
+                                        }
+                                        _ => bevy_inspector_egui::bevy_inspector::ui_for_value(
+                                            &mut r.pace,
+                                            ui,
+                                            world,
+                                        ),
+                                    };
+                                    if changed {
+                                        ruleset.set_changed();
+                                    }
+                                },
+                            );
+                        }
+                    }
+                    ui.separator();
                     if ui.button("Dump diff → stdout + clipboard").clicked() {
                         let variant = world.resource::<crate::game::GameConfig>().variant;
                         let text = world
@@ -475,4 +544,50 @@ fn debug_panel(world: &mut World) {
                 }
             }
         });
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy_inspector_egui::inspector_egui_impls::InspectorEguiImpl;
+    use std::any::TypeId;
+
+    /// The Tune tab is only usable if every primitive leaf type has an
+    /// `InspectorEguiImpl` in the type registry — without it, every field
+    /// renders as an error label instead of an editable widget.
+    #[test]
+    fn debug_plugin_registers_inspector_widgets_for_primitives() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(bevy::state::app::StatesPlugin)
+            // EguiPlugin's build wants shader/image assets that normally come
+            // from the render stack; provide bare asset storage instead.
+            .add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<bevy::render::render_resource::Shader>();
+        app.init_asset::<bevy::image::Image>();
+        // DefaultPlugins registers these in the real app; the inspector's
+        // config plugin asserts on them, so the bare harness must too.
+        app.register_type::<Entity>();
+        app.register_type::<bevy::asset::Handle<bevy::render::mesh::Mesh>>();
+        app.register_type::<bevy::asset::Handle<bevy::image::Image>>();
+        app.register_type::<bevy::render::view::RenderLayers>();
+        app.init_state::<crate::game::GameState>();
+        app.add_plugins(DebugPlugin);
+
+        let registry = app.world().resource::<AppTypeRegistry>().0.clone();
+        let registry = registry.read();
+        for (name, id) in [
+            ("f32", TypeId::of::<f32>()),
+            ("u32", TypeId::of::<u32>()),
+            ("bool", TypeId::of::<bool>()),
+        ] {
+            assert!(
+                registry.get_type_data::<InspectorEguiImpl>(id).is_some(),
+                "{name} has no InspectorEguiImpl — the Tune tab would render \
+                 error labels instead of editable widgets"
+            );
+        }
+    }
 }
