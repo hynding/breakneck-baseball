@@ -75,6 +75,30 @@ each line perpendicular to that direction by the bag's half-width
 (`BASE_HALF_WIDTH`, 0.229 m) so its fair-side edge kisses the bag's outer
 edge rather than passing through its centre.
 
+## Strike zone (Official Baseball Rules, Definitions of Terms; mlb.com rules glossary)
+
+- The strike zone is "that area over home plate the upper limit of which is a
+  horizontal line at the midpoint between the top of the shoulders and the top
+  of the uniform pants, and the lower level is a line at the hollow beneath
+  the kneecap", judged "from the batter's stance as the batter is prepared to
+  swing at a pitched ball". Its width is home plate's 17 in.
+- A STRIKE (b) is "a pitch ... any part of which passes through any part of
+  the strike zone" — a ball whose *edge* nicks the zone counts, so a
+  centre-of-ball zone test widens by one ball radius (~1.45 in) each side.
+- Broadcast K-zone graphics draw the plate-width rectangle; the edge
+  allowance is the invisible margin that makes "painting the corner" a
+  strike.
+
+In the game: `rules::ZONE_*` — plate half-width 0.216 m plus ball radius
+0.037 m gives the called half-width 0.253 m; heights 0.45–1.275 m are read
+off the authored rig's own skeleton (`tools/build_player.py`: knee joint at
+0.50 less a hair for "below the kneecap"; shoulder line 1.50 and hip-block/
+pants top 1.05 → rulebook midpoint 1.275). `field::spawn_strike_zone` draws
+the plate-width wireframe box (as deep as the plate — the rulebook zone is
+a prism *over the plate*), and the calls honour the ball-radius allowance
+past the drawn frame. Players can toggle the overlay from the pause board
+(**Z**, persisted via `Settings::show_strike_zone`).
+
 ## Dirt, grass, and mowing (turface.com, mightygrass.com)
 
 - The **grass line** (where infield dirt meets outfield grass) is an arc of

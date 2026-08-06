@@ -62,3 +62,11 @@ jobs:
 
       - name: Clippy (wasm)
         run: cargo clippy --target wasm32-unknown-unknown -- -D warnings
+
+      # The optional `debug` feature (bevy-inspector-egui panel) must compile
+      # clean on both targets even though it's off by default.
+      - name: Check (debug feature)
+        run: cargo check --features debug
+
+      - name: Check (debug feature, wasm)
+        run: cargo check --target wasm32-unknown-unknown --features debug

@@ -34,11 +34,11 @@ const MAX_FRAMES: u64 = 100_000;
 /// same decoupling as `e2e_full_game`).
 fn pin_classic_contact_windows(app: &mut App) {
     let mut r = app.world_mut().resource_mut::<Ruleset>();
-    r.perfect_ms = 40.0;
-    r.solid_ms = 90.0;
-    r.foul_ms = 140.0;
-    r.exit_solid = 1.0;
-    r.exit_perfect = 1.25;
+    r.batting.perfect_ms = 40.0;
+    r.batting.solid_ms = 90.0;
+    r.batting.foul_ms = 140.0;
+    r.batting.exit_solid = 1.0;
+    r.batting.exit_perfect = 1.25;
 }
 
 fn drive(

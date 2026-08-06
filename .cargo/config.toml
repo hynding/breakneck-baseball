@@ -2,4 +2,10 @@
 
 [target.wasm32-unknown-unknown]
 # getrandom ≥ 0.3 requires an explicit backend selection for WASM.
-rustflags = ["--cfg", "getrandom_backend=\"wasm_js\""]
+# web_sys_unstable_apis: bevy_egui's clipboard support (pulled in by the
+# `debug` feature's bevy-inspector-egui) needs the unstable web-sys clipboard
+# bindings; harmless on builds that don't touch them.
+rustflags = [
+    "--cfg", "getrandom_backend=\"wasm_js\"",
+    "--cfg", "web_sys_unstable_apis",
+]

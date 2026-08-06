@@ -202,9 +202,9 @@ fn spawn_hud(
             })
             .with_children(|row| {
                 let groups = [
-                    (CountKind::Ball, "B", rules.balls_per_walk - 1),
-                    (CountKind::Strike, "S", rules.strikes_per_out - 1),
-                    (CountKind::Out, "O", rules.outs_per_half - 1),
+                    (CountKind::Ball, "B", rules.counts.balls_per_walk - 1),
+                    (CountKind::Strike, "S", rules.counts.strikes_per_out - 1),
+                    (CountKind::Out, "O", rules.counts.outs_per_half - 1),
                 ];
                 for (kind, label, dots) in groups {
                     row.spawn(Node {

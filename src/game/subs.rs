@@ -24,6 +24,7 @@ use crate::game::ball::{Baseball, InFlight};
 use crate::game::flow::{Phase, Play};
 use crate::game::roster::Rosters;
 use crate::game::rules::LINEUP_SIZE;
+use crate::game::settings::Settings;
 use crate::game::theme::Theme;
 use crate::game::ui::hidden_tint;
 use crate::game::{GameState, GameplayEntity, ScoreBoard, Team};
@@ -64,6 +65,8 @@ enum SubsLineKind {
     Row(usize),
     BenchHeader,
     Bench,
+    /// The strike-zone overlay toggle's live state ("STRIKE ZONE: ON").
+    ZoneToggle,
     Hint,
 }
 
@@ -141,11 +144,19 @@ fn board_controls(
     pads: Query<&Gamepad>,
     mut menu: ResMut<SubsMenu>,
     mut rosters: ResMut<Rosters>,
+    mut settings: ResMut<Settings>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     if pause_pressed(&keyboard, &pads) {
         next_state.set(GameState::Playing);
         return;
+    }
+
+    // Z toggles the strike-zone overlay for everyone, persisted like any
+    // other setting (the settings screen itself only exists on the menu,
+    // so the pause board is where mid-game preferences live).
+    if keyboard.just_pressed(KeyCode::KeyZ) {
+        settings.show_strike_zone = !settings.show_strike_zone;
     }
 
     let lineup_len = rosters.team(menu.team).lineup.len();
@@ -231,6 +242,7 @@ fn spawn_board(mut commands: Commands, theme: Res<Theme>) {
                     }
                     line(SubsLineKind::BenchHeader, 14.0);
                     line(SubsLineKind::Bench, 17.0);
+                    line(SubsLineKind::ZoneToggle, 14.0);
                     line(SubsLineKind::Hint, 13.0);
                 });
 
@@ -272,14 +284,18 @@ fn update_board(
     state: Res<State<GameState>>,
     menu: Res<SubsMenu>,
     rosters: Res<Rosters>,
+    settings: Res<Settings>,
     theme: Res<Theme>,
     added: Query<(), Added<SubsLine>>,
     mut roots: Query<&mut BackgroundColor, (With<SubsUi>, Without<SubsCard>)>,
     mut cards: Query<(&mut BackgroundColor, &mut BorderColor), With<SubsCard>>,
     mut lines: Query<(&SubsLine, &mut Text, &mut TextColor)>,
 ) {
-    let repaint =
-        state.is_changed() || menu.is_changed() || rosters.is_changed() || !added.is_empty();
+    let repaint = state.is_changed()
+        || menu.is_changed()
+        || rosters.is_changed()
+        || settings.is_changed()
+        || !added.is_empty();
     if !repaint {
         return;
     }
@@ -348,8 +364,24 @@ fn update_board(
                 };
                 (value, ui.text_primary)
             }
+            SubsLineKind::ZoneToggle => (
+                format!(
+                    "STRIKE ZONE: {}",
+                    if settings.show_strike_zone {
+                        "ON"
+                    } else {
+                        "OFF"
+                    }
+                ),
+                if settings.show_strike_zone {
+                    ui.text_primary
+                } else {
+                    ui.text_dim
+                },
+            ),
             SubsLineKind::Hint => (
-                "Up/Down slot   Left/Right bench   Enter swap   T team   Esc/P resume".to_string(),
+                "Up/Down slot   Left/Right bench   Enter swap   T team   Z zone   Esc/P resume"
+                    .to_string(),
                 ui.text_dim,
             ),
         };

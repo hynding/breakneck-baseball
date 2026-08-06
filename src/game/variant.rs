@@ -8,13 +8,74 @@
 //! all plate-local logic (pitching, swinging, cameras) is shared.
 
 use bevy::math::Vec3;
-use bevy::prelude::Resource;
+use bevy::prelude::{Reflect, Resource};
 
 use crate::game::field::{HALF_DIAGONAL, PITCH_DISTANCE};
 
-/// Countable-rule knobs read by the rules engine and game flow.
-#[derive(Resource, Clone, Debug)]
+/// Countable-rule knobs read by the rules engine and game flow, grouped so
+/// the debug inspector renders each group as its own collapsible section.
+#[derive(Resource, Clone, Debug, Reflect)]
 pub struct Ruleset {
+    pub counts: CountRules,
+    pub batting: BattingTuning,
+    pub pace: PaceTuning,
+}
+
+impl Ruleset {
+    /// Paste-ready Rust lines for every field differing from `variant`'s
+    /// defaults — the debug panel's tuning-session export.
+    pub fn diff_literal(&self, variant: VariantId) -> String {
+        let d = variant.rules();
+        let mut out = String::new();
+        macro_rules! diff {
+            ($($path:ident).+) => {
+                if self.$($path).+ != d.$($path).+ {
+                    out.push_str(&format!(
+                        concat!(stringify!($($path).+), ": {:?},\n"),
+                        self.$($path).+
+                    ));
+                }
+            };
+        }
+        diff!(counts.balls_per_walk);
+        diff!(counts.strikes_per_out);
+        diff!(counts.outs_per_half);
+        diff!(counts.innings);
+        diff!(counts.peg_outs);
+        diff!(counts.steal_window_secs);
+        diff!(batting.perfect_ms);
+        diff!(batting.solid_ms);
+        diff!(batting.foul_ms);
+        diff!(batting.exit_weak);
+        diff!(batting.exit_solid);
+        diff!(batting.exit_perfect);
+        diff!(batting.pull_yaw_per_ms);
+        diff!(batting.cpu_timing_spread_ms);
+        diff!(batting.pci_radius_m);
+        diff!(pace.pitch_speed_scale);
+        diff!(pace.runner_speed);
+        diff!(pace.fielder_speed);
+        diff!(pace.reaction_secs);
+        diff!(pace.throw_speed);
+        diff!(pace.throw_transfer_secs);
+        diff!(pace.relay_transfer_secs);
+        diff!(pace.hit_and_run_jump_secs);
+        diff!(pace.stretch_grace_secs);
+        diff!(pace.runner_margin_secs);
+        diff!(pace.result_secs);
+        diff!(pace.pickoff_cooldown_secs);
+        diff!(pace.auto_throw_delay_secs);
+        if out.is_empty() {
+            out
+        } else {
+            format!("// VariantId::{:?} overrides:\n{}", variant, out)
+        }
+    }
+}
+
+/// Count thresholds and window rules.
+#[derive(Clone, Debug, Reflect)]
+pub struct CountRules {
     /// Balls that walk the batter.
     pub balls_per_walk: u32,
     /// Strikes that retire the batter.
@@ -30,15 +91,19 @@ pub struct Ruleset {
     /// steal, the pitch is held this long while the leadoff/pickoff duel
     /// runs. Zero disables the window.
     pub steal_window_secs: f32,
+}
 
-    // ── Batting-feel timing/contact tuning (per docs/superpowers/specs/
-    // 2026-07-30-batting-feel-design.md §2) ────────────────────────────────
-    // `rules::contact_quality` maps a swing's timing error (milliseconds,
-    // signed: negative = early) to a `ContactQuality` using these windows —
-    // data, not code, so each variant can feel different without touching
-    // `rules.rs`. The B7 balance harness is the tuning arbiter for these
-    // numbers: they start at the plan's defaults and only that harness
-    // should move them.
+/// Batting-feel timing/contact tuning (see the batting-feel spec §2).
+// ── Batting-feel timing/contact tuning (per docs/superpowers/specs/
+// 2026-07-30-batting-feel-design.md §2) ────────────────────────────────
+// `rules::contact_quality` maps a swing's timing error (milliseconds,
+// signed: negative = early) to a `ContactQuality` using these windows —
+// data, not code, so each variant can feel different without touching
+// `rules.rs`. The B7 balance harness is the tuning arbiter for these
+// numbers: they start at the plan's defaults and only that harness
+// should move them.
+#[derive(Clone, Debug, Reflect)]
+pub struct BattingTuning {
     /// |dt| at or under this many ms is a `ContactQuality::Perfect`.
     pub perfect_ms: f32,
     /// |dt| at or under this many ms (and over `perfect_ms`) is a
@@ -65,6 +130,71 @@ pub struct Ruleset {
     pub pci_radius_m: f32,
 }
 
+/// Speeds, delays, and race clocks — the game's pace. Defaults are the
+/// long-standing module constants; `tests/balance_sim.rs` arbitrates changes.
+#[derive(Clone, Debug, Reflect)]
+pub struct PaceTuning {
+    /// Scales every `PitchKind::speed()` at release (1.0 = the kind table).
+    /// This is how the spec's `PITCH_SPEED` promotion lands: one dial for
+    /// all five pitches instead of a fastball-only field.
+    pub pitch_speed_scale: f32,
+    /// Base-runner sprint speed (m/s) — was `rules::RUNNER_SPEED`.
+    pub runner_speed: f32,
+    /// Fielder sprint speed (m/s) — was `rules::FIELDER_SPEED`.
+    pub fielder_speed: f32,
+    /// First-step reaction delay for fielders and runners alike — was
+    /// `rules::REACTION`.
+    pub reaction_secs: f32,
+    /// Throw flight speed (m/s) — was `rules::THROW_FLIGHT_SPEED`.
+    pub throw_speed: f32,
+    /// Glove-to-hand transfer time for a gather — was `rules::THROW_TRANSFER`.
+    pub throw_transfer_secs: f32,
+    /// Glove-to-hand transfer time for a relay — was `rules::RELAY_TRANSFER`.
+    pub relay_transfer_secs: f32,
+    /// Head start a hit-and-run jump gives every forced runner — was
+    /// `rules::HIT_AND_RUN_JUMP`.
+    pub hit_and_run_jump_secs: f32,
+    /// Extra grace a sent batter gets stretching for the next base — was
+    /// `rules::STRETCH_GRACE`.
+    pub stretch_grace_secs: f32,
+    /// Bang-bang margin: ties and near-ties go to the runner — was
+    /// `rules::RUNNER_MARGIN`.
+    pub runner_margin_secs: f32,
+    /// Seconds the result banner lingers before the next pitch — was
+    /// `flow::RESULT_SECS`.
+    pub result_secs: f32,
+    /// Minimum seconds between pickoff throws — was
+    /// `flow::PICKOFF_COOLDOWN_SECS`.
+    pub pickoff_cooldown_secs: f32,
+    /// How long the holder waits for a manual throw before auto-throwing —
+    /// was `fielding::AUTO_THROW_DELAY`.
+    pub auto_throw_delay_secs: f32,
+}
+
+impl Default for PaceTuning {
+    /// Sourced straight from the long-standing module constants they promote
+    /// — this is the single source of truth those consts now feed, so the
+    /// two can never quietly drift apart.
+    fn default() -> Self {
+        use crate::game::{fielding, flow, rules};
+        Self {
+            pitch_speed_scale: 1.0,
+            runner_speed: rules::RUNNER_SPEED,
+            fielder_speed: rules::FIELDER_SPEED,
+            reaction_secs: rules::REACTION,
+            throw_speed: rules::THROW_FLIGHT_SPEED,
+            throw_transfer_secs: rules::THROW_TRANSFER,
+            relay_transfer_secs: rules::RELAY_TRANSFER,
+            hit_and_run_jump_secs: rules::HIT_AND_RUN_JUMP,
+            stretch_grace_secs: rules::STRETCH_GRACE,
+            runner_margin_secs: rules::RUNNER_MARGIN,
+            result_secs: flow::RESULT_SECS,
+            pickoff_cooldown_secs: flow::PICKOFF_COOLDOWN_SECS,
+            auto_throw_delay_secs: fielding::AUTO_THROW_DELAY,
+        }
+    }
+}
+
 /// Menu-selectable regulation game lengths.
 pub const INNINGS_OPTIONS: [u32; 4] = [1, 3, 6, 9];
 
@@ -78,7 +208,7 @@ pub fn next_innings(current: u32) -> u32 {
 }
 
 /// Field geometry and personnel. Home plate is implicitly at the origin.
-#[derive(Resource, Clone, Debug)]
+#[derive(Resource, Clone, Debug, Reflect)]
 pub struct FieldSpec {
     /// Bases in running order (first base first); the last base leads home.
     pub base_positions: Vec<Vec3>,
@@ -136,7 +266,7 @@ impl FieldSpec {
 }
 
 /// Which spawn routine builds the surroundings.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Reflect)]
 pub enum Scenery {
     /// Classic ballpark: infield diamond, mound, foul poles, outfield wall.
     Stadium,
@@ -173,39 +303,49 @@ impl VariantId {
     pub fn rules(self) -> Ruleset {
         match self {
             VariantId::Standard => Ruleset {
-                balls_per_walk: 4,
-                strikes_per_out: 3,
-                outs_per_half: 3,
-                innings: 9,
-                peg_outs: false,
-                steal_window_secs: 1.5,
-                perfect_ms: 40.0,
-                solid_ms: 90.0,
-                foul_ms: 130.0,
-                exit_weak: 0.65,
-                exit_solid: 0.95,
-                exit_perfect: 1.28,
-                pull_yaw_per_ms: 0.006,
-                cpu_timing_spread_ms: 225.0,
-                pci_radius_m: 0.20,
+                counts: CountRules {
+                    balls_per_walk: 4,
+                    strikes_per_out: 3,
+                    outs_per_half: 3,
+                    innings: 9,
+                    peg_outs: false,
+                    steal_window_secs: 1.5,
+                },
+                batting: BattingTuning {
+                    perfect_ms: 40.0,
+                    solid_ms: 90.0,
+                    foul_ms: 130.0,
+                    exit_weak: 0.65,
+                    exit_solid: 0.95,
+                    exit_perfect: 1.28,
+                    pull_yaw_per_ms: 0.006,
+                    cpu_timing_spread_ms: 225.0,
+                    pci_radius_m: 0.20,
+                },
+                pace: PaceTuning::default(),
             },
             // Kid's rules: short games, outs by pegging the runner.
             VariantId::FrontYard => Ruleset {
-                balls_per_walk: 4,
-                strikes_per_out: 3,
-                outs_per_half: 3,
-                innings: 3,
-                peg_outs: true,
-                steal_window_secs: 1.5,
-                perfect_ms: 40.0,
-                solid_ms: 90.0,
-                foul_ms: 130.0,
-                exit_weak: 0.65,
-                exit_solid: 0.95,
-                exit_perfect: 1.28,
-                pull_yaw_per_ms: 0.006,
-                cpu_timing_spread_ms: 225.0,
-                pci_radius_m: 0.20,
+                counts: CountRules {
+                    balls_per_walk: 4,
+                    strikes_per_out: 3,
+                    outs_per_half: 3,
+                    innings: 3,
+                    peg_outs: true,
+                    steal_window_secs: 1.5,
+                },
+                batting: BattingTuning {
+                    perfect_ms: 40.0,
+                    solid_ms: 90.0,
+                    foul_ms: 130.0,
+                    exit_weak: 0.65,
+                    exit_solid: 0.95,
+                    exit_perfect: 1.28,
+                    pull_yaw_per_ms: 0.006,
+                    cpu_timing_spread_ms: 225.0,
+                    pci_radius_m: 0.20,
+                },
+                pace: PaceTuning::default(),
             },
         }
     }
@@ -251,23 +391,22 @@ impl VariantId {
                 bounds: 220.0,
                 broadcast_eye: Vec3::new(0.0, 13.0, -21.0),
                 broadcast_target: Vec3::new(0.0, 1.2, 9.0),
-                // The catcher's own point of view: the lens sits at his
-                // crouched eye height, just in front of his head, so no
-                // part of his rig renders (it's all behind the near plane)
-                // — the plate umpire, further back at z=-3.0, stays hidden
-                // too. Catcher spot is (0,0,-1.5) (see `fielder_positions`
-                // below); the rig's capsule collider (radius 0.4, matching
-                // `Collider::capsule_y` in player.rs) puts his forward-most
-                // surface at about z=-1.1, so z=-0.9 clears him with a
-                // ~0.2 m margin. Crouched eye height: the rig is authored
-                // 1.85 m tall (tools/build_player.py), head centred at
-                // Blender Z=1.66 standing; `CatcherCrouch` only translates
-                // the whole Hips chain down 0.22 m (no separate spine
-                // lean — see the clip's `Hips: {"dz": ...}` entry), so the
-                // crouched head sits at ~1.44 m, not the ~1.1 m a folded
-                // crouch might suggest.
-                duel_eye: Vec3::new(0.0, 1.4, -0.9),
-                duel_target: Vec3::new(0.0, 0.85, 15.0),
+                // The catcher's own point of view, tilted down onto the
+                // batter: the lens sits at his crouched eye height (~1.44 m
+                // — the rig is authored 1.85 m tall, head centred at
+                // Blender Z=1.66 standing, and `CatcherCrouch` translates
+                // the Hips chain down 0.22 m), looking down toward the
+                // plate so the batter's *entire* body — spikes to helmet —
+                // fills 80–90% of the screen height
+                // (`camera::catcher_pov_frames_the_full_batter_at_80_to_90_percent`
+                // is the arbiter; the low target is the downward tilt that
+                // keeps his feet in frame). The eye now sits at z=-1.2,
+                // fractionally *inside* the catcher's silhouette (his
+                // capsule's forward surface is ~z=-1.1), which is why
+                // `camera::hide_occluders` hides the catcher outright in
+                // this view for as long as the duel framing holds.
+                duel_eye: Vec3::new(0.0, 1.4, -1.2),
+                duel_target: Vec3::new(0.0, 0.2, 4.0),
                 // Behind and above the mound (rubber at z=`pitch_distance`),
                 // looking back at the batter's box — the reference
                 // pitcher-cam shot. 3 m of standoff behind the rubber keeps
@@ -316,15 +455,14 @@ impl VariantId {
                 broadcast_eye: Vec3::new(0.0, 7.0, -12.0),
                 broadcast_target: Vec3::new(0.0, 1.0, 5.0),
                 // No catcher on the lawn (see `fielder_positions` above —
-                // none sits at z<0), so the crouching figure to clear here
-                // is the lone plate umpire (z=-2.2, same rig, same
-                // CatcherCrouch pose). Same reasoning as the standard
-                // park's `duel_eye`: his capsule's front surface sits at
-                // about z=-1.8, so z=-1.5 clears him with a margin, and the
-                // eye height matches the same ~1.4 m crouched head derived
-                // there (see the comment on Standard's `duel_eye`).
-                duel_eye: Vec3::new(0.0, 1.35, -1.5),
-                duel_target: Vec3::new(0.0, 0.8, 8.0),
+                // none sits at z<0); the lone plate umpire (z=-2.2, front
+                // surface ~z=-1.8) stays behind the eye at z=-1.25, so
+                // nothing needs hiding here. Same full-body batter framing
+                // contract as Standard's `duel_eye` (80–90% of screen
+                // height, camera test is the arbiter), scaled a touch lower
+                // for the lawn's cosier geometry.
+                duel_eye: Vec3::new(0.0, 1.3, -1.25),
+                duel_target: Vec3::new(0.0, 0.3, 4.0),
                 // Same reasoning as Standard's `behind_pitcher_eye`, scaled
                 // to the shorter lawn pitch distance: 3 m behind the rubber
                 // clears the pitcher's own rig, and puts the sole umpire
@@ -351,18 +489,36 @@ mod tests {
     use crate::game::field::BASE_DISTANCE;
 
     #[test]
+    fn pace_defaults_match_legacy_constants() {
+        let p = PaceTuning::default();
+        assert_eq!(p.pitch_speed_scale, 1.0);
+        assert_eq!(p.runner_speed, 7.5);
+        assert_eq!(p.fielder_speed, 7.0);
+        assert_eq!(p.reaction_secs, 0.35);
+        assert_eq!(p.throw_speed, 27.0);
+        assert_eq!(p.throw_transfer_secs, 0.5);
+        assert_eq!(p.relay_transfer_secs, 0.3);
+        assert_eq!(p.hit_and_run_jump_secs, 1.6);
+        assert_eq!(p.stretch_grace_secs, 0.9);
+        assert_eq!(p.runner_margin_secs, 0.35);
+        assert_eq!(p.result_secs, 1.2);
+        assert_eq!(p.pickoff_cooldown_secs, 0.9);
+        assert_eq!(p.auto_throw_delay_secs, 0.6);
+    }
+
+    #[test]
     fn standard_matches_regulation_baseball() {
         let (r, f) = (VariantId::Standard.rules(), VariantId::Standard.field());
         assert_eq!(
             (
-                r.balls_per_walk,
-                r.strikes_per_out,
-                r.outs_per_half,
-                r.innings
+                r.counts.balls_per_walk,
+                r.counts.strikes_per_out,
+                r.counts.outs_per_half,
+                r.counts.innings
             ),
             (4, 3, 3, 9)
         );
-        assert!(!r.peg_outs);
+        assert!(!r.counts.peg_outs);
         assert_eq!(f.base_count(), 3);
         assert_eq!(f.pitch_distance, 18.44);
         assert_eq!(f.scenery, Scenery::Stadium);
@@ -382,8 +538,8 @@ mod tests {
     #[test]
     fn front_yard_is_four_bases_with_pegging() {
         let (r, f) = (VariantId::FrontYard.rules(), VariantId::FrontYard.field());
-        assert!(r.peg_outs);
-        assert_eq!(r.innings, 3);
+        assert!(r.counts.peg_outs);
+        assert_eq!(r.counts.innings, 3);
         assert_eq!(f.base_count(), 4);
         assert_eq!(f.fielder_positions.len(), 3); // + the pitcher = 4-player team
         assert!(f.peg_radius > 0.0);
@@ -445,6 +601,87 @@ mod tests {
             );
             assert!(f.behind_pitcher_eye.z > f.behind_pitcher_target.z);
         }
+    }
+
+    #[test]
+    fn diff_literal_is_empty_at_defaults() {
+        assert_eq!(
+            VariantId::Standard
+                .rules()
+                .diff_literal(VariantId::Standard),
+            ""
+        );
+    }
+
+    #[test]
+    fn diff_literal_lists_only_changed_fields() {
+        let mut r = VariantId::Standard.rules();
+        r.batting.perfect_ms = 48.0;
+        r.pace.runner_speed = 8.0;
+        let s = r.diff_literal(VariantId::Standard);
+        assert!(s.contains("batting.perfect_ms: 48.0,"));
+        assert!(s.contains("pace.runner_speed: 8.0,"));
+        assert!(!s.contains("solid_ms"));
+        assert!(s.starts_with("// VariantId::Standard overrides:"));
+    }
+
+    /// `diff_literal`'s `diff!` field list is hand-maintained and can
+    /// silently miss a field added to `Ruleset` (or a sub-struct) in the
+    /// future. Guard it with reflection instead of a second hand-maintained
+    /// list: flip every leaf field `Ruleset` reflects away from its default,
+    /// and require `diff_literal` to emit exactly that many lines. A field
+    /// missing a `diff!` arm shows up as a line-count mismatch here.
+    #[test]
+    fn diff_literal_covers_every_reflected_field() {
+        use bevy::reflect::{PartialReflect, ReflectMut, ReflectRef};
+
+        fn count_leaf_fields(value: &dyn PartialReflect) -> usize {
+            match value.reflect_ref() {
+                ReflectRef::Struct(s) => (0..s.field_len())
+                    .map(|i| count_leaf_fields(s.field_at(i).unwrap()))
+                    .sum(),
+                _ => 1,
+            }
+        }
+
+        fn perturb_every_field(value: &mut dyn PartialReflect) {
+            match value.reflect_mut() {
+                ReflectMut::Struct(s) => {
+                    for i in 0..s.field_len() {
+                        perturb_every_field(s.field_at_mut(i).unwrap());
+                    }
+                }
+                _ => {
+                    if let Some(v) = value.try_downcast_mut::<f32>() {
+                        *v += 1.0;
+                    } else if let Some(v) = value.try_downcast_mut::<u32>() {
+                        *v += 1;
+                    } else if let Some(v) = value.try_downcast_mut::<bool>() {
+                        *v = !*v;
+                    } else {
+                        panic!(
+                            "diff_literal completeness test: unhandled leaf field type on \
+                             Ruleset; add a case to perturb_every_field (and a matching \
+                             diff! arm in diff_literal)"
+                        );
+                    }
+                }
+            }
+        }
+
+        let expected = count_leaf_fields(VariantId::Standard.rules().as_partial_reflect());
+
+        let mut all_changed = VariantId::Standard.rules();
+        perturb_every_field(all_changed.as_partial_reflect_mut());
+
+        let diff = all_changed.diff_literal(VariantId::Standard);
+        let emitted = diff.lines().filter(|l| !l.starts_with("//")).count();
+
+        assert_eq!(
+            emitted, expected,
+            "diff_literal emitted {emitted} line(s) but Ruleset reflects {expected} leaf \
+             field(s) — a field is missing a diff! arm in diff_literal"
+        );
     }
 
     #[test]

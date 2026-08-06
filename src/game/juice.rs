@@ -34,6 +34,17 @@ use crate::game::{game_start, GameState};
 #[derive(Resource)]
 pub struct JuiceDisabled;
 
+/// The "normal" speed every juice restore returns to — 1.0 in the shipping
+/// game; the debug Time tab dials it for slow-mo/fast-forward sessions.
+#[derive(Resource)]
+pub struct BaseSpeed(pub f32);
+
+impl Default for BaseSpeed {
+    fn default() -> Self {
+        BaseSpeed(1.0)
+    }
+}
+
 /// How many Update frames the initial freeze holds, and how slow it runs.
 /// Frame-counted rather than time-ticked: at `FREEZE_SPEED` a
 /// `Time<Virtual>`-ticked timer would barely advance at all, so the freeze
@@ -98,6 +109,7 @@ pub struct JuicePlugin;
 impl Plugin for JuicePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<JuiceState>()
+            .init_resource::<BaseSpeed>()
             .add_systems(game_start(), reset_juice)
             .add_systems(
                 Update,
@@ -122,8 +134,12 @@ fn juice_enabled(disabled: Option<Res<JuiceDisabled>>) -> bool {
     disabled.is_none()
 }
 
-fn reset_juice(mut virt: ResMut<Time<Virtual>>, mut state: ResMut<JuiceState>) {
-    virt.set_relative_speed(1.0);
+fn reset_juice(
+    mut virt: ResMut<Time<Virtual>>,
+    mut state: ResMut<JuiceState>,
+    base: Res<BaseSpeed>,
+) {
+    virt.set_relative_speed(base.0);
     state.clear();
 }
 
@@ -134,6 +150,7 @@ fn trigger_juice(
     mut events: EventReader<ContactEvent>,
     mut virt: ResMut<Time<Virtual>>,
     mut state: ResMut<JuiceState>,
+    base: Res<BaseSpeed>,
 ) {
     for ev in events.read() {
         match ev.quality {
@@ -141,13 +158,17 @@ fn trigger_juice(
             ContactQuality::Perfect => state.start(true),
             _ => continue,
         }
-        virt.set_relative_speed(FREEZE_SPEED);
+        virt.set_relative_speed(FREEZE_SPEED * base.0);
     }
 }
 
 /// Counts down the frame-based freeze; on expiry either chains into the
 /// Perfect slow-mo tail or restores full speed (Solid).
-fn tick_freeze(mut virt: ResMut<Time<Virtual>>, mut state: ResMut<JuiceState>) {
+fn tick_freeze(
+    mut virt: ResMut<Time<Virtual>>,
+    mut state: ResMut<JuiceState>,
+    base: Res<BaseSpeed>,
+) {
     if state.stage != Some(Stage::Freeze) {
         return;
     }
@@ -158,15 +179,19 @@ fn tick_freeze(mut virt: ResMut<Time<Virtual>>, mut state: ResMut<JuiceState>) {
     if state.queue_slowmo {
         state.stage = Some(Stage::SlowMo);
         state.slowmo_timer = Some(Timer::from_seconds(SLOWMO_SECS, TimerMode::Once));
-        virt.set_relative_speed(SLOWMO_SPEED);
+        virt.set_relative_speed(SLOWMO_SPEED * base.0);
     } else {
-        virt.set_relative_speed(1.0);
+        virt.set_relative_speed(base.0);
         state.clear();
     }
 }
 
 /// Ticks Perfect's slow-mo tail in virtual seconds; restores on expiry.
-fn tick_slowmo(mut virt: ResMut<Time<Virtual>>, mut state: ResMut<JuiceState>) {
+fn tick_slowmo(
+    mut virt: ResMut<Time<Virtual>>,
+    mut state: ResMut<JuiceState>,
+    base: Res<BaseSpeed>,
+) {
     if state.stage != Some(Stage::SlowMo) {
         return;
     }
@@ -176,7 +201,7 @@ fn tick_slowmo(mut virt: ResMut<Time<Virtual>>, mut state: ResMut<JuiceState>) {
         .as_mut()
         .is_some_and(|t| t.tick(delta).finished());
     if finished {
-        virt.set_relative_speed(1.0);
+        virt.set_relative_speed(base.0);
         state.clear();
     }
 }
@@ -187,9 +212,10 @@ fn restore_on_result(
     play: Res<Play>,
     mut virt: ResMut<Time<Virtual>>,
     mut state: ResMut<JuiceState>,
+    base: Res<BaseSpeed>,
 ) {
     if play.phase == Phase::Result && state.stage.is_some() {
-        virt.set_relative_speed(1.0);
+        virt.set_relative_speed(base.0);
         state.clear();
     }
 }
@@ -201,21 +227,26 @@ fn tick_watchdog(
     real: Res<Time<Real>>,
     mut virt: ResMut<Time<Virtual>>,
     mut state: ResMut<JuiceState>,
+    base: Res<BaseSpeed>,
 ) {
     let elapsed = state
         .watchdog
         .as_mut()
         .is_some_and(|t| t.tick(real.delta()).finished());
     if elapsed {
-        virt.set_relative_speed(1.0);
+        virt.set_relative_speed(base.0);
         state.clear();
     }
 }
 
 /// Leaving `Playing` (pause or game over) restores immediately — no reason
 /// to wait out the watchdog budget for the common case.
-fn force_restore(mut virt: ResMut<Time<Virtual>>, mut state: ResMut<JuiceState>) {
-    virt.set_relative_speed(1.0);
+fn force_restore(
+    mut virt: ResMut<Time<Virtual>>,
+    mut state: ResMut<JuiceState>,
+    base: Res<BaseSpeed>,
+) {
+    virt.set_relative_speed(base.0);
     state.clear();
 }
 
@@ -284,6 +315,21 @@ mod tests {
             speed(&app),
             1.0,
             "relative_speed must be back to 1.0 within the budget"
+        );
+    }
+
+    #[test]
+    fn watchdog_restores_to_base_speed_not_one() {
+        let mut app = test_app();
+        app.insert_resource(BaseSpeed(0.5));
+        send_perfect(&mut app);
+        for _ in 0..250 {
+            app.update();
+        }
+        assert_eq!(
+            speed(&app),
+            0.5,
+            "restore must return to the debug base speed"
         );
     }
 

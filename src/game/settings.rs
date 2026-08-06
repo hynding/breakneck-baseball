@@ -46,19 +46,144 @@ impl BattingStyle {
     }
 }
 
+/// Which look the pitch trail wears (consumed by `fx.rs`'s trail systems):
+/// the classic fading path, or one of five interchangeable 3D styles.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum PitchTrailStyle {
+    /// The baseline: a fading path of motes tracing the pitch.
+    #[default]
+    Comet,
+    /// Flickering flame cones drifting up off the seam.
+    Fireball,
+    /// Spinning ice shards falling away behind the ball.
+    Frostbite,
+    /// Glowing hoops the ball threads, expanding as they fade.
+    NeonRings,
+    /// Twinkling star motes that hang and shimmer.
+    Stardust,
+    /// Wobbling bubbles that rise, swell, and pop.
+    Bubbles,
+}
+
+impl PitchTrailStyle {
+    pub fn label(self) -> &'static str {
+        match self {
+            PitchTrailStyle::Comet => "Comet (fading path)",
+            PitchTrailStyle::Fireball => "Fireball",
+            PitchTrailStyle::Frostbite => "Frostbite",
+            PitchTrailStyle::NeonRings => "Neon rings",
+            PitchTrailStyle::Stardust => "Stardust",
+            PitchTrailStyle::Bubbles => "Bubble stream",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            PitchTrailStyle::Comet => PitchTrailStyle::Fireball,
+            PitchTrailStyle::Fireball => PitchTrailStyle::Frostbite,
+            PitchTrailStyle::Frostbite => PitchTrailStyle::NeonRings,
+            PitchTrailStyle::NeonRings => PitchTrailStyle::Stardust,
+            PitchTrailStyle::Stardust => PitchTrailStyle::Bubbles,
+            PitchTrailStyle::Bubbles => PitchTrailStyle::Comet,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        // 5 nexts = 1 prev in a 6-cycle.
+        self.next().next().next().next().next()
+    }
+}
+
+/// The adjustable trail colour — a named preset palette (cycled on the
+/// settings screen) applied to the fading path and tinting every 3D style.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum TrailColor {
+    #[default]
+    Ember,
+    Gold,
+    Venom,
+    Ice,
+    Royal,
+    Rose,
+    Frost,
+}
+
+impl TrailColor {
+    pub fn label(self) -> &'static str {
+        match self {
+            TrailColor::Ember => "Ember",
+            TrailColor::Gold => "Gold",
+            TrailColor::Venom => "Venom",
+            TrailColor::Ice => "Ice",
+            TrailColor::Royal => "Royal",
+            TrailColor::Rose => "Rose",
+            TrailColor::Frost => "Frost",
+        }
+    }
+
+    /// The preset's base colour (alpha is the trail systems' business).
+    pub fn color(self) -> Color {
+        match self {
+            TrailColor::Ember => Color::srgb(1.0, 0.45, 0.15),
+            TrailColor::Gold => Color::srgb(1.0, 0.85, 0.30),
+            TrailColor::Venom => Color::srgb(0.45, 1.0, 0.35),
+            TrailColor::Ice => Color::srgb(0.40, 0.85, 1.0),
+            TrailColor::Royal => Color::srgb(0.65, 0.45, 1.0),
+            TrailColor::Rose => Color::srgb(1.0, 0.45, 0.75),
+            TrailColor::Frost => Color::srgb(0.95, 0.97, 1.0),
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            TrailColor::Ember => TrailColor::Gold,
+            TrailColor::Gold => TrailColor::Venom,
+            TrailColor::Venom => TrailColor::Ice,
+            TrailColor::Ice => TrailColor::Royal,
+            TrailColor::Royal => TrailColor::Rose,
+            TrailColor::Rose => TrailColor::Frost,
+            TrailColor::Frost => TrailColor::Ember,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        // 6 nexts = 1 prev in a 7-cycle.
+        self.next().next().next().next().next().next()
+    }
+}
+
 /// Everything the player can configure. Persisted on every change.
 #[derive(Resource, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Settings {
     /// Batting style per player slot (index 0 = P1, 1 = P2).
     pub batting_style: [BattingStyle; 2],
+    /// The pitch trail's look — serde-defaulted so stores written before
+    /// trails existed still load instead of resetting every option.
+    #[serde(default)]
+    pub pitch_trail: PitchTrailStyle,
+    /// The trail's colour preset (same back-compat default).
+    #[serde(default)]
+    pub trail_color: TrailColor,
+    /// Whether the floating strike-zone wireframe is drawn during the duel.
+    /// Toggled from the pause board (**Z**) so either player can switch it
+    /// mid-game; defaults on, serde-defaulted for old stores.
+    #[serde(default = "default_true")]
+    pub show_strike_zone: bool,
     /// Master volume, 0.0..=1.0, applied via [`bevy::audio::GlobalVolume`].
     pub volume: f32,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
             batting_style: [BattingStyle::ClassicTiming; 2],
+            pitch_trail: PitchTrailStyle::default(),
+            trail_color: TrailColor::default(),
+            show_strike_zone: true,
             volume: 0.7,
         }
     }
@@ -211,19 +336,25 @@ struct SettingsCard;
 #[derive(Component)]
 struct SettingsTitle;
 
-/// Label text for row `0..=2` — tinted to show the cursor row.
+/// Label text for each row — tinted to show the cursor row.
 #[derive(Component)]
 struct SettingsRowLabel(usize);
 
-/// Value text for row `0..=2` (styles, styles, volume).
+/// Value text for each row (styles, trail, colour, volume).
 #[derive(Component)]
 struct SettingsRowText(usize);
 
-/// Which row the cursor is on (0..=2).
+/// Which row the cursor is on (0..ROW_LABELS.len()).
 #[derive(Resource, Default)]
 struct SettingsCursorRow(usize);
 
-const ROW_LABELS: [&str; 3] = ["P1 BATTING STYLE", "P2 BATTING STYLE", "VOLUME"];
+const ROW_LABELS: [&str; 5] = [
+    "P1 BATTING STYLE",
+    "P2 BATTING STYLE",
+    "PITCH TRAIL",
+    "TRAIL COLOR",
+    "VOLUME",
+];
 
 /// Builds the settings screen once at startup, painted behind
 /// [`hidden_tint`] per the wasm UI rule (see `subs.rs`): spawned once, shown
@@ -271,7 +402,7 @@ fn spawn_settings_screen(mut commands: Commands, theme: Res<Theme>) {
                     },
                     TextColor(ui.accent),
                 ));
-                for i in 0..3 {
+                for i in 0..ROW_LABELS.len() {
                     card.spawn((
                         SettingsRowLabel(i),
                         Text::new(""),
@@ -368,6 +499,8 @@ fn paint_settings_screen(
         **text = match row.0 {
             0 => settings.batting_style[0].label().to_string(),
             1 => settings.batting_style[1].label().to_string(),
+            2 => settings.pitch_trail.label().to_string(),
+            3 => settings.trail_color.label().to_string(),
             _ => format!("{:.0}%", settings.volume * 100.0),
         };
     }
@@ -421,10 +554,10 @@ fn edit_settings(
     let down = keyboard.just_pressed(KeyCode::ArrowDown)
         || pads.iter().any(|p| p.just_pressed(GamepadButton::DPadDown));
     if up {
-        cursor.0 = cursor.0.checked_sub(1).unwrap_or(2);
+        cursor.0 = cursor.0.checked_sub(1).unwrap_or(ROW_LABELS.len() - 1);
     }
     if down {
-        cursor.0 = (cursor.0 + 1) % 3;
+        cursor.0 = (cursor.0 + 1) % ROW_LABELS.len();
     }
     let left = keyboard.just_pressed(KeyCode::ArrowLeft)
         || pads.iter().any(|p| p.just_pressed(GamepadButton::DPadLeft));
@@ -439,6 +572,14 @@ fn edit_settings(
         0 | 1 => {
             let s = settings.batting_style[cursor.0];
             settings.batting_style[cursor.0] = if right { s.next() } else { s.prev() };
+        }
+        2 => {
+            let s = settings.pitch_trail;
+            settings.pitch_trail = if right { s.next() } else { s.prev() };
+        }
+        3 => {
+            let c = settings.trail_color;
+            settings.trail_color = if right { c.next() } else { c.prev() };
         }
         _ => {
             let dv = if right { 0.1 } else { -0.1 };
@@ -499,6 +640,36 @@ mod tests {
         assert!(BattingStyle::PciCursor
             .label()
             .contains("gamepad recommended"));
+    }
+
+    #[test]
+    fn trail_style_and_color_cycle_and_wrap() {
+        let mut s = PitchTrailStyle::Comet;
+        for _ in 0..6 {
+            s = s.next();
+        }
+        assert_eq!(s, PitchTrailStyle::Comet);
+        assert_eq!(PitchTrailStyle::Comet.prev(), PitchTrailStyle::Bubbles);
+        let mut c = TrailColor::Ember;
+        for _ in 0..7 {
+            c = c.next();
+        }
+        assert_eq!(c, TrailColor::Ember);
+        assert_eq!(TrailColor::Ember.prev(), TrailColor::Frost);
+    }
+
+    /// A pre-trail settings store (no trail fields) must still load — the
+    /// new fields are serde-defaulted, not a breaking schema change that
+    /// would silently reset every player's existing choices.
+    #[test]
+    fn legacy_store_without_trail_fields_loads_with_defaults() {
+        let legacy = r#"{"batting_style":["SwingMeter","ClassicTiming"],"volume":0.5}"#;
+        let s: Settings = serde_json::from_str(legacy).unwrap();
+        assert_eq!(s.pitch_trail, PitchTrailStyle::Comet);
+        assert_eq!(s.trail_color, TrailColor::Ember);
+        assert!(s.show_strike_zone, "zone overlay defaults on");
+        assert_eq!(s.batting_style[0], BattingStyle::SwingMeter);
+        assert!((s.volume - 0.5).abs() < 1e-6);
     }
 
     #[test]
@@ -603,18 +774,23 @@ mod tests {
             BattingStyle::SwingMeter
         );
 
-        // Move to the volume row and push past the clamp. `press` only
-        // re-marks `just_pressed` after a `release` — a held key doesn't
-        // repeat — so each tap is release-then-press.
+        // Move to the volume row (now the last of ROW_LABELS, past the two
+        // trail rows) and push past the clamp. `press` only re-marks
+        // `just_pressed` after a `release` — a held key doesn't repeat — so
+        // each tap is release-then-press.
         let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
         kb.release(KeyCode::ArrowRight);
-        kb.press(KeyCode::ArrowDown);
-        app.update();
-        let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
-        kb.release(KeyCode::ArrowDown);
-        kb.press(KeyCode::ArrowDown);
-        app.update();
-        assert_eq!(app.world().resource::<SettingsCursorRow>().0, 2);
+        for _ in 0..ROW_LABELS.len() - 1 {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(KeyCode::ArrowDown);
+            app.update();
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.release(KeyCode::ArrowDown);
+        }
+        assert_eq!(
+            app.world().resource::<SettingsCursorRow>().0,
+            ROW_LABELS.len() - 1
+        );
 
         let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
         kb.release(KeyCode::ArrowDown);

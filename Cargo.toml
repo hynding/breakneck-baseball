@@ -21,6 +21,9 @@ bevy_rapier3d = { version = "0.28", features = ["debug-render-3d"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# Debug-mode inspector UI (feature-gated, see `game::debug`)
+bevy-inspector-egui = { version = "0.28", optional = true }
+
 # ── Native-only: enable SIMD acceleration for Rapier ──────────────────────────
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 bevy_rapier3d = { version = "0.28", features = ["simd-stable", "debug-render-3d"] }
@@ -41,6 +44,9 @@ default = []
 
 # Enable this for faster iteration in development (loads Bevy as a dynamic library)
 dev = ["bevy/dynamic_linking", "bevy/file_watcher"]
+
+# Debug mode: F1-toggled tabbed egui panel + gizmo overlays (see `game::debug`)
+debug = ["dep:bevy-inspector-egui"]
 
 [profile.dev]
 opt-level = 1

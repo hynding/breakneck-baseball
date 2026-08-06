@@ -33,6 +33,15 @@ pub struct Pitcher;
 #[derive(Component)]
 pub struct Batter;
 
+/// Where the batter stands: the centre of his side of the right-handed
+/// batter's box (+X of the plate, docs/BASEBALL.md). Public so the camera
+/// framing tests can prove the duel shot really contains him.
+pub const BATTER_STAND_X: f32 = 0.7;
+
+/// The rig's authored height (tools/build_player.py) — spikes to helmet.
+/// Public for the same framing tests.
+pub const RIG_HEIGHT_M: f32 = 1.85;
+
 /// Marker for a defensive fielder: the i-th spot in the field spec's
 /// `fielder_positions`.
 #[derive(Component)]
@@ -349,11 +358,11 @@ fn spawn_players(
         &rig_model,
         RigUnit::Batter,
         offense,
-        Vec3::new(0.7, 0.6, 0.0),
+        Vec3::new(BATTER_STAND_X, 0.6, 0.0),
         1.0,
     );
     commands.entity(batter).insert(
-        Transform::from_xyz(0.7, 0.6, 0.0)
+        Transform::from_xyz(BATTER_STAND_X, 0.6, 0.0)
             .with_rotation(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)),
     );
     attach_jerseys(&mut commands, batter, JerseyRole::Batter, &jersey_assets);

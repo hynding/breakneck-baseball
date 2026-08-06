@@ -9,6 +9,8 @@ pub mod audio;
 pub mod ball;
 pub mod batting;
 pub mod camera;
+#[cfg(feature = "debug")]
+pub mod debug;
 pub mod field;
 pub mod fielding;
 pub mod flow;
@@ -22,6 +24,7 @@ pub mod player;
 pub mod roster;
 pub mod rules;
 pub mod runner;
+pub mod scenario;
 pub mod settings;
 pub mod subs;
 pub mod theme;
@@ -117,7 +120,7 @@ impl Default for GameConfig {
         let variant = VariantId::default();
         Self {
             mode: GameMode::default(),
-            innings: variant.rules().innings,
+            innings: variant.rules().counts.innings,
             variant,
             theme: ThemeId::default(),
         }
@@ -215,6 +218,8 @@ impl Plugin for GamePlugin {
             // both resources with the chosen variant before a game starts.
             .insert_resource(VariantId::Standard.rules())
             .insert_resource(VariantId::Standard.field())
+            .register_type::<variant::Ruleset>()
+            .register_type::<variant::FieldSpec>()
             .insert_resource(ThemeId::DaylightClassic.build())
             .insert_resource(ScoreBoard {
                 inning: 1,
@@ -222,6 +227,8 @@ impl Plugin for GamePlugin {
                 ..default()
             })
             .init_resource::<Rosters>()
+            .init_resource::<scenario::PitchOverride>()
+            .add_event::<scenario::ScenarioAppliedEvent>()
             // Sub-plugins (input/menu first so their resources exist for the
             // rest); split across two tuples — `add_plugins` tops out at 15.
             .add_plugins((
@@ -246,7 +253,10 @@ impl Plugin for GamePlugin {
                 SubsPlugin,
                 settings::SettingsPlugin,
                 JuicePlugin,
-            ))
+            ));
+        #[cfg(feature = "debug")]
+        app.add_plugins(debug::DebugPlugin);
+        app
             // Fresh scoreboard/rosters each time a game starts from the menu;
             // tear the scene down once the game is over. Pausing stays inside
             // Playing ⇄ Paused and touches neither.

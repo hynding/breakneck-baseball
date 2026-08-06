@@ -41,11 +41,11 @@ fn start_two_player_game(app: &mut App) {
     // economy, so it pins the windows it depends on rather than inheriting the
     // tunable defaults — same decoupling as `e2e_cpu_timing`'s forced spread.
     let mut r = app.world_mut().resource_mut::<Ruleset>();
-    r.perfect_ms = 40.0;
-    r.solid_ms = 90.0;
-    r.foul_ms = 140.0;
-    r.exit_solid = 1.0;
-    r.exit_perfect = 1.25;
+    r.batting.perfect_ms = 40.0;
+    r.batting.solid_ms = 90.0;
+    r.batting.foul_ms = 140.0;
+    r.batting.exit_solid = 1.0;
+    r.batting.exit_perfect = 1.25;
 }
 
 fn bases(app: &mut App) -> &Bases {
