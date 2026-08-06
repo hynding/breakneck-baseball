@@ -251,23 +251,22 @@ impl VariantId {
                 bounds: 220.0,
                 broadcast_eye: Vec3::new(0.0, 13.0, -21.0),
                 broadcast_target: Vec3::new(0.0, 1.2, 9.0),
-                // The catcher's own point of view: the lens sits at his
-                // crouched eye height, just in front of his head, so no
-                // part of his rig renders (it's all behind the near plane)
-                // — the plate umpire, further back at z=-3.0, stays hidden
-                // too. Catcher spot is (0,0,-1.5) (see `fielder_positions`
-                // below); the rig's capsule collider (radius 0.4, matching
-                // `Collider::capsule_y` in player.rs) puts his forward-most
-                // surface at about z=-1.1, so z=-0.9 clears him with a
-                // ~0.2 m margin. Crouched eye height: the rig is authored
-                // 1.85 m tall (tools/build_player.py), head centred at
-                // Blender Z=1.66 standing; `CatcherCrouch` only translates
-                // the whole Hips chain down 0.22 m (no separate spine
-                // lean — see the clip's `Hips: {"dz": ...}` entry), so the
-                // crouched head sits at ~1.44 m, not the ~1.1 m a folded
-                // crouch might suggest.
-                duel_eye: Vec3::new(0.0, 1.4, -0.9),
-                duel_target: Vec3::new(0.0, 0.85, 15.0),
+                // The catcher's own point of view, tilted down onto the
+                // batter: the lens sits at his crouched eye height (~1.44 m
+                // — the rig is authored 1.85 m tall, head centred at
+                // Blender Z=1.66 standing, and `CatcherCrouch` translates
+                // the Hips chain down 0.22 m), looking down toward the
+                // plate so the batter's *entire* body — spikes to helmet —
+                // fills 80–90% of the screen height
+                // (`camera::catcher_pov_frames_the_full_batter_at_80_to_90_percent`
+                // is the arbiter; the low target is the downward tilt that
+                // keeps his feet in frame). The eye now sits at z=-1.2,
+                // fractionally *inside* the catcher's silhouette (his
+                // capsule's forward surface is ~z=-1.1), which is why
+                // `camera::hide_occluders` hides the catcher outright in
+                // this view for as long as the duel framing holds.
+                duel_eye: Vec3::new(0.0, 1.4, -1.2),
+                duel_target: Vec3::new(0.0, 0.2, 4.0),
                 // Behind and above the mound (rubber at z=`pitch_distance`),
                 // looking back at the batter's box — the reference
                 // pitcher-cam shot. 3 m of standoff behind the rubber keeps
@@ -316,15 +315,14 @@ impl VariantId {
                 broadcast_eye: Vec3::new(0.0, 7.0, -12.0),
                 broadcast_target: Vec3::new(0.0, 1.0, 5.0),
                 // No catcher on the lawn (see `fielder_positions` above —
-                // none sits at z<0), so the crouching figure to clear here
-                // is the lone plate umpire (z=-2.2, same rig, same
-                // CatcherCrouch pose). Same reasoning as the standard
-                // park's `duel_eye`: his capsule's front surface sits at
-                // about z=-1.8, so z=-1.5 clears him with a margin, and the
-                // eye height matches the same ~1.4 m crouched head derived
-                // there (see the comment on Standard's `duel_eye`).
-                duel_eye: Vec3::new(0.0, 1.35, -1.5),
-                duel_target: Vec3::new(0.0, 0.8, 8.0),
+                // none sits at z<0); the lone plate umpire (z=-2.2, front
+                // surface ~z=-1.8) stays behind the eye at z=-1.25, so
+                // nothing needs hiding here. Same full-body batter framing
+                // contract as Standard's `duel_eye` (80–90% of screen
+                // height, camera test is the arbiter), scaled a touch lower
+                // for the lawn's cosier geometry.
+                duel_eye: Vec3::new(0.0, 1.3, -1.25),
+                duel_target: Vec3::new(0.0, 0.3, 4.0),
                 // Same reasoning as Standard's `behind_pitcher_eye`, scaled
                 // to the shorter lawn pitch distance: 3 m behind the rubber
                 // clears the pitcher's own rig, and puts the sole umpire

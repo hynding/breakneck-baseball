@@ -192,6 +192,27 @@ const BEHIND_PITCHER_FOV: f32 = 40.0_f32.to_radians();
 /// at the batter's shoulder.
 const BATTING_ZOOM_FOV: f32 = 65.0_f32.to_radians();
 
+// ── Framing math ──────────────────────────────────────────────────────────────
+
+/// Signed vertical NDC coordinate (−1 = bottom edge, +1 = top edge) of world
+/// point `p` as seen by a look-at camera at `eye` toward `target` with
+/// vertical FOV `vfov`. Pure — the framing tests use it to prove the duel
+/// shot really contains the batter, instead of eyeballing screenshots.
+pub fn framed_ndc_y(eye: Vec3, target: Vec3, vfov: f32, p: Vec3) -> f32 {
+    let fwd = (target - eye).normalize();
+    let right = fwd.cross(Vec3::Y).normalize();
+    let up = right.cross(fwd);
+    let v = p - eye;
+    let depth = v.dot(fwd).max(f32::EPSILON);
+    (v.dot(up) / depth) / (vfov / 2.0).tan()
+}
+
+/// Fraction of the viewport height the segment `bottom`→`top` spans through
+/// the same camera.
+pub fn framed_height_fraction(eye: Vec3, target: Vec3, vfov: f32, bottom: Vec3, top: Vec3) -> f32 {
+    ((framed_ndc_y(eye, target, vfov, top) - framed_ndc_y(eye, target, vfov, bottom)) / 2.0).abs()
+}
+
 // ── Occlusion ─────────────────────────────────────────────────────────────────
 
 /// How close to the eye (metres, measured along the eye→target axis) a
@@ -227,6 +248,19 @@ pub fn occludes(eye: Vec3, target: Vec3, subject: Vec3, near: f32, radius: f32) 
     perp.length() <= radius
 }
 
+/// The phases during which the broadcast rig wants (or is still holding)
+/// the tight duel framing: the duel itself and the post-contact plate hold.
+/// Shared between [`broadcast_camera`]'s framing choice and
+/// [`hide_occluders`]'s catcher-POV arm so the catcher can never pop into
+/// a lens that is still parked inside his silhouette.
+fn duel_framing_wanted(play: &Play, now: f32) -> bool {
+    match play.phase {
+        Phase::PrePitch | Phase::WindUp | Phase::Pitch => true,
+        Phase::InPlay => play.since_contact(now) < BALL_FOLLOW_DELAY,
+        Phase::Result => false,
+    }
+}
+
 /// Hides the catcher/plate umpire root(s) that sit in the way of the active
 /// duel view for as long as they do, and restores them the rest of the
 /// time — outside the duel phases (ball in play, result pause) or on a view
@@ -234,20 +268,33 @@ pub fn occludes(eye: Vec3, target: Vec3, subject: Vec3, near: f32, radius: f32) 
 /// mechanism run-out rigs use to swap the batter for his stand-in
 /// (`runner.rs`), so this never fights that: it only ever touches
 /// `CatcherRole`/`PlateUmpire` roots, which never run bases.
+///
+/// The catcher-POV view gets its own arm: its eye sits fractionally
+/// *inside* the catcher's silhouette (see `FieldSpec::duel_eye`), behind
+/// his forward surface, where the `occludes` cone (which only looks ahead
+/// of the eye) can't see him — so in that view the catcher is hidden
+/// outright whenever the duel framing is wanted or still held.
 #[allow(clippy::type_complexity)]
 fn hide_occluders(
+    time: Res<Time>,
     view: Res<DuelView>,
     field: Res<FieldSpec>,
     play: Res<Play>,
     mode: Res<CameraMode>,
-    mut subjects: Query<(&Transform, &mut Visibility), Or<(With<CatcherRole>, With<PlateUmpire>)>>,
+    mut subjects: Query<
+        (&Transform, &mut Visibility, Has<CatcherRole>),
+        Or<(With<CatcherRole>, With<PlateUmpire>)>,
+    >,
 ) {
     let dueling = matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch);
+    let pov_inside_catcher = *mode == CameraMode::Broadcast
+        && *view == DuelView::CatcherPov
+        && duel_framing_wanted(&play, time.elapsed_secs());
     // The FOV this call computes is discarded (occlusion only cares about the
     // eye/target axis), so the aspect passed through doesn't matter — the
     // reference aspect keeps this a no-op correction.
     let (eye, target, _) = view.framing(&field, DUEL_REFERENCE_ASPECT);
-    for (transform, mut visibility) in &mut subjects {
+    for (transform, mut visibility, is_catcher) in &mut subjects {
         // Occlusion only makes sense for the camera actually looking through
         // this axis: in Orbit the player is free-looking with a completely
         // different eye/target, so a rig hidden for a Broadcast duel view
@@ -255,15 +302,16 @@ fn hide_occluders(
         // changed — the system still runs every frame (unconditionally, not
         // gated out entirely) so switching back to Broadcast, or into
         // Orbit, both re-evaluate and settle on the right state immediately.
-        let blocking = dueling
-            && *mode == CameraMode::Broadcast
-            && occludes(
-                eye,
-                target,
-                transform.translation,
-                OCCLUSION_NEAR,
-                OCCLUSION_RADIUS,
-            );
+        let blocking = (is_catcher && pov_inside_catcher)
+            || (dueling
+                && *mode == CameraMode::Broadcast
+                && occludes(
+                    eye,
+                    target,
+                    transform.translation,
+                    OCCLUSION_NEAR,
+                    OCCLUSION_RADIUS,
+                ));
         let desired = if blocking {
             Visibility::Hidden
         } else {
@@ -667,6 +715,33 @@ mod tests {
                 assert!(p.distance(eye) > 1e-3, "the orbit must actually move");
             }
             prev = Some(eye);
+        }
+    }
+
+    /// The catcher-POV duel framing must show the batter's entire body —
+    /// spikes to helmet, on his side of the plate — filling 80–90% of the
+    /// screen height at the 16:9 reference aspect, fully inside the frame,
+    /// in both parks. The design ask behind the pulled-back duel eye.
+    #[test]
+    fn catcher_pov_frames_the_full_batter_at_80_to_90_percent() {
+        use crate::game::player::{BATTER_STAND_X, RIG_HEIGHT_M};
+        for id in [VariantId::Standard, VariantId::FrontYard] {
+            let f = id.field();
+            let (eye, target, vfov) = DuelView::CatcherPov.framing(&f, DUEL_REFERENCE_ASPECT);
+            let feet = Vec3::new(BATTER_STAND_X, 0.0, 0.0);
+            let head = feet + Vec3::Y * RIG_HEIGHT_M;
+            let frac = framed_height_fraction(eye, target, vfov, feet, head);
+            assert!(
+                (0.80..=0.90).contains(&frac),
+                "{id:?}: batter fills {frac:.3} of screen height, want 0.80..=0.90"
+            );
+            for p in [feet, head] {
+                let y = framed_ndc_y(eye, target, vfov, p);
+                assert!(
+                    y.abs() <= 0.98,
+                    "{id:?}: batter point {p} clipped at ndc y {y:.3}"
+                );
+            }
         }
     }
 
