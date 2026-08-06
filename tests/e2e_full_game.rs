@@ -15,6 +15,7 @@ use bevy::prelude::*;
 
 use breakneck_baseball::game::ball::Baseball;
 use breakneck_baseball::game::flow::{Phase, Play};
+use breakneck_baseball::game::fx::TrailMote;
 use breakneck_baseball::game::input::Intents;
 use breakneck_baseball::game::variant::Ruleset;
 use breakneck_baseball::game::{GameState, ScoreBoard, Team};
@@ -90,7 +91,18 @@ fn one_inning_game_plays_to_completion() {
     start_game(&mut app, KeyCode::Digit2);
     pin_classic_contact_windows(&mut app);
 
+    // Sampled through the run: every pitch should be leaving a trail (the
+    // default Comet fading path) while it flies.
+    let mut trail_motes_seen = 0usize;
     let finished = run_until(&mut app, MAX_FRAMES, |app| {
+        if app.world().resource::<Play>().phase == Phase::Pitch {
+            let count = app
+                .world_mut()
+                .query_filtered::<Entity, With<TrailMote>>()
+                .iter(app.world())
+                .count();
+            trail_motes_seen = trail_motes_seen.max(count);
+        }
         *app.world().resource::<State<GameState>>().get() == GameState::GameOver
     });
 
@@ -119,5 +131,9 @@ fn one_inning_game_plays_to_completion() {
         "Home's walk-off run must have scored (home {} - away {})",
         score.home_runs,
         score.away_runs
+    );
+    assert!(
+        trail_motes_seen > 0,
+        "a pitched ball must leave a trail (default Comet path)"
     );
 }
