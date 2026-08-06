@@ -93,6 +93,15 @@ pub fn deterministic_headless_app() -> App {
 }
 
 fn build_headless_app(single_threaded: bool) -> App {
+    // Isolate the settings store before `SettingsPlugin` loads it: a
+    // headless test must neither read the developer's real settings.json
+    // (their volume/batting-style choices would silently steer test
+    // behaviour) nor overwrite it when a test mutates `Settings` (the
+    // pause board's strike-zone toggle really persists).
+    std::env::set_var(
+        "BREAKNECK_SETTINGS_PATH",
+        std::env::temp_dir().join(format!("bb-e2e-settings-{}.json", std::process::id())),
+    );
     let mut app = App::new();
     let default_plugins = DefaultPlugins
         // No window, no winit event loop, and no GPU at all: CI runners
@@ -137,7 +146,17 @@ fn build_headless_app(single_threaded: bool) -> App {
         // Solid/Perfect would genuinely slow the shared virtual clock every
         // other timing-sensitive system reads. This insert is load-bearing,
         // not just belt-and-braces.
-        .insert_resource(breakneck_baseball::game::juice::JuiceDisabled);
+        .insert_resource(breakneck_baseball::game::juice::JuiceDisabled)
+        // Mute the harness: `DefaultPlugins` keeps `AudioPlugin` (only
+        // window/render/winit are stripped), so at a real volume every
+        // headless run plays the synthesized crowd/cracks through the
+        // machine's speakers — forty balance-sim games of crowd noise.
+        // Overwrites the plugin-loaded settings with clean defaults at
+        // volume zero (`apply_volume` mirrors it into `GlobalVolume`).
+        .insert_resource(breakneck_baseball::game::settings::Settings {
+            volume: 0.0,
+            ..Default::default()
+        });
 
     app.init_schedule(DriveGame);
     app.world_mut()

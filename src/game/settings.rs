@@ -164,8 +164,17 @@ pub struct Settings {
     /// The trail's colour preset (same back-compat default).
     #[serde(default)]
     pub trail_color: TrailColor,
+    /// Whether the floating strike-zone wireframe is drawn during the duel.
+    /// Toggled from the pause board (**Z**) so either player can switch it
+    /// mid-game; defaults on, serde-defaulted for old stores.
+    #[serde(default = "default_true")]
+    pub show_strike_zone: bool,
     /// Master volume, 0.0..=1.0, applied via [`bevy::audio::GlobalVolume`].
     pub volume: f32,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for Settings {
@@ -174,6 +183,7 @@ impl Default for Settings {
             batting_style: [BattingStyle::ClassicTiming; 2],
             pitch_trail: PitchTrailStyle::default(),
             trail_color: TrailColor::default(),
+            show_strike_zone: true,
             volume: 0.7,
         }
     }
@@ -657,6 +667,7 @@ mod tests {
         let s: Settings = serde_json::from_str(legacy).unwrap();
         assert_eq!(s.pitch_trail, PitchTrailStyle::Comet);
         assert_eq!(s.trail_color, TrailColor::Ember);
+        assert!(s.show_strike_zone, "zone overlay defaults on");
         assert_eq!(s.batting_style[0], BattingStyle::SwingMeter);
         assert!((s.volume - 0.5).abs() < 1e-6);
     }

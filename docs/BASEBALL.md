@@ -90,11 +90,14 @@ edge rather than passing through its centre.
   strike.
 
 In the game: `rules::ZONE_*` — plate half-width 0.216 m plus ball radius
-0.037 m gives the called half-width 0.253 m; heights 0.50–1.30 m are the
-1.85 m rig's knee hollow and stance midpoint (`tools/build_player.py`
-proportions). `field::spawn_strike_zone` draws the plate-width wireframe box
-(as deep as the plate — the rulebook zone is a prism *over the plate*), and
-the calls honour the ball-radius allowance past the drawn frame.
+0.037 m gives the called half-width 0.253 m; heights 0.45–1.275 m are read
+off the authored rig's own skeleton (`tools/build_player.py`: knee joint at
+0.50 less a hair for "below the kneecap"; shoulder line 1.50 and hip-block/
+pants top 1.05 → rulebook midpoint 1.275). `field::spawn_strike_zone` draws
+the plate-width wireframe box (as deep as the plate — the rulebook zone is
+a prism *over the plate*), and the calls honour the ball-radius allowance
+past the drawn frame. Players can toggle the overlay from the pause board
+(**Z**, persisted via `Settings::show_strike_zone`).
 
 ## Dirt, grass, and mowing (turface.com, mightygrass.com)
 

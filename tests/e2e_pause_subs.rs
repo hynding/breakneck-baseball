@@ -36,9 +36,11 @@ mod common;
 use bevy::prelude::*;
 
 use breakneck_baseball::game::ball::Baseball;
+use breakneck_baseball::game::field::StrikeZoneOverlay;
 use breakneck_baseball::game::flow::{Phase, Play};
 use breakneck_baseball::game::input::Intents;
 use breakneck_baseball::game::roster::Rosters;
+use breakneck_baseball::game::settings::Settings;
 use breakneck_baseball::game::subs::ControlsDialog;
 use breakneck_baseball::game::{GameState, ScoreBoard};
 
@@ -100,6 +102,9 @@ fn controls_dialog_alpha(app: &mut App) -> f32 {
 
 #[test]
 fn pause_swaps_the_bench_and_resumes_cleanly() {
+    // (The Z toggle below really persists Settings — the harness's
+    // BREAKNECK_SETTINGS_PATH scratch seam keeps that off the developer's
+    // real settings.json.)
     let mut app = headless_app();
     app.init_resource::<AutoPitch>();
     app.add_systems(DriveGame, drive);
@@ -153,6 +158,14 @@ fn pause_swaps_the_bench_and_resumes_cleanly() {
         "starter took the bench seat"
     );
 
+    // Z on the pause board toggles the strike-zone overlay off — a real,
+    // persisted setting either player can flip mid-game.
+    tap_key(&mut app, KeyCode::KeyZ);
+    assert!(
+        !app.world().resource::<Settings>().show_strike_zone,
+        "Z while paused must switch the zone overlay off"
+    );
+
     // Resume: exactly one ball (no duplicate scene spawn), and the game keeps
     // playing — the scripted pitcher works the count against a taking batter.
     tap_key(&mut app, KeyCode::Escape);
@@ -161,6 +174,20 @@ fn pause_swaps_the_bench_and_resumes_cleanly() {
     assert!(
         controls_dialog_alpha(&mut app) < 0.01,
         "controls dialog must hide again on resume"
+    );
+
+    // With the toggle off, the duel's zone wireframe stays hidden even in
+    // PrePitch, where it would normally show.
+    app.update();
+    let zone_hidden = |app: &mut App| {
+        app.world_mut()
+            .query_filtered::<&Visibility, With<StrikeZoneOverlay>>()
+            .iter(app.world())
+            .all(|v| *v == Visibility::Hidden)
+    };
+    assert!(
+        zone_hidden(&mut app),
+        "zone overlay must stay hidden once toggled off"
     );
 
     // Hand the pitch button back to the scripted driver now that the pause

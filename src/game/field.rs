@@ -920,16 +920,16 @@ const ZONE_DRAWN_HALF_WIDTH: f32 = rules::PLATE_HALF_WIDTH_M;
 /// The zone volume is as deep as home plate (17 in front edge to point,
 /// docs/BASEBALL.md) — the rulebook zone is a prism *over the plate*.
 const ZONE_DEPTH: f32 = PLATE_WIDTH;
-/// Darker wireframe per the design ask: near-black steel at half opacity,
-/// readable against grass and sky without dominating the plate or washing
-/// out the PCI cursor and the ball.
-const ZONE_FRAME_COLOR: Color = Color::srgba(0.10, 0.11, 0.14, 0.50);
+/// Darker wireframe per the design ask: near-black steel, nearly
+/// transparent — a ghost of a K-zone that never competes with the ball or
+/// the PCI cursor.
+const ZONE_FRAME_COLOR: Color = Color::srgba(0.10, 0.11, 0.14, 0.20);
 /// A whisper of dark tint on the near face only — enough for the PCI
 /// cursor to read against, never a bright pane.
 const ZONE_FILL_COLOR: Color = Color::srgba(0.05, 0.06, 0.08, 0.10);
-/// Wireframe bar thickness — thin rails, closer to a broadcast K-zone
-/// overlay than scaffolding.
-const ZONE_BAR: f32 = 0.008;
+/// Wireframe bar thickness — hairline rails (halved from the first
+/// designer pass, and halved again on review).
+const ZONE_BAR: f32 = 0.004;
 
 /// A floating 3D wireframe box over the plate showing the zone the umpire
 /// calls ([`rules::ZONE_LOW`]..[`rules::ZONE_HIGH`], plate-wide and
@@ -1035,14 +1035,18 @@ fn spawn_strike_zone(
 /// the moment the ball is in play — except a live Task-B4 flash pulse holds
 /// it up a beat longer (`flash.timer.is_some()`) so the pulse that fires the
 /// same frame contact flips the phase to `InPlay` actually gets a chance to
-/// render, instead of being hidden the very frame it's set.
+/// render, instead of being hidden the very frame it's set. Players can
+/// switch the overlay off entirely from the pause board
+/// ([`Settings::show_strike_zone`], toggled with **Z** in `subs.rs`).
 fn strike_zone_visibility(
     play: Res<Play>,
     flash: Res<ZoneFlash>,
+    settings: Res<Settings>,
     mut overlay: Query<&mut Visibility, With<StrikeZoneOverlay>>,
 ) {
-    let visible = matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch)
-        || flash.timer.is_some();
+    let visible = settings.show_strike_zone
+        && (matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch)
+            || flash.timer.is_some());
     for mut visibility in &mut overlay {
         let desired = if visible {
             Visibility::Inherited
@@ -1399,9 +1403,12 @@ mod tests {
 
     /// The zone overlay is a 3D wireframe the size of the rulebook zone:
     /// plate width, plate depth, knee-to-midpoint tall (docs/BASEBALL.md
-    /// "Strike zone") — and *darker* than the old washed-out white frame
-    /// (every channel below 0.5), with nonzero alpha per the wasm UI rule.
+    /// "Strike zone") — darker than the old washed-out white frame (every
+    /// channel below 0.5), with nonzero alpha per the wasm UI rule.
+    /// Deliberately asserts on constants: it pins design-reviewed values
+    /// against silent drift.
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn zone_wireframe_matches_rulebook_dimensions() {
         assert!((ZONE_DRAWN_HALF_WIDTH - rules::PLATE_HALF_WIDTH_M).abs() < 1e-6);
         assert!((ZONE_DEPTH - PLATE_WIDTH).abs() < 1e-6);
@@ -1410,14 +1417,17 @@ mod tests {
             c.red < 0.5 && c.green < 0.5 && c.blue < 0.5,
             "the wireframe should read dark, got {c:?}"
         );
-        // Designer-reviewed look: half-opacity rails, thin like a broadcast
-        // K-zone overlay rather than scaffolding (and never alpha 0 — wasm
-        // rule).
+        // Designer-reviewed look: hairline rails, nearly transparent — but
+        // never alpha 0 (wasm rule).
         assert!(
-            (c.alpha - 0.5).abs() < 1e-6,
-            "frame should sit at 50% opacity"
+            c.alpha > 0.0 && c.alpha <= 0.25,
+            "frame should be nearly transparent, got alpha {}",
+            c.alpha
         );
-        assert!(ZONE_BAR <= 0.01, "rails should stay thin, got {ZONE_BAR}");
+        assert!(
+            ZONE_BAR <= 0.005,
+            "rails should stay hairline, got {ZONE_BAR}"
+        );
         let f = ZONE_FILL_COLOR.to_srgba();
         assert!(f.alpha > 0.0 && f.alpha < 0.2, "fill stays a whisper");
     }

@@ -38,12 +38,20 @@ pub const BALL_RADIUS_M: f32 = 0.037;
 /// is still a strike by exactly its own radius, as in real life. Public so
 /// the field can draw the zone the umpire actually calls.
 pub const ZONE_HALF_WIDTH: f32 = PLATE_HALF_WIDTH_M + BALL_RADIUS_M;
-/// Zone floor: the hollow beneath the kneecap of the 1.85 m rig
-/// (docs/BASEBALL.md "Strike zone").
-pub const ZONE_LOW: f32 = 0.5;
-/// Zone ceiling: the midpoint between shoulder top and pants top in the
-/// rig's slight stance crouch (docs/BASEBALL.md) — not the old arcade 1.45.
-pub const ZONE_HIGH: f32 = 1.30;
+/// Rig landmarks measured off the authored skeleton (tools/build_player.py,
+/// 1 unit = 1 m, feet at 0): the spine bone's shoulder line (its tail, and
+/// the torso block's top edge), the top of the hip block — where the
+/// uniform pants start — and the knee joint (UpperLeg tail / LowerLeg head).
+const RIG_SHOULDER_TOP_M: f32 = 1.50;
+const RIG_PANTS_TOP_M: f32 = 1.05;
+const RIG_KNEE_M: f32 = 0.50;
+/// Zone floor: just below the rig's kneecap (docs/BASEBALL.md "Strike
+/// zone" — "the hollow beneath the kneecap").
+pub const ZONE_LOW: f32 = RIG_KNEE_M - 0.05;
+/// Zone ceiling: the rulebook midpoint between the top of the shoulders
+/// and the top of the uniform pants, both read off the rig itself rather
+/// than generic human proportions (docs/BASEBALL.md).
+pub const ZONE_HIGH: f32 = (RIG_SHOULDER_TOP_M + RIG_PANTS_TOP_M) / 2.0;
 
 /// A caught fly at least this far out (scaled by [`FieldSpec::hit_scale`])
 /// gives runners time to tag up and advance.
@@ -2707,8 +2715,11 @@ mod tests {
     #[test]
     fn zone_is_plate_width_plus_ball_allowance() {
         assert!((ZONE_HALF_WIDTH - (PLATE_HALF_WIDTH_M + BALL_RADIUS_M)).abs() < 1e-6);
-        assert!((ZONE_LOW - 0.5).abs() < 1e-6);
-        assert!((ZONE_HIGH - 1.30).abs() < 1e-6);
+        // Just below the rig's kneecap, and the rulebook shoulders/pants
+        // midpoint read off the rig skeleton (0.45 and 1.275 for the
+        // authored 1.85 m rig — see the consts' derivation).
+        assert!((ZONE_LOW - 0.45).abs() < 1e-6);
+        assert!((ZONE_HIGH - 1.275).abs() < 1e-6);
         // The pure module's duplicated ball radius must track the physics.
         assert!((BALL_RADIUS_M - crate::game::ball::BALL_RADIUS).abs() < 1e-9);
     }
