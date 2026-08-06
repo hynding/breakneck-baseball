@@ -26,21 +26,27 @@ fn start_hit_stop(
     mut hits: EventReader<HitEvent>,
     mut virt: ResMut<Time<Virtual>>,
     mut stop: ResMut<HitStop>,
+    base: Res<crate::game::juice::BaseSpeed>,
 ) {
     if hits.read().next().is_some() {
-        virt.set_relative_speed(HIT_STOP_SCALE);
+        virt.set_relative_speed(HIT_STOP_SCALE * base.0);
         stop.0 = Some(Timer::from_seconds(HIT_STOP_SECS, TimerMode::Once));
     }
 }
 
 /// Restores full speed once the (real-time) freeze window elapses.
-fn end_hit_stop(real: Res<Time<Real>>, mut virt: ResMut<Time<Virtual>>, mut stop: ResMut<HitStop>) {
+fn end_hit_stop(
+    real: Res<Time<Real>>,
+    mut virt: ResMut<Time<Virtual>>,
+    mut stop: ResMut<HitStop>,
+    base: Res<crate::game::juice::BaseSpeed>,
+) {
     let finished = stop
         .0
         .as_mut()
         .is_some_and(|t| t.tick(real.delta()).finished());
     if finished {
-        virt.set_relative_speed(1.0);
+        virt.set_relative_speed(base.0);
         stop.0 = None;
     }
 }
