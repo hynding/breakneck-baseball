@@ -34,6 +34,7 @@ pub struct DebugState {
     pub gizmos: GizmoToggles,
     pub last_error: Option<&'static str>,
     pub custom: crate::game::scenario::Scenario,
+    pub step_pending: bool,
 }
 
 /// Pins every judged swing's grade — deterministic swing-outcome testing.
@@ -63,7 +64,8 @@ impl Plugin for DebugPlugin {
                     pci_gizmo,
                 )
                     .run_if(in_state(crate::game::GameState::Playing)),
-            );
+            )
+            .add_systems(Last, finish_step);
     }
 }
 
@@ -218,6 +220,16 @@ fn pci_gizmo(
 
 fn panel_open(state: Res<DebugState>) -> bool {
     state.open
+}
+
+/// Re-pauses after a single-step frame: `step` in the Time tab unpauses
+/// `Time<Virtual>` for exactly one `Update`, and this `Last`-schedule system
+/// pauses it back before the next frame starts.
+fn finish_step(mut state: ResMut<DebugState>, mut virt: ResMut<Time<Virtual>>) {
+    if state.step_pending {
+        virt.pause();
+        state.step_pending = false;
+    }
 }
 
 /// F1 opens/closes; number keys 1–5 switch tabs while the panel is open.
@@ -414,7 +426,30 @@ fn debug_panel(world: &mut World) {
                     world.resource_mut::<DebugState>().gizmos = gizmos;
                 }
                 DebugTab::Time => {
-                    ui.label("Time — Task 10");
+                    ui.horizontal(|ui| {
+                        for (label, s) in [("¼×", 0.25f32), ("½×", 0.5), ("1×", 1.0), ("2×", 2.0)]
+                        {
+                            if ui.button(label).clicked() {
+                                world.resource_mut::<crate::game::juice::BaseSpeed>().0 = s;
+                                world.resource_mut::<Time<Virtual>>().set_relative_speed(s);
+                            }
+                        }
+                    });
+                    let paused = world.resource::<Time<Virtual>>().is_paused();
+                    ui.horizontal(|ui| {
+                        if ui.button(if paused { "resume" } else { "pause" }).clicked() {
+                            let mut virt = world.resource_mut::<Time<Virtual>>();
+                            if paused {
+                                virt.unpause()
+                            } else {
+                                virt.pause()
+                            }
+                        }
+                        if ui.button("step").clicked() {
+                            world.resource_mut::<Time<Virtual>>().unpause();
+                            world.resource_mut::<DebugState>().step_pending = true;
+                        }
+                    });
                 }
             }
         });
