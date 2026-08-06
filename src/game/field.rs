@@ -478,7 +478,7 @@ fn spawn_bases(
 /// plate slab and the batter's-box math below so the 6 in gap is measured
 /// from the plate's *actual* modeled edge rather than a second, independently
 /// duplicated literal.
-const PLATE_WIDTH: f32 = 0.432;
+const PLATE_WIDTH: f32 = rules::PLATE_HALF_WIDTH_M * 2.0;
 const PLATE_HALF_WIDTH: f32 = PLATE_WIDTH / 2.0;
 
 /// Regulation base size since the 2023 rule change: 18 in square (0.457 m,
@@ -912,9 +912,28 @@ fn spawn_front_yard(
 }
 
 // ── Strike-zone overlay ───────────────────────────────────────────────────────
-/// A floating box over the plate showing exactly the zone the umpire calls
-/// ([`rules::ZONE_HALF_WIDTH`] / `ZONE_LOW..ZONE_HIGH`) — the catcher's-eye
-/// duel view's aiming aid. Visible only during the duel (see
+
+/// The drawn zone is the *plate-width* rulebook zone; the umpire's calls
+/// extend one ball radius past the frame (see [`rules::ZONE_HALF_WIDTH`]'s
+/// doc — the "any part of the ball" allowance, docs/BASEBALL.md).
+const ZONE_DRAWN_HALF_WIDTH: f32 = rules::PLATE_HALF_WIDTH_M;
+/// The zone volume is as deep as home plate (17 in front edge to point,
+/// docs/BASEBALL.md) — the rulebook zone is a prism *over the plate*.
+const ZONE_DEPTH: f32 = PLATE_WIDTH;
+/// Darker wireframe per the design ask: near-black steel, readable against
+/// grass and sky without washing out the PCI cursor or the ball.
+const ZONE_FRAME_COLOR: Color = Color::srgba(0.10, 0.11, 0.14, 0.85);
+/// A whisper of dark tint on the near face only — enough for the PCI
+/// cursor to read against, never a bright pane.
+const ZONE_FILL_COLOR: Color = Color::srgba(0.05, 0.06, 0.08, 0.10);
+/// Wireframe bar thickness.
+const ZONE_BAR: f32 = 0.02;
+
+/// A floating 3D wireframe box over the plate showing the zone the umpire
+/// calls ([`rules::ZONE_LOW`]..[`rules::ZONE_HIGH`], plate-wide and
+/// plate-deep per docs/BASEBALL.md "Strike zone"; calls get the ball-radius
+/// edge allowance past the drawn frame) — the catcher's-eye duel view's
+/// aiming aid. Visible only during the duel (see
 /// [`strike_zone_visibility`]); no colliders, the ball flies through it.
 fn spawn_strike_zone(
     commands: &mut Commands,
@@ -922,7 +941,6 @@ fn spawn_strike_zone(
     materials: &mut ResMut<Assets<StandardMaterial>>,
     theme: &crate::game::theme::Theme,
 ) {
-    let width = rules::ZONE_HALF_WIDTH * 2.0;
     let height = rules::ZONE_HIGH - rules::ZONE_LOW;
     let mid_y = (rules::ZONE_HIGH + rules::ZONE_LOW) / 2.0;
     let mut translucent = |color: Color| {
@@ -934,8 +952,8 @@ fn spawn_strike_zone(
             ..default()
         })
     };
-    let frame_base_color = Color::srgba(1.0, 1.0, 1.0, 0.4);
-    let fill = translucent(Color::srgba(1.0, 1.0, 1.0, 0.07));
+    let frame_base_color = ZONE_FRAME_COLOR;
+    let fill = translucent(ZONE_FILL_COLOR);
     let frame = translucent(frame_base_color);
 
     // Task B4: a Solid/Perfect contact pulses the frame bars toward the
@@ -958,38 +976,55 @@ fn spawn_strike_zone(
         ));
     };
 
+    let hw = ZONE_DRAWN_HALF_WIDTH;
+    let hd = ZONE_DEPTH / 2.0;
+    let bar = ZONE_BAR;
+    // Subtle fill on the near (catcher-side) face only, for PCI contrast.
     part(
-        Vec3::new(width, height, 0.006),
-        Vec3::new(0.0, mid_y, 0.0),
+        Vec3::new(hw * 2.0, height, 0.004),
+        Vec3::new(0.0, mid_y, -hd),
         &fill,
     );
-    let bar = 0.02;
-    for y in [rules::ZONE_LOW, rules::ZONE_HIGH] {
-        part(
-            Vec3::new(width + bar, bar, 0.008),
-            Vec3::new(0.0, y, 0.0),
-            &frame,
-        );
+    // The 12 edges of the zone prism: horizontals and verticals on the near
+    // and far faces...
+    for z in [-hd, hd] {
+        for y in [rules::ZONE_LOW, rules::ZONE_HIGH] {
+            part(
+                Vec3::new(hw * 2.0 + bar, bar, bar),
+                Vec3::new(0.0, y, z),
+                &frame,
+            );
+        }
+        for x in [-hw, hw] {
+            part(
+                Vec3::new(bar, height + bar, bar),
+                Vec3::new(x, mid_y, z),
+                &frame,
+            );
+        }
     }
-    for x in [-rules::ZONE_HALF_WIDTH, rules::ZONE_HALF_WIDTH] {
-        part(
-            Vec3::new(bar, height + bar, 0.008),
-            Vec3::new(x, mid_y, 0.0),
-            &frame,
-        );
+    // ...and the four depth rails connecting them.
+    for x in [-hw, hw] {
+        for y in [rules::ZONE_LOW, rules::ZONE_HIGH] {
+            part(
+                Vec3::new(bar, bar, ZONE_DEPTH + bar),
+                Vec3::new(x, y, 0.0),
+                &frame,
+            );
+        }
     }
 
-    // The PCI aiming cursor: a small unlit quad sitting a hair in front of the
-    // zone plane (toward the behind-home camera) so it reads over the fill.
-    // Hidden at spawn, revealed only for a human PCI batter (wasm UI rule: the
-    // scene spawns at game start and shows/hides — never respawns).
+    // The PCI aiming cursor: a small unlit quad sitting a hair off the zone
+    // box's near face (toward the behind-home camera) so it reads over the
+    // fill. Hidden at spawn, revealed only for a human PCI batter (wasm UI
+    // rule: the scene spawns at game start and shows/hides — never respawns).
     let cursor_mat = translucent(theme.ui.accent.with_alpha(0.9));
     commands.spawn((
         PciCursorMarker,
         GameplayEntity,
         Mesh3d(meshes.add(Cuboid::new(0.06, 0.06, 0.004))),
         MeshMaterial3d(cursor_mat),
-        Transform::from_translation(Vec3::new(0.0, mid_y, -0.02)),
+        Transform::from_translation(Vec3::new(0.0, mid_y, -hd - 0.02)),
         Visibility::Hidden,
     ));
 }
@@ -1358,6 +1393,24 @@ mod tests {
             !on_box_outline(Vec2::ZERO, center, half, CHALK_WIDTH),
             "home plate itself must sit clear of the box outline"
         );
+    }
+
+    /// The zone overlay is a 3D wireframe the size of the rulebook zone:
+    /// plate width, plate depth, knee-to-midpoint tall (docs/BASEBALL.md
+    /// "Strike zone") — and *darker* than the old washed-out white frame
+    /// (every channel below 0.5), with nonzero alpha per the wasm UI rule.
+    #[test]
+    fn zone_wireframe_matches_rulebook_dimensions() {
+        assert!((ZONE_DRAWN_HALF_WIDTH - rules::PLATE_HALF_WIDTH_M).abs() < 1e-6);
+        assert!((ZONE_DEPTH - PLATE_WIDTH).abs() < 1e-6);
+        let c = ZONE_FRAME_COLOR.to_srgba();
+        assert!(
+            c.red < 0.5 && c.green < 0.5 && c.blue < 0.5,
+            "the wireframe should read dark, got {c:?}"
+        );
+        assert!(c.alpha > 0.0, "wasm rule: never spawn at alpha 0");
+        let f = ZONE_FILL_COLOR.to_srgba();
+        assert!(f.alpha > 0.0 && f.alpha < 0.2, "fill stays a whisper");
     }
 
     /// Regression guard: the batter's box must actually clear the plate by
