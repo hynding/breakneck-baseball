@@ -73,15 +73,20 @@ pub(crate) fn late_swing_z(vel_z: f32, foul_ms: f32) -> f32 {
     foul_ms * vel_z.min(-f32::EPSILON) / 1000.0
 }
 
-/// Seconds the result banner lingers before the next pitch.
-const RESULT_SECS: f32 = 1.2;
+/// Seconds the result banner lingers before the next pitch. Live gameplay
+/// reads this off `Ruleset.pace.result_secs`; `Play::default()` keeps this
+/// const as its bootstrap value (no resource access at construction), and
+/// it's `PaceTuning::default()`'s source of truth.
+pub(crate) const RESULT_SECS: f32 = 1.2;
 /// Extra seconds the result pause will wait for runner rigs to finish their
 /// paths (the home-run trot, a first-to-third sprint) before the next batter
 /// steps in — a hard cap so a stray path can never stall the game.
 const RESULT_SETTLE_CAP: f32 = 20.0;
 /// Minimum seconds between pickoff throws — the arm has to reload, so a held
-/// button can't machine-gun the bag.
-const PICKOFF_COOLDOWN_SECS: f32 = 0.9;
+/// button can't machine-gun the bag. Live gameplay reads this off
+/// `Ruleset.pace.pickoff_cooldown_secs`; this const only remains as
+/// `PaceTuning::default()`'s source of truth.
+pub(crate) const PICKOFF_COOLDOWN_SECS: f32 = 0.9;
 /// Backstop on a decided throw still in the air: if the settle report never
 /// arrives (a dropped relay edge case), the pending call is announced after
 /// this many seconds so the game can never hang on presentation.
@@ -482,14 +487,15 @@ fn pre_pitch(
         // pickoff throw at the leading runner, not a pitch — one throw per
         // reload, so a held button can't spam the bag.
         if intent.action && play.pickoff_cooldown.finished() {
-            play.pickoff_cooldown = Timer::from_seconds(PICKOFF_COOLDOWN_SECS, TimerMode::Once);
+            play.pickoff_cooldown =
+                Timer::from_seconds(rules_res.pace.pickoff_cooldown_secs, TimerMode::Once);
             match rules::attempt_pickoff(&mut score, &mut bases, &rules_res, lead.extended) {
                 rules::PickoffResult::PickedOff { .. } => {
                     banner.send(PlayBanner::new("PICKED OFF!", BannerTone::Bad));
                     // A pickoff out is a play: it takes the same result
                     // pause as any other out (banner linger + runners
                     // settling) before the next window can open.
-                    end_pitch(&mut play);
+                    end_pitch(&mut play, rules_res.pace.result_secs);
                 }
                 rules::PickoffResult::SafeBack => {
                     banner.send(PlayBanner::new("BACK IN TIME", BannerTone::Info));
@@ -531,6 +537,7 @@ fn wind_up(
     time: Res<Time>,
     mut play: ResMut<Play>,
     field: Res<FieldSpec>,
+    rules: Res<Ruleset>,
     intents: Res<Intents>,
     score: Res<ScoreBoard>,
     bases: Res<Bases>,
@@ -554,7 +561,12 @@ fn wind_up(
             .take()
             .unwrap_or((Vec2::ZERO, rules::PitchKind::Changeup));
         pitch_ev.send(PitchEvent {
-            velocity: rules::pitch_velocity_kind(kind, aim, field.pitch_distance),
+            velocity: rules::pitch_velocity_kind(
+                kind,
+                aim,
+                field.pitch_distance,
+                rules.pace.pitch_speed_scale,
+            ),
             spin: kind.spin(),
         });
         play.live_kind = Some(kind);
@@ -702,7 +714,7 @@ fn pitch_live(
                 rules::foul(&mut score, &rules);
                 banner.send(PlayBanner::new("FOUL", BannerTone::Info));
                 play.pitch_taken = true; // the catcher gloves the tipped ball
-                end_pitch(&mut play);
+                end_pitch(&mut play, rules.pace.result_secs);
             }
             // A swing and miss — exactly today's whiff path.
             rules::ContactQuality::Whiff => {
@@ -722,7 +734,7 @@ fn pitch_live(
                 if play.steal_armed {
                     resolve_steal(&play, &mut score, &mut bases, &rules, &mut banner);
                 }
-                end_pitch(&mut play);
+                end_pitch(&mut play, rules.pace.result_secs);
             }
         }
         return;
@@ -760,7 +772,7 @@ fn pitch_live(
                 resolve_steal(&play, &mut score, &mut bases, &rules, &mut banner);
             }
         }
-        end_pitch(&mut play);
+        end_pitch(&mut play, rules.pace.result_secs);
     }
 }
 
@@ -877,14 +889,14 @@ fn catcher_receives(
 /// timer runs out; unresolved plays are force-called by `resolve_live_play`,
 /// and a decided-but-unannounced throw waits there too (the announcement is
 /// what flips the phase).
-fn in_play(mut play: ResMut<Play>, time: Res<Time>) {
+fn in_play(mut play: ResMut<Play>, time: Res<Time>, rules: Res<Ruleset>) {
     if play.phase != Phase::InPlay {
         return;
     }
     play.timer.tick(time.delta());
     if play.resolved && play.pending_call.is_none() && play.timer.finished() {
         play.phase = Phase::Result;
-        play.timer = Timer::from_seconds(RESULT_SECS, TimerMode::Once);
+        play.timer = Timer::from_seconds(rules.pace.result_secs, TimerMode::Once);
     }
 }
 
@@ -929,7 +941,7 @@ fn resolve_live_play(
                 order.advance(batter);
             }
             play.phase = Phase::Result;
-            play.timer = Timer::from_seconds(RESULT_SECS, TimerMode::Once);
+            play.timer = Timer::from_seconds(rules_res.pace.result_secs, TimerMode::Once);
         }
         return;
     }
@@ -1007,7 +1019,7 @@ fn resolve_live_play(
     }
     play.resolved = true;
     play.phase = Phase::Result;
-    play.timer = Timer::from_seconds(RESULT_SECS, TimerMode::Once);
+    play.timer = Timer::from_seconds(rules_res.pace.result_secs, TimerMode::Once);
 }
 
 // ── Result: brief pause, then reset for the next pitch ────────────────────────
@@ -1265,9 +1277,9 @@ fn add_strike(
     call
 }
 
-fn end_pitch(play: &mut Play) {
+fn end_pitch(play: &mut Play, result_secs: f32) {
     play.phase = Phase::Result;
-    play.timer = Timer::from_seconds(RESULT_SECS, TimerMode::Once);
+    play.timer = Timer::from_seconds(result_secs, TimerMode::Once);
     play.resolved = true;
 }
 

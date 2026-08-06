@@ -11,7 +11,7 @@ use bevy::math::{Vec2, Vec3};
 use bevy::prelude::Resource;
 
 use crate::game::ball::BALL_RADIUS;
-use crate::game::variant::{FieldSpec, Ruleset};
+use crate::game::variant::{FieldSpec, PaceTuning, Ruleset};
 use crate::game::{ScoreBoard, Team};
 
 // ── Tuning constants ──────────────────────────────────────────────────────────
@@ -61,26 +61,29 @@ const TAG_UP_MIN_DIST: f32 = 65.0;
 // The outcome of a ball in play is decided *during* the play by kinematic
 // races between the live simulation and these speeds — never at contact.
 
+// These are now read live off `Ruleset.pace` (see [`crate::game::variant::PaceTuning`])
+// by every function below — the values here only remain as `PaceTuning::default()`'s
+// source of truth, so `pub(crate)` (not `pub`) is enough.
 /// Base-runner sprint speed (m/s) — shared with the runner rigs so the
 /// animation and the umpire agree.
-pub const RUNNER_SPEED: f32 = 7.5;
+pub(crate) const RUNNER_SPEED: f32 = 7.5;
 /// Fielder sprint speed — matches the fielding choreography's chase speed.
-pub const FIELDER_SPEED: f32 = 7.0;
+pub(crate) const FIELDER_SPEED: f32 = 7.0;
 /// First-step reaction delay for fielders and runners alike.
-const REACTION: f32 = 0.35;
+pub(crate) const REACTION: f32 = 0.35;
 /// Throw flight speed and glove-to-hand transfer time.
-const THROW_FLIGHT_SPEED: f32 = 27.0;
-const THROW_TRANSFER: f32 = 0.5;
+pub(crate) const THROW_FLIGHT_SPEED: f32 = 27.0;
+pub(crate) const THROW_TRANSFER: f32 = 0.5;
 /// A relay (catch-and-rethrow at a bag) turns faster than a gather.
-const RELAY_TRANSFER: f32 = 0.3;
+pub(crate) const RELAY_TRANSFER: f32 = 0.3;
 /// Head start a hit-and-run jump gives every forced runner (they broke with
 /// the windup, not at contact).
-const HIT_AND_RUN_JUMP: f32 = 1.6;
+pub(crate) const HIT_AND_RUN_JUMP: f32 = 1.6;
 /// Extra grace a sent batter gets stretching for the next base — the throw
 /// is usually going somewhere else, so the race is softer than the walk.
-const STRETCH_GRACE: f32 = 0.9;
+pub(crate) const STRETCH_GRACE: f32 = 0.9;
 /// Bang-bang margin: ties and near-ties go to the runner.
-const RUNNER_MARGIN: f32 = 0.35;
+pub(crate) const RUNNER_MARGIN: f32 = 0.35;
 /// Gathers beyond this radius (scaled by hit_scale) concede first base — the
 /// out at first is only contested on infield balls.
 const INFIELD_GATHER_RADIUS: f32 = 30.0;
@@ -311,8 +314,17 @@ impl PitchKind {
 /// `pitch_distance` aimed at plate location `(aim.x, aim.y)` (both in
 /// −1.0..=1.0, zero = middle of the zone). Deliberately gravity-only: the
 /// kind's spin then bends the flight (fastballs ride, curveballs dive), so a
-/// pitch's character *is* its physics.
-pub fn pitch_velocity_kind(kind: PitchKind, aim: Vec2, pitch_distance: f32) -> Vec3 {
+/// pitch's character *is* its physics. `pitch_speed_scale`
+/// (`PaceTuning::pitch_speed_scale`) scales `kind.speed()` at release — the
+/// one dial that speeds up or slows down every pitch in the arsenal — before
+/// the ballistic solve, so the scaled flight time keeps the aim accurate at
+/// any scale, not just 1.0.
+pub fn pitch_velocity_kind(
+    kind: PitchKind,
+    aim: Vec2,
+    pitch_distance: f32,
+    pitch_speed_scale: f32,
+) -> Vec3 {
     // Wide enough that a full-inside aim reaches the batter's body — painting
     // the inside corner risks a hit-by-pitch. Negated: stick-right means
     // screen-right, which the behind-home camera renders as world −X.
@@ -322,7 +334,7 @@ pub fn pitch_velocity_kind(kind: PitchKind, aim: Vec2, pitch_distance: f32) -> V
     // zone edge to just outside it — full-up still paints above the
     // letters, full-down still bounces the curve in the dirt.
     let target_y = (ZONE_LOW + ZONE_HIGH) / 2.0 + aim.y * 0.45;
-    let speed = kind.speed();
+    let speed = kind.speed() * pitch_speed_scale;
 
     let start = mound_reset_pos(pitch_distance);
     let flight = pitch_distance / speed;
@@ -536,17 +548,23 @@ pub fn fence_at(pos: Vec3, field: &FieldSpec) -> f32 {
 }
 
 /// Time for a fielder at `from` to reach `landing`, first step included.
-pub fn catch_time(from: Vec3, landing: Vec3) -> f32 {
-    REACTION + Vec2::new(landing.x - from.x, landing.z - from.z).length() / FIELDER_SPEED
+pub fn catch_time(from: Vec3, landing: Vec3, pace: &PaceTuning) -> f32 {
+    pace.reaction_secs
+        + Vec2::new(landing.x - from.x, landing.z - from.z).length() / pace.fielder_speed
 }
 
 /// The fielder (index into `fielders`) best placed to catch a ball landing at
 /// `landing` after `hang` seconds — `None` if nobody can make it.
-pub fn best_catcher(fielders: &[Vec3], landing: Vec3, hang: f32) -> Option<usize> {
+pub fn best_catcher(
+    fielders: &[Vec3],
+    landing: Vec3,
+    hang: f32,
+    pace: &PaceTuning,
+) -> Option<usize> {
     fielders
         .iter()
         .enumerate()
-        .map(|(i, f)| (i, catch_time(*f, landing)))
+        .map(|(i, f)| (i, catch_time(*f, landing, pace)))
         .filter(|(_, t)| *t <= hang)
         .min_by(|a, b| a.1.total_cmp(&b.1))
         .map(|(i, _)| i)
@@ -579,17 +597,18 @@ pub fn resolve_gathered(
     rules: &Ruleset,
 ) -> Outcome {
     let leg = field.base_positions.first().map_or(27.43, |b| b.length());
-    let runner_at = |base: usize| REACTION + leg * base as f32 / RUNNER_SPEED;
+    let runner_at =
+        |base: usize| rules.pace.reaction_secs + leg * base as f32 / rules.pace.runner_speed;
     let throw_at = |target: Vec3| {
         gather_time
-            + THROW_TRANSFER
-            + Vec2::new(target.x - pos.x, target.z - pos.z).length() / THROW_FLIGHT_SPEED
+            + rules.pace.throw_transfer_secs
+            + Vec2::new(target.x - pos.x, target.z - pos.z).length() / rules.pace.throw_speed
     };
     let safe = |base: usize| {
         field
             .base_positions
             .get(base - 1)
-            .is_some_and(|bp| runner_at(base) <= throw_at(*bp) + RUNNER_MARGIN)
+            .is_some_and(|bp| runner_at(base) <= throw_at(*bp) + rules.pace.runner_margin_secs)
     };
 
     let from_home = Vec2::new(pos.x, pos.z).length();
@@ -624,38 +643,39 @@ pub fn throw_target(
     bases: &Bases,
     runners_going: bool,
     field: &FieldSpec,
+    pace: &PaceTuning,
 ) -> usize {
     let leg = field.base_positions.first().map_or(27.43, |b| b.length());
     // Every forced runner (batter included) sprints exactly one base from a
     // standing start at contact, so one clock covers them all — minus the
     // jump when the runners broke with the windup.
-    let runner_at = forced_runner_at(leg, runners_going);
+    let runner_at = forced_runner_at(leg, runners_going, pace);
     let throw_at = |target: Vec3| {
         gather_time
-            + THROW_TRANSFER
-            + Vec2::new(target.x - pos.x, target.z - pos.z).length() / THROW_FLIGHT_SPEED
+            + pace.throw_transfer_secs
+            + Vec2::new(target.x - pos.x, target.z - pos.z).length() / pace.throw_speed
     };
     let base_pos = |b: usize| home_or_base(b, field);
 
     // Take the biggest force out the throw still beats. The batter never
     // has the jump, so first base races on the standing-start clock.
-    let batter_at = forced_runner_at(leg, false);
+    let batter_at = forced_runner_at(leg, false, pace);
     let mut b = lead_force(bases, field);
     loop {
         let clock = if b == 0 { batter_at } else { runner_at };
-        if clock > throw_at(base_pos(b)) + RUNNER_MARGIN {
+        if clock > throw_at(base_pos(b)) + pace.runner_margin_secs {
             return b;
         }
         if b == 0 {
             // No out is winnable anywhere: throw ahead of the batter, to
             // the bag he'll finish on (the same walk [`resolve_thrown`]
             // concedes) — the play the crowd expects to see attempted.
-            let batter_reaches = |base: usize| REACTION + leg * base as f32 / RUNNER_SPEED;
+            let batter_reaches =
+                |base: usize| pace.reaction_secs + leg * base as f32 / pace.runner_speed;
             let safe = |base: usize| {
-                field
-                    .base_positions
-                    .get(base - 1)
-                    .is_some_and(|bp| batter_reaches(base) <= throw_at(*bp) + RUNNER_MARGIN)
+                field.base_positions.get(base - 1).is_some_and(|bp| {
+                    batter_reaches(base) <= throw_at(*bp) + pace.runner_margin_secs
+                })
             };
             let mut n = 1;
             while n < field.base_count() && safe(n + 1) {
@@ -669,8 +689,13 @@ pub fn throw_target(
 
 /// One forced runner's time to the next bag: a standing start at contact,
 /// minus the hit-and-run head start when the runners broke with the windup.
-fn forced_runner_at(leg: f32, going: bool) -> f32 {
-    REACTION + leg / RUNNER_SPEED - if going { HIT_AND_RUN_JUMP } else { 0.0 }
+fn forced_runner_at(leg: f32, going: bool, pace: &PaceTuning) -> f32 {
+    pace.reaction_secs + leg / pace.runner_speed
+        - if going {
+            pace.hit_and_run_jump_secs
+        } else {
+            0.0
+        }
 }
 
 /// World position of base `b`, where `b == base_count()` means home plate.
@@ -725,8 +750,8 @@ pub fn resolve_thrown(
     let leg = field.base_positions.first().map_or(27.43, |b| b.length());
     let throw_at = |p: Vec3| {
         throw_time
-            + THROW_TRANSFER
-            + Vec2::new(p.x - pos.x, p.z - pos.z).length() / THROW_FLIGHT_SPEED
+            + rules.pace.throw_transfer_secs
+            + Vec2::new(p.x - pos.x, p.z - pos.z).length() / rules.pace.throw_speed
     };
     let base_pos = |b: usize| home_or_base(b, field);
     let flat_dist = |a: Vec3, b: Vec3| Vec2::new(a.x - b.x, a.z - b.z).length();
@@ -735,13 +760,13 @@ pub fn resolve_thrown(
     let infield = from_home < INFIELD_GATHER_RADIUS * field.hit_scale;
     let runner_clock = if target == 0 {
         // The batter is the forced runner at first and never has the jump.
-        forced_runner_at(leg, false)
+        forced_runner_at(leg, false, &rules.pace)
     } else {
-        forced_runner_at(leg, runners_going)
+        forced_runner_at(leg, runners_going, &rules.pace)
     };
     if target <= lead_force(bases, field)
         && infield
-        && runner_clock > throw_at(base_pos(target)) + RUNNER_MARGIN
+        && runner_clock > throw_at(base_pos(target)) + rules.pace.runner_margin_secs
     {
         if target == 0 {
             // The sure out at first: just the batter.
@@ -753,21 +778,23 @@ pub fn resolve_thrown(
         }
         // Forced runner retired; the relay to first races the batter.
         let relay_arrival = throw_at(base_pos(target))
-            + RELAY_TRANSFER
-            + flat_dist(base_pos(target), base_pos(0)) / THROW_FLIGHT_SPEED;
-        if forced_runner_at(leg, false) > relay_arrival + RUNNER_MARGIN {
+            + rules.pace.relay_transfer_secs
+            + flat_dist(base_pos(target), base_pos(0)) / rules.pace.throw_speed;
+        if forced_runner_at(leg, false, &rules.pace) > relay_arrival + rules.pace.runner_margin_secs
+        {
             return Outcome::DoublePlay;
         }
         return Outcome::FieldersChoice { out_base: target };
     }
 
     // No out on the throw: the batter takes every base it can't beat.
-    let batter_at = |base: usize| REACTION + leg * base as f32 / RUNNER_SPEED;
+    let batter_at =
+        |base: usize| rules.pace.reaction_secs + leg * base as f32 / rules.pace.runner_speed;
     let safe = |base: usize| {
         field
             .base_positions
             .get(base - 1)
-            .is_some_and(|bp| batter_at(base) <= throw_at(*bp) + RUNNER_MARGIN)
+            .is_some_and(|bp| batter_at(base) <= throw_at(*bp) + rules.pace.runner_margin_secs)
     };
     let mut n = 1;
     while n < field.base_count() && safe(n + 1) {
@@ -778,7 +805,11 @@ pub fn resolve_thrown(
         // but getting it wrong is an out on the bases.
         RunnerCall::Send if n < field.base_count() => {
             let stretch_to = field.base_positions[n];
-            if batter_at(n + 1) <= throw_at(stretch_to) + RUNNER_MARGIN + STRETCH_GRACE {
+            if batter_at(n + 1)
+                <= throw_at(stretch_to)
+                    + rules.pace.runner_margin_secs
+                    + rules.pace.stretch_grace_secs
+            {
                 Outcome::Hit(n as u32 + 1)
             } else {
                 Outcome::Out(OutKind::Stretching { advanced: n as u32 })
@@ -1446,6 +1477,10 @@ mod tests {
 
     fn std_rules() -> Ruleset {
         VariantId::Standard.rules()
+    }
+
+    fn pace() -> PaceTuning {
+        PaceTuning::default()
     }
 
     fn empty() -> Bases {
@@ -2238,14 +2273,26 @@ mod tests {
         // A can-of-corn to shallow centre hangs ~3 s; the middle infield
         // reaches it with time to spare.
         let f = std_field();
-        assert!(best_catcher(&f.fielder_positions, Vec3::new(0.0, 0.0, 44.0), 3.0).is_some());
+        assert!(best_catcher(
+            &f.fielder_positions,
+            Vec3::new(0.0, 0.0, 44.0),
+            3.0,
+            &PaceTuning::default()
+        )
+        .is_some());
     }
 
     #[test]
     fn sinking_liner_falls_in() {
         // A liner dying at 55 m hangs ~1.5 s: nobody can get there.
         let f = std_field();
-        assert!(best_catcher(&f.fielder_positions, Vec3::new(0.0, 0.0, 55.0), 1.5).is_none());
+        assert!(best_catcher(
+            &f.fielder_positions,
+            Vec3::new(0.0, 0.0, 55.0),
+            1.5,
+            &PaceTuning::default()
+        )
+        .is_none());
     }
 
     #[test]
@@ -2311,7 +2358,14 @@ mod tests {
     #[test]
     fn bases_empty_throws_to_first() {
         assert_eq!(
-            throw_target(Vec3::new(0.0, 0.0, 7.0), 1.2, &empty(), false, &std_field()),
+            throw_target(
+                Vec3::new(0.0, 0.0, 7.0),
+                1.2,
+                &empty(),
+                false,
+                &std_field(),
+                &pace()
+            ),
             0
         );
     }
@@ -2326,7 +2380,8 @@ mod tests {
                 1.2,
                 &with(&[0]),
                 false,
-                &std_field()
+                &std_field(),
+                &pace()
             ),
             1
         );
@@ -2341,7 +2396,8 @@ mod tests {
                 1.2,
                 &with(&[1]),
                 false,
-                &std_field()
+                &std_field(),
+                &pace()
             ),
             0
         );
@@ -2351,7 +2407,14 @@ mod tests {
     fn bases_loaded_forces_the_play_at_home() {
         let field = std_field();
         assert_eq!(
-            throw_target(Vec3::new(-5.0, 0.0, 10.0), 0.8, &loaded(), false, &field),
+            throw_target(
+                Vec3::new(-5.0, 0.0, 10.0),
+                0.8,
+                &loaded(),
+                false,
+                &field,
+                &pace()
+            ),
             field.base_count()
         );
     }
@@ -2366,7 +2429,8 @@ mod tests {
                 6.0,
                 &with(&[0]),
                 false,
-                &std_field()
+                &std_field(),
+                &pace()
             ),
             0
         );
@@ -2382,7 +2446,8 @@ mod tests {
                 6.5,
                 &empty(),
                 false,
-                &std_field()
+                &std_field(),
+                &pace()
             ),
             1
         );
@@ -2394,8 +2459,14 @@ mod tests {
         // second — but with the windup jump the throw can't win there, so
         // the smart throw goes to first instead.
         let pos = Vec3::new(0.0, 0.0, 20.0);
-        assert_eq!(throw_target(pos, 1.2, &with(&[0]), false, &std_field()), 1);
-        assert_eq!(throw_target(pos, 1.2, &with(&[0]), true, &std_field()), 0);
+        assert_eq!(
+            throw_target(pos, 1.2, &with(&[0]), false, &std_field(), &pace()),
+            1
+        );
+        assert_eq!(
+            throw_target(pos, 1.2, &with(&[0]), true, &std_field(), &pace()),
+            0
+        );
     }
 
     // ── Thrown-ball resolution ────────────────────────────────────────────────
@@ -2697,7 +2768,7 @@ mod tests {
     fn simulate_pitch(kind: PitchKind, aim: Vec2) -> Vec2 {
         let pitch_distance = std_field().pitch_distance;
         let mut pos = mound_reset_pos(pitch_distance);
-        let mut vel = pitch_velocity_kind(kind, aim, pitch_distance);
+        let mut vel = pitch_velocity_kind(kind, aim, pitch_distance, 1.0);
         let spin = kind.spin();
         let dt = 1.0 / 240.0;
 
@@ -2734,7 +2805,7 @@ mod tests {
     #[test]
     fn neutral_aim_targets_zone_middle() {
         let kind = PitchKind::Changeup;
-        let v = pitch_velocity_kind(kind, Vec2::ZERO, 18.44);
+        let v = pitch_velocity_kind(kind, Vec2::ZERO, 18.44, 1.0);
         let flight = 18.44 / kind.speed();
         let start = mound_reset_pos(18.44);
         let y_at_plate = start.y + v.y * flight - 0.5 * GRAVITY * flight * flight;

@@ -18,6 +18,7 @@ use crate::game::field::{HALF_DIAGONAL, PITCH_DISTANCE};
 pub struct Ruleset {
     pub counts: CountRules,
     pub batting: BattingTuning,
+    pub pace: PaceTuning,
 }
 
 /// Count thresholds and window rules.
@@ -75,6 +76,71 @@ pub struct BattingTuning {
     pub cpu_timing_spread_ms: f32,
     /// PCI cursor radius (metres) — where timing windows shrink to zero per spec §3.
     pub pci_radius_m: f32,
+}
+
+/// Speeds, delays, and race clocks — the game's pace. Defaults are the
+/// long-standing module constants; `tests/balance_sim.rs` arbitrates changes.
+#[derive(Clone, Debug)]
+pub struct PaceTuning {
+    /// Scales every `PitchKind::speed()` at release (1.0 = the kind table).
+    /// This is how the spec's `PITCH_SPEED` promotion lands: one dial for
+    /// all five pitches instead of a fastball-only field.
+    pub pitch_speed_scale: f32,
+    /// Base-runner sprint speed (m/s) — was `rules::RUNNER_SPEED`.
+    pub runner_speed: f32,
+    /// Fielder sprint speed (m/s) — was `rules::FIELDER_SPEED`.
+    pub fielder_speed: f32,
+    /// First-step reaction delay for fielders and runners alike — was
+    /// `rules::REACTION`.
+    pub reaction_secs: f32,
+    /// Throw flight speed (m/s) — was `rules::THROW_FLIGHT_SPEED`.
+    pub throw_speed: f32,
+    /// Glove-to-hand transfer time for a gather — was `rules::THROW_TRANSFER`.
+    pub throw_transfer_secs: f32,
+    /// Glove-to-hand transfer time for a relay — was `rules::RELAY_TRANSFER`.
+    pub relay_transfer_secs: f32,
+    /// Head start a hit-and-run jump gives every forced runner — was
+    /// `rules::HIT_AND_RUN_JUMP`.
+    pub hit_and_run_jump_secs: f32,
+    /// Extra grace a sent batter gets stretching for the next base — was
+    /// `rules::STRETCH_GRACE`.
+    pub stretch_grace_secs: f32,
+    /// Bang-bang margin: ties and near-ties go to the runner — was
+    /// `rules::RUNNER_MARGIN`.
+    pub runner_margin_secs: f32,
+    /// Seconds the result banner lingers before the next pitch — was
+    /// `flow::RESULT_SECS`.
+    pub result_secs: f32,
+    /// Minimum seconds between pickoff throws — was
+    /// `flow::PICKOFF_COOLDOWN_SECS`.
+    pub pickoff_cooldown_secs: f32,
+    /// How long the holder waits for a manual throw before auto-throwing —
+    /// was `fielding::AUTO_THROW_DELAY`.
+    pub auto_throw_delay_secs: f32,
+}
+
+impl Default for PaceTuning {
+    /// Sourced straight from the long-standing module constants they promote
+    /// — this is the single source of truth those consts now feed, so the
+    /// two can never quietly drift apart.
+    fn default() -> Self {
+        use crate::game::{fielding, flow, rules};
+        Self {
+            pitch_speed_scale: 1.0,
+            runner_speed: rules::RUNNER_SPEED,
+            fielder_speed: rules::FIELDER_SPEED,
+            reaction_secs: rules::REACTION,
+            throw_speed: rules::THROW_FLIGHT_SPEED,
+            throw_transfer_secs: rules::THROW_TRANSFER,
+            relay_transfer_secs: rules::RELAY_TRANSFER,
+            hit_and_run_jump_secs: rules::HIT_AND_RUN_JUMP,
+            stretch_grace_secs: rules::STRETCH_GRACE,
+            runner_margin_secs: rules::RUNNER_MARGIN,
+            result_secs: flow::RESULT_SECS,
+            pickoff_cooldown_secs: flow::PICKOFF_COOLDOWN_SECS,
+            auto_throw_delay_secs: fielding::AUTO_THROW_DELAY,
+        }
+    }
 }
 
 /// Menu-selectable regulation game lengths.
@@ -204,6 +270,7 @@ impl VariantId {
                     cpu_timing_spread_ms: 225.0,
                     pci_radius_m: 0.20,
                 },
+                pace: PaceTuning::default(),
             },
             // Kid's rules: short games, outs by pegging the runner.
             VariantId::FrontYard => Ruleset {
@@ -226,6 +293,7 @@ impl VariantId {
                     cpu_timing_spread_ms: 225.0,
                     pci_radius_m: 0.20,
                 },
+                pace: PaceTuning::default(),
             },
         }
     }
@@ -367,6 +435,24 @@ impl VariantId {
 mod tests {
     use super::*;
     use crate::game::field::BASE_DISTANCE;
+
+    #[test]
+    fn pace_defaults_match_legacy_constants() {
+        let p = PaceTuning::default();
+        assert_eq!(p.pitch_speed_scale, 1.0);
+        assert_eq!(p.runner_speed, 7.5);
+        assert_eq!(p.fielder_speed, 7.0);
+        assert_eq!(p.reaction_secs, 0.35);
+        assert_eq!(p.throw_speed, 27.0);
+        assert_eq!(p.throw_transfer_secs, 0.5);
+        assert_eq!(p.relay_transfer_secs, 0.3);
+        assert_eq!(p.hit_and_run_jump_secs, 1.6);
+        assert_eq!(p.stretch_grace_secs, 0.9);
+        assert_eq!(p.runner_margin_secs, 0.35);
+        assert_eq!(p.result_secs, 1.2);
+        assert_eq!(p.pickoff_cooldown_secs, 0.9);
+        assert_eq!(p.auto_throw_delay_secs, 0.6);
+    }
 
     #[test]
     fn standard_matches_regulation_baseball() {

@@ -7,11 +7,9 @@ use crate::game::animation::{AnimClip, MoveIntent, Playing};
 use crate::game::flow::{BallInPlayEvent, LeadState, LiveBallEvent, Phase, Play};
 use crate::game::player::{spawn_rig, Batter, RigModel, RigUnit, TeamPalette};
 use crate::game::rules::{self, Bases, ContactKind, RunnerBreak};
-use crate::game::variant::FieldSpec;
+use crate::game::variant::{FieldSpec, Ruleset};
 use crate::game::{GameState, ScoreBoard};
 
-/// Matches `rules::RUNNER_SPEED` so the rigs arrive when the umpire says.
-const RUN_SPEED: f32 = crate::game::rules::RUNNER_SPEED;
 /// Rig-root height above the base pad.
 const RIG_Y: f32 = 0.6;
 /// Where a new runner starts (the batter's box).
@@ -115,6 +113,7 @@ fn path_home(field: &FieldSpec, from: usize) -> Vec<Vec3> {
 /// Rigs still serving their [`RunDelay`] hold at the plate.
 #[allow(clippy::type_complexity)]
 fn advance_paths(
+    ruleset: Res<Ruleset>,
     mut movers: Query<
         (
             Entity,
@@ -132,7 +131,7 @@ fn advance_paths(
         }
         if path.next < path.waypoints.len() {
             intent.target = Some(path.waypoints[path.next]);
-            intent.speed = RUN_SPEED;
+            intent.speed = ruleset.pace.runner_speed;
             path.next += 1;
         } else if despawn.is_some() {
             commands.entity(entity).despawn_recursive();
@@ -163,6 +162,7 @@ fn take_leadoffs(
     lead: Res<LeadState>,
     bases: Res<Bases>,
     field: Res<FieldSpec>,
+    ruleset: Res<Ruleset>,
     mut runners: Query<
         (&Runner, &Transform, &mut MoveIntent),
         (Without<BasePath>, Without<Breaking>),
@@ -179,7 +179,7 @@ fn take_leadoffs(
                 // He's off with the pitch — the resolution at the catcher
                 // will repath him (safe) or send him off (caught).
                 intent.target = Some(next);
-                intent.speed = RUN_SPEED;
+                intent.speed = ruleset.pace.runner_speed;
                 continue;
             }
             let dist = if lead.extended {
@@ -536,6 +536,7 @@ fn read_break_reads(
 #[allow(clippy::type_complexity)]
 fn drive_breaks(
     field: Res<FieldSpec>,
+    ruleset: Res<Ruleset>,
     mut runners: Query<(&Runner, &Breaking, &Transform, &mut MoveIntent), Without<BasePath>>,
 ) {
     for (runner, breaking, tf, mut intent) in &mut runners {
@@ -548,7 +549,7 @@ fn drive_breaks(
         };
         if (tf.translation - target).length() > 0.25 {
             intent.target = Some(target);
-            intent.speed = RUN_SPEED;
+            intent.speed = ruleset.pace.runner_speed;
         }
     }
 }

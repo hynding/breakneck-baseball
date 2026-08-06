@@ -23,9 +23,8 @@ use crate::game::rules;
 use crate::game::variant::{FieldSpec, Ruleset};
 use crate::game::{GameState, ScoreBoard};
 
-/// Sprint speed while chasing (m/s) — mirrors `rules::FIELDER_SPEED` so the
-/// race maths and the legs agree — and jog speed returning to position.
-const CHASE_SPEED: f32 = rules::FIELDER_SPEED;
+/// Jog speed returning to position — chase speed itself now lives at
+/// `Ruleset.pace.fielder_speed` (was `rules::FIELDER_SPEED`).
 const RETURN_SPEED: f32 = 4.0;
 /// Horizontal distance that counts as "on the ball".
 const REACH: f32 = 0.9;
@@ -35,7 +34,9 @@ const BOUNCE_HEIGHT: f32 = 0.25;
 /// Horizontal speed of a cosmetic lob throw.
 const THROW_SPEED: f32 = 16.0;
 /// How long the holder waits for a manual throw before making the smart one.
-const AUTO_THROW_DELAY: f32 = 0.6;
+/// Live gameplay reads this off `Ruleset.pace.auto_throw_delay_secs`; this
+/// const only remains as `PaceTuning::default()`'s source of truth.
+pub(crate) const AUTO_THROW_DELAY: f32 = 0.6;
 /// How far beyond the landing spot the backup fielder stations itself.
 const BACKUP_DEPTH: f32 = 6.0;
 /// How far inside the wall an aerial intercept is allowed to plan.
@@ -122,9 +123,11 @@ fn cover_pos(field: &FieldSpec, base: usize) -> Vec3 {
 fn assign_on_contact(
     mut events: EventReader<BallInPlayEvent>,
     field: Res<FieldSpec>,
+    ruleset: Res<Ruleset>,
     mut fielders: Query<(Entity, &Transform, &mut MoveIntent), With<Fielder>>,
     mut active: ResMut<ActivePlay>,
 ) {
+    let pace = &ruleset.pace;
     for ev in events.read() {
         let target = cap_inside_fence(ev.landing, &field, INTERCEPT_FENCE_MARGIN);
 
@@ -134,14 +137,14 @@ fn assign_on_contact(
             .map(|(entity, tf, _)| (entity, tf.translation))
             .collect();
         ranked.sort_by(|a, b| {
-            rules::catch_time(a.1, target).total_cmp(&rules::catch_time(b.1, target))
+            rules::catch_time(a.1, target, pace).total_cmp(&rules::catch_time(b.1, target, pace))
         });
         let Some(&(chaser, _)) = ranked.first() else {
             continue;
         };
         if let Ok((_, _, mut intent)) = fielders.get_mut(chaser) {
             intent.target = Some(target);
-            intent.speed = CHASE_SPEED;
+            intent.speed = pace.fielder_speed;
         }
 
         // Cover every base (home included) with the nearest free fielder.
@@ -166,7 +169,7 @@ fn assign_on_contact(
             let (coverer, _) = free.remove(i);
             if let Ok((_, _, mut intent)) = fielders.get_mut(coverer) {
                 intent.target = Some(spot);
-                intent.speed = CHASE_SPEED;
+                intent.speed = pace.fielder_speed;
             }
             active.cover.push((base, coverer));
         }
@@ -179,7 +182,7 @@ fn assign_on_contact(
                 cap_inside_fence(target + out * BACKUP_DEPTH, &field, INTERCEPT_FENCE_MARGIN);
             if let Ok((_, _, mut intent)) = fielders.get_mut(backup) {
                 intent.target = Some(spot);
-                intent.speed = CHASE_SPEED;
+                intent.speed = pace.fielder_speed;
             }
         }
 
@@ -205,6 +208,7 @@ fn chase_and_gather(
     mut active: ResMut<ActivePlay>,
     play: Res<Play>,
     field: Res<FieldSpec>,
+    ruleset: Res<Ruleset>,
     mut ball_q: Query<(Entity, &Transform, &mut Velocity), With<Baseball>>,
     mut fielders: Query<(Entity, &Transform, &mut MoveIntent), With<Fielder>>,
     mut reports: EventWriter<LiveBallEvent>,
@@ -270,7 +274,7 @@ fn chase_and_gather(
         );
         if let Ok((_, _, mut intent)) = fielders.get_mut(chaser) {
             intent.target = Some(cap_inside_fence(landing, &field, INTERCEPT_FENCE_MARGIN));
-            intent.speed = CHASE_SPEED;
+            intent.speed = ruleset.pace.fielder_speed;
         }
         return;
     }
@@ -293,7 +297,7 @@ fn chase_and_gather(
         };
     } else if let Ok((_, _, mut intent)) = fielders.get_mut(chaser) {
         intent.target = Some(cap_inside_fence(ball_pos, &field, GROUND_FENCE_MARGIN));
-        intent.speed = CHASE_SPEED;
+        intent.speed = ruleset.pace.fielder_speed;
     }
 }
 
@@ -348,8 +352,15 @@ fn hold_and_throw(
     let going = play.runners_going();
     let (base, throw_time) = if let Some(base) = manual {
         (base, play.since_contact(now))
-    } else if now - held_at >= AUTO_THROW_DELAY {
-        let target = rules::throw_target(ball_tf.translation, race_time, &bases, going, &field);
+    } else if now - held_at >= ruleset.pace.auto_throw_delay_secs {
+        let target = rules::throw_target(
+            ball_tf.translation,
+            race_time,
+            &bases,
+            going,
+            &field,
+            &ruleset.pace,
+        );
         (target, race_time)
     } else {
         return;
@@ -477,12 +488,14 @@ fn receive_throw(
 /// throw selector) instead of the auto intercept — risk and reward, since a
 /// missed route means a dropped-in hit. Runs after `chase_and_gather` so the
 /// override wins the frame; the CPU never steers.
+#[allow(clippy::too_many_arguments)]
 fn steer_chaser(
     play: Res<Play>,
     score: Res<ScoreBoard>,
     controllers: Res<Controllers>,
     intents: Res<Intents>,
     field: Res<FieldSpec>,
+    ruleset: Res<Ruleset>,
     active: Res<ActivePlay>,
     mut fielders: Query<(&Transform, &mut MoveIntent), With<Fielder>>,
 ) {
@@ -506,7 +519,7 @@ fn steer_chaser(
             &field,
             GROUND_FENCE_MARGIN,
         ));
-        intent.speed = CHASE_SPEED;
+        intent.speed = ruleset.pace.fielder_speed;
     }
 }
 
