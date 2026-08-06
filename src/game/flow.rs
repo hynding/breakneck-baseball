@@ -610,6 +610,7 @@ fn pitch_live(
     mut contact_ev: EventWriter<ContactEvent>,
     mut banner: EventWriter<PlayBanner>,
     mut order: ResMut<BattingOrder>,
+    #[cfg(feature = "debug")] forced: Res<crate::game::debug::ForcedContact>,
 ) {
     if play.phase != Phase::Pitch || play.resolved {
         return;
@@ -644,7 +645,8 @@ fn pitch_live(
         let dt_ms = swing_dt_ms(pos.z, ball_vel.linvel.z);
         // Classic/Meter grade on timing alone; PCI also folds in how far the
         // aiming cursor sat from the ball at the contact point (spec §3).
-        let quality = if !reachable {
+        #[allow(unused_mut)]
+        let mut quality = if !reachable {
             rules::ContactQuality::Whiff
         } else if let Some(cursor) = swing.pci_offset {
             let miss = cursor.distance(Vec2::new(pos.x, pos.y));
@@ -652,6 +654,10 @@ fn pitch_live(
         } else {
             rules::contact_quality(dt_ms, &rules)
         };
+        #[cfg(feature = "debug")]
+        if let Some(f) = forced.0 {
+            quality = f;
+        }
         // Direction: PCI derives it from the contact-point offset (spec §3);
         // Classic/Meter use the raw aim held at the swing.
         let aim = match swing.pci_offset {

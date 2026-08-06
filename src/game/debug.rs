@@ -33,13 +33,20 @@ pub struct DebugState {
     pub tab: DebugTab,
     pub gizmos: GizmoToggles,
     pub last_error: Option<&'static str>,
+    pub custom: crate::game::scenario::Scenario,
 }
+
+/// Pins every judged swing's grade — deterministic swing-outcome testing.
+/// Debug-only: read by `flow`'s swing site through a cfg-gated param.
+#[derive(Resource, Default, Clone, Copy)]
+pub struct ForcedContact(pub Option<crate::game::rules::ContactQuality>);
 
 pub struct DebugPlugin;
 
 impl Plugin for DebugPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DebugState>()
+            .init_resource::<ForcedContact>()
             .add_plugins(EguiPlugin)
             .add_systems(Update, toggle_panel)
             .add_systems(Update, debug_panel.run_if(panel_open));
@@ -117,7 +124,81 @@ fn debug_panel(world: &mut World) {
                     }
                 }
                 DebugTab::Scenario => {
-                    ui.label("Scenario — Task 6");
+                    for s in crate::game::scenario::presets() {
+                        if ui.button(s.name).clicked() {
+                            let r = crate::game::scenario::apply_to_world(world, &s);
+                            world.resource_mut::<DebugState>().last_error = r.err();
+                        }
+                    }
+                    ui.separator();
+                    ui.label("Custom");
+                    let base_count = world
+                        .resource::<crate::game::variant::FieldSpec>()
+                        .base_count();
+                    let mut state = world.resource_mut::<DebugState>();
+                    state.custom.bases.resize(base_count, false);
+                    let mut custom = state.custom.clone();
+                    ui.horizontal(|ui| {
+                        for (i, occ) in custom.bases.iter_mut().enumerate() {
+                            ui.checkbox(occ, format!("{}B", i + 1));
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::DragValue::new(&mut custom.balls)
+                                .range(0..=3)
+                                .prefix("B "),
+                        );
+                        ui.add(
+                            egui::DragValue::new(&mut custom.strikes)
+                                .range(0..=2)
+                                .prefix("S "),
+                        );
+                        ui.add(
+                            egui::DragValue::new(&mut custom.outs)
+                                .range(0..=2)
+                                .prefix("O "),
+                        );
+                        ui.add(
+                            egui::DragValue::new(&mut custom.inning)
+                                .range(1..=99)
+                                .prefix("Inn "),
+                        );
+                        ui.checkbox(&mut custom.top, "top");
+                    });
+                    egui::ComboBox::from_label("next CPU pitch")
+                        .selected_text(format!("{:?}", custom.next_cpu_pitch))
+                        .show_ui(ui, |ui| {
+                            use crate::game::rules::PitchKind::*;
+                            ui.selectable_value(&mut custom.next_cpu_pitch, None, "None");
+                            for k in [Fastball, Curveball, Changeup, Slider, Sinker] {
+                                ui.selectable_value(
+                                    &mut custom.next_cpu_pitch,
+                                    Some(k),
+                                    format!("{k:?}"),
+                                );
+                            }
+                        });
+                    world.resource_mut::<DebugState>().custom = custom.clone();
+                    if ui.button("Apply custom").clicked() {
+                        let r = crate::game::scenario::apply_to_world(world, &custom);
+                        world.resource_mut::<DebugState>().last_error = r.err();
+                    }
+                    ui.separator();
+                    let mut forced = world.resource::<ForcedContact>().0;
+                    egui::ComboBox::from_label("force contact")
+                        .selected_text(format!("{forced:?}"))
+                        .show_ui(ui, |ui| {
+                            use crate::game::rules::ContactQuality::*;
+                            ui.selectable_value(&mut forced, None, "Off");
+                            for q in [Whiff, FoulTip, Weak, Solid, Perfect] {
+                                ui.selectable_value(&mut forced, Some(q), format!("{q:?}"));
+                            }
+                        });
+                    world.resource_mut::<ForcedContact>().0 = forced;
+                    if let Some(err) = world.resource::<DebugState>().last_error {
+                        ui.colored_label(egui::Color32::YELLOW, err);
+                    }
                 }
                 DebugTab::State => {
                     ui.label("State — Task 8");
