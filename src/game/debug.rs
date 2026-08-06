@@ -48,6 +48,7 @@ impl Plugin for DebugPlugin {
         app.init_resource::<DebugState>()
             .init_resource::<ForcedContact>()
             .add_plugins(EguiPlugin)
+            .add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin)
             .add_systems(Update, toggle_panel)
             .add_systems(Update, debug_panel.run_if(panel_open));
     }
@@ -201,7 +202,37 @@ fn debug_panel(world: &mut World) {
                     }
                 }
                 DebugTab::State => {
-                    ui.label("State — Task 8");
+                    let play = world.resource::<crate::game::flow::Play>();
+                    ui.monospace(format!("phase: {:?}", play.phase));
+                    ui.monospace(format!("pending_call: {:?}", play.pending_call()));
+                    ui.monospace(format!("last swing: {:?}", play.last_contact_quality()));
+                    ui.monospace(format!(
+                        "steal window: {:.2}s (lead extended: {})",
+                        play.steal_window_remaining(),
+                        world.resource::<crate::game::flow::LeadState>().extended
+                    ));
+                    ui.monospace(format!(
+                        "runners settled: {}",
+                        world.resource::<crate::game::runner::RunnersSettled>().0
+                    ));
+                    let mut q = world.query_filtered::<(
+                        &Transform,
+                        &bevy_rapier3d::prelude::Velocity,
+                    ), With<crate::game::ball::Baseball>>();
+                    if let Ok((tf, vel)) = q.get_single(world) {
+                        ui.monospace(format!(
+                            "ball: h {:.1} m, v {:.1} m/s",
+                            tf.translation.y,
+                            vel.linvel.length()
+                        ));
+                    }
+                    if let Some(fps) = world
+                        .resource::<bevy::diagnostic::DiagnosticsStore>()
+                        .get(&bevy::diagnostic::FrameTimeDiagnosticsPlugin::FPS)
+                        .and_then(|d| d.smoothed())
+                    {
+                        ui.monospace(format!("fps: {fps:.0}"));
+                    }
                 }
                 DebugTab::Gizmos => {
                     ui.label("Gizmos — Task 9");

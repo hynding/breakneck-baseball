@@ -224,6 +224,17 @@ impl Play {
         self.last_contact_quality
     }
 
+    /// The hit/out already decided but not yet announced (the throw is still
+    /// in the air), for debug readouts.
+    pub fn pending_call(&self) -> Option<Outcome> {
+        self.pending_call
+    }
+
+    /// Seconds left in the pre-pitch steal window, for debug readouts.
+    pub fn steal_window_remaining(&self) -> f32 {
+        self.hold.remaining_secs()
+    }
+
     /// Whether the live/just-finished play is a home run — held from contact
     /// through the trot and the result pause so the camera can orbit it.
     pub fn is_home_run(&self) -> bool {
