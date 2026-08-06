@@ -8,21 +8,73 @@
 //! all plate-local logic (pitching, swinging, cameras) is shared.
 
 use bevy::math::Vec3;
-use bevy::prelude::Resource;
+use bevy::prelude::{Reflect, Resource};
 
 use crate::game::field::{HALF_DIAGONAL, PITCH_DISTANCE};
 
 /// Countable-rule knobs read by the rules engine and game flow, grouped so
 /// the debug inspector renders each group as its own collapsible section.
-#[derive(Resource, Clone, Debug)]
+#[derive(Resource, Clone, Debug, Reflect)]
 pub struct Ruleset {
     pub counts: CountRules,
     pub batting: BattingTuning,
     pub pace: PaceTuning,
 }
 
+impl Ruleset {
+    /// Paste-ready Rust lines for every field differing from `variant`'s
+    /// defaults — the debug panel's tuning-session export.
+    pub fn diff_literal(&self, variant: VariantId) -> String {
+        let d = variant.rules();
+        let mut out = String::new();
+        macro_rules! diff {
+            ($($path:ident).+) => {
+                if self.$($path).+ != d.$($path).+ {
+                    out.push_str(&format!(
+                        concat!(stringify!($($path).+), ": {:?},\n"),
+                        self.$($path).+
+                    ));
+                }
+            };
+        }
+        diff!(counts.balls_per_walk);
+        diff!(counts.strikes_per_out);
+        diff!(counts.outs_per_half);
+        diff!(counts.innings);
+        diff!(counts.peg_outs);
+        diff!(counts.steal_window_secs);
+        diff!(batting.perfect_ms);
+        diff!(batting.solid_ms);
+        diff!(batting.foul_ms);
+        diff!(batting.exit_weak);
+        diff!(batting.exit_solid);
+        diff!(batting.exit_perfect);
+        diff!(batting.pull_yaw_per_ms);
+        diff!(batting.cpu_timing_spread_ms);
+        diff!(batting.pci_radius_m);
+        diff!(pace.pitch_speed_scale);
+        diff!(pace.runner_speed);
+        diff!(pace.fielder_speed);
+        diff!(pace.reaction_secs);
+        diff!(pace.throw_speed);
+        diff!(pace.throw_transfer_secs);
+        diff!(pace.relay_transfer_secs);
+        diff!(pace.hit_and_run_jump_secs);
+        diff!(pace.stretch_grace_secs);
+        diff!(pace.runner_margin_secs);
+        diff!(pace.result_secs);
+        diff!(pace.pickoff_cooldown_secs);
+        diff!(pace.auto_throw_delay_secs);
+        if out.is_empty() {
+            out
+        } else {
+            format!("// VariantId::{:?} overrides:\n{}", variant, out)
+        }
+    }
+}
+
 /// Count thresholds and window rules.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Reflect)]
 pub struct CountRules {
     /// Balls that walk the batter.
     pub balls_per_walk: u32,
@@ -50,7 +102,7 @@ pub struct CountRules {
 // `rules.rs`. The B7 balance harness is the tuning arbiter for these
 // numbers: they start at the plan's defaults and only that harness
 // should move them.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Reflect)]
 pub struct BattingTuning {
     /// |dt| at or under this many ms is a `ContactQuality::Perfect`.
     pub perfect_ms: f32,
@@ -80,7 +132,7 @@ pub struct BattingTuning {
 
 /// Speeds, delays, and race clocks — the game's pace. Defaults are the
 /// long-standing module constants; `tests/balance_sim.rs` arbitrates changes.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Reflect)]
 pub struct PaceTuning {
     /// Scales every `PitchKind::speed()` at release (1.0 = the kind table).
     /// This is how the spec's `PITCH_SPEED` promotion lands: one dial for
@@ -156,7 +208,7 @@ pub fn next_innings(current: u32) -> u32 {
 }
 
 /// Field geometry and personnel. Home plate is implicitly at the origin.
-#[derive(Resource, Clone, Debug)]
+#[derive(Resource, Clone, Debug, Reflect)]
 pub struct FieldSpec {
     /// Bases in running order (first base first); the last base leads home.
     pub base_positions: Vec<Vec3>,
@@ -214,7 +266,7 @@ impl FieldSpec {
 }
 
 /// Which spawn routine builds the surroundings.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Reflect)]
 pub enum Scenery {
     /// Classic ballpark: infield diamond, mound, foul poles, outfield wall.
     Stadium,
@@ -549,6 +601,28 @@ mod tests {
             );
             assert!(f.behind_pitcher_eye.z > f.behind_pitcher_target.z);
         }
+    }
+
+    #[test]
+    fn diff_literal_is_empty_at_defaults() {
+        assert_eq!(
+            VariantId::Standard
+                .rules()
+                .diff_literal(VariantId::Standard),
+            ""
+        );
+    }
+
+    #[test]
+    fn diff_literal_lists_only_changed_fields() {
+        let mut r = VariantId::Standard.rules();
+        r.batting.perfect_ms = 48.0;
+        r.pace.runner_speed = 8.0;
+        let s = r.diff_literal(VariantId::Standard);
+        assert!(s.contains("batting.perfect_ms: 48.0,"));
+        assert!(s.contains("pace.runner_speed: 8.0,"));
+        assert!(!s.contains("solid_ms"));
+        assert!(s.starts_with("// VariantId::Standard overrides:"));
     }
 
     #[test]

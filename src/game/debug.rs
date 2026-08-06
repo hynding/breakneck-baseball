@@ -98,11 +98,36 @@ fn debug_panel(world: &mut World) {
             world.resource_mut::<DebugState>().tab = tab;
             ui.separator();
             match tab {
-                DebugTab::Tune => ui.label("Tune — Task 4"),
-                DebugTab::Scenario => ui.label("Scenario — Task 6"),
-                DebugTab::State => ui.label("State — Task 8"),
-                DebugTab::Gizmos => ui.label("Gizmos — Task 9"),
-                DebugTab::Time => ui.label("Time — Task 10"),
-            };
+                DebugTab::Tune => {
+                    bevy_inspector_egui::bevy_inspector::ui_for_resource::<
+                        crate::game::variant::Ruleset,
+                    >(world, ui);
+                    egui::CollapsingHeader::new("Field & Camera").show(ui, |ui| {
+                        bevy_inspector_egui::bevy_inspector::ui_for_resource::<
+                            crate::game::variant::FieldSpec,
+                        >(world, ui);
+                    });
+                    if ui.button("Dump diff → stdout + clipboard").clicked() {
+                        let variant = world.resource::<crate::game::GameConfig>().variant;
+                        let text = world
+                            .resource::<crate::game::variant::Ruleset>()
+                            .diff_literal(variant);
+                        println!("{text}");
+                        ui.ctx().copy_text(text);
+                    }
+                }
+                DebugTab::Scenario => {
+                    ui.label("Scenario — Task 6");
+                }
+                DebugTab::State => {
+                    ui.label("State — Task 8");
+                }
+                DebugTab::Gizmos => {
+                    ui.label("Gizmos — Task 9");
+                }
+                DebugTab::Time => {
+                    ui.label("Time — Task 10");
+                }
+            }
         });
 }

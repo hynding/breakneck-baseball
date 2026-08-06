@@ -217,6 +217,8 @@ impl Plugin for GamePlugin {
             // both resources with the chosen variant before a game starts.
             .insert_resource(VariantId::Standard.rules())
             .insert_resource(VariantId::Standard.field())
+            .register_type::<variant::Ruleset>()
+            .register_type::<variant::FieldSpec>()
             .insert_resource(ThemeId::DaylightClassic.build())
             .insert_resource(ScoreBoard {
                 inning: 1,
