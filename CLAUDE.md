@@ -18,6 +18,7 @@ export PATH="/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$PATH"
 cargo check                          # fast compile check (~45 s cold, seconds warm)
 cargo run                            # native desktop build
 cargo run --features dev             # faster iteration: links Bevy as a dylib
+cargo run --features "dev debug"     # + F1 in-game debug panel
 cargo build --target wasm32-unknown-unknown   # web build (debug)
 wasm-bindgen --out-dir web/out --target web target/wasm32-unknown-unknown/debug/breakneck-baseball.wasm
 python3 -m http.server --directory web 8080   # serve, then open http://localhost:8080

@@ -9,6 +9,8 @@ pub mod audio;
 pub mod ball;
 pub mod batting;
 pub mod camera;
+#[cfg(feature = "debug")]
+pub mod debug;
 pub mod field;
 pub mod fielding;
 pub mod flow;
@@ -246,7 +248,10 @@ impl Plugin for GamePlugin {
                 SubsPlugin,
                 settings::SettingsPlugin,
                 JuicePlugin,
-            ))
+            ));
+        #[cfg(feature = "debug")]
+        app.add_plugins(debug::DebugPlugin);
+        app
             // Fresh scoreboard/rosters each time a game starts from the menu;
             // tear the scene down once the game is over. Pausing stays inside
             // Playing ⇄ Paused and touches neither.
