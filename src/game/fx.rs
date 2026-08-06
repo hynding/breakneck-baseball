@@ -244,7 +244,7 @@ fn fade_step(age_frac: f32, steps: usize) -> usize {
 /// Distance-based drop test, so trail density is frame-rate independent
 /// (and deterministic in the headless harness).
 fn should_drop(last: Option<Vec3>, pos: Vec3, spacing: f32) -> bool {
-    last.map_or(true, |l| l.distance(pos) >= spacing)
+    last.is_none_or(|l| l.distance(pos) >= spacing)
 }
 
 /// The style's mote mesh — all procedural primitives, no asset files (same
@@ -296,6 +296,7 @@ fn build_trail_assets(
 /// Drops trail motes behind the pitched ball — the pitch's signature, not
 /// the batted ball's, so it runs only while a pitch is on its way to the
 /// plate. Cosmetic like every fx system: spawns motes, touches nothing.
+#[allow(clippy::type_complexity)]
 fn pitch_trail(
     play: Res<Play>,
     assets: Option<Res<TrailAssets>>,
@@ -649,6 +650,33 @@ fn tick_particles(
 
 pub struct FxPlugin;
 
+impl Plugin for FxPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<HitStop>()
+            .init_resource::<Fireworks>()
+            .add_systems(
+                crate::game::game_start(),
+                (build_fx_assets, spawn_landing_ring),
+            )
+            .add_systems(
+                Update,
+                (
+                    start_hit_stop,
+                    end_hit_stop,
+                    contact_burst,
+                    wall_bang_burst,
+                    home_run_fireworks,
+                    bounce_dust,
+                    update_landing_ring,
+                    tick_particles,
+                    pitch_trail,
+                    tick_trail,
+                )
+                    .run_if(in_state(GameState::Playing)),
+            );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -692,32 +720,5 @@ mod tests {
             assert!(trail_spacing(style) > 0.0);
             assert!(trail_lifetime(style) > 0.0);
         }
-    }
-}
-
-impl Plugin for FxPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<HitStop>()
-            .init_resource::<Fireworks>()
-            .add_systems(
-                crate::game::game_start(),
-                (build_fx_assets, spawn_landing_ring),
-            )
-            .add_systems(
-                Update,
-                (
-                    start_hit_stop,
-                    end_hit_stop,
-                    contact_burst,
-                    wall_bang_burst,
-                    home_run_fireworks,
-                    bounce_dust,
-                    update_landing_ring,
-                    tick_particles,
-                    pitch_trail,
-                    tick_trail,
-                )
-                    .run_if(in_state(GameState::Playing)),
-            );
     }
 }
