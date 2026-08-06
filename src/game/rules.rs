@@ -24,12 +24,26 @@ const CONTACT_HEIGHT: f32 = 0.6;
 /// Nominal fastball speed (m/s) — roughly 85 mph.
 pub const PITCH_SPEED: f32 = 38.0;
 
-/// Horizontal half-width of the called strike zone (metres from plate
-/// centre). Public so the field can draw the zone the umpire actually calls.
-pub const ZONE_HALF_WIDTH: f32 = 0.34;
-/// Vertical strike-zone bounds (metres).
+/// Home plate half-width (17 in across the front / 2 — docs/BASEBALL.md).
+/// The single source of truth: `field.rs` builds the plate slab and the
+/// drawn zone from it, and the called zone below adds the ball allowance.
+pub const PLATE_HALF_WIDTH_M: f32 = 0.216;
+/// Official ball radius — matches `ball::BALL_RADIUS` (asserted in tests;
+/// duplicated here so the pure rules module stays free of engine imports).
+pub const BALL_RADIUS_M: f32 = 0.037;
+/// Horizontal half-width of the *called* strike zone (metres from plate
+/// centre): the plate plus the rulebook's "any part of the ball" allowance
+/// (Official Baseball Rules, STRIKE (b) — docs/BASEBALL.md "Strike zone").
+/// The drawn zone is the bare plate width; a pitch grazing the drawn frame
+/// is still a strike by exactly its own radius, as in real life. Public so
+/// the field can draw the zone the umpire actually calls.
+pub const ZONE_HALF_WIDTH: f32 = PLATE_HALF_WIDTH_M + BALL_RADIUS_M;
+/// Zone floor: the hollow beneath the kneecap of the 1.85 m rig
+/// (docs/BASEBALL.md "Strike zone").
 pub const ZONE_LOW: f32 = 0.5;
-pub const ZONE_HIGH: f32 = 1.45;
+/// Zone ceiling: the midpoint between shoulder top and pants top in the
+/// rig's slight stance crouch (docs/BASEBALL.md) — not the old arcade 1.45.
+pub const ZONE_HIGH: f32 = 1.30;
 
 /// A caught fly at least this far out (scaled by [`FieldSpec::hit_scale`])
 /// gives runners time to tag up and advance.
@@ -295,7 +309,11 @@ pub fn pitch_velocity_kind(kind: PitchKind, aim: Vec2, pitch_distance: f32) -> V
     // the inside corner risks a hit-by-pitch. Negated: stick-right means
     // screen-right, which the behind-home camera renders as world −X.
     let target_x = -aim.x * 0.6;
-    let target_y = 1.05 + aim.y * 0.5;
+    // Centred on the *current* zone's middle (so "zero = middle of the
+    // zone" stays true whatever the rulebook heights are); ±0.45 spans the
+    // zone edge to just outside it — full-up still paints above the
+    // letters, full-down still bounces the curve in the dirt.
+    let target_y = (ZONE_LOW + ZONE_HIGH) / 2.0 + aim.y * 0.45;
     let speed = kind.speed();
 
     let start = mound_reset_pos(pitch_distance);
@@ -2681,6 +2699,37 @@ mod tests {
             assert!(pos.y > 0.0, "pitch hit the ground before the plate");
         }
         Vec2::new(pos.x, pos.y)
+    }
+
+    /// The called zone follows the MLB rulebook (docs/BASEBALL.md, "Strike
+    /// zone"): plate width plus the any-part-of-the-ball allowance each
+    /// side, knee hollow to the stance midpoint for the 1.85 m rig.
+    #[test]
+    fn zone_is_plate_width_plus_ball_allowance() {
+        assert!((ZONE_HALF_WIDTH - (PLATE_HALF_WIDTH_M + BALL_RADIUS_M)).abs() < 1e-6);
+        assert!((ZONE_LOW - 0.5).abs() < 1e-6);
+        assert!((ZONE_HIGH - 1.30).abs() < 1e-6);
+        // The pure module's duplicated ball radius must track the physics.
+        assert!((BALL_RADIUS_M - crate::game::ball::BALL_RADIUS).abs() < 1e-9);
+    }
+
+    /// Neutral aim throws to the middle of the *current* zone — the aim map
+    /// may never drift off the zone the umpire calls. `pitch_velocity_kind`
+    /// is a gravity-only solve, so the check is exact (spin/drag bend is the
+    /// kinds' character on top, covered by the flight sims below).
+    #[test]
+    fn neutral_aim_targets_zone_middle() {
+        let kind = PitchKind::Changeup;
+        let v = pitch_velocity_kind(kind, Vec2::ZERO, 18.44);
+        let flight = 18.44 / kind.speed();
+        let start = mound_reset_pos(18.44);
+        let y_at_plate = start.y + v.y * flight - 0.5 * GRAVITY * flight * flight;
+        assert!(
+            (y_at_plate - (ZONE_LOW + ZONE_HIGH) / 2.0).abs() < 0.02,
+            "neutral aim crosses at y {y_at_plate}, zone middle is {}",
+            (ZONE_LOW + ZONE_HIGH) / 2.0
+        );
+        assert!(v.x.abs() < 0.05);
     }
 
     #[test]

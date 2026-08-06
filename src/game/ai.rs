@@ -294,7 +294,11 @@ pub fn cpu_offense(
             pos.x + ball_vel.linvel.x * flight,
             pos.y + ball_vel.linvel.y * flight - 0.5 * GRAVITY * flight * flight,
         );
-        let in_zone = cross.x.abs() < 0.5 && (0.4..=1.6).contains(&cross.y);
+        // The CPU's *judged* zone: the real called zone (rules::ZONE_*)
+        // plus a hitter's honest misjudgment fuzz — ~0.1 m wide, ~0.15 m
+        // tall. Tracks the rulebook zone so a zone retune doesn't silently
+        // turn the CPU into a chaser or a statue.
+        let in_zone = cross.x.abs() < 0.35 && (0.4..=1.45).contains(&cross.y);
         let roll = hash01(t * 5.0);
         let swing = if in_zone {
             roll < 0.5 + 0.4 * cfg.skill // usually offers at strikes
