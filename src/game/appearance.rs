@@ -136,6 +136,63 @@ pub fn parse_roster_file(text: &str) -> Result<RosterFile, ron::error::SpannedEr
     ron::from_str(text)
 }
 
+use bevy::prelude::Resource;
+
+/// The shipped definitions, embedded so wasm and release builds need no
+/// filesystem. `data/` lives at the repo root, beside `src/`.
+pub const EMBEDDED_PLAYERS_RON: &str = include_str!("../../data/players.ron");
+
+/// Parses the embedded file. Panicking is correct here: the contract test
+/// (`tests/appearance_contract.rs`) makes a bad file unshippable, so at
+/// runtime this is an assertion, not error handling.
+pub fn embedded_roster_file() -> RosterFile {
+    parse_roster_file(EMBEDDED_PLAYERS_RON)
+        .expect("embedded data/players.ron must parse — see tests/appearance_contract.rs")
+}
+
+/// The live player definitions: embedded content at startup, replaced by
+/// the dev file-watcher (Task 6) when `data/players.ron` changes on disk.
+#[derive(Resource, Clone, Debug)]
+pub struct RosterDefs(pub RosterFile);
+
+impl Default for RosterDefs {
+    fn default() -> Self {
+        Self(embedded_roster_file())
+    }
+}
+
+impl RosterDefs {
+    /// Roster invariants shared by the contract test and the dev reloader:
+    /// jersey-font-safe names, two-digit unique numbers, benches present.
+    pub fn validate(file: &RosterFile) -> Result<(), String> {
+        for (label, pool) in [("home", &file.home), ("away", &file.away)] {
+            if pool.len() <= crate::game::rules::LINEUP_SIZE as usize {
+                return Err(format!("{label}: need more than nine players for a bench"));
+            }
+            let mut numbers: Vec<u32> = Vec::new();
+            for def in pool {
+                if def.name.is_empty()
+                    || def.name.len() > 8
+                    || !def.name.chars().all(|c| c.is_ascii_uppercase())
+                {
+                    return Err(format!(
+                        "{label}: name {:?} must be A-Z only, 1-8 chars (jersey font)",
+                        def.name
+                    ));
+                }
+                if def.number >= 100 {
+                    return Err(format!("{label}: #{} needs two digits max", def.number));
+                }
+                if numbers.contains(&def.number) {
+                    return Err(format!("{label}: duplicate number {}", def.number));
+                }
+                numbers.push(def.number);
+            }
+        }
+        Ok(())
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
