@@ -1533,6 +1533,7 @@ dependencies = [
  "dirs",
  "getrandom 0.3.4",
  "gltf",
+ "ron",
  "serde",
  "serde_json",
  "wasm-bindgen",

@@ -20,6 +20,7 @@ bevy_rapier3d = { version = "0.28", features = ["debug-render-3d"] }
 # Serialization (used by Settings)
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+ron = "0.8"
 
 # Debug-mode inspector UI (feature-gated, see `game::debug`)
 bevy-inspector-egui = { version = "0.28", optional = true }

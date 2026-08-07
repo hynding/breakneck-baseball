@@ -5,6 +5,7 @@
 
 pub mod ai;
 pub mod animation;
+pub mod appearance;
 pub mod audio;
 pub mod ball;
 pub mod batting;
