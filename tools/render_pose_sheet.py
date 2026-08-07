@@ -28,8 +28,14 @@ SHOTS = {
     "Slide": [0.95],
     "BattingStance": [0.5],
     "BatterSwing": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+    "StanceOpen": [0.5],
+    "StanceClosed": [0.5],
+    "StanceWaggle": [0.0, 0.25, 0.5, 0.75],
+    "FidgetBatTap": [0.0, 0.4, 0.5, 0.6, 1.0],
+    "FidgetHalfSwing": [0.0, 0.45, 0.5, 1.0],
+    "CelebrateBatFlip": [0.0, 0.3, 0.35, 0.6, 1.0],
 }
-TOP_VIEW = {"BatterSwing", "RunCycle", "BattingStance"}
+TOP_VIEW = {"BatterSwing", "RunCycle", "BattingStance", "StanceOpen", "StanceClosed", "StanceWaggle"}
 
 rig = bpy.data.objects["PlayerRig"]
 

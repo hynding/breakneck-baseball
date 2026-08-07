@@ -50,6 +50,26 @@ pub enum AnimClip {
     BattingStance,
     /// Neutral resting stance the glTF driver settles rigs into. Loops.
     Idle,
+    /// Personality batting stance: wide open base, sunk hips, deeper crouch.
+    /// Same solved arm/bat hold as `BattingStance` so the swing crossfade
+    /// never pops the arms. Loops.
+    StanceOpen,
+    /// Personality batting stance: tall and upright, quiet legs, bat cocked
+    /// closer to vertical, deeper spine coil. Loops.
+    StanceClosed,
+    /// Personality batting stance: `BattingStance`'s legs, a restless barrel
+    /// waggle and bigger torso sway. Loops.
+    StanceWaggle,
+    /// Fidget: dips the bat barrel to the plate and back. Starts and ends on
+    /// the `BattingStance` hold so chaining back into a stance is seamless.
+    FidgetBatTap,
+    /// Fidget: a partial practice unwind and back, arms riding the torso.
+    /// Starts and ends on the `BattingStance` hold.
+    FidgetHalfSwing,
+    /// Celebration: arms sweep up and out, the bat flicks skyward, chest
+    /// opens. Chained via `Playing::then` right after `BatterSwing`, so its
+    /// frame 0 matches `BatterSwing`'s real end pose.
+    CelebrateBatFlip,
 }
 
 impl AnimClip {
@@ -69,6 +89,12 @@ impl AnimClip {
             AnimClip::BatterSwing => 0.42,
             AnimClip::BattingStance => 1.2,
             AnimClip::Idle => 1.0,
+            AnimClip::StanceOpen => 1.2,
+            AnimClip::StanceClosed => 1.2,
+            AnimClip::StanceWaggle => 1.2,
+            AnimClip::FidgetBatTap => 0.8,
+            AnimClip::FidgetHalfSwing => 0.9,
+            AnimClip::CelebrateBatFlip => 0.85,
         }
     }
 
@@ -76,7 +102,13 @@ impl AnimClip {
     pub fn looping(self) -> bool {
         matches!(
             self,
-            AnimClip::RunCycle | AnimClip::CatcherCrouch | AnimClip::Idle | AnimClip::BattingStance
+            AnimClip::RunCycle
+                | AnimClip::CatcherCrouch
+                | AnimClip::Idle
+                | AnimClip::BattingStance
+                | AnimClip::StanceOpen
+                | AnimClip::StanceClosed
+                | AnimClip::StanceWaggle
         )
     }
 }
@@ -257,8 +289,12 @@ fn limb_pose(clip: AnimClip, kind: LimbKind, f: f32) -> Quat {
         }
         // Blocky fallback: the two-handed grip is a glTF-only bone reposition
         // (tools/build_player.py), so the procedural rig just holds Idle's
-        // neutral limb pose rather than approximating the stance.
-        SwingBat | RecoverSwing | Idle | BattingStance => Quat::IDENTITY,
+        // neutral limb pose rather than approximating the stance. The three
+        // personality stances delegate to BattingStance's branch and the two
+        // fidgets plus the celebration delegate to Idle's — all four already
+        // resolve to the same neutral identity pose here.
+        SwingBat | RecoverSwing | Idle | BattingStance | StanceOpen | StanceClosed
+        | StanceWaggle | FidgetBatTap | FidgetHalfSwing | CelebrateBatFlip => Quat::IDENTITY,
     }
 }
 

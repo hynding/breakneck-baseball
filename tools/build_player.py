@@ -251,6 +251,94 @@ CLIPS = {
         },
         "Bat": {"rx": [(0, 0.6), (1, 0.4)]},
     }),
+    # Open crouch: wide base, sunk hips, same solved arm/bat hold as
+    # BattingStance so the swing crossfade never pops.
+    "StanceOpen": (1.2, True, {
+        "UpperArm.R": {"rx": [(0, -0.95), (0.25, -0.92), (0.5, -0.95), (0.75, -0.98), (1, -0.95)],
+                        "rz": [(0, -0.8), (1, -0.8)]},
+        "UpperArm.L": {"rx": [(0, -0.95), (0.25, -0.92), (0.5, -0.95), (0.75, -0.98), (1, -0.95)],
+                        "rz": [(0, 0.85), (1, 0.85)]},
+        "Bat": {"rx": [(0, 0.6), (1, 0.6)]},
+        "UpperLeg.L": {"rx": [(0, 0.5), (1, 0.5)], "rz": [(0, 0.22), (1, 0.22)]},
+        "UpperLeg.R": {"rx": [(0, 0.5), (1, 0.5)], "rz": [(0, -0.22), (1, -0.22)]},
+        "LowerLeg.L": {"rx": [(0, -0.5), (1, -0.5)]},
+        "LowerLeg.R": {"rx": [(0, -0.5), (1, -0.5)]},
+        "Hips": {"dz": [(0, -0.10), (1, -0.10)]},
+        "Spine": {"ry": [(0, 0.25), (0.25, 0.29), (0.5, 0.25), (0.75, 0.21), (1, 0.25)]},
+    }),
+    # Upright closed: tall, quiet legs, bat cocked more vertical, deeper coil.
+    "StanceClosed": (1.2, True, {
+        "UpperArm.R": {"rx": [(0, -0.95), (0.25, -0.93), (0.5, -0.95), (0.75, -0.97), (1, -0.95)],
+                        "rz": [(0, -0.8), (1, -0.8)]},
+        "UpperArm.L": {"rx": [(0, -0.95), (0.25, -0.93), (0.5, -0.95), (0.75, -0.97), (1, -0.95)],
+                        "rz": [(0, 0.85), (1, 0.85)]},
+        "Bat": {"rx": [(0, 0.95), (1, 0.95)]},
+        "UpperLeg.L": {"rx": [(0, 0.1), (1, 0.1)]},
+        "UpperLeg.R": {"rx": [(0, 0.1), (1, 0.1)]},
+        "LowerLeg.L": {"rx": [(0, -0.1), (1, -0.1)]},
+        "LowerLeg.R": {"rx": [(0, -0.1), (1, -0.1)]},
+        "Spine": {"ry": [(0, 0.38), (0.25, 0.41), (0.5, 0.38), (0.75, 0.35), (1, 0.38)]},
+    }),
+    # Waggle: BattingStance legs, restless barrel + bigger torso sway.
+    "StanceWaggle": (1.2, True, {
+        "UpperArm.R": {"rx": [(0, -0.95), (0.25, -0.92), (0.5, -0.95), (0.75, -0.98), (1, -0.95)],
+                        "rz": [(0, -0.8), (1, -0.8)]},
+        "UpperArm.L": {"rx": [(0, -0.95), (0.25, -0.92), (0.5, -0.95), (0.75, -0.98), (1, -0.95)],
+                        "rz": [(0, 0.85), (1, 0.85)]},
+        "Bat": {"rx": [(0, 0.6), (0.25, 0.95), (0.5, 0.6), (0.75, 0.95), (1, 0.6)]},
+        "UpperLeg.L": {"rx": [(0, 0.3), (1, 0.3)]},
+        "UpperLeg.R": {"rx": [(0, 0.3), (1, 0.3)]},
+        "LowerLeg.L": {"rx": [(0, -0.3), (1, -0.3)]},
+        "LowerLeg.R": {"rx": [(0, -0.3), (1, -0.3)]},
+        "Spine": {"ry": [(0, 0.25), (0.25, 0.32), (0.5, 0.25), (0.75, 0.18), (1, 0.25)]},
+    }),
+    # Bat tap: dip the barrel to the plate and back; starts and ENDS on the
+    # BattingStance hold so Playing::then(fidget, stance) re-enters clean.
+    "FidgetBatTap": (0.8, False, {
+        "UpperArm.R": {"rx": [(0, -0.95), (0.4, -0.55), (0.6, -0.55), (1, -0.95)],
+                        "rz": [(0, -0.8), (1, -0.8)]},
+        "UpperArm.L": {"rx": [(0, -0.95), (0.4, -0.55), (0.6, -0.55), (1, -0.95)],
+                        "rz": [(0, 0.85), (1, 0.85)]},
+        "Bat": {"rx": [(0, 0.6), (0.4, -0.35), (0.6, -0.35), (1, 0.6)]},
+        "Spine": {"rx": [(0, 0), (0.4, 0.18), (0.6, 0.18), (1, 0)],
+                   "ry": [(0, 0.25), (1, 0.25)]},
+        "UpperLeg.L": {"rx": [(0, 0.3), (1, 0.3)]},
+        "UpperLeg.R": {"rx": [(0, 0.3), (1, 0.3)]},
+        "LowerLeg.L": {"rx": [(0, -0.3), (1, -0.3)]},
+        "LowerLeg.R": {"rx": [(0, -0.3), (1, -0.3)]},
+    }),
+    # Practice half swing: partial unwind and back, arms riding the torso.
+    "FidgetHalfSwing": (0.9, False, {
+        "UpperArm.R": {"rx": [(0, -0.95), (0.45, -0.95), (1, -0.95)],
+                        "rz": [(0, -0.8), (0.45, -0.35), (1, -0.8)]},
+        "UpperArm.L": {"rx": [(0, -0.95), (0.45, -0.95), (1, -0.95)],
+                        "rz": [(0, 0.85), (0.45, 0.45), (1, 0.85)]},
+        "Bat": {"rx": [(0, 0.6), (0.45, 0.3), (1, 0.6)]},
+        "Spine": {"ry": [(0, 0.25), (0.45, -0.15), (1, 0.25)]},
+        "UpperLeg.L": {"rx": [(0, 0.3), (1, 0.3)]},
+        "UpperLeg.R": {"rx": [(0, 0.3), (1, 0.3)]},
+        "LowerLeg.L": {"rx": [(0, -0.3), (1, -0.3)]},
+        "LowerLeg.R": {"rx": [(0, -0.3), (1, -0.3)]},
+    }),
+    # Bat flip: arms sweep up and out, barrel flicks skyward, chest opens.
+    # Plays via Playing.next after BatterSwing, so frame 0 matches the
+    # swing's END pose region (arms driven through — approximate with the
+    # follow-through-side arm values; tune against the pose sheet).
+    "CelebrateBatFlip": (0.85, False, {
+        # Frame-0 arm values are BatterSwing's REAL end pose (read from its
+        # f=1.0 keys), so the next-chain never teleports the arms.
+        "UpperArm.R": {"rx": [(0, -2.20), (0.35, -2.5), (1, -1.6)],
+                        "rz": [(0, 0.80), (0.35, 0.4), (1, 0.5)]},
+        "UpperArm.L": {"rx": [(0, -0.9326), (0.35, -1.8), (1, -1.3)],
+                        "rz": [(0, 2.3596), (0.35, 1.6), (1, 1.8)]},
+        # Frame-0 Bat.rx matches BatterSwing's own real end value (0.4, not
+        # the brief's provisional 0.6) so the bat's local barrel angle never
+        # pops either, on top of the arm channels already matching exactly.
+        "Bat": {"rx": [(0, 0.4), (0.3, 2.2), (1, 1.4)]},
+        "Spine": {"rx": [(0, 0), (0.4, -0.22), (1, -0.1)],
+                   "ry": [(0, -0.25), (1, 0.0)]},
+        "Head": {"rx": [(0, 0), (0.4, -0.3), (1, -0.15)]},
+    }),
 }
 
 CHANNEL = {"rx": ("rotation_euler", 0), "ry": ("rotation_euler", 1),

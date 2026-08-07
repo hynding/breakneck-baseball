@@ -53,6 +53,12 @@ pub const CLIP_TABLE: &[(AnimClip, &str)] = &[
     (AnimClip::Slide, "Slide"),
     (AnimClip::BatterSwing, "BatterSwing"),
     (AnimClip::BattingStance, "BattingStance"),
+    (AnimClip::StanceOpen, "StanceOpen"),
+    (AnimClip::StanceClosed, "StanceClosed"),
+    (AnimClip::StanceWaggle, "StanceWaggle"),
+    (AnimClip::FidgetBatTap, "FidgetBatTap"),
+    (AnimClip::FidgetHalfSwing, "FidgetHalfSwing"),
+    (AnimClip::CelebrateBatFlip, "CelebrateBatFlip"),
 ];
 
 /// Clips without their own baked action fold onto the one that covers them.
