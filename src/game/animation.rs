@@ -736,4 +736,29 @@ mod tests {
         assert!(!is_fidget(AnimClip::BattingStance));
         assert!(!is_fidget(AnimClip::CelebrateBatFlip));
     }
+
+    /// Pins the personality clips' loop mode against `looping()`'s
+    /// exhaustive `matches!` (no wildcard arm): the three held stances loop
+    /// through the duel, while the two fidgets and the bat-flip celebration
+    /// are one-shots that must finish and hand off via `Playing::next`
+    /// instead of repeating forever. A future clip added to the enum without
+    /// updating this match fails to compile, but nothing catches a clip
+    /// landing in the *wrong* arm — this test does.
+    #[test]
+    fn personality_clips_have_the_right_loop_mode() {
+        for clip in [
+            AnimClip::StanceOpen,
+            AnimClip::StanceClosed,
+            AnimClip::StanceWaggle,
+        ] {
+            assert!(clip.looping(), "{clip:?} must loop");
+        }
+        for clip in [
+            AnimClip::FidgetBatTap,
+            AnimClip::FidgetHalfSwing,
+            AnimClip::CelebrateBatFlip,
+        ] {
+            assert!(!clip.looping(), "{clip:?} must not loop");
+        }
+    }
 }
