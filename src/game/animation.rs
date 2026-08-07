@@ -425,7 +425,16 @@ fn sample_clips(
         if playing.timer.finished() && !playing.clip.looping() {
             if let Some(next) = playing.next.take() {
                 playing.clip = next;
-                playing.timer = Timer::from_seconds(next.duration(), TimerMode::Once);
+                // Mode-aware re-arm, mirroring `Playing::new`: a chained clip
+                // that loops (e.g. a fidget chaining back into a held
+                // stance) must keep repeating, not fire this branch again
+                // next frame and immediately fall into the `else` removal.
+                let mode = if next.looping() {
+                    TimerMode::Repeating
+                } else {
+                    TimerMode::Once
+                };
+                playing.timer = Timer::from_seconds(next.duration(), mode);
             } else {
                 if self_pose(playing.clip, 1.0).is_some() {
                     transform.rotation = bat_idle_rotation();
@@ -577,7 +586,18 @@ fn drive_graph_rigs(
         if playing.timer.finished() && !playing.clip.looping() {
             if let Some(next) = playing.next.take() {
                 playing.clip = next;
-                playing.timer = Timer::from_seconds(next.duration(), TimerMode::Once);
+                // Mode-aware re-arm (mirrors the `sample_clips` site above
+                // and `Playing::new`): the graph backend's own visual loop
+                // comes from `start_clip`'s `anim.repeat()`, but `Playing`'s
+                // timer still has to keep ticking in `Repeating` mode for a
+                // looping `next` — otherwise it latches `finished()` forever
+                // once `TimerMode::Once` clamps at duration.
+                let mode = if next.looping() {
+                    TimerMode::Repeating
+                } else {
+                    TimerMode::Once
+                };
+                playing.timer = Timer::from_seconds(next.duration(), mode);
                 // The mismatch with rig.current starts `next` (with blend)
                 // on the next pass.
             } else {
