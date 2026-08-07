@@ -35,6 +35,7 @@ pub mod variant;
 use bevy::prelude::*;
 
 use animation::AnimationPlugin;
+use appearance::AppearancePlugin;
 use audio::SoundPlugin;
 use ball::BallPlugin;
 use batting::BattingPlugin;
@@ -228,7 +229,6 @@ impl Plugin for GamePlugin {
                 ..default()
             })
             .init_resource::<Rosters>()
-            .init_resource::<crate::game::appearance::RosterDefs>()
             .init_resource::<scenario::PitchOverride>()
             .add_event::<scenario::ScenarioAppliedEvent>()
             // Sub-plugins (input/menu first so their resources exist for the
@@ -239,6 +239,7 @@ impl Plugin for GamePlugin {
                 FieldPlugin,
                 BallPlugin,
                 ModelAssetsPlugin,
+                AppearancePlugin,
                 PlayerPlugin,
                 AnimationPlugin,
                 BattingPlugin,
@@ -248,9 +249,9 @@ impl Plugin for GamePlugin {
                 FieldingPlugin,
                 RunnerPlugin,
                 CameraPlugin,
-                UiPlugin,
             ))
             .add_plugins((
+                UiPlugin,
                 JerseyPlugin,
                 SubsPlugin,
                 settings::SettingsPlugin,

@@ -193,6 +193,68 @@ impl RosterDefs {
     }
 }
 
+/// Applies edited file content to the live defs: parse, validate, swap.
+/// Pure so the dev watcher stays a thin shell around a tested core.
+pub fn apply_reload(text: &str, defs: &mut RosterDefs) -> Result<bool, String> {
+    let file = parse_roster_file(text).map_err(|e| e.to_string())?;
+    RosterDefs::validate(&file)?;
+    if file == defs.0 {
+        return Ok(false);
+    }
+    defs.0 = file;
+    Ok(true)
+}
+
+/// The dev-only watcher (native only — wasm has no fs) polls the repo file
+/// once a second; on change it swaps the defs *and* rebuilds live `Rosters`
+/// so a running game repaints (identity sync + jersey dressing react to
+/// `rosters.is_changed()`; a mid-game reload resets substitutions — accepted
+/// for a dev tool, noted in the system doc).
+#[cfg(all(feature = "dev", not(target_arch = "wasm32")))]
+mod dev_watch {
+    use super::*;
+    use bevy::prelude::*;
+
+    /// Repo-relative source path — dev builds run from the workspace.
+    const PLAYERS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data/players.ron");
+
+    /// Polls `data/players.ron` and hot-swaps definitions into the running
+    /// game — the AI/editor round-trip seam. NOTE: rebuilding [`Rosters`]
+    /// mid-game discards substitutions made this game (dev-only trade-off).
+    pub fn watch_players_file(
+        time: Res<Time<Real>>,
+        mut timer: Local<Option<Timer>>,
+        mut defs: ResMut<RosterDefs>,
+        mut rosters: ResMut<crate::game::roster::Rosters>,
+    ) {
+        let timer = timer.get_or_insert_with(|| Timer::from_seconds(1.0, TimerMode::Repeating));
+        if !timer.tick(time.delta()).just_finished() {
+            return;
+        }
+        let Ok(text) = std::fs::read_to_string(PLAYERS_PATH) else {
+            return; // transient editor save states are fine to skip
+        };
+        match apply_reload(&text, &mut defs) {
+            Ok(true) => {
+                *rosters = crate::game::roster::Rosters::from_defs(&defs);
+                info!("players.ron reloaded");
+            }
+            Ok(false) => {}
+            Err(e) => warn!("players.ron rejected: {e}"),
+        }
+    }
+}
+
+pub struct AppearancePlugin;
+
+impl bevy::prelude::Plugin for AppearancePlugin {
+    fn build(&self, app: &mut bevy::prelude::App) {
+        app.init_resource::<RosterDefs>();
+        #[cfg(all(feature = "dev", not(target_arch = "wasm32")))]
+        app.add_systems(bevy::prelude::Update, dev_watch::watch_players_file);
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -238,6 +300,23 @@ mod tests {
             ron::from_str("(headwear: PropellerBeanie, skin: Chartreuse)").unwrap();
         assert_eq!(app.headwear, Headwear::default());
         assert_eq!(app.skin, SkinTone::default());
+    }
+
+    #[test]
+    fn apply_reload_swaps_defs_only_on_valid_new_content() {
+        let mut defs = RosterDefs::default();
+        // Same content: no-op.
+        assert_eq!(apply_reload(EMBEDDED_PLAYERS_RON, &mut defs), Ok(false));
+        // Valid new content: applied.
+        let edited = EMBEDDED_PLAYERS_RON.replacen("VEGA", "VEGO", 1);
+        assert_eq!(apply_reload(&edited, &mut defs), Ok(true));
+        assert!(defs.0.home.iter().any(|d| d.name == "VEGO"));
+        // Broken content: rejected, last good defs kept.
+        assert!(apply_reload("(version: 1", &mut defs).is_err());
+        assert!(defs.0.home.iter().any(|d| d.name == "VEGO"));
+        // Parseable but invariant-violating content: rejected too.
+        let bad = EMBEDDED_PLAYERS_RON.replacen("VEGA", "vega!", 1);
+        assert!(apply_reload(&bad, &mut defs).is_err());
     }
 
     #[test]
