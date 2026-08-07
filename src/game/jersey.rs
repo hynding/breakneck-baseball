@@ -16,10 +16,9 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use crate::game::model_assets::RigBones;
-use crate::game::roster::{PlayerCard, Rosters};
-use crate::game::rules::BattingOrder;
+use crate::game::roster::{PlayerCard, PlayerIdentity, Rosters};
 use crate::game::theme::Theme;
-use crate::game::{GameState, ScoreBoard, Team};
+use crate::game::{GameState, Team};
 
 // ── The 5×7 font ──────────────────────────────────────────────────────────────
 
@@ -182,20 +181,11 @@ fn contrast_color(jersey: Color) -> [u8; 4] {
 
 // ── Components & assets ───────────────────────────────────────────────────────
 
-/// Whose lettering a rig wears: resolved against the live scoreboard so the
-/// defense always shows the fielding team's roster and the batter the man
-/// actually due up.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum JerseyRole {
-    Pitcher,
-    Fielder(usize),
-    Batter,
-}
-
-/// One lettered quad on a rig.
+/// One lettered quad on a rig. Carries its rig root so dressing can look up
+/// who that rig currently is even after the quad re-parents onto a bone.
 #[derive(Component)]
 pub struct JerseyQuad {
-    role: JerseyRole,
+    rig: Entity,
     face: JerseyFace,
 }
 
@@ -237,12 +227,7 @@ pub fn make_assets(
 
 /// Hangs the four lettered quads (back, chest, both shoulders) off a rig
 /// root. Called by the player spawner for every dressed rig.
-pub fn attach_jerseys(
-    commands: &mut Commands,
-    rig: Entity,
-    role: JerseyRole,
-    assets: &JerseyAssets,
-) {
+pub fn attach_jerseys(commands: &mut Commands, rig: Entity, assets: &JerseyAssets) {
     let pi = std::f32::consts::PI;
     let half = std::f32::consts::FRAC_PI_2;
     let quads: [(JerseyFace, &Handle<Mesh>, Vec3, f32); 4] = [
@@ -274,7 +259,7 @@ pub fn attach_jerseys(
     for (face, mesh, pos, yaw) in quads {
         let quad = commands
             .spawn((
-                JerseyQuad { role, face },
+                JerseyQuad { rig, face },
                 Mesh3d((*mesh).clone()),
                 MeshMaterial3d(assets.placeholder.clone()),
                 Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(yaw)),
@@ -335,45 +320,39 @@ fn mount_jerseys_on_bones(
 
 // ── The dressing system ───────────────────────────────────────────────────────
 
-/// Re-letters every jersey quad whenever the scoreboard flips sides, the
-/// batting order advances, a substitution rewrites a roster, or fresh quads
-/// appear.
+/// Re-letters every jersey quad whenever its rig's [`PlayerIdentity`]
+/// changes (half-inning flips, batting-order advances, substitutions all
+/// flow through an identity re-stamp — see `player::sync_identities`), a
+/// roster rewrite changes what a card says, or fresh quads appear.
 #[allow(clippy::too_many_arguments)]
 fn dress_jerseys(
-    score: Res<ScoreBoard>,
-    order: Res<BattingOrder>,
     rosters: Res<Rosters>,
     theme: Res<Theme>,
     assets: Option<Res<JerseyAssets>>,
     mut cache: ResMut<JerseyCache>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    identities: Query<&PlayerIdentity>,
+    changed: Query<(), Changed<PlayerIdentity>>,
     added: Query<(), Added<JerseyQuad>>,
     mut quads: Query<(&JerseyQuad, &mut MeshMaterial3d<StandardMaterial>)>,
 ) {
     if assets.is_none() {
         return;
     }
-    let refresh =
-        score.is_changed() || order.is_changed() || rosters.is_changed() || !added.is_empty();
+    let refresh = rosters.is_changed() || !changed.is_empty() || !added.is_empty();
     if !refresh {
         return;
     }
 
     for (quad, mut material) in &mut quads {
-        let team = match quad.role {
-            JerseyRole::Batter => score.batting_team(),
-            _ => score.fielding_team(),
+        let Ok(id) = identities.get(quad.rig) else {
+            continue; // rig not seated yet — next identity stamp repaints
         };
-        let roster = rosters.team(team);
-        let card = match quad.role {
-            JerseyRole::Pitcher => roster.fielding(None),
-            JerseyRole::Fielder(i) => roster.fielding(Some(i)),
-            JerseyRole::Batter => roster.batting(order.current(team)),
-        };
-        let key = (team, card.name.clone(), card.number, quad.face);
+        let card = rosters.team(id.team).card(id.index);
+        let key = (id.team, card.name.clone(), card.number, quad.face);
         let handle = cache.0.entry(key).or_insert_with(|| {
-            let template = match team {
+            let template = match id.team {
                 Team::Home => &theme.home,
                 Team::Away => &theme.away,
             };
@@ -403,7 +382,13 @@ impl Plugin for JerseyPlugin {
             .add_systems(crate::game::game_start(), reset_cache)
             .add_systems(
                 Update,
-                (dress_jerseys, mount_jerseys_on_bones).run_if(in_state(GameState::Playing)),
+                (crate::game::player::sync_identities, dress_jerseys)
+                    .chain()
+                    .run_if(in_state(GameState::Playing)),
+            )
+            .add_systems(
+                Update,
+                mount_jerseys_on_bones.run_if(in_state(GameState::Playing)),
             );
     }
 }

@@ -17,8 +17,10 @@ use crate::game::animation::{
 use crate::game::ball::PLAYER_GROUP;
 use crate::game::flow::{Phase, Play};
 use crate::game::input::Intents;
-use crate::game::jersey::{attach_jerseys, JerseyRole};
+use crate::game::jersey::attach_jerseys;
 use crate::game::model_assets::{GltfJerseyMesh, GltfPart, GltfTeamMaterials};
+use crate::game::roster::{RosterRole, Rosters};
+use crate::game::rules::BattingOrder;
 use crate::game::theme::{PlayerModelId, PlayerTemplate, Theme};
 use crate::game::variant::FieldSpec;
 use crate::game::{GameState, GameplayEntity, ScoreBoard, Team};
@@ -307,8 +309,11 @@ fn spawn_players(
         Vec3::new(0.0, 0.6 + 0.25, field.pitch_distance),
         -1.0,
     );
-    commands.entity(pitcher).insert(Pitcher);
-    attach_jerseys(&mut commands, pitcher, JerseyRole::Pitcher, &jersey_assets);
+    commands
+        .entity(pitcher)
+        .insert(Pitcher)
+        .insert(RosterRole::Pitcher);
+    attach_jerseys(&mut commands, pitcher, &jersey_assets);
 
     // Fielders at the spec's spots.
     for (index, spot) in field.fielder_positions.iter().enumerate() {
@@ -320,13 +325,11 @@ fn spawn_players(
             *spot + Vec3::Y * 0.6,
             -1.0,
         );
-        commands.entity(fielder).insert(Fielder { index });
-        attach_jerseys(
-            &mut commands,
-            fielder,
-            JerseyRole::Fielder(index),
-            &jersey_assets,
-        );
+        commands
+            .entity(fielder)
+            .insert(Fielder { index })
+            .insert(RosterRole::Fielder(index));
+        attach_jerseys(&mut commands, fielder, &jersey_assets);
         if spot.z < 0.0 {
             commands.entity(fielder).insert(CatcherRole);
         }
@@ -365,9 +368,12 @@ fn spawn_players(
         Transform::from_xyz(BATTER_STAND_X, 0.6, 0.0)
             .with_rotation(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)),
     );
-    attach_jerseys(&mut commands, batter, JerseyRole::Batter, &jersey_assets);
+    attach_jerseys(&mut commands, batter, &jersey_assets);
     commands.insert_resource(jersey_assets);
-    commands.entity(batter).insert(Batter);
+    commands
+        .entity(batter)
+        .insert(Batter)
+        .insert(RosterRole::Batter);
     // The bat is a mesh child only for Blocky — in glTF it's a bone under
     // the skeleton, wired up alongside the rest of the rig (Task 5).
     if let RigModel::Blocky(meshes) = &rig_model {
@@ -607,5 +613,33 @@ fn trigger_swing(
                 .entity(entity)
                 .insert(Playing::new(AnimClip::BatterSwing));
         }
+    }
+}
+
+/// Keeps every seated rig's [`crate::game::roster::PlayerIdentity`] matching
+/// the live game: re-stamps on scoreboard flips (the defense becomes the
+/// other team's nine), batting-order advances (the batter rig becomes the
+/// next hitter), and roster rewrites (substitutions, dev file reloads).
+/// Inserting is the change signal — `dress_jerseys` chains after this and
+/// watches `Changed<PlayerIdentity>`. `pub(crate)` and registered from
+/// `JerseyPlugin` (not here) so the two chain together with Bevy's
+/// auto-inserted sync point.
+pub(crate) fn sync_identities(
+    score: Res<ScoreBoard>,
+    order: Res<BattingOrder>,
+    rosters: Res<Rosters>,
+    mut commands: Commands,
+    rigs: Query<(Entity, &RosterRole)>,
+    added: Query<(), Added<RosterRole>>,
+) {
+    let refresh =
+        score.is_changed() || order.is_changed() || rosters.is_changed() || !added.is_empty();
+    if !refresh {
+        return;
+    }
+    for (entity, role) in &rigs {
+        commands
+            .entity(entity)
+            .insert(role.identity(&score, &order, &rosters));
     }
 }

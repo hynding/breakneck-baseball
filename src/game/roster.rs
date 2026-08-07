@@ -8,7 +8,7 @@
 //! spec order). The pause menu swaps bench players into lineup slots between
 //! plays; re-entry is allowed — this is backyard ball, not the rulebook.
 
-use bevy::prelude::Resource;
+use bevy::prelude::{Component, Resource};
 
 use crate::game::appearance::{PlayerAppearance, PlayerDef, RosterDefs};
 use crate::game::rules::LINEUP_SIZE;
@@ -118,11 +118,110 @@ impl Default for Rosters {
     }
 }
 
+/// Which roster seat a rig is playing *right now* — team-relative, so the
+/// same physical rig means a different player after a half-inning flip.
+/// Static per rig; [`PlayerIdentity`] is the derived, refreshed answer.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RosterRole {
+    Pitcher,
+    Fielder(usize),
+    Batter,
+}
+
+/// Who a rig currently is: the key every appearance system looks up cards
+/// with. Kept fresh by `player::sync_identities`; runner rigs get theirs
+/// stamped once at spawn (a runner never changes person mid-play).
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlayerIdentity {
+    pub team: Team,
+    pub index: usize,
+}
+
+impl RosterRole {
+    pub fn identity(
+        &self,
+        score: &crate::game::ScoreBoard,
+        order: &crate::game::rules::BattingOrder,
+        rosters: &Rosters,
+    ) -> PlayerIdentity {
+        match self {
+            RosterRole::Pitcher => PlayerIdentity {
+                team: score.fielding_team(),
+                index: 0,
+            },
+            RosterRole::Fielder(i) => {
+                let team = score.fielding_team();
+                PlayerIdentity {
+                    team,
+                    index: (i + 1) % rosters.team(team).lineup.len(),
+                }
+            }
+            RosterRole::Batter => {
+                let team = score.batting_team();
+                let len = rosters.team(team).lineup.len();
+                PlayerIdentity {
+                    team,
+                    index: (order.current(team) as usize - 1).min(len - 1),
+                }
+            }
+        }
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn roster_roles_resolve_to_identities() {
+        use crate::game::rules::BattingOrder;
+        use crate::game::ScoreBoard;
+        // ScoreBoard::default() is *not* top-1st (top_of_inning defaults to
+        // false); construct it the way `mod.rs`'s game-start insert and
+        // `ScoreBoard::reset` do.
+        let score = ScoreBoard {
+            inning: 1,
+            top_of_inning: true,
+            ..Default::default()
+        };
+        let order = BattingOrder::default();
+        let rosters = Rosters::default();
+        let id = RosterRole::Pitcher.identity(&score, &order, &rosters);
+        assert_eq!(
+            id,
+            PlayerIdentity {
+                team: Team::Home,
+                index: 0
+            }
+        );
+        let id = RosterRole::Fielder(0).identity(&score, &order, &rosters);
+        assert_eq!(
+            id,
+            PlayerIdentity {
+                team: Team::Home,
+                index: 1
+            }
+        );
+        // Fielder spots wrap on tiny parks, same as TeamRoster::fielding.
+        let id = RosterRole::Fielder(8).identity(&score, &order, &rosters);
+        assert_eq!(
+            id,
+            PlayerIdentity {
+                team: Team::Home,
+                index: 0
+            }
+        );
+        let id = RosterRole::Batter.identity(&score, &order, &rosters);
+        assert_eq!(
+            id,
+            PlayerIdentity {
+                team: Team::Away,
+                index: 0
+            }
+        );
+    }
 
     #[test]
     fn default_rosters_field_nine_with_a_bench() {
