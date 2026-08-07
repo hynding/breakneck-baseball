@@ -647,19 +647,26 @@ impl Plugin for AnimationPlugin {
         app.add_systems(
             Update,
             (
-                locomote,
-                drive_graph_rigs,
-                settle_graph_removed,
-                idle_graph_rigs,
-                sample_clips,
-                settle_removed,
+                // `locomote` only ever drives real gameplay movers (fielders,
+                // runners) and `meter_stance_sink` only the Swing Meter's
+                // batting-adapter feedback — both stay `Playing`-only. The
+                // five clip-driver systems between them widen to
+                // `dressing_active` so the Creator's preview rig (`--features
+                // debug`) is posed by the exact same drivers gameplay uses;
+                // `.chain()` still orders every system here regardless of
+                // which run condition gates it.
+                locomote.run_if(in_state(GameState::Playing)),
+                drive_graph_rigs.run_if(crate::game::dressing_active),
+                settle_graph_removed.run_if(crate::game::dressing_active),
+                idle_graph_rigs.run_if(crate::game::dressing_active),
+                sample_clips.run_if(crate::game::dressing_active),
+                settle_removed.run_if(crate::game::dressing_active),
                 // Composes the meter's stance-sink over `RigBaseY` last, so it
                 // wins the batter root's y after `settle_removed`/`sample_clips`
                 // have restored it.
-                meter_stance_sink,
+                meter_stance_sink.run_if(in_state(GameState::Playing)),
             )
-                .chain()
-                .run_if(in_state(GameState::Playing)),
+                .chain(),
         );
     }
 }

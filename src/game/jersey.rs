@@ -23,7 +23,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use crate::game::model_assets::RigBones;
 use crate::game::roster::{PlayerCard, PlayerIdentity, Rosters};
 use crate::game::theme::Theme;
-use crate::game::{GameState, Team};
+use crate::game::Team;
 
 // ── The 5×7 font ──────────────────────────────────────────────────────────────
 
@@ -400,11 +400,11 @@ impl Plugin for JerseyPlugin {
                         .after(crate::game::runner::sync_runners),
                     dress_jerseys.after(crate::game::player::IdentitySet),
                 )
-                    .run_if(in_state(GameState::Playing)),
+                    .run_if(crate::game::dressing_active),
             )
             .add_systems(
                 Update,
-                mount_jerseys_on_bones.run_if(in_state(GameState::Playing)),
+                mount_jerseys_on_bones.run_if(crate::game::dressing_active),
             );
     }
 }

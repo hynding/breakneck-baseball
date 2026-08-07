@@ -11,6 +11,8 @@ pub mod ball;
 pub mod batting;
 pub mod camera;
 #[cfg(feature = "debug")]
+pub mod creator;
+#[cfg(feature = "debug")]
 pub mod debug;
 pub mod field;
 pub mod fielding;
@@ -84,6 +86,20 @@ impl Team {
     }
 }
 
+/// The rig-dressing/wiring/animation pipeline runs while gameplay OR the
+/// dev Creator stage is active — the Creator's honesty property is that
+/// the exact same systems dress the preview rig.
+pub fn dressing_active(state: Res<State<GameState>>) -> bool {
+    #[cfg(feature = "debug")]
+    {
+        matches!(state.get(), GameState::Playing | GameState::Creator)
+    }
+    #[cfg(not(feature = "debug"))]
+    {
+        matches!(state.get(), GameState::Playing)
+    }
+}
+
 /// The schedule that fires once when a game starts from the menu — the slot
 /// for every scene spawn/reset system. Deliberately *not* `OnEnter(Playing)`:
 /// resuming from `Paused` re-enters `Playing` and must not respawn anything.
@@ -149,6 +165,9 @@ pub enum GameState {
     Paused,
     /// Inning / game over screen.
     GameOver,
+    /// Dev-only player-creation stage (menu → C in debug builds).
+    #[cfg(feature = "debug")]
+    Creator,
 }
 
 /// Runtime counters shared across systems.
@@ -261,7 +280,7 @@ impl Plugin for GamePlugin {
                 JuicePlugin,
             ));
         #[cfg(feature = "debug")]
-        app.add_plugins(debug::DebugPlugin);
+        app.add_plugins((debug::DebugPlugin, creator::CreatorPlugin));
         app
             // Fresh scoreboard/rosters each time a game starts from the menu;
             // tear the scene down once the game is over. Pausing stays inside

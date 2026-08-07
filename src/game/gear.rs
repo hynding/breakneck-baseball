@@ -13,7 +13,7 @@ use crate::game::model_assets::{
     GltfTeamMaterials, RigAnimations, RigBones, RigCapMeshes, RigSkinMeshes,
 };
 use crate::game::roster::{PlayerIdentity, Rosters};
-use crate::game::{GameState, Team};
+use crate::game::Team;
 
 /// Lazy cache of tinted skin materials, one per swatch — bounded by the
 /// palette, not the roster (the `JerseyCache` precedent).
@@ -324,7 +324,7 @@ impl Plugin for GearPlugin {
                 Update,
                 dress_rigs
                     .after(crate::game::player::IdentitySet)
-                    .run_if(in_state(GameState::Playing)),
+                    .run_if(crate::game::dressing_active),
             );
     }
 }

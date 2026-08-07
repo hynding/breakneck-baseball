@@ -477,9 +477,6 @@ impl Plugin for ModelAssetsPlugin {
                 ),
             )
             .add_systems(Update, retint_gltf_team_materials)
-            .add_systems(
-                Update,
-                wire_rigs.run_if(in_state(crate::game::GameState::Playing)),
-            );
+            .add_systems(Update, wire_rigs.run_if(crate::game::dressing_active));
     }
 }

@@ -127,7 +127,7 @@ impl TeamPalette {
     }
 }
 
-fn build_materials(
+pub(crate) fn build_materials(
     materials: &mut Assets<StandardMaterial>,
     template: &PlayerTemplate,
 ) -> RigMaterials {
@@ -408,22 +408,17 @@ pub enum RigModel {
     Gltf { scene: Handle<Scene> },
 }
 
-/// Builds the team palette and every player rig for the current field.
-fn spawn_players(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    field: Res<FieldSpec>,
-    theme: Res<Theme>,
-    asset_server: Res<AssetServer>,
-) {
-    let palette = TeamPalette {
-        home: build_materials(&mut materials, &theme.home),
-        away: build_materials(&mut materials, &theme.away),
-    };
-    // The model seam: a future humanoid model is a new arm here (its own
-    // meshes — and richer poses behind the same AnimClip names).
-    let rig_model = match theme.player_model {
+/// Constructs the [`RigModel`] for the active theme's `player_model` — the
+/// model seam: a future humanoid model is a new arm here (its own meshes —
+/// and richer poses behind the same `AnimClip` names). Shared by
+/// `spawn_players` and (in debug builds) the Creator's preview rig, so both
+/// build rigs the exact same way.
+pub(crate) fn build_rig_model(
+    meshes: &mut Assets<Mesh>,
+    asset_server: &AssetServer,
+    player_model: PlayerModelId,
+) -> RigModel {
+    match player_model {
         PlayerModelId::Blocky => RigModel::Blocky(RigMeshes {
             torso: meshes.add(Capsule3d::new(0.3, 0.9)),
             head: meshes.add(Sphere::new(0.18)),
@@ -440,7 +435,23 @@ fn spawn_players(
                     .from_asset(crate::game::model_assets::player_model_path()),
             ),
         },
+    }
+}
+
+/// Builds the team palette and every player rig for the current field.
+fn spawn_players(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    field: Res<FieldSpec>,
+    theme: Res<Theme>,
+    asset_server: Res<AssetServer>,
+) {
+    let palette = TeamPalette {
+        home: build_materials(&mut materials, &theme.home),
+        away: build_materials(&mut materials, &theme.away),
     };
+    let rig_model = build_rig_model(&mut meshes, &asset_server, theme.player_model);
     let jersey_assets = crate::game::jersey::make_assets(&mut meshes, &mut materials);
 
     // Top of the 1st: Away bats, Home fields.

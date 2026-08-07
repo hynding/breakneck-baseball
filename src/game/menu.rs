@@ -166,9 +166,10 @@ fn build_menu(commands: &mut Commands, config: &GameConfig, theme: &Theme) {
                         },
                     ));
                     card.spawn((
-                        Text::new(
-                            "Controller: A pitch/swing, stick to aim\nKeyboard: WASD + Space (P1), Arrows + Right-Ctrl (P2)\nBatting: hold Down through the windup to send the runner\nSettings: S / gamepad Select opens batting style & volume options",
-                        ),
+                        Text::new(format!(
+                            "Controller: A pitch/swing, stick to aim\nKeyboard: WASD + Space (P1), Arrows + Right-Ctrl (P2)\nBatting: hold Down through the windup to send the runner\nSettings: S / gamepad Select opens batting style & volume options{}",
+                            creator_hint()
+                        )),
                         TextFont {
                             font_size: 13.0,
                             ..default()
@@ -178,6 +179,18 @@ fn build_menu(commands: &mut Commands, config: &GameConfig, theme: &Theme) {
                     ));
                 });
         });
+}
+
+/// Dev-only hint line for the Creator stage (`--features debug`), appended to
+/// the menu's control summary.
+#[cfg(feature = "debug")]
+fn creator_hint() -> &'static str {
+    "\nC — player creator (dev)"
+}
+
+#[cfg(not(feature = "debug"))]
+fn creator_hint() -> &'static str {
+    ""
 }
 
 fn update_controller_status(
