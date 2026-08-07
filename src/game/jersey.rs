@@ -5,13 +5,14 @@
 //! the back carries the surname over a big number, the chest and both
 //! shoulders carry the number alone. Quads hang off the rig roots (they are
 //! not [`RigPart`]s, so team recolouring ignores them). Dressing is
-//! identity-driven and runs as a two-system chain: `player::sync_identities`
-//! re-stamps each rig's [`PlayerIdentity`] whenever the half-inning flips,
-//! the batting order advances, or a substitution changes the roster, and
-//! [`dress_jerseys`] reacts to that `Changed<PlayerIdentity>` (chained
-//! immediately after) to re-letter whichever jerseys just changed who they
-//! belong to. Textures are cached per (team, player, face) so a full game
-//! allocates a few dozen small images.
+//! identity-driven: `player::sync_identities` re-stamps each rig's
+//! [`PlayerIdentity`] whenever the half-inning flips, the batting order
+//! advances, or a substitution changes the roster (`.in_set(IdentitySet)`),
+//! and [`dress_jerseys`] reacts to that `Changed<PlayerIdentity>`
+//! (`.after(IdentitySet)`, which gets Bevy's auto-inserted sync point) to
+//! re-letter whichever jerseys just changed who they belong to. Textures are
+//! cached per (team, player, face) so a full game allocates a few dozen
+//! small images.
 
 use std::collections::HashMap;
 
@@ -386,16 +387,19 @@ impl Plugin for JerseyPlugin {
             .add_systems(crate::game::game_start(), reset_cache)
             .add_systems(
                 Update,
-                (crate::game::player::sync_identities, dress_jerseys)
-                    .chain()
+                (
                     // Ordering, not a data dependency: on a walk/HBP/dropped-
                     // third, `runner::sync_runners`'s ghost-less fallback
                     // reads the batter rig's `PlayerIdentity` in the same
-                    // frame this chain re-stamps that rig to the *next*
-                    // hitter. Forcing this chain after `sync_runners` keeps
-                    // the runner's identity read a step ahead of the
+                    // frame this system re-stamps that rig to the *next*
+                    // hitter. Forcing `sync_identities` after `sync_runners`
+                    // keeps the runner's identity read a step ahead of the
                     // re-stamp (see the comment on `sync_runners`).
-                    .after(crate::game::runner::sync_runners)
+                    crate::game::player::sync_identities
+                        .in_set(crate::game::player::IdentitySet)
+                        .after(crate::game::runner::sync_runners),
+                    dress_jerseys.after(crate::game::player::IdentitySet),
+                )
                     .run_if(in_state(GameState::Playing)),
             )
             .add_systems(

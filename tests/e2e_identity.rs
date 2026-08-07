@@ -88,3 +88,40 @@ fn runner_rigs_are_identified_and_wear_jerseys() {
         assert_eq!(count_quads(world, rig), 4, "runner must wear its jerseys");
     }
 }
+
+#[test]
+fn skin_tones_dress_the_wired_rigs() {
+    let mut app = headless_app();
+    start_game(&mut app, KeyCode::Digit1);
+    // Wait for glTF wiring + dressing (async asset load).
+    let dressed = run_until(&mut app, 5_000, |app| {
+        let world = app.world_mut();
+        let mut q = world.query::<&breakneck_baseball::game::gear::DressedAs>();
+        q.iter(world).count() > 0
+    });
+    assert!(
+        dressed.is_some(),
+        "at least one rig must dress after wiring"
+    );
+    // A dressed rig's skin meshes must not wear the shared base material.
+    let world = app.world_mut();
+    let base = world
+        .resource::<breakneck_baseball::game::model_assets::RigAnimations>()
+        .skin_material
+        .clone();
+    let mut rigs = world.query_filtered::<
+        &breakneck_baseball::game::model_assets::RigSkinMeshes,
+        With<breakneck_baseball::game::gear::DressedAs>,
+    >();
+    let skin_meshes: Vec<Entity> = rigs.iter(world).flat_map(|m| m.0.clone()).collect();
+    assert!(!skin_meshes.is_empty());
+    for mesh in skin_meshes {
+        let mat = world
+            .get::<MeshMaterial3d<StandardMaterial>>(mesh)
+            .expect("skin mesh keeps its material component");
+        assert_ne!(
+            mat.0, base,
+            "dressed skin must be a swatch clone, not the base"
+        );
+    }
+}

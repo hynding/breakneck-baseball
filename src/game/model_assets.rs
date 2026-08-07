@@ -15,6 +15,8 @@ pub const CAP_MATERIAL: &str = "Cap";
 /// Named bat material — the exporter splits mesh primitives per material, so
 /// the bat is its own child entity `wire_rigs` finds by handle equality.
 pub const BAT_MATERIAL: &str = "Bat";
+/// Named skin material — the per-player tint seam ([`RigSkinMeshes`]).
+pub const SKIN_MATERIAL: &str = "Skin";
 
 /// Bones gameplay attaches to (jersey lettering, the bat, future props).
 pub const ATTACH_BONES: &[&str] = &["Hips", "Spine", "Head", "UpperArm.L", "UpperArm.R", "Bat"];
@@ -91,6 +93,9 @@ pub struct RigAnimations {
     /// The bat submesh's material handle — `wire_rigs` compares every
     /// descendant against it to find and show/hide the batter's prop.
     pub bat_material: Handle<StandardMaterial>,
+    /// The skin submesh's material handle — `wire_rigs` compares every
+    /// descendant against it to collect [`RigSkinMeshes`] for per-player tint.
+    pub skin_material: Handle<StandardMaterial>,
     nodes: Vec<AnimationNodeIndex>, // parallel to CLIP_TABLE
     speeds: Vec<f32>,               // authored duration / AnimClip::duration()
 }
@@ -249,6 +254,11 @@ fn build_rig_animations(
         .get(BAT_MATERIAL)
         .cloned()
         .unwrap_or_default();
+    let skin_material = gltf
+        .named_materials
+        .get(SKIN_MATERIAL)
+        .cloned()
+        .unwrap_or_default();
 
     let tint = |materials: &mut Assets<StandardMaterial>,
                 base: &Handle<StandardMaterial>,
@@ -273,6 +283,7 @@ fn build_rig_animations(
         jersey_material: jersey_base,
         cap_material: cap_base,
         bat_material,
+        skin_material,
         nodes,
         speeds,
     });
@@ -295,11 +306,24 @@ pub struct RigBones {
     pub bat: Entity,
 }
 
+/// Skinned-mesh entities wearing the model's Skin material, per rig — the
+/// per-player tint seam. Umpire rigs get one too but are never dressed (no
+/// PlayerIdentity).
+#[derive(Component)]
+pub struct RigSkinMeshes(pub Vec<Entity>);
+
+/// This rig's cap submeshes — headwear dressing shows/hides them per player
+/// while team recolouring keeps owning their material.
+#[derive(Component)]
+pub struct RigCapMeshes(pub Vec<Entity>);
+
 /// Finishes glTF rigs once their scene has instantiated: attaches the shared
 /// graph + transitions to the skeleton's AnimationPlayer, resolves the
 /// contract's named bones, tags every skinned mesh wearing the model's
 /// jersey/cap material with [`GltfJerseyMesh`] so [`recolor_gltf`] can dress
-/// it, and shows the bat submesh only on the plate batter (the `Batter`
+/// it, collects the skin/cap submeshes onto the root as [`RigSkinMeshes`]/
+/// [`RigCapMeshes`] for per-player dressing (`gear::dress_rigs`), and shows
+/// the bat submesh only on the plate batter (the `Batter`
 /// marker) — every other rig, including run-out rigs which also carry
 /// `RigUnit::Batter`, hides it, since the bat is skinned into the shared mesh
 /// and every instance would otherwise carry one. Retries each frame until
@@ -324,6 +348,7 @@ fn wire_rigs(
         let mut jersey_meshes = Vec::new();
         let mut cap_meshes = Vec::new();
         let mut bat_meshes = Vec::new();
+        let mut skin_meshes = Vec::new();
         let mut stack = vec![root];
         while let Some(e) = stack.pop() {
             if players.get(e).is_ok() {
@@ -345,6 +370,8 @@ fn wire_rigs(
                     cap_meshes.push(e);
                 } else if mat.0 == anims.bat_material {
                     bat_meshes.push(e);
+                } else if mat.0 == anims.skin_material {
+                    skin_meshes.push(e);
                 }
             }
             if let Ok(children) = children_q.get(e) {
@@ -371,6 +398,8 @@ fn wire_rigs(
                 upper_arm_r: uar,
                 bat,
             },
+            RigSkinMeshes(skin_meshes),
+            RigCapMeshes(cap_meshes.clone()),
         ));
         let unit = unit_tag.0;
         for e in jersey_meshes {

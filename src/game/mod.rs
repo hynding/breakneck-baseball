@@ -16,6 +16,7 @@ pub mod field;
 pub mod fielding;
 pub mod flow;
 pub mod fx;
+pub mod gear;
 pub mod input;
 pub mod jersey;
 pub mod juice;
@@ -44,6 +45,7 @@ use field::FieldPlugin;
 use fielding::FieldingPlugin;
 use flow::FlowPlugin;
 use fx::FxPlugin;
+use gear::GearPlugin;
 use input::InputPlugin;
 use jersey::JerseyPlugin;
 use juice::JuicePlugin;
@@ -253,6 +255,7 @@ impl Plugin for GamePlugin {
             .add_plugins((
                 UiPlugin,
                 JerseyPlugin,
+                GearPlugin,
                 SubsPlugin,
                 settings::SettingsPlugin,
                 JuicePlugin,

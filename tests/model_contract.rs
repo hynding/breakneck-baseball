@@ -5,7 +5,7 @@ use std::collections::HashSet;
 
 use breakneck_baseball::game::model_assets::{
     ATTACH_BONES, BAT_MATERIAL, CAP_MATERIAL, CLIP_TABLE, JERSEY_MATERIAL, MAX_BONES,
-    MAX_GLB_BYTES, MAX_TRIANGLES, PLAYER_GLB,
+    MAX_GLB_BYTES, MAX_TRIANGLES, PLAYER_GLB, SKIN_MATERIAL,
 };
 
 #[test]
@@ -37,7 +37,7 @@ fn player_glb_satisfies_contract() {
     // Every named material `build_rig_animations` looks up must really be
     // present — an `unwrap_or_default()` fallback there degrades silently
     // (caps stop tinting, the bat shows on every rig) instead of failing.
-    for material in [JERSEY_MATERIAL, CAP_MATERIAL, BAT_MATERIAL] {
+    for material in [JERSEY_MATERIAL, CAP_MATERIAL, BAT_MATERIAL, SKIN_MATERIAL] {
         assert!(
             material_names.iter().any(|n| n == material),
             "missing material {material}; found {material_names:?}"

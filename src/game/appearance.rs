@@ -47,7 +47,7 @@ macro_rules! appearance_enum {
 appearance_enum! {
 /// Curated skin swatch ids — resolved to actual colours by the dressing
 /// systems (Phase 2), never raw RGB in the data file.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SkinTone {
     Porcelain,
     Light,
@@ -58,6 +58,23 @@ pub enum SkinTone {
     #[serde(other)]
     Medium,
 }
+}
+
+impl SkinTone {
+    /// Curated swatch colours (sRGB). Data files reference tones by id;
+    /// only this function knows the pixels, so retuning the palette never
+    /// touches player data.
+    pub fn color(self) -> bevy::color::Color {
+        use bevy::color::Color;
+        match self {
+            SkinTone::Porcelain => Color::srgb(0.96, 0.87, 0.79),
+            SkinTone::Light => Color::srgb(0.88, 0.72, 0.59),
+            SkinTone::Medium => Color::srgb(0.76, 0.57, 0.42),
+            SkinTone::Tan => Color::srgb(0.62, 0.44, 0.30),
+            SkinTone::Brown => Color::srgb(0.45, 0.30, 0.20),
+            SkinTone::Deep => Color::srgb(0.28, 0.18, 0.12),
+        }
+    }
 }
 
 appearance_enum! {
@@ -382,6 +399,33 @@ mod tests {
             "rejection reason should mention the version mismatch: {err}"
         );
         assert!(defs.0.home.iter().any(|d| d.name == "VEGO"));
+    }
+
+    #[test]
+    fn skin_tones_resolve_to_distinct_colors() {
+        use bevy::color::ColorToComponents;
+        let tones = [
+            SkinTone::Porcelain,
+            SkinTone::Light,
+            SkinTone::Medium,
+            SkinTone::Tan,
+            SkinTone::Brown,
+            SkinTone::Deep,
+        ];
+        let colors: Vec<[f32; 4]> = tones
+            .iter()
+            .map(|t| t.color().to_srgba().to_f32_array())
+            .collect();
+        for (i, a) in colors.iter().enumerate() {
+            for b in &colors[i + 1..] {
+                assert_ne!(a, b, "every swatch must be visually distinct");
+            }
+        }
+        // Luminance ordering: the list runs light → deep.
+        let lum = |c: &[f32; 4]| 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+        for w in colors.windows(2) {
+            assert!(lum(&w[0]) > lum(&w[1]), "tones must darken monotonically");
+        }
     }
 
     #[test]

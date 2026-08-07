@@ -616,6 +616,14 @@ fn trigger_swing(
     }
 }
 
+/// Systems that stamp [`crate::game::roster::PlayerIdentity`] run in this
+/// set; identity *consumers* order `.after(IdentitySet)` and get Bevy's
+/// auto-inserted sync point, seeing the same-frame stamps. Promoted from a
+/// bare `.chain()` per the Phase 1 review so new consumers join
+/// declaratively.
+#[derive(bevy::ecs::schedule::SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct IdentitySet;
+
 /// Keeps every seated rig's [`crate::game::roster::PlayerIdentity`] matching
 /// the live game: re-stamps on scoreboard flips (the defense becomes the
 /// other team's nine), batting-order advances (the batter rig becomes the
