@@ -94,6 +94,13 @@ impl SkinTone {
 
 (Exhaustive match, no wildcard — adding a tone forces a colour.) GREEN.
 
+Also in this step: `SkinTone`'s derive list gains `Hash` (it becomes a
+`HashMap` key in Step 4):
+
+```rust
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+```
+
 - [ ] **Step 3: Skin material through the contract**
 
 In `model_assets.rs`:
@@ -158,7 +165,7 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 
 use crate::game::appearance::{PlayerAppearance, SkinTone};
-use crate::game::model_assets::{RigAnimations, RigBones, RigCapMeshes, RigSkinMeshes};
+use crate::game::model_assets::{RigAnimations, RigSkinMeshes};
 use crate::game::roster::{PlayerIdentity, Rosters};
 use crate::game::{GameState, Team};
 
@@ -244,8 +251,18 @@ impl Plugin for GearPlugin {
 
 (If the `dressed == ...` comparison line fights the borrow checker, the
 plain form is `if dressed.map(|d| *d) == Some(target) { continue; }` —
-keep the semantics, not the syntax.) Note `RigCapMeshes`/`RigBones`/`Team`
-imports may be unused until Task 3 — import them then, not now (clippy).
+keep the semantics, not the syntax.) `RigCapMeshes`/`RigBones` are
+imported in Task 3 when their arms land, not now (clippy `-D warnings`
+is a hard gate). Also give `DressedAs` a pub accessor now — Task 4's
+tests read it:
+
+```rust
+impl DressedAs {
+    pub fn team(&self) -> Team {
+        self.team
+    }
+}
+```
 
 Register in `mod.rs`: `gear::GearPlugin` next to `JerseyPlugin`, plus `pub mod gear;`.
 
@@ -326,6 +343,8 @@ pub const ATTACH_BONES: &[&str] = &[
 
 Run `cargo test --test model_contract` — expect GREEN immediately (all three bones already exist in the committed glb; this is a pin, not a change — say so in the commit message).
 
+Documented deviation from spec §3: `hips` is deliberately NOT added to `RigBones` — no Phase 2 gear mounts there, and an unused resolved bone is dead weight (YAGNI). The spec's Layer-2 list is a menu, not a mandate; add `hips` when a prop actually needs it.
+
 - [ ] **Step 2: Failing compile via `RigBones` growth**
 
 Add `pub head: Entity, pub lower_arm_l: Entity, pub lower_arm_r: Entity` to `RigBones`; `cargo check` — RED at `wire_rigs`'s struct literal.
@@ -361,12 +380,17 @@ fn headwear_hides_the_baked_cap_and_mounts_gear() {
     start_game(&mut app, KeyCode::Digit1);
     // VEGA (home slot 0 → the pitcher in the top 1st) wears a Helmet in
     // data/players.ron: his baked cap must hide and a helmet prop appear.
+    // Gate on the PITCHER RIG specifically being dressed — rigs wire
+    // asynchronously per-entity, so "any gear exists" would race.
     let done = run_until(&mut app, 5_000, |app| {
         let world = app.world_mut();
-        let mut q = world.query::<&breakneck_baseball::game::gear::GearProp>();
-        q.iter(world).count() > 0
+        let mut q = world.query_filtered::<
+            &breakneck_baseball::game::gear::RigGear,
+            With<breakneck_baseball::game::player::Pitcher>,
+        >();
+        q.iter(world).next().map(|g| !g.0.is_empty()).unwrap_or(false)
     });
-    assert!(done.is_some(), "gear props must spawn for helmeted players");
+    assert!(done.is_some(), "the helmeted pitcher must dress with gear props");
 
     let world = app.world_mut();
     // Find the pitcher rig (identity Home/0 = VEGA per data/players.ron).
@@ -377,7 +401,8 @@ fn headwear_hides_the_baked_cap_and_mounts_gear() {
     >();
     let (caps, gear) = pitchers.single(world);
     let cap_entities = caps.0.clone();
-    assert!(!gear.0.is_empty(), "helmet wearer must own gear props");
+    let gear_entities = gear.0.clone();
+    assert!(!gear_entities.is_empty(), "helmet wearer must own gear props");
     for cap in cap_entities {
         assert_eq!(
             world.get::<Visibility>(cap).copied(),
@@ -385,6 +410,17 @@ fn headwear_hides_the_baked_cap_and_mounts_gear() {
             "baked cap must hide under a helmet"
         );
     }
+    // Spec §7: props are parented to the right bone entities — the helmet
+    // must be a child of the pitcher rig's Head bone.
+    let mut pitcher_bones = world.query_filtered::<
+        &breakneck_baseball::game::model_assets::RigBones,
+        With<breakneck_baseball::game::player::Pitcher>,
+    >();
+    let head = pitcher_bones.single(world).head;
+    let on_head = gear_entities
+        .iter()
+        .any(|&p| world.get::<Parent>(p).map(|par| par.get()) == Some(head));
+    assert!(on_head, "the helmet prop must hang off the Head bone");
 }
 ```
 
@@ -407,7 +443,7 @@ pub struct GearAssets {
     visor: Handle<Mesh>,       // Cuboid(0.22, 0.05, 0.02) — shades
     eye_black: Handle<Mesh>,   // Cuboid(0.05, 0.025, 0.005) — cheek smear
     wristband: Handle<Mesh>,   // Cylinder(0.055, 0.05) — forearm band
-    chain: Handle<Mesh>,       // Torus { minor: 0.012, major: 0.09 } — necklace
+    chain: Handle<Mesh>,       // Torus { minor_radius: 0.012, major_radius: 0.09 } — necklace
     dark: Handle<StandardMaterial>,   // near-black, for lenses/visor/eye black
     white: Handle<StandardMaterial>,  // wristbands
     gold: Handle<StandardMaterial>,   // chain (metallic-ish: base gold, low roughness)
@@ -483,11 +519,25 @@ use common::{headless_app, run_until, start_game};
 fn gear_survives_count_changes_without_respawning() {
     let mut app = headless_app();
     start_game(&mut app, KeyCode::Digit1);
-    let ready = run_until(&mut app, 5_000, |app| {
+    // Readiness = the dressed-rig count has been STABLE for 60 frames
+    // (async per-rig wiring means "some gear exists" races a late rig).
+    let mut stable_frames = 0u32;
+    let mut last_count = 0usize;
+    let ready = run_until(&mut app, 10_000, |app| {
         let world = app.world_mut();
-        world.query::<&GearProp>().iter(world).count() > 0
+        let count = world
+            .query::<&breakneck_baseball::game::gear::DressedAs>()
+            .iter(world)
+            .count();
+        if count > 0 && count == last_count {
+            stable_frames += 1;
+        } else {
+            stable_frames = 0;
+            last_count = count;
+        }
+        stable_frames >= 60
     });
-    assert!(ready.is_some());
+    assert!(ready.is_some(), "dressed-rig count never stabilized");
     let world = app.world_mut();
     let before: Vec<Entity> = world.query_filtered::<Entity, With<GearProp>>().iter(world).collect();
     // Force a scoreboard change (a ball on the count) — identities re-stamp.
@@ -520,16 +570,39 @@ fn batter_redresses_on_half_inning_flip() {
         let mut score = app.world_mut().resource_mut::<ScoreBoard>();
         score.top_of_inning = false;
     }
+    // The claim under test is the DRESSING following the flip, not just
+    // identity (Phase 1 already pins identity) — read DressedAs::team().
     let flipped = run_until(&mut app, 1_000, |app| {
         let world = app.world_mut();
         world
-            .query_filtered::<&PlayerIdentity, With<Batter>>()
+            .query_filtered::<&breakneck_baseball::game::gear::DressedAs, With<Batter>>()
             .iter(world)
             .next()
-            .map(|id| id.team == Team::Home)
+            .map(|d| d.team() == Team::Home)
             .unwrap_or(false)
     });
-    assert!(flipped.is_some(), "batter identity must follow the flip");
+    assert!(flipped.is_some(), "batter dressing must follow the flip");
+}
+
+/// Spec §7: runner rigs are dressed too. Manifest bases-loaded runners via
+/// the scenario seam (the e2e_identity pattern) and assert each carries
+/// DressedAs once wired.
+#[test]
+fn runner_rigs_are_dressed() {
+    use breakneck_baseball::game::gear::DressedAs;
+    use breakneck_baseball::game::runner::Runner;
+    use breakneck_baseball::game::scenario::{apply_to_world, presets, PRESET_LOADED};
+    let mut app = headless_app();
+    start_game(&mut app, KeyCode::Digit1);
+    let s = presets().into_iter().find(|s| s.name == PRESET_LOADED).unwrap();
+    apply_to_world(app.world_mut(), &s).expect("ball is dead at PrePitch");
+    let dressed = run_until(&mut app, 5_000, |app| {
+        let world = app.world_mut();
+        let runners: Vec<Entity> =
+            world.query_filtered::<Entity, With<Runner>>().iter(world).collect();
+        runners.len() == 3 && runners.iter().all(|&r| world.get::<DressedAs>(r).is_some())
+    });
+    assert!(dressed.is_some(), "all three scenario runners must dress");
 }
 ```
 
