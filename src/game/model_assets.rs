@@ -19,7 +19,16 @@ pub const BAT_MATERIAL: &str = "Bat";
 pub const SKIN_MATERIAL: &str = "Skin";
 
 /// Bones gameplay attaches to (jersey lettering, the bat, future props).
-pub const ATTACH_BONES: &[&str] = &["Hips", "Spine", "Head", "UpperArm.L", "UpperArm.R", "Bat"];
+pub const ATTACH_BONES: &[&str] = &[
+    "Hips",
+    "Spine",
+    "Head",
+    "UpperArm.L",
+    "UpperArm.R",
+    "LowerArm.L",
+    "LowerArm.R",
+    "Bat",
+];
 
 /// Budgets per docs/superpowers/specs/2026-07-24-gltf-player-models-design.md
 /// §7 — ~18 skinned rigs at once on a WebGL2 floor.
@@ -298,11 +307,17 @@ pub struct RigPlayer {
 }
 
 /// Named bone entities gameplay attaches to (jersey quads, future props).
+/// Note: Hips is in ATTACH_BONES (the model contract) but deliberately NOT
+/// resolved here — no Phase 2 gear mounts to hips, and an unused resolved bone
+/// is dead weight (YAGNI). Add hips when a prop actually needs it.
 #[derive(Component)]
 pub struct RigBones {
     pub spine: Entity,
     pub upper_arm_l: Entity,
     pub upper_arm_r: Entity,
+    pub head: Entity,
+    pub lower_arm_l: Entity,
+    pub lower_arm_r: Entity,
     pub bat: Entity,
 }
 
@@ -344,7 +359,8 @@ fn wire_rigs(
     };
     for (root, unit_tag, is_batter) in &unwired {
         let mut player = None;
-        let (mut spine, mut ual, mut uar, mut bat) = (None, None, None, None);
+        let (mut spine, mut ual, mut uar, mut head, mut lal, mut lar, mut bat) =
+            (None, None, None, None, None, None, None);
         let mut jersey_meshes = Vec::new();
         let mut cap_meshes = Vec::new();
         let mut bat_meshes = Vec::new();
@@ -359,6 +375,9 @@ fn wire_rigs(
                     "Spine" => spine = Some(e),
                     "UpperArm.L" => ual = Some(e),
                     "UpperArm.R" => uar = Some(e),
+                    "Head" => head = Some(e),
+                    "LowerArm.L" => lal = Some(e),
+                    "LowerArm.R" => lar = Some(e),
                     "Bat" => bat = Some(e),
                     _ => {}
                 }
@@ -378,8 +397,16 @@ fn wire_rigs(
                 stack.extend(children.iter().copied());
             }
         }
-        let (Some(player), Some(spine), Some(ual), Some(uar), Some(bat)) =
-            (player, spine, ual, uar, bat)
+        let (
+            Some(player),
+            Some(spine),
+            Some(ual),
+            Some(uar),
+            Some(head),
+            Some(lal),
+            Some(lar),
+            Some(bat),
+        ) = (player, spine, ual, uar, head, lal, lar, bat)
         else {
             continue; // scene still instantiating — retry next frame
         };
@@ -396,6 +423,9 @@ fn wire_rigs(
                 spine,
                 upper_arm_l: ual,
                 upper_arm_r: uar,
+                head,
+                lower_arm_l: lal,
+                lower_arm_r: lar,
                 bat,
             },
             RigSkinMeshes(skin_meshes),
