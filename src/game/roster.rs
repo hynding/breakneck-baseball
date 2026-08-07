@@ -10,15 +10,18 @@
 
 use bevy::prelude::Resource;
 
+use crate::game::appearance::{PlayerAppearance, PlayerDef, RosterDefs};
 use crate::game::rules::LINEUP_SIZE;
 use crate::game::Team;
 
 /// One player: jersey name (A–Z only — the procedural jersey font's
-/// alphabet) and number.
+/// alphabet), number, and personal appearance recipe (authored in
+/// `data/players.ron`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlayerCard {
-    pub name: &'static str,
+    pub name: String,
     pub number: u32,
+    pub appearance: PlayerAppearance,
 }
 
 /// One team's nine starters plus the bench.
@@ -31,10 +34,14 @@ pub struct TeamRoster {
 }
 
 impl TeamRoster {
-    fn from_pool(pool: &[(&'static str, u32)]) -> Self {
-        let mut cards: Vec<PlayerCard> = pool
+    fn from_defs(defs: &[PlayerDef]) -> Self {
+        let mut cards: Vec<PlayerCard> = defs
             .iter()
-            .map(|&(name, number)| PlayerCard { name, number })
+            .map(|d| PlayerCard {
+                name: d.name.clone(),
+                number: d.number,
+                appearance: d.appearance,
+            })
             .collect();
         let bench = cards.split_off(LINEUP_SIZE as usize);
         Self {
@@ -56,6 +63,12 @@ impl TeamRoster {
             None => &self.lineup[0],
             Some(i) => &self.lineup[(i + 1) % self.lineup.len()],
         }
+    }
+
+    /// Direct lineup access by 0-based index, clamped like [`Self::batting`]
+    /// — the lookup [`crate::game::roster`] identity consumers use.
+    pub fn card(&self, index: usize) -> &PlayerCard {
+        &self.lineup[index.min(self.lineup.len() - 1)]
     }
 
     /// Swaps bench player `bench_index` into lineup `slot` (0-indexed); the
@@ -90,47 +103,20 @@ impl Rosters {
     }
 }
 
-impl Default for Rosters {
-    fn default() -> Self {
+impl Rosters {
+    pub fn from_defs(defs: &RosterDefs) -> Self {
         Self {
-            home: TeamRoster::from_pool(HOME_POOL),
-            away: TeamRoster::from_pool(AWAY_POOL),
+            home: TeamRoster::from_defs(&defs.0.home),
+            away: TeamRoster::from_defs(&defs.0.away),
         }
     }
 }
 
-/// Nine starters then the bench, in batting order.
-const HOME_POOL: &[(&str, u32)] = &[
-    ("VEGA", 7),
-    ("OKAFOR", 23),
-    ("BLAZE", 44),
-    ("TANAKA", 5),
-    ("CRUZ", 12),
-    ("HOLT", 28),
-    ("DIAZ", 3),
-    ("MERCER", 19),
-    ("KANE", 31),
-    ("RIOS", 51),
-    ("PYE", 8),
-    ("NOVAK", 60),
-    ("ASHFORD", 14),
-];
-
-const AWAY_POOL: &[(&str, u32)] = &[
-    ("STONE", 21),
-    ("IBARRA", 9),
-    ("FOX", 33),
-    ("NAKANO", 2),
-    ("REYES", 17),
-    ("BOONE", 45),
-    ("LUKIC", 6),
-    ("HALE", 26),
-    ("OSEI", 38),
-    ("QUINN", 55),
-    ("MARSH", 11),
-    ("IKEDA", 4),
-    ("COLE", 29),
-];
+impl Default for Rosters {
+    fn default() -> Self {
+        Self::from_defs(&RosterDefs::default())
+    }
+}
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -145,7 +131,6 @@ mod tests {
             assert_eq!(roster.lineup.len(), LINEUP_SIZE as usize);
             assert!(!roster.bench.is_empty());
         }
-        // No duplicate numbers within a team.
         for roster in [&r.home, &r.away] {
             let mut numbers: Vec<u32> = roster
                 .lineup
@@ -160,14 +145,24 @@ mod tests {
     }
 
     #[test]
+    fn cards_carry_their_authored_appearance() {
+        // data/players.ron gives VEGA a helmet; the built roster must keep it.
+        let r = Rosters::default();
+        let vega = r.home.lineup.iter().find(|c| c.name == "VEGA").unwrap();
+        assert_eq!(
+            vega.appearance.headwear,
+            crate::game::appearance::Headwear::Helmet
+        );
+    }
+
+    #[test]
     fn substitution_swaps_starter_and_bench() {
-        let mut r = TeamRoster::from_pool(HOME_POOL);
+        let mut r = Rosters::default().home;
         let starter = r.lineup[2].clone();
         let sub = r.bench[1].clone();
         r.substitute(2, 1);
         assert_eq!(r.lineup[2], sub);
         assert_eq!(r.bench[1], starter);
-        // Out-of-range indices are ignored.
         r.substitute(99, 0);
         r.substitute(0, 99);
         assert_eq!(r.lineup[2], sub);
@@ -175,12 +170,15 @@ mod tests {
 
     #[test]
     fn positional_lookups_follow_the_arcade_mapping() {
-        let r = TeamRoster::from_pool(HOME_POOL);
+        let r = Rosters::default().home;
         assert_eq!(r.batting(1), &r.lineup[0]);
         assert_eq!(r.batting(9), &r.lineup[8]);
-        assert_eq!(r.fielding(None), &r.lineup[0]); // the pitcher
+        assert_eq!(r.fielding(None), &r.lineup[0]);
         assert_eq!(r.fielding(Some(0)), &r.lineup[1]);
-        assert_eq!(r.fielding(Some(8)), &r.lineup[0]); // wraps on tiny parks
+        assert_eq!(r.fielding(Some(8)), &r.lineup[0]);
+        // The clamped direct index the identity systems use.
+        assert_eq!(r.card(0), &r.lineup[0]);
+        assert_eq!(r.card(99), &r.lineup[8]);
     }
 
     #[test]

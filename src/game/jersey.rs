@@ -141,9 +141,9 @@ fn build_texture(card: &PlayerCard, face: JerseyFace, color: [u8; 4]) -> Image {
     let number = card.number.to_string();
     match face {
         JerseyFace::Back => {
-            let name_scale = fit_scale(card.name, w - 8).min(2);
-            let nx = (w - text_width(card.name, name_scale)) / 2;
-            draw_text(&mut canvas, w, nx, 6, name_scale, card.name, color);
+            let name_scale = fit_scale(&card.name, w - 8).min(2);
+            let nx = (w - text_width(&card.name, name_scale)) / 2;
+            draw_text(&mut canvas, w, nx, 6, name_scale, &card.name, color);
             let num_scale = fit_scale(&number, w - 12).min(6);
             let x = (w - text_width(&number, num_scale)) / 2;
             let y = 24 + (h - 24 - 7 * num_scale) / 2;
@@ -213,7 +213,7 @@ pub struct JerseyAssets {
 /// Cache of generated lettering materials, keyed by (team, name, number,
 /// face) — bounded by roster size.
 #[derive(Resource, Default)]
-struct JerseyCache(HashMap<(Team, &'static str, u32, JerseyFace), Handle<StandardMaterial>>);
+struct JerseyCache(HashMap<(Team, String, u32, JerseyFace), Handle<StandardMaterial>>);
 
 /// Builds the shared quad meshes/placeholder. Called by the player spawner
 /// (which inserts the resource) so rigs and their jerseys appear together —
@@ -371,7 +371,7 @@ fn dress_jerseys(
             JerseyRole::Fielder(i) => roster.fielding(Some(i)),
             JerseyRole::Batter => roster.batting(order.current(team)),
         };
-        let key = (team, card.name, card.number, quad.face);
+        let key = (team, card.name.clone(), card.number, quad.face);
         let handle = cache.0.entry(key).or_insert_with(|| {
             let template = match team {
                 Team::Home => &theme.home,
@@ -432,8 +432,9 @@ mod tests {
     #[test]
     fn back_texture_draws_name_and_number_pixels() {
         let card = PlayerCard {
-            name: "OKAFOR",
+            name: "OKAFOR".to_string(),
             number: 23,
+            appearance: Default::default(),
         };
         let image = build_texture(&card, JerseyFace::Back, [255, 255, 255, 255]);
         let data = image.data;
@@ -448,8 +449,9 @@ mod tests {
     #[test]
     fn number_texture_scales_single_digits_up() {
         let card = PlayerCard {
-            name: "PYE",
+            name: "PYE".to_string(),
             number: 8,
+            appearance: Default::default(),
         };
         let one = build_texture(&card, JerseyFace::Number, [255, 255, 255, 255]);
         let lit = one.data.chunks(4).filter(|px| px[3] == 255).count();

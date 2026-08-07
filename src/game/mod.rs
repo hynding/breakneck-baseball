@@ -228,6 +228,7 @@ impl Plugin for GamePlugin {
                 ..default()
             })
             .init_resource::<Rosters>()
+            .init_resource::<crate::game::appearance::RosterDefs>()
             .init_resource::<scenario::PitchOverride>()
             .add_event::<scenario::ScenarioAppliedEvent>()
             // Sub-plugins (input/menu first so their resources exist for the
@@ -275,9 +276,13 @@ impl Plugin for GamePlugin {
 }
 
 /// Resets the scoreboard (and both rosters) whenever a new game begins.
-fn reset_scoreboard(mut score: ResMut<ScoreBoard>, mut rosters: ResMut<Rosters>) {
+fn reset_scoreboard(
+    mut score: ResMut<ScoreBoard>,
+    mut rosters: ResMut<Rosters>,
+    defs: Res<crate::game::appearance::RosterDefs>,
+) {
     score.reset();
-    *rosters = Rosters::default();
+    *rosters = Rosters::from_defs(&defs);
 }
 
 /// Despawns all gameplay entities when leaving `Playing` so a restart rebuilds
