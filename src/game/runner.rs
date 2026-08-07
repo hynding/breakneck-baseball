@@ -231,8 +231,10 @@ fn sync_runners(
     score: Res<ScoreBoard>,
     rig_model: Option<Res<RigModel>>,
     palette: Option<Res<TeamPalette>>,
+    assets: Option<Res<crate::game::jersey::JerseyAssets>>,
+    batter_identity: Query<&crate::game::roster::PlayerIdentity, With<Batter>>,
     mut runners: Query<(Entity, &mut Runner)>,
-    ghosts: Query<(Entity, &Transform), With<BatterGhost>>,
+    ghosts: Query<(Entity, &Transform, &crate::game::roster::PlayerIdentity), With<BatterGhost>>,
     mut commands: Commands,
 ) {
     if !bases.is_changed() {
@@ -271,7 +273,12 @@ fn sync_runners(
     // The batter reaching base: spawn a fresh runner — from wherever the
     // run-out ghost already got to, if one is still on the basepath.
     for target in unmatched {
-        let start = ghosts.iter().next().map_or(PLATE_START, |(ghost, tf)| {
+        let inherited = ghosts
+            .iter()
+            .next()
+            .map(|(_, _, id)| *id)
+            .or_else(|| batter_identity.get_single().ok().copied());
+        let start = ghosts.iter().next().map_or(PLATE_START, |(ghost, tf, _)| {
             commands.entity(ghost).despawn_recursive();
             tf.translation
         });
@@ -284,6 +291,12 @@ fn sync_runners(
                 next: 0,
             },
         ));
+        if let Some(id) = inherited {
+            commands.entity(entity).insert(id);
+        }
+        if let Some(assets) = &assets {
+            crate::game::jersey::attach_jerseys(&mut commands, entity, assets);
+        }
     }
 
     // Leftovers scored or were cleared: run home and leave the field.
@@ -310,6 +323,8 @@ fn batter_runs(
     score: Res<ScoreBoard>,
     rig_model: Option<Res<RigModel>>,
     palette: Option<Res<TeamPalette>>,
+    assets: Option<Res<crate::game::jersey::JerseyAssets>>,
+    batter_identity: Query<&crate::game::roster::PlayerIdentity, With<Batter>>,
     mut commands: Commands,
 ) {
     for ev in events.read() {
@@ -350,6 +365,12 @@ fn batter_runs(
         ));
         if ghost {
             commands.entity(entity).insert(BatterGhost);
+        }
+        if let Ok(id) = batter_identity.get_single() {
+            commands.entity(entity).insert(*id);
+        }
+        if let Some(assets) = &assets {
+            crate::game::jersey::attach_jerseys(&mut commands, entity, assets);
         }
     }
 }

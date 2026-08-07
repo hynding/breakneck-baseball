@@ -1,0 +1,90 @@
+//! Identity plumbing e2e: rigs know who they are; runners wear jerseys.
+
+mod common;
+
+use bevy::prelude::*;
+use breakneck_baseball::game::jersey::JerseyQuad;
+use breakneck_baseball::game::player::{Batter, Pitcher};
+use breakneck_baseball::game::roster::PlayerIdentity;
+use breakneck_baseball::game::runner::Runner;
+use breakneck_baseball::game::scenario::{apply_to_world, presets, PRESET_LOADED};
+use breakneck_baseball::game::Team;
+use common::{headless_app, run_until, start_game};
+
+/// JerseyQuads start as rig-root children and re-parent onto bones once the
+/// async glTF wiring lands — either way they stay descendants of the root.
+fn count_quads(world: &mut World, root: Entity) -> usize {
+    let mut count = 0;
+    let mut stack = vec![root];
+    while let Some(e) = stack.pop() {
+        if world.get::<JerseyQuad>(e).is_some() {
+            count += 1;
+        }
+        if let Some(children) = world.get::<Children>(e) {
+            stack.extend(children.iter().copied());
+        }
+    }
+    count
+}
+
+#[test]
+fn seated_rigs_are_identified_at_kickoff() {
+    let mut app = headless_app();
+    start_game(&mut app, KeyCode::Digit1);
+    // Top 1st: Away bats slot 1, Home pitches.
+    let world = app.world_mut();
+    let batter_id = *world
+        .query_filtered::<&PlayerIdentity, With<Batter>>()
+        .single(world);
+    assert_eq!(
+        batter_id,
+        PlayerIdentity {
+            team: Team::Away,
+            index: 0
+        }
+    );
+    let pitcher_id = *world
+        .query_filtered::<&PlayerIdentity, With<Pitcher>>()
+        .single(world);
+    assert_eq!(
+        pitcher_id,
+        PlayerIdentity {
+            team: Team::Home,
+            index: 0
+        }
+    );
+}
+
+#[test]
+fn runner_rigs_are_identified_and_wear_jerseys() {
+    let mut app = headless_app();
+    start_game(&mut app, KeyCode::Digit1);
+    let s = presets()
+        .into_iter()
+        .find(|s| s.name == PRESET_LOADED)
+        .unwrap();
+    apply_to_world(app.world_mut(), &s).expect("ball is dead at PrePitch");
+    let settled = run_until(&mut app, 5_000, |app| {
+        let mut q = app.world_mut().query::<&Runner>();
+        q.iter(app.world()).count() == 3
+    });
+    assert!(
+        settled.is_some(),
+        "three runner rigs must appear for bases loaded"
+    );
+
+    // Every runner knows who it is (scenario-manifested runners take the
+    // batter-side fallback identity) and carries the four lettered quads.
+    let world = app.world_mut();
+    let runners: Vec<Entity> = world
+        .query_filtered::<Entity, With<Runner>>()
+        .iter(world)
+        .collect();
+    for rig in runners {
+        let id = world
+            .get::<PlayerIdentity>(rig)
+            .expect("runner rig must carry PlayerIdentity");
+        assert_eq!(id.team, Team::Away, "runners belong to the batting team");
+        assert_eq!(count_quads(world, rig), 4, "runner must wear its jerseys");
+    }
+}
