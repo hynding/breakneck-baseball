@@ -282,17 +282,30 @@ fn batter_stance(
 
 /// Between pitches a batter with an authored fidget occasionally breaks his
 /// stance hold — helmet tap, practice half-swing — then settles back into it
-/// (`Playing::then`). Dead-ball only: `Phase::PrePitch`, never during the
-/// steal window (the duel there is gameplay-legible timing), and only while
-/// he's actually holding a stance — `batter_stance`'s continuation-cut arm
-/// owns getting any in-flight fidget back out before the windup, so this
-/// system never has to worry about one surviving past `PrePitch`. Cadence is
-/// deterministic hash noise (`ai::hash01`, the ai.rs convention): the seed
-/// mixes the inning, the batter's 1-based lineup slot, and his roster index,
-/// so the drawn interval — 4..9 s per at-bat-slot — varies between at-bats
-/// but never between runs (replays and tests stay reproducible).
-/// `FidgetsDisabled` (the scripted e2e harness default) suppresses it
-/// outright. Registered `.after(IdentitySet)` — it reads `PlayerIdentity`.
+/// (`Playing::then`). Dead-ball only: accumulates on qualifying frames —
+/// `Phase::PrePitch`, never during the steal window (the duel there is
+/// gameplay-legible timing), and only while he's actually holding a stance —
+/// but a non-qualifying frame (windup started, steal window opened, no
+/// stance yet) simply pauses accumulation instead of zeroing it. Against the
+/// CPU pitcher a single `PrePitch` stretch only lasts ~0.7-1.2 s (`ai.rs`),
+/// well under the 4-9 s interval, so the accumulator must survive across
+/// stretches within the same at-bat or fidgets would never fire — it resets
+/// only on the three events that actually invalidate the count: the batter
+/// at the plate changes (tracked via `Local<Option<PlayerIdentity>>`,
+/// compared each frame), a fidget actually fires, or fidgets are disabled.
+/// `batter_stance`'s continuation-cut arm still owns getting any in-flight
+/// fidget back out before the windup, so this system never has to worry
+/// about one surviving past `PrePitch`. Cadence is deterministic hash noise
+/// (`ai::hash01`, the ai.rs convention): the seed mixes the inning, the
+/// batter's 1-based lineup slot, his roster index, and the current out
+/// count (outs climb across an inning even when the same slot bats twice,
+/// so consecutive at-bats still draw different intervals) — balls/strikes
+/// are deliberately left out since they change mid-at-bat and would make
+/// the target interval drift under the still-accumulating counter. The
+/// drawn interval — 4..9 s per at-bat — varies between at-bats but never
+/// between runs (replays and tests stay reproducible). `FidgetsDisabled`
+/// (the scripted e2e harness default) suppresses it outright. Registered
+/// `.after(IdentitySet)` — it reads `PlayerIdentity`.
 #[allow(clippy::too_many_arguments)]
 fn batter_fidgets(
     play: Res<Play>,
@@ -302,22 +315,31 @@ fn batter_fidgets(
     time: Res<Time>,
     disabled: Option<Res<animation::FidgetsDisabled>>,
     mut since_stance: Local<f32>,
+    mut current_batter: Local<Option<PlayerIdentity>>,
     batters: Query<(Entity, &PlayerIdentity, Option<&Playing>), With<Batter>>,
     mut commands: Commands,
 ) {
-    if disabled.is_some() || play.phase != Phase::PrePitch || play.in_steal_window() {
+    if disabled.is_some() {
         *since_stance = 0.0;
+        *current_batter = None;
         return;
     }
     let Ok((entity, id, playing)) = batters.get_single() else {
         return;
     };
-    let Some(playing) = playing else {
+    if *current_batter != Some(*id) {
+        // New batter at the plate (substitution or the next at-bat): any
+        // accumulated dead-ball time belonged to someone else.
+        *current_batter = Some(*id);
         *since_stance = 0.0;
-        return;
-    };
-    if !animation::is_stance(playing.clip) {
-        *since_stance = 0.0;
+    }
+    let qualifies = play.phase == Phase::PrePitch
+        && !play.in_steal_window()
+        && playing.is_some_and(|playing| animation::is_stance(playing.clip));
+    if !qualifies {
+        // Pause, don't reset — the next qualifying frame (which may be in a
+        // later PrePitch stretch of the same at-bat) picks up where this
+        // left off.
         return;
     }
     let card = rosters.team(id.team).card(id.index);
@@ -326,10 +348,11 @@ fn batter_fidgets(
     };
     *since_stance += time.delta_secs();
     // Deterministic per-at-bat interval in [4, 9): hash the inning, the
-    // batter's lineup slot, and his roster index so it varies between
-    // at-bats but never between runs.
-    let seed =
-        score.inning as f32 * 31.0 + order.current(id.team) as f32 * 7.0 + id.index as f32 * 13.0;
+    // batter's lineup slot, his roster index, and the out count.
+    let seed = score.inning as f32 * 31.0
+        + order.current(id.team) as f32 * 7.0
+        + id.index as f32 * 13.0
+        + score.outs as f32 * 17.0;
     let interval = 4.0 + 5.0 * crate::game::ai::hash01(seed);
     if *since_stance >= interval {
         *since_stance = 0.0;
