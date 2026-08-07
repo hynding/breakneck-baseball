@@ -92,7 +92,21 @@ fn enter_creator_stage(
     theme: Res<Theme>,
     cs: Res<CreatorState>,
     jersey_assets: Option<Res<JerseyAssets>>,
+    mut main_cameras: Query<&mut Camera, (With<Camera3d>, Without<CreatorStage>)>,
 ) {
+    // The persistent main camera (`camera.rs::spawn_camera`, active from
+    // `Startup`) is still around while the Creator's own camera spawns
+    // below. Two active `Camera3d`s at the same default order targeting the
+    // primary window trip Bevy's `sort_cameras` order-ambiguity warning
+    // ("Camera order ambiguities detected") and render unpredictably — stand
+    // the main one down for the duration of the stage; `exit_creator_stage`
+    // restores it. Filtered by `Without<CreatorStage>` (rather than by
+    // spawn-order) so it's correct regardless of when our own camera below
+    // is actually materialized.
+    for mut camera in &mut main_cameras {
+        camera.is_active = false;
+    }
+
     // A small neutral stage — not the field's mown-stripe texture (that's
     // gameplay dressing this module has no business duplicating), just
     // somewhere flat to stand the preview rig.
@@ -178,10 +192,19 @@ fn enter_creator_stage(
 }
 
 /// Despawns the whole stage — the preview rig included, so the next entry
-/// rebuilds it fresh rather than trying to reuse a stale one.
-fn exit_creator_stage(mut commands: Commands, stage: Query<Entity, With<CreatorStage>>) {
+/// rebuilds it fresh rather than trying to reuse a stale one — and
+/// reactivates the main camera `enter_creator_stage` stood down (see the
+/// comment there on the order-ambiguity warning this pairing prevents).
+fn exit_creator_stage(
+    mut commands: Commands,
+    stage: Query<Entity, With<CreatorStage>>,
+    mut main_cameras: Query<&mut Camera, (With<Camera3d>, Without<CreatorStage>)>,
+) {
     for entity in &stage {
         commands.entity(entity).despawn_recursive();
+    }
+    for mut camera in &mut main_cameras {
+        camera.is_active = true;
     }
 }
 
