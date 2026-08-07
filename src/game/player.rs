@@ -183,6 +183,11 @@ impl Plugin for PlayerPlugin {
                     // frame a new batter steps up (the `dress_jerseys`
                     // pattern in jersey.rs).
                     batter_stance.after(IdentitySet),
+                    // Also reads `PlayerIdentity` for the fidget lookup;
+                    // chained after `batter_stance` so it always sees this
+                    // frame's freshly (re)resolved stance/cut before
+                    // deciding whether to break it.
+                    batter_fidgets.after(IdentitySet),
                     trigger_swing,
                     catcher_crouch,
                 )
@@ -206,6 +211,16 @@ impl Plugin for PlayerPlugin {
 /// Registered `.after(IdentitySet)` so it never reads a stale identity on the
 /// exact frame a new batter steps up (the established `dress_jerseys`
 /// pattern in jersey.rs).
+///
+/// Also owns cutting a fidget short: `batter_fidgets` only *starts* one in
+/// `Phase::PrePitch`, but an 0.8–0.9 s fidget clip started late in PrePitch
+/// can still be mid-flight when the duel moves to `WindUp`/`Pitch` — and a
+/// fidget clip left in place there would both violate "fidgets exist only in
+/// PrePitch" and (via `trigger_swing`'s stance-only gate) eat a real swing
+/// press for up to 0.9 s. So whenever the batter is dueling past PrePitch, or
+/// not dueling at all, any fidget in flight is force-replaced with the
+/// resolved stance (dueling) or dropped outright (`!dueling`), mirroring the
+/// stance-removal arm below.
 fn batter_stance(
     play: Res<Play>,
     identities: Query<&PlayerIdentity>,
@@ -214,6 +229,7 @@ fn batter_stance(
     mut commands: Commands,
 ) {
     let dueling = matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch);
+    let past_pre_pitch = matches!(play.phase, Phase::WindUp | Phase::Pitch);
     for (entity, playing) in &batters {
         let resolved = identities
             .get(entity)
@@ -235,8 +251,80 @@ fn batter_stance(
             Some(playing) if !dueling && animation::is_stance(playing.clip) => {
                 commands.entity(entity).remove::<Playing>();
             }
+            // Continuation cut: a fidget still playing once the windup
+            // starts settles straight into the stance it was chained back
+            // to anyway.
+            Some(playing) if past_pre_pitch && animation::is_fidget(playing.clip) => {
+                commands.entity(entity).insert(Playing::new(resolved));
+            }
+            // Continuation cut, dead-ball side: a fidget surviving into a
+            // non-dueling frame (e.g. the ball going live mid-fidget) is
+            // just dropped, same as a held stance would be.
+            Some(playing) if !dueling && animation::is_fidget(playing.clip) => {
+                commands.entity(entity).remove::<Playing>();
+            }
             _ => {}
         }
+    }
+}
+
+/// Between pitches a batter with an authored fidget occasionally breaks his
+/// stance hold — helmet tap, practice half-swing — then settles back into it
+/// (`Playing::then`). Dead-ball only: `Phase::PrePitch`, never during the
+/// steal window (the duel there is gameplay-legible timing), and only while
+/// he's actually holding a stance — `batter_stance`'s continuation-cut arm
+/// owns getting any in-flight fidget back out before the windup, so this
+/// system never has to worry about one surviving past `PrePitch`. Cadence is
+/// deterministic hash noise (`ai::hash01`, the ai.rs convention): the seed
+/// mixes the inning, the batter's 1-based lineup slot, and his roster index,
+/// so the drawn interval — 4..9 s per at-bat-slot — varies between at-bats
+/// but never between runs (replays and tests stay reproducible).
+/// `FidgetsDisabled` (the scripted e2e harness default) suppresses it
+/// outright. Registered `.after(IdentitySet)` — it reads `PlayerIdentity`.
+#[allow(clippy::too_many_arguments)]
+fn batter_fidgets(
+    play: Res<Play>,
+    score: Res<ScoreBoard>,
+    order: Res<BattingOrder>,
+    rosters: Res<Rosters>,
+    time: Res<Time>,
+    disabled: Option<Res<animation::FidgetsDisabled>>,
+    mut since_stance: Local<f32>,
+    batters: Query<(Entity, &PlayerIdentity, Option<&Playing>), With<Batter>>,
+    mut commands: Commands,
+) {
+    if disabled.is_some() || play.phase != Phase::PrePitch || play.in_steal_window() {
+        *since_stance = 0.0;
+        return;
+    }
+    let Ok((entity, id, playing)) = batters.get_single() else {
+        return;
+    };
+    let Some(playing) = playing else {
+        *since_stance = 0.0;
+        return;
+    };
+    if !animation::is_stance(playing.clip) {
+        *since_stance = 0.0;
+        return;
+    }
+    let card = rosters.team(id.team).card(id.index);
+    let Some(fidget) = card.appearance.style.fidget else {
+        return;
+    };
+    *since_stance += time.delta_secs();
+    // Deterministic per-at-bat interval in [4, 9): hash the inning, the
+    // batter's lineup slot, and his roster index so it varies between
+    // at-bats but never between runs.
+    let seed =
+        score.inning as f32 * 31.0 + order.current(id.team) as f32 * 7.0 + id.index as f32 * 13.0;
+    let interval = 4.0 + 5.0 * crate::game::ai::hash01(seed);
+    if *since_stance >= interval {
+        *since_stance = 0.0;
+        commands.entity(entity).insert(Playing::then(
+            animation::fidget_clip(fidget),
+            animation::stance_clip(card.appearance.style.stance),
+        ));
     }
 }
 

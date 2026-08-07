@@ -146,6 +146,91 @@ fn batter_holds_his_personal_stance() {
 }
 
 #[test]
+fn fidgets_fire_between_pitches_when_enabled() {
+    use breakneck_baseball::game::animation::{AnimClip, FidgetsDisabled, Playing};
+    let mut app = headless_app();
+    app.world_mut().remove_resource::<FidgetsDisabled>(); // harness default off
+    start_game(&mut app, KeyCode::Digit1);
+    // STONE (away leadoff) has NO authored fidget — use the scenario seam to
+    // put slot 2 (IBARRA, fidget: Some(BatTap)) at the plate instantly
+    // instead of simulating an at-bat (batter_slot is 1-based; slot 2 ==
+    // away lineup index 1 == IBARRA, per data/players.ron).
+    breakneck_baseball::game::scenario::apply_to_world(
+        app.world_mut(),
+        &breakneck_baseball::game::scenario::Scenario {
+            batter_slot: Some(2),
+            ..Default::default()
+        },
+    )
+    .expect("ball is dead at PrePitch");
+    let fidgeted = run_until(&mut app, 240 * 12, |app| {
+        let world = app.world_mut();
+        world
+            .query_filtered::<&Playing, With<Batter>>()
+            .iter(world)
+            .next()
+            .map(|p| matches!(p.clip, AnimClip::FidgetBatTap | AnimClip::FidgetHalfSwing))
+            .unwrap_or(false)
+    });
+    assert!(
+        fidgeted.is_some(),
+        "an authored fidget must fire within ~12 s of PrePitch"
+    );
+}
+
+/// Top 1st: Away bats (CPU by default), Home pitches — a human key press, so
+/// this test scripts it directly (the `e2e_cpu.rs` `drive` pattern) rather
+/// than waiting on an idle keyboard.
+fn drive_pitch_in_pre_pitch(
+    play: Option<Res<breakneck_baseball::game::flow::Play>>,
+    mut intents: ResMut<breakneck_baseball::game::input::Intents>,
+) {
+    let Some(play) = play else { return };
+    intents.home = default();
+    if play.phase == breakneck_baseball::game::flow::Phase::PrePitch {
+        intents.home.action = true;
+    }
+}
+
+#[test]
+fn fidget_is_cut_before_the_windup() {
+    use breakneck_baseball::game::animation::{is_fidget, AnimClip, Playing};
+    use breakneck_baseball::game::flow::{Phase, Play};
+    let mut app = headless_app();
+    app.add_systems(common::DriveGame, drive_pitch_in_pre_pitch);
+    start_game(&mut app, KeyCode::Digit1);
+    // Force a fidget onto the batter directly — bypassing `batter_fidgets`'
+    // own hash-noise cadence — so `batter_stance`'s continuation-cut arm is
+    // exercised deterministically instead of waiting on the interval draw.
+    let batter = app
+        .world_mut()
+        .query_filtered::<Entity, With<Batter>>()
+        .single(app.world());
+    app.world_mut()
+        .entity_mut(batter)
+        .insert(Playing::new(AnimClip::FidgetHalfSwing));
+    // The scripted pitcher advances PrePitch -> WindUp; the fidget must
+    // already be gone the instant it does (spec §4: fidgets exist only
+    // inside PrePitch), which also means `trigger_swing`'s stance-only gate
+    // never sees one and blocks a real swing press.
+    let past_pre_pitch = run_until(&mut app, 5_000, |app| {
+        app.world().resource::<Play>().phase != Phase::PrePitch
+    });
+    assert!(
+        past_pre_pitch.is_some(),
+        "the pitcher must eventually pitch"
+    );
+    let world = app.world_mut();
+    let survived_fidget = world
+        .get::<Playing>(batter)
+        .is_some_and(|p| is_fidget(p.clip));
+    assert!(
+        !survived_fidget,
+        "a fidget must never survive past PrePitch into the windup"
+    );
+}
+
+#[test]
 fn headwear_hides_the_baked_cap_and_mounts_gear() {
     let mut app = headless_app();
     start_game(&mut app, KeyCode::Digit1);

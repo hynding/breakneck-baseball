@@ -150,6 +150,22 @@ pub fn is_stance(clip: AnimClip) -> bool {
     )
 }
 
+/// Either idle fidget (helmet tap, practice half-swing) — the clips
+/// `player::batter_stance`'s continuation-cut arm replaces the instant the
+/// duel leaves `Phase::PrePitch`, so a fidget never survives into the
+/// windup or blocks a swing press (`player::trigger_swing`'s stance-only
+/// gate).
+pub fn is_fidget(clip: AnimClip) -> bool {
+    matches!(clip, AnimClip::FidgetBatTap | AnimClip::FidgetHalfSwing)
+}
+
+/// Insert to suppress idle fidgets outright — the scripted e2e harness
+/// does (a fidget replaces the batter's Playing state mid-script, which
+/// perturbs timing-sensitive drivers even though swings can interrupt it).
+/// The `JuiceDisabled` pattern.
+#[derive(Resource)]
+pub struct FidgetsDisabled;
+
 /// What a rig is currently playing. Insert to start, remove to stop; the
 /// sampler chains to `next` when a one-shot clip finishes.
 #[derive(Component)]

@@ -147,6 +147,13 @@ fn build_headless_app(single_threaded: bool) -> App {
         // other timing-sensitive system reads. This insert is load-bearing,
         // not just belt-and-braces.
         .insert_resource(breakneck_baseball::game::juice::JuiceDisabled)
+        // `player.rs`'s `batter_fidgets` occasionally replaces the batter's
+        // held-stance `Playing` with a fidget clip between pitches — real
+        // gameplay flavour, but it would perturb any scripted e2e that
+        // scripts timing against a known `Playing` clip mid-PrePitch. The
+        // `JuiceDisabled` pattern: off by default for every headless test,
+        // removed explicitly by the one test that exercises fidgets.
+        .insert_resource(breakneck_baseball::game::animation::FidgetsDisabled)
         // Mute the harness: `DefaultPlugins` keeps `AudioPlugin` (only
         // window/render/winit are stripped), so at a real volume every
         // headless run plays the synthesized crowd/cracks through the
