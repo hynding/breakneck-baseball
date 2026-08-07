@@ -16,6 +16,7 @@
 
 - PATH prefix for every cargo command: `export PATH="/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$PATH"`.
 - Blender rebuilds are ALWAYS the pair, in order: `blender --background --python tools/build_player.py` then `blender --background assets-src/player.blend --python tools/export_glb.py`. Never hand-export. `tools/render_pose_sheet.py` is the QA companion.
+- Verify `blender` is invocable BEFORE starting Task 1 (`which blender`) — it is not on PATH in every shell; if absent, use the app bundle binary `/Applications/Blender.app/Contents/MacOS/Blender` in place of `blender` in all three commands.
 - Full `cargo test` green EXCEPT the two known pre-existing failures (`e2e_camera_views::cycling_v_changes_view_and_toggles_the_catchers_visibility`, `e2e_settings::settings_edit_persists_and_game_starts`).
 - `tests/balance_sim.rs` must stay green un-retuned — styles are cosmetic; the CPU still bats Classic with the same timing dial. If balance drifts, the implementation leaked style into timing — fix the leak, never the bands.
 - `cargo check --target wasm32-unknown-unknown`, clippy `-D warnings`, fmt — all clean.
@@ -117,10 +118,12 @@ Add to `CLIPS` in `tools/build_player.py`. These starting tables are derived fro
     # swing's END pose region (arms driven through — approximate with the
     # follow-through-side arm values; tune against the pose sheet).
     "CelebrateBatFlip": (0.85, False, {
-        "UpperArm.R": {"rx": [(0, -0.95), (0.35, -2.3), (1, -1.5)],
-                        "rz": [(0, 0.6), (0.35, 0.2), (1, 0.3)]},
-        "UpperArm.L": {"rx": [(0, -0.95), (0.35, -2.0), (1, -1.3)],
-                        "rz": [(0, -0.5), (0.35, -0.2), (1, -0.3)]},
+        # Frame-0 arm values are BatterSwing's REAL end pose (read from its
+        # f=1.0 keys), so the next-chain never teleports the arms.
+        "UpperArm.R": {"rx": [(0, -2.20), (0.35, -2.5), (1, -1.6)],
+                        "rz": [(0, 0.80), (0.35, 0.4), (1, 0.5)]},
+        "UpperArm.L": {"rx": [(0, -0.9326), (0.35, -1.8), (1, -1.3)],
+                        "rz": [(0, 2.3596), (0.35, 1.6), (1, 1.8)]},
         "Bat": {"rx": [(0, 0.6), (0.3, 2.2), (1, 1.4)]},
         "Spine": {"rx": [(0, 0), (0.4, -0.22), (1, -0.1)],
                    "ry": [(0, -0.25), (1, 0.0)]},
@@ -128,12 +131,12 @@ Add to `CLIPS` in `tools/build_player.py`. These starting tables are derived fro
     }),
 ```
 
-`BatterSwing`'s actual end-pose arm values may differ from the `CelebrateBatFlip` frame-0 guesses above — read `BatterSwing`'s final keys in `CLIPS` and set the flip's frame-0 arm values to match before first export.
+The `CelebrateBatFlip` frame-0 arm values above are `BatterSwing`'s verified end-pose keys (R rx −2.20 / rz +0.80, L rx −0.9326 / rz +2.3596) — if `BatterSwing`'s keys have changed since this plan was written, re-read them and keep the frame-0 match exact.
 
 - [ ] **Step 2: Rust side in the same commit**
 
 - `AnimClip` gains the six variants with doc comments; `duration()` arms (1.2/1.2/1.2/0.8/0.9/0.85); `looping()` adds the three stances to the matches!.
-- `limb_pose()` (Blocky fallback): delegate — the three stances reuse `BattingStance`'s arm/leg branch, the two fidgets and the celebration reuse `Idle`'s. Implement by matching the new variants into the existing branches (the compiler's exhaustive match walks you to every site — including `root_drop`/`root_pitch` if they match on clip; delegate those identically).
+- `limb_pose()` (Blocky fallback): delegate — the three stances reuse `BattingStance`'s arm/leg branch, the two fidgets and the celebration reuse `Idle`'s. NOTE on compiler enforcement: only `duration()` and `limb_pose()` are truly exhaustive; `looping()` is a `matches!` (forgetting the three stances there compiles fine and silently breaks looping — add them deliberately and test it), and `root_drop`/`root_pitch` end in `_ => 0.0` wildcards (the new clips correctly fall through — no edit needed there, but don't expect the compiler to prompt you).
 - `CLIP_TABLE` gains six rows with the exact glb names above. `node_for` needs no new arms (each clip has its own action).
 
 - [ ] **Step 3: Rebuild, QA, iterate**
@@ -239,7 +242,8 @@ fn batter_holds_his_personal_stance() {
 - Resolution fns as above (+ their unit tests in `animation.rs`'s test module).
 - `batter_stance` (player.rs): add `identities: Query<&PlayerIdentity>` lookup + `rosters: Res<Rosters>`; the insert arm becomes `Playing::new(stance)` where `stance = animation::stance_clip(rosters.team(id.team).card(id.index).appearance.style.stance)` (fall back to `AnimClip::BattingStance` when the batter has no identity yet — `identities.get(entity)` miss). The removal arm's condition becomes `animation::is_stance(playing.clip)`. ALSO: if the batter holds a *different* stance than his resolved one (identity changed mid-duel — new at-bat), replace it.
 - `trigger_swing`: the `swingable` gate becomes `match playing.map(|p| p.clip) { None => true, Some(c) => animation::is_stance(c) }`.
-- Grep for other `AnimClip::BattingStance` matchers (`grep -rn "BattingStance" src/`) — any system that special-cases the stance hold (flow, camera, batting adapters) must go through `is_stance` instead. Fix every site the grep reveals and list them in your report.
+- Register `batter_stance` `.after(crate::game::player::IdentitySet)` — it now reads `PlayerIdentity`, and without the ordering edge it can read a stale identity on the exact frame a new batter steps up (the established `dress_jerseys` pattern in jersey.rs).
+- Grep for other `AnimClip::BattingStance` matchers (`grep -rn "BattingStance" src/`) — any system that special-cases the stance hold (flow, camera, batting adapters) must go through `is_stance` instead. Fix every site the grep reveals and list them in your report. (Plan-time grep found only player.rs/animation.rs/model_assets.rs — verify.)
 
 - [ ] **Step 3: Suite + commit**
 
@@ -326,9 +330,9 @@ fn batter_fidgets(
 }
 ```
 
-(Adapt names to the real imports; `time.delta_secs()` is the virtual clock — correct, it must freeze under debug pause. If `order.current` isn't reachable here, derive the hash from `id.index` + `score.inning` + `score.balls * 3 + score.strikes` instead — any deterministic mix is fine; document the one you use.) Register in `PlayerPlugin` with the other batter systems, `run_if(in_state(GameState::Playing))`.
+(Adapt names to the real imports; `time.delta_secs()` is the virtual clock — correct, it must freeze under debug pause. If `order.current` isn't reachable here, derive the hash from `id.index` + `score.inning` + `score.balls * 3 + score.strikes` instead — any deterministic mix is fine; document the one you use.) Register in `PlayerPlugin` with the other batter systems, `run_if(in_state(GameState::Playing))` and `.after(crate::game::player::IdentitySet)` (it reads `PlayerIdentity`).
 
-Swing safety already holds: Task 2's `trigger_swing` gate treats only stances as swingable — a swing pressed mid-fidget waits for the `then`-chained stance return (≤ 0.9 s). That is a deliberate, small realism trade documented here; the steal-window/PrePitch gating keeps it out of every timing-critical moment. If review disputes it, the alternative (fidgets also swingable) is a one-line gate change.
+**Fidget continuation must be cut, not just gated at start.** PrePitch-gating only blocks a *new* fidget; one started late in PrePitch (0.8–0.9 s clips; PrePitch can end ~1.5 s after the steal window) would otherwise still be playing at the windup — exactly what spec §4 forbids, and worse, `trigger_swing`'s stance-only gate would eat a real swing press for up to 0.9 s. So `batter_stance` (which already owns the stance lifecycle) gains one arm: whenever the phase is WindUp or Pitch (i.e. `dueling` but past PrePitch) — or `!dueling` — and the batter's `Playing.clip` is a *fidget* clip, replace it immediately with `Playing::new(resolved stance)` (dueling) or remove it (`!dueling`), mirroring the existing removal arm. Add `pub fn is_fidget(clip: AnimClip) -> bool` beside `is_stance` in animation.rs (matches the two fidget clips) for this. Result: fidgets exist only inside PrePitch, and a swing press is never blocked outside PrePitch. (Within PrePitch a mid-fidget swing press still waits for the cut-in at windup — acceptable: swings during PrePitch don't contact anything.)
 
 - [ ] **Step 3: The e2e (fidgets fire when enabled)**
 
@@ -339,10 +343,13 @@ fn fidgets_fire_between_pitches_when_enabled() {
     let mut app = headless_app();
     app.world_mut().remove_resource::<FidgetsDisabled>(); // harness default off
     start_game(&mut app, KeyCode::Digit1);
-    // Away leadoff needs an authored fidget for this test — verify in
-    // data/players.ron and target accordingly (STONE has none as authored:
-    // if so, run to the second batter or assert on whichever leadoff has
-    // Some(fidget); state your choice in the test comment).
+    // STONE (away leadoff) has NO authored fidget — use the scenario seam
+    // to put slot 2 (IBARRA, fidget: Some(BatTap)) at the plate instantly
+    // instead of simulating an at-bat:
+    //   use breakneck_baseball::game::scenario::{apply_to_world, Scenario};
+    //   apply_to_world(app.world_mut(),
+    //       &Scenario { batter_slot: Some(2), ..Default::default() }).unwrap();
+    // (batter_slot is 1-based; slot 2 == away lineup index 1 == IBARRA.)
     let fidgeted = run_until(&mut app, 240 * 12, |app| {
         let world = app.world_mut();
         world
@@ -440,7 +447,7 @@ fn celebrate_home_run(
 }
 ```
 
-(Match `BallInPlayEvent`/`ContactKind`'s real shape; if `kind` carries fields, pattern-match accordingly. Register with the batter systems.) The `next.is_none()` guard keeps re-entrancy safe if the event ever double-fires.
+(Verified shape: `BallInPlayEvent { kind: ContactKind, landing: Vec3, contact_class: ContactClass }` — audio.rs's tests construct the exact literal. Register with the batter systems, `.after(crate::game::player::IdentitySet)`.) The `next.is_none()` guard keeps re-entrancy safe if the event ever double-fires.
 
 - [ ] **Step 3: Suite + commit**
 
