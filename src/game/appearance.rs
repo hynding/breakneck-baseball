@@ -115,9 +115,11 @@ pub enum Arms {
 }
 
 appearance_enum! {
-/// Batting-stance id. Only `Standard` resolves to a clip until Phase 3
-/// lands the new Blender actions; the ids exist now so `data/players.ron`
-/// can be fully authored once.
+/// Batting-stance id. All four resolve to a clip (`animation::stance_clip`) —
+/// `Standard` to the shared `BattingStance`, the other three to their own
+/// personality clips (`StanceOpen`/`StanceClosed`/`StanceWaggle`). Kept here
+/// rather than in animation.rs so the schema module stays serde-pure with no
+/// animation dependency.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StanceId {
     OpenCrouch,
