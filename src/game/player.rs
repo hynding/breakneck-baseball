@@ -16,12 +16,12 @@ use crate::game::animation::{
     bat_idle_rotation, AnimClip, LimbKind, MoveIntent, Playing, RigBaseY, RigLimb,
 };
 use crate::game::ball::PLAYER_GROUP;
-use crate::game::flow::{Phase, Play};
+use crate::game::flow::{BallInPlayEvent, Phase, Play};
 use crate::game::input::Intents;
 use crate::game::jersey::attach_jerseys;
 use crate::game::model_assets::{GltfJerseyMesh, GltfPart, GltfTeamMaterials};
 use crate::game::roster::{PlayerIdentity, RosterRole, Rosters};
-use crate::game::rules::BattingOrder;
+use crate::game::rules::{BattingOrder, ContactKind};
 use crate::game::theme::{PlayerModelId, PlayerTemplate, Theme};
 use crate::game::variant::FieldSpec;
 use crate::game::{GameState, GameplayEntity, ScoreBoard, Team};
@@ -189,6 +189,12 @@ impl Plugin for PlayerPlugin {
                     // deciding whether to break it.
                     batter_fidgets.after(IdentitySet),
                     trigger_swing,
+                    // Reads `PlayerIdentity` to resolve the batter's
+                    // authored celebration; ordered after `trigger_swing` so
+                    // a same-frame swing press has already landed
+                    // `BatterSwing` before it decides whether to chain the
+                    // flip.
+                    celebrate_home_run.after(IdentitySet),
                     catcher_crouch,
                 )
                     .chain()
@@ -730,6 +736,35 @@ fn trigger_swing(
             commands
                 .entity(entity)
                 .insert(Playing::new(AnimClip::BatterSwing));
+        }
+    }
+}
+
+/// A homer with an authored celebration chains it after the swing
+/// follow-through (`Playing.next`), so the flip rides the same rig the
+/// camera is holding on. The trot rig takes over at `RunDelay` expiry
+/// (`TROT_DELAY` 0.9 s) — the flip's 0.85 s mostly fits; the handoff
+/// truncating the last frames on slow swings is an accepted arcade trade
+/// (the HR orbit camera is already moving by then). The `next.is_none()`
+/// guard keeps re-entrancy safe if the event ever double-fires, and never
+/// touches a batter without `Playing::clip == BatterSwing` — no in-flight
+/// swing, no flip.
+fn celebrate_home_run(
+    mut events: EventReader<BallInPlayEvent>,
+    rosters: Res<Rosters>,
+    mut batters: Query<(&PlayerIdentity, &mut Playing), With<Batter>>,
+) {
+    for ev in events.read() {
+        if !matches!(ev.kind, ContactKind::HomeRun) {
+            continue;
+        }
+        for (id, mut playing) in &mut batters {
+            let card = rosters.team(id.team).card(id.index);
+            if let Some(clip) = animation::celebration_clip(card.appearance.style.celebration) {
+                if playing.clip == AnimClip::BatterSwing && playing.next.is_none() {
+                    playing.next = Some(clip);
+                }
+            }
         }
     }
 }

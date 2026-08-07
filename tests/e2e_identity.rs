@@ -231,6 +231,49 @@ fn fidget_is_cut_before_the_windup() {
 }
 
 #[test]
+fn home_run_queues_the_authored_celebration() {
+    use breakneck_baseball::game::animation::{AnimClip, Playing};
+    use breakneck_baseball::game::flow::BallInPlayEvent;
+    use breakneck_baseball::game::rules::{ContactClass, ContactKind};
+    let mut app = headless_app();
+    start_game(&mut app, KeyCode::Digit1);
+    // Stamp FOX (away idx2 — authored celebration BatFlip per
+    // data/players.ron; OKAFOR home/1, KANE home/8, MARSH away/10 also
+    // qualify) directly onto the batter rig: a synthetic identity swap,
+    // acceptable per the task brief instead of driving a batting-order
+    // advance to put him up for real.
+    let batter = app
+        .world_mut()
+        .query_filtered::<Entity, With<Batter>>()
+        .single(app.world());
+    app.world_mut().entity_mut(batter).insert(PlayerIdentity {
+        team: Team::Away,
+        index: 2,
+    });
+    // Swing in flight when the ball is declared a homer: the celebration
+    // must chain via `Playing.next`, never cutting the swing.
+    app.world_mut()
+        .entity_mut(batter)
+        .insert(Playing::new(AnimClip::BatterSwing));
+    app.world_mut().send_event(BallInPlayEvent {
+        kind: ContactKind::HomeRun,
+        landing: Vec3::new(0.0, 0.0, 120.0),
+        contact_class: ContactClass::DeepFly,
+    });
+    for _ in 0..4 {
+        app.update();
+    }
+    let world = app.world_mut();
+    let playing = world.get::<Playing>(batter).expect("swing still in flight");
+    assert_eq!(playing.clip, AnimClip::BatterSwing, "swing must not be cut");
+    assert_eq!(
+        playing.next,
+        Some(AnimClip::CelebrateBatFlip),
+        "flip chains after"
+    );
+}
+
+#[test]
 fn headwear_hides_the_baked_cap_and_mounts_gear() {
     let mut app = headless_app();
     start_game(&mut app, KeyCode::Digit1);
