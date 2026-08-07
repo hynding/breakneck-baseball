@@ -72,7 +72,7 @@ const TROT_DELAY: f32 = 0.9;
 /// resolution puts the batter on base, [`sync_runners`] adopts this rig's
 /// position so the runner doesn't teleport back to the plate.
 #[derive(Component)]
-struct BatterGhost;
+pub(crate) struct BatterGhost;
 
 /// How a runner aboard is currently breaking off contact, before the umpire's
 /// call arrives (see [`rules::runner_break`]). A runner *without* this
@@ -224,8 +224,18 @@ fn slide_into_base(
 /// Mirrors `Bases` after every change: existing runners advance (greedy,
 /// most-advanced first), a new runner appears for the batter's base, and
 /// leftovers (scored, or wiped by a half-inning flip) run home and leave.
+///
+/// On a walk/HBP/dropped-third strike, flow mutates `Bases` *and* advances
+/// `BattingOrder` in the same frame, and there is no ghost rig to inherit
+/// from — this system's fallback reads the live batter rig's
+/// `PlayerIdentity` directly. `player::sync_identities` re-stamps that same
+/// rig to the *next* hitter in that same frame, so without an ordering
+/// constraint which value this system observes is scheduler-dependent. Kept
+/// `pub(crate)` so `JerseyPlugin` can order its identity-restamp chain
+/// `.after(sync_runners)` (see `jersey.rs`), pinning this system strictly
+/// before that re-stamp within the frame.
 #[allow(clippy::too_many_arguments)]
-fn sync_runners(
+pub(crate) fn sync_runners(
     bases: Res<Bases>,
     field: Res<FieldSpec>,
     score: Res<ScoreBoard>,
@@ -317,6 +327,7 @@ fn sync_runners(
 /// run to first and home runs a full trot, both despawning at path end. The
 /// run-out rig waits hidden through a short [`RunDelay`] so the real batter
 /// is seen finishing the swing before the swap; fouls leave him in the box.
+#[allow(clippy::too_many_arguments)]
 fn batter_runs(
     mut events: EventReader<BallInPlayEvent>,
     field: Res<FieldSpec>,

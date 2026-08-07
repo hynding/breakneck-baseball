@@ -18,9 +18,11 @@ use bevy::prelude::*;
 use breakneck_baseball::game::ball::Baseball;
 use breakneck_baseball::game::flow::{Phase, Play};
 use breakneck_baseball::game::input::Intents;
+use breakneck_baseball::game::roster::PlayerIdentity;
 use breakneck_baseball::game::rules::Bases;
+use breakneck_baseball::game::runner::Runner;
 use breakneck_baseball::game::variant::Ruleset;
-use breakneck_baseball::game::{GameState, ScoreBoard};
+use breakneck_baseball::game::{GameState, ScoreBoard, Team};
 
 use common::{headless_app, run_until, start_game, DriveGame};
 
@@ -54,6 +56,17 @@ fn bases(app: &mut App) -> &Bases {
 
 fn score(app: &mut App) -> &ScoreBoard {
     app.world().resource::<ScoreBoard>()
+}
+
+/// The [`PlayerIdentity`] of whichever runner rig currently stands on `base`,
+/// if any — used to pin who a walk/HBP runner actually is (see
+/// `runner::sync_runners`'s doc comment on the walk/HBP identity race).
+fn runner_identity(app: &mut App, base: usize) -> Option<PlayerIdentity> {
+    let world = app.world_mut();
+    let mut q = world.query::<(&Runner, &PlayerIdentity)>();
+    q.iter(world)
+        .find(|(r, _)| r.base == base)
+        .map(|(_, id)| *id)
 }
 
 /// Advances the stage counter and runs until `milestone` holds.
@@ -155,6 +168,20 @@ fn hbp_steals_force_outs_and_hit_and_run() {
     start_two_player_game(&mut app);
 
     expect_stage(&mut app, 0, "hit-by-pitch", |app| bases(app).is_occupied(0));
+    // The runner on first must wear the identity of the batter who was just
+    // hit — Away's leadoff hitter (index 0), the top of the 1st's very first
+    // batter — not the next hitter the batting order has already advanced
+    // to by the time this frame's identity re-stamp runs. A dropped
+    // `.after(sync_runners)` ordering constraint (see runner.rs/jersey.rs)
+    // would make this scheduler-dependent instead of pinned.
+    assert_eq!(
+        runner_identity(&mut app, 0),
+        Some(PlayerIdentity {
+            team: Team::Away,
+            index: 0
+        }),
+        "the HBP runner on first must be the batter who was hit, not the next hitter"
+    );
     expect_stage(&mut app, 1, "stolen base", |app| {
         let b = bases(app);
         b.is_occupied(1) && !b.is_occupied(0)
