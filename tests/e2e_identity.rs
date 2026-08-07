@@ -125,3 +125,60 @@ fn skin_tones_dress_the_wired_rigs() {
         );
     }
 }
+
+#[test]
+fn headwear_hides_the_baked_cap_and_mounts_gear() {
+    let mut app = headless_app();
+    start_game(&mut app, KeyCode::Digit1);
+    // VEGA (home slot 0 → the pitcher in the top 1st) wears a Helmet in
+    // data/players.ron: his baked cap must hide and a helmet prop appear.
+    // Gate on the PITCHER RIG specifically being dressed — rigs wire
+    // asynchronously per-entity, so "any gear exists" would race.
+    let done = run_until(&mut app, 5_000, |app| {
+        let world = app.world_mut();
+        let mut q = world.query_filtered::<
+            &breakneck_baseball::game::gear::RigGear,
+            With<breakneck_baseball::game::player::Pitcher>,
+        >();
+        q.iter(world)
+            .next()
+            .map(|g| !g.0.is_empty())
+            .unwrap_or(false)
+    });
+    assert!(
+        done.is_some(),
+        "the helmeted pitcher must dress with gear props"
+    );
+
+    let world = app.world_mut();
+    // Find the pitcher rig (identity Home/0 = VEGA per data/players.ron).
+    let mut pitchers = world.query_filtered::<(
+        &breakneck_baseball::game::model_assets::RigCapMeshes,
+        &breakneck_baseball::game::gear::RigGear,
+    ), With<breakneck_baseball::game::player::Pitcher>>();
+    let (caps, gear) = pitchers.single(world);
+    let cap_entities = caps.0.clone();
+    let gear_entities = gear.0.clone();
+    assert!(
+        !gear_entities.is_empty(),
+        "helmet wearer must own gear props"
+    );
+    for cap in cap_entities {
+        assert_eq!(
+            world.get::<Visibility>(cap).copied(),
+            Some(Visibility::Hidden),
+            "baked cap must hide under a helmet"
+        );
+    }
+    // Spec §7: props are parented to the right bone entities — the helmet
+    // must be a child of the pitcher rig's Head bone.
+    let mut pitcher_bones = world.query_filtered::<
+        &breakneck_baseball::game::model_assets::RigBones,
+        With<breakneck_baseball::game::player::Pitcher>,
+    >();
+    let head = pitcher_bones.single(world).head;
+    let on_head = gear_entities
+        .iter()
+        .any(|&p| world.get::<Parent>(p).map(|par| par.get()) == Some(head));
+    assert!(on_head, "the helmet prop must hang off the Head bone");
+}
