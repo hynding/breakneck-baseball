@@ -11,6 +11,40 @@ use serde::{Deserialize, Serialize};
 /// Schema version stamped in `data/players.ron`.
 pub const APPEARANCE_VERSION: u32 = 1;
 
+/// Defines a fieldless enum together with a `NAMES` const listing every
+/// variant's RON identifier, generated from the exact same variant list the
+/// enum declares — the single source of truth the strict-identifier check in
+/// `tests/appearance_contract.rs` reads (an id in `data/players.ron` that
+/// isn't in `NAMES` for its field is a typo, not a forward-compat unknown).
+/// Because `NAMES` is built with `stringify!` over the same token list as
+/// the enum body, the two cannot drift apart the way a hand-duplicated
+/// string list could.
+macro_rules! appearance_enum {
+    (
+        $(#[$meta:meta])*
+        $vis:vis enum $name:ident {
+            $(
+                $(#[$vmeta:meta])*
+                $variant:ident
+            ),+ $(,)?
+        }
+    ) => {
+        $(#[$meta])*
+        $vis enum $name {
+            $(
+                $(#[$vmeta])*
+                $variant
+            ),+
+        }
+
+        impl $name {
+            /// Every variant's RON identifier, in declaration order.
+            pub const NAMES: &'static [&'static str] = &[$(stringify!($variant)),+];
+        }
+    };
+}
+
+appearance_enum! {
 /// Curated skin swatch ids — resolved to actual colours by the dressing
 /// systems (Phase 2), never raw RGB in the data file.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -24,7 +58,9 @@ pub enum SkinTone {
     #[serde(other)]
     Medium,
 }
+}
 
+appearance_enum! {
 /// What sits on the head. `Cap` is today's baked-in model cap.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Headwear {
@@ -35,7 +71,9 @@ pub enum Headwear {
     #[serde(other)]
     Cap,
 }
+}
 
+appearance_enum! {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Eyewear {
     Glasses,
@@ -45,7 +83,9 @@ pub enum Eyewear {
     #[serde(other)]
     Bare,
 }
+}
 
+appearance_enum! {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Arms {
     WristbandL,
@@ -55,7 +95,9 @@ pub enum Arms {
     #[serde(other)]
     Bare,
 }
+}
 
+appearance_enum! {
 /// Batting-stance id. Only `Standard` resolves to a clip until Phase 3
 /// lands the new Blender actions; the ids exist now so `data/players.ron`
 /// can be fully authored once.
@@ -68,7 +110,9 @@ pub enum StanceId {
     #[serde(other)]
     Standard,
 }
+}
 
+appearance_enum! {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FidgetId {
     HalfSwing,
@@ -76,20 +120,25 @@ pub enum FidgetId {
     #[serde(other)]
     BatTap,
 }
+}
 
+appearance_enum! {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TrotId {
     #[default]
     #[serde(other)]
     Standard,
 }
+}
 
+appearance_enum! {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CelebrationId {
     BatFlip,
     #[default]
     #[serde(other)]
     Standard,
+}
 }
 
 /// Per-player animation-personality overrides over the shared base clips.
@@ -165,6 +214,12 @@ impl RosterDefs {
     /// Roster invariants shared by the contract test and the dev reloader:
     /// jersey-font-safe names, two-digit unique numbers, benches present.
     pub fn validate(file: &RosterFile) -> Result<(), String> {
+        if file.version != APPEARANCE_VERSION {
+            return Err(format!(
+                "unsupported players.ron version {} (expected {APPEARANCE_VERSION})",
+                file.version
+            ));
+        }
         for (label, pool) in [("home", &file.home), ("away", &file.away)] {
             if pool.len() <= crate::game::rules::LINEUP_SIZE as usize {
                 return Err(format!("{label}: need more than nine players for a bench"));
@@ -317,6 +372,16 @@ mod tests {
         // Parseable but invariant-violating content: rejected too.
         let bad = EMBEDDED_PLAYERS_RON.replacen("VEGA", "vega!", 1);
         assert!(apply_reload(&bad, &mut defs).is_err());
+        // Parseable, otherwise-valid, but a wrong schema version: rejected —
+        // a hot-reloaded `version: 99` must not slip in silently.
+        let wrong_version = EMBEDDED_PLAYERS_RON.replacen("version: 1", "version: 99", 1);
+        let err = apply_reload(&wrong_version, &mut defs)
+            .expect_err("a mismatched version must be rejected");
+        assert!(
+            err.contains("version"),
+            "rejection reason should mention the version mismatch: {err}"
+        );
+        assert!(defs.0.home.iter().any(|d| d.name == "VEGO"));
     }
 
     #[test]
