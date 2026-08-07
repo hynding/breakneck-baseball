@@ -339,28 +339,32 @@ use breakneck_baseball::game::input::Intents;
 use breakneck_baseball::game::ScoreBoard;
 use common::DriveGame;
 
-/// Task 18: the plate batter holds the two-handed `BattingStance` loop
-/// through the duel — mirrors `catcher_crouch_reaches_the_graph` on the
-/// batting side of the plate — and pressing swing replaces it with
-/// `BatterSwing` (never `SwingBat`/`RecoverSwing`: those alias `BatterSwing`
-/// via `node_for`, so the batter's own `RigPlayer` never shows them).
+/// Task 18: the plate batter holds his batting stance loop through the duel
+/// — mirrors `catcher_crouch_reaches_the_graph` on the batting side of the
+/// plate — and pressing swing replaces it with `BatterSwing` (never
+/// `SwingBat`/`RecoverSwing`: those alias `BatterSwing` via `node_for`, so
+/// the batter's own `RigPlayer` never shows them). Phase 3 makes the stance
+/// personal: the away leadoff (STONE, batting first in the top 1st) has
+/// `stance: UprightClosed` in `data/players.ron`, so his hold resolves to
+/// `StanceClosed`, not the shared `BattingStance` — see
+/// `animation::stance_clip`.
 #[test]
 fn batting_stance_then_swing_reach_the_graph() {
     let mut app = common::headless_app();
     common::start_game(&mut app, KeyCode::Digit2);
 
-    // The duel starts immediately; batter_stance inserts BattingStance, and
-    // the driver must forward it to the batter's skeleton.
+    // The duel starts immediately; batter_stance inserts STONE's personal
+    // stance clip, and the driver must forward it to the batter's skeleton.
     let stanced = common::run_until(&mut app, 4_000, |app| {
         let world = app.world_mut();
         world
             .query_filtered::<&RigPlayer, With<Batter>>()
             .iter(world)
-            .any(|rig| rig.current == Some(AnimClip::BattingStance))
+            .any(|rig| rig.current == Some(AnimClip::StanceClosed))
     });
     assert!(
         stanced.is_some(),
-        "driver never started BattingStance on the batter's skeleton"
+        "driver never started the batter's personal stance clip on his skeleton"
     );
 
     // Press swing for the batting side every frame from here on (mirrors
@@ -380,6 +384,6 @@ fn batting_stance_then_swing_reach_the_graph() {
     });
     assert!(
         swung.is_some(),
-        "swing press never replaced BattingStance with BatterSwing on the batter's skeleton"
+        "swing press never replaced the held stance with BatterSwing on the batter's skeleton"
     );
 }

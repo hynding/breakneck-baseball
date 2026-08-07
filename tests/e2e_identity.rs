@@ -127,6 +127,25 @@ fn skin_tones_dress_the_wired_rigs() {
 }
 
 #[test]
+fn batter_holds_his_personal_stance() {
+    use breakneck_baseball::game::animation::Playing;
+    let mut app = headless_app();
+    start_game(&mut app, KeyCode::Digit1);
+    // Away leadoff (STONE) has stance UprightClosed in data/players.ron →
+    // his duel hold must be StanceClosed, not the shared BattingStance.
+    let held = run_until(&mut app, 5_000, |app| {
+        let world = app.world_mut();
+        world
+            .query_filtered::<&Playing, With<Batter>>()
+            .iter(world)
+            .next()
+            .map(|p| p.clip == breakneck_baseball::game::animation::AnimClip::StanceClosed)
+            .unwrap_or(false)
+    });
+    assert!(held.is_some(), "batter must hold his personal stance clip");
+}
+
+#[test]
 fn headwear_hides_the_baked_cap_and_mounts_gear() {
     let mut app = headless_app();
     start_game(&mut app, KeyCode::Digit1);

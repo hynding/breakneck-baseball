@@ -11,6 +11,7 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
+use crate::game::animation;
 use crate::game::animation::{
     bat_idle_rotation, AnimClip, LimbKind, MoveIntent, Playing, RigBaseY, RigLimb,
 };
@@ -19,7 +20,7 @@ use crate::game::flow::{Phase, Play};
 use crate::game::input::Intents;
 use crate::game::jersey::attach_jerseys;
 use crate::game::model_assets::{GltfJerseyMesh, GltfPart, GltfTeamMaterials};
-use crate::game::roster::{RosterRole, Rosters};
+use crate::game::roster::{PlayerIdentity, RosterRole, Rosters};
 use crate::game::rules::BattingOrder;
 use crate::game::theme::{PlayerModelId, PlayerTemplate, Theme};
 use crate::game::variant::FieldSpec;
@@ -177,7 +178,11 @@ impl Plugin for PlayerPlugin {
                 (
                     recolor_teams,
                     recolor_gltf,
-                    batter_stance,
+                    // Reads `PlayerIdentity` to resolve the batter's personal
+                    // stance — must see the same-frame stamp on the exact
+                    // frame a new batter steps up (the `dress_jerseys`
+                    // pattern in jersey.rs).
+                    batter_stance.after(IdentitySet),
                     trigger_swing,
                     catcher_crouch,
                 )
@@ -187,28 +192,47 @@ impl Plugin for PlayerPlugin {
     }
 }
 
-/// Holds the plate batter (the `Batter`-marker rig) in the two-handed
-/// batting stance through the duel — the mirror of [`catcher_crouch`] on the
-/// other side of the plate — and releases it the moment the ball is in
+/// Holds the plate batter (the `Batter`-marker rig) in his personal batting
+/// stance through the duel — resolved from `PlayerIdentity` via
+/// `Rosters::team(..).card(..).appearance.style.stance` and
+/// `animation::stance_clip`, falling back to the shared `AnimClip::BattingStance`
+/// when the batter has no identity yet — the mirror of [`catcher_crouch`] on
+/// the other side of the plate — and releases it the moment the ball is in
 /// play, so the swap to the run-out rig (or a return to `Idle` between
 /// at-bats) can take over. Runs before [`trigger_swing`] (via `.chain()`) so
 /// a swing pressed on the very first duel frame still lands: even if this
 /// system's insert reaches the batter first, `trigger_swing`'s widened gate
-/// immediately replaces `BattingStance` with `BatterSwing` the same frame.
+/// immediately replaces the held stance with `BatterSwing` the same frame.
+/// Registered `.after(IdentitySet)` so it never reads a stale identity on the
+/// exact frame a new batter steps up (the established `dress_jerseys`
+/// pattern in jersey.rs).
 fn batter_stance(
     play: Res<Play>,
+    identities: Query<&PlayerIdentity>,
+    rosters: Res<Rosters>,
     batters: Query<(Entity, Option<&Playing>), With<Batter>>,
     mut commands: Commands,
 ) {
     let dueling = matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch);
     for (entity, playing) in &batters {
+        let resolved = identities
+            .get(entity)
+            .map(|id| rosters.team(id.team).card(id.index).appearance.style.stance)
+            .map(animation::stance_clip)
+            .unwrap_or(AnimClip::BattingStance);
         match playing {
             None if dueling => {
-                commands
-                    .entity(entity)
-                    .insert(Playing::new(AnimClip::BattingStance));
+                commands.entity(entity).insert(Playing::new(resolved));
             }
-            Some(playing) if !dueling && playing.clip == AnimClip::BattingStance => {
+            // Identity changed mid-duel (a new at-bat that never passed
+            // through a non-dueling frame): swap the stale stance for the
+            // new batter's own.
+            Some(playing)
+                if dueling && animation::is_stance(playing.clip) && playing.clip != resolved =>
+            {
+                commands.entity(entity).insert(Playing::new(resolved));
+            }
+            Some(playing) if !dueling && animation::is_stance(playing.clip) => {
                 commands.entity(entity).remove::<Playing>();
             }
             _ => {}
@@ -599,15 +623,15 @@ fn trigger_swing(
         }
     }
     for (entity, playing) in &batters {
-        // The stance loop always plays through the duel now, so "nothing
-        // playing" is no longer the only swingable state: replacing
-        // `BattingStance` is fine (the driver's current-mismatch restart
-        // cross-fades it away), but a `BatterSwing` already in flight must
-        // never be interrupted by a second press.
-        let swingable = matches!(
-            playing.map(|p| p.clip),
-            None | Some(AnimClip::BattingStance)
-        );
+        // A stance loop (shared or personal) always plays through the duel
+        // now, so "nothing playing" is no longer the only swingable state:
+        // replacing any held stance is fine (the driver's current-mismatch
+        // restart cross-fades it away), but a `BatterSwing` already in
+        // flight must never be interrupted by a second press.
+        let swingable = match playing.map(|p| p.clip) {
+            None => true,
+            Some(c) => animation::is_stance(c),
+        };
         if swingable {
             commands
                 .entity(entity)
