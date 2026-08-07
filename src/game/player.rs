@@ -192,6 +192,12 @@ impl Plugin for PlayerPlugin {
                     catcher_crouch,
                 )
                     .chain()
+                    // Same-frame phase-flip guarantee (batter_stance's
+                    // fidget-cut vs. a swing pressed right at the windup):
+                    // `flow::PhaseSet` mutates `Play::phase` earlier this
+                    // frame, unpinned otherwise against the multi-threaded
+                    // executor's worker-timing tie-break.
+                    .after(crate::game::flow::PhaseSet)
                     .run_if(in_state(GameState::Playing)),
             );
     }

@@ -696,4 +696,24 @@ mod tests {
         assert!(!is_stance(AnimClip::FidgetBatTap));
         assert!(!is_stance(AnimClip::CelebrateBatFlip));
     }
+
+    /// Every `FidgetId` resolves to a clip `is_fidget` accepts — the mirror
+    /// of `every_stance_id_resolves_to_a_stance_clip`.
+    #[test]
+    fn every_fidget_id_resolves_to_a_fidget_clip() {
+        for id in [FidgetId::BatTap, FidgetId::HalfSwing] {
+            assert!(
+                is_fidget(fidget_clip(id)),
+                "{id:?} resolved to a clip is_fidget rejects"
+            );
+        }
+    }
+
+    #[test]
+    fn is_fidget_rejects_non_fidget_clips() {
+        assert!(!is_fidget(AnimClip::Idle));
+        assert!(!is_fidget(AnimClip::BatterSwing));
+        assert!(!is_fidget(AnimClip::BattingStance));
+        assert!(!is_fidget(AnimClip::CelebrateBatFlip));
+    }
 }

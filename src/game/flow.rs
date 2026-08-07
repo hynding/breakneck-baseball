@@ -420,6 +420,20 @@ impl PlayBanner {
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
+/// Marks the flow chain below — `pre_pitch`, `wind_up`, `pitch_live`,
+/// `in_play`, `resolve_live_play`, and `result_phase` all mutate
+/// `Play::phase` somewhere in this tuple. Consumers that read `Play::phase`
+/// and must see this frame's flip (not last frame's) order
+/// `.after(PhaseSet)` — the `player::IdentitySet` pattern. In particular
+/// `player::PlayerPlugin`'s batter chain needs this: `batter_stance`'s
+/// continuation-cut arm (and `batter_fidgets`, and `trigger_swing`'s
+/// stance-only swing gate) must see the *same-frame* `PrePitch -> WindUp`
+/// flip `pre_pitch` writes, or the multi-threaded executor's ambiguous
+/// worker-timing tie-break can run the batter chain first and leave a
+/// fidget clip in place for a frame right at the windup.
+#[derive(bevy::ecs::schedule::SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PhaseSet;
+
 pub struct FlowPlugin;
 
 impl Plugin for FlowPlugin {
@@ -461,6 +475,7 @@ impl Plugin for FlowPlugin {
                     result_phase,
                 )
                     .chain()
+                    .in_set(PhaseSet)
                     .run_if(in_state(GameState::Playing)),
             );
     }
