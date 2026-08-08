@@ -396,15 +396,28 @@ fn retint_preview(
 
 /// The selector + tabs + revert egui side panel. Exclusive (needs `&mut
 /// World`, same as `debug::debug_panel`) purely to reach the `EguiContext`
-/// the same way that system does; every actual read/write is a single
-/// `Mut<CreatorState>` borrow handed to [`render_creator_panel`], which is
-/// plain `egui` + `CreatorState` with no other ECS access at all.
+/// the same way that system does.
+///
+/// egui redraws every frame the panel is visible, so a plain `&mut
+/// CreatorState` handed to [`render_creator_panel`] would flag
+/// `Changed<CreatorState>` on *every* frame via `Mut::deref_mut` — not just
+/// frames with a real edit — defeating `apply_creator_edits`'s
+/// `is_changed()` gate (it would rebuild `RosterDefs`/`Rosters` and
+/// re-insert `PlayerIdentity` continuously while the Creator is simply
+/// sitting open). Fixed the same way `debug.rs`'s Tune tab avoids the same
+/// trap: render against a `bypass_change_detection()` borrow (no implicit
+/// flag), have the render fns report back whether a widget actually
+/// changed something, and only call `set_changed()` when that's true — a
+/// real edit still flags exactly like a normal `DerefMut` would.
 ///
 /// Tolerates a missing egui context — a headless test app has no
 /// `PrimaryWindow` entity, so this no-ops instead of panicking; the apply
 /// path it feeds (`apply_creator_edits`) is a separate system precisely so
 /// the headless e2e can drive it with no panel, and therefore no egui
-/// context, in the loop at all.
+/// context, in the loop at all — and that path mutates `CreatorState` via
+/// ordinary `ResMut`/field-assignment, whose normal change detection is
+/// untouched by this bypass (it only ever applies to the panel's own
+/// render-time borrow).
 fn creator_panel(world: &mut World) {
     let Ok(ctx) = world
         .query_filtered::<&mut EguiContext, With<PrimaryWindow>>()
@@ -414,23 +427,37 @@ fn creator_panel(world: &mut World) {
         return;
     };
     let mut cs = world.resource_mut::<CreatorState>();
-    egui::SidePanel::left("creator_panel")
-        .default_width(320.0)
-        .resizable(true)
-        .show(&ctx, |ui| render_creator_panel(ui, &mut cs));
+    let changed = {
+        let cs = cs.bypass_change_detection();
+        egui::SidePanel::left("creator_panel")
+            .default_width(320.0)
+            .resizable(true)
+            .show(&ctx, |ui| render_creator_panel(ui, cs))
+            .inner
+    };
+    if changed {
+        cs.set_changed();
+    }
 }
 
 /// Team toggle + scrollable 13-name roster list, tab strip, the active
 /// tab's fields, and Revert — all against `cs.working` (the panel never
 /// touches `RosterDefs`/`Rosters`/the preview rig directly; that's
-/// [`apply_creator_edits`]'s job, driven by `cs` simply having changed).
-fn render_creator_panel(ui: &mut egui::Ui, cs: &mut CreatorState) {
+/// [`apply_creator_edits`]'s job). Returns whether any widget actually
+/// changed a value this frame — `creator_panel` uses that to decide
+/// whether to flag `CreatorState` changed at all (see its doc comment).
+fn render_creator_panel(ui: &mut egui::Ui, cs: &mut CreatorState) -> bool {
+    let mut changed = false;
     ui.heading("Player Creator");
     ui.separator();
 
     ui.horizontal(|ui| {
-        ui.selectable_value(&mut cs.team, Team::Home, "Home");
-        ui.selectable_value(&mut cs.team, Team::Away, "Away");
+        changed |= ui
+            .selectable_value(&mut cs.team, Team::Home, "Home")
+            .changed();
+        changed |= ui
+            .selectable_value(&mut cs.team, Team::Away, "Away")
+            .changed();
     });
     let team = cs.team;
     let pool_len = match team {
@@ -452,8 +479,9 @@ fn render_creator_panel(ui: &mut egui::Ui, cs: &mut CreatorState) {
                 } else {
                     format!("B{}. #{:<2} {}", i - lineup_size + 1, def.number, def.name)
                 };
-                if ui.selectable_label(cs.index == i, label).clicked() {
+                if ui.selectable_label(cs.index == i, label).clicked() && cs.index != i {
                     cs.index = i;
+                    changed = true;
                 }
             }
         });
@@ -466,7 +494,7 @@ fn render_creator_panel(ui: &mut egui::Ui, cs: &mut CreatorState) {
             ("Colors", CreatorTab::Colors),
             ("Animations", CreatorTab::Animations),
         ] {
-            ui.selectable_value(&mut cs.tab, t, label);
+            changed |= ui.selectable_value(&mut cs.tab, t, label).changed();
         }
     });
     ui.separator();
@@ -475,12 +503,12 @@ fn render_creator_panel(ui: &mut egui::Ui, cs: &mut CreatorState) {
     let (team, index) = (cs.team, cs.index);
     {
         let def = selected_def(&mut cs.working, team, index);
-        match tab {
+        changed |= match tab {
             CreatorTab::Identity => render_identity_tab(ui, def),
             CreatorTab::Gear => render_gear_tab(ui, def),
             CreatorTab::Colors => render_colors_tab(ui, def),
             CreatorTab::Animations => render_animations_tab(ui, def),
-        }
+        };
     }
 
     ui.separator();
@@ -490,6 +518,7 @@ fn render_creator_panel(ui: &mut egui::Ui, cs: &mut CreatorState) {
             // on any `CreatorState` change, a revert included.
             cs.working = cs.snapshot.clone();
             cs.status = "reverted to last entry".to_string();
+            changed = true;
         }
         ui.add_enabled(false, egui::Button::new("Save"))
             .on_disabled_hover_text("lands in a later task");
@@ -499,9 +528,11 @@ fn render_creator_panel(ui: &mut egui::Ui, cs: &mut CreatorState) {
             .on_disabled_hover_text("lands in a later task");
     });
     ui.label(cs.status.as_str());
+    changed
 }
 
-fn render_identity_tab(ui: &mut egui::Ui, def: &mut PlayerDef) {
+fn render_identity_tab(ui: &mut egui::Ui, def: &mut PlayerDef) -> bool {
+    let mut changed = false;
     ui.label("Name (A-Z, up to 8 characters — jersey font alphabet)");
     let mut name = def.name.clone();
     if ui.text_edit_singleline(&mut name).changed() {
@@ -511,32 +542,42 @@ fn render_identity_tab(ui: &mut egui::Ui, def: &mut PlayerDef) {
             .map(|c| c.to_ascii_uppercase())
             .take(8)
             .collect();
+        changed = true;
     }
     ui.horizontal(|ui| {
         ui.label("Number");
-        ui.add(egui::DragValue::new(&mut def.number).range(0..=99));
+        changed |= ui
+            .add(egui::DragValue::new(&mut def.number).range(0..=99))
+            .changed();
     });
+    changed
 }
 
 /// One horizontally-wrapped row of selectable buttons, one per `T::VARIANTS`
 /// entry labelled from `T::NAMES` (declaration order pinned equal by
 /// `appearance_enum!`, see `tests::variants_len_matches_names_for_every_appearance_enum`).
+/// Returns whether the click actually changed `value` (a re-click on the
+/// already-selected variant reports `false`, same as every other widget
+/// here).
 fn radio_grid<T: Copy + PartialEq>(
     ui: &mut egui::Ui,
     variants: &[T],
     names: &[&str],
     value: &mut T,
-) {
+) -> bool {
+    let mut changed = false;
     ui.horizontal_wrapped(|ui| {
         for (variant, name) in variants.iter().zip(names.iter()) {
-            ui.selectable_value(value, *variant, *name);
+            changed |= ui.selectable_value(value, *variant, *name).changed();
         }
     });
+    changed
 }
 
-fn render_gear_tab(ui: &mut egui::Ui, def: &mut PlayerDef) {
+fn render_gear_tab(ui: &mut egui::Ui, def: &mut PlayerDef) -> bool {
+    let mut changed = false;
     ui.label("Headwear");
-    radio_grid(
+    changed |= radio_grid(
         ui,
         Headwear::VARIANTS,
         Headwear::NAMES,
@@ -544,7 +585,7 @@ fn render_gear_tab(ui: &mut egui::Ui, def: &mut PlayerDef) {
     );
     ui.separator();
     ui.label("Eyewear");
-    radio_grid(
+    changed |= radio_grid(
         ui,
         Eyewear::VARIANTS,
         Eyewear::NAMES,
@@ -552,12 +593,14 @@ fn render_gear_tab(ui: &mut egui::Ui, def: &mut PlayerDef) {
     );
     ui.separator();
     ui.label("Arms");
-    radio_grid(ui, Arms::VARIANTS, Arms::NAMES, &mut def.appearance.arms);
+    changed |= radio_grid(ui, Arms::VARIANTS, Arms::NAMES, &mut def.appearance.arms);
     ui.separator();
-    ui.checkbox(&mut def.appearance.chain, "Chain");
+    changed |= ui.checkbox(&mut def.appearance.chain, "Chain").changed();
+    changed
 }
 
-fn render_colors_tab(ui: &mut egui::Ui, def: &mut PlayerDef) {
+fn render_colors_tab(ui: &mut egui::Ui, def: &mut PlayerDef) -> bool {
+    let mut changed = false;
     ui.label("Skin tone");
     ui.horizontal_wrapped(|ui| {
         for (variant, name) in SkinTone::VARIANTS.iter().zip(SkinTone::NAMES.iter()) {
@@ -576,16 +619,19 @@ fn render_colors_tab(ui: &mut egui::Ui, def: &mut PlayerDef) {
                 } else {
                     egui::Stroke::NONE
                 });
-            if ui.add(button).on_hover_text(*name).clicked() {
+            if ui.add(button).on_hover_text(*name).clicked() && def.appearance.skin != *variant {
                 def.appearance.skin = *variant;
+                changed = true;
             }
         }
     });
+    changed
 }
 
-fn render_animations_tab(ui: &mut egui::Ui, def: &mut PlayerDef) {
+fn render_animations_tab(ui: &mut egui::Ui, def: &mut PlayerDef) -> bool {
+    let mut changed = false;
     ui.label("Stance");
-    radio_grid(
+    changed |= radio_grid(
         ui,
         StanceId::VARIANTS,
         StanceId::NAMES,
@@ -594,19 +640,24 @@ fn render_animations_tab(ui: &mut egui::Ui, def: &mut PlayerDef) {
     ui.separator();
     ui.label("Fidget");
     ui.horizontal_wrapped(|ui| {
-        ui.selectable_value(&mut def.appearance.style.fidget, None, "None");
+        changed |= ui
+            .selectable_value(&mut def.appearance.style.fidget, None, "None")
+            .changed();
         for (variant, name) in FidgetId::VARIANTS.iter().zip(FidgetId::NAMES.iter()) {
-            ui.selectable_value(&mut def.appearance.style.fidget, Some(*variant), *name);
+            changed |= ui
+                .selectable_value(&mut def.appearance.style.fidget, Some(*variant), *name)
+                .changed();
         }
     });
     ui.separator();
     ui.label("Celebration");
-    radio_grid(
+    changed |= radio_grid(
         ui,
         CelebrationId::VARIANTS,
         CelebrationId::NAMES,
         &mut def.appearance.style.celebration,
     );
+    changed
 }
 
 pub struct CreatorPlugin;
