@@ -8,9 +8,11 @@
 //! [`crate::game::creator::CreatorState`], walk every (team, roster-slot)
 //! pair through both framings the brief cares about (full-body on the
 //! Identity tab, head close-up on Gear), and capture each via Bevy 0.15's
-//! `Screenshot::primary_window()` + `save_to_disk` — the same one-shot API
-//! `creator.rs`'s doc comment already cites as verified. When the queue
-//! drains, it fires `AppExit`.
+//! `Screenshot::primary_window()` + `save_to_disk` one-shot API — this
+//! module is the only place in the crate that uses it; `creator.rs` itself
+//! never touches screenshotting, it only supplies the `CreatorState`/
+//! `CreatorTab` seam this driver steers. When the queue drains, it fires
+//! `AppExit`.
 //!
 //! No headless e2e test covers this module: `Screenshot::primary_window()`
 //! needs a real window and a real GPU surface to read back from, neither of

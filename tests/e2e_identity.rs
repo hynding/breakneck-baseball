@@ -178,6 +178,134 @@ fn fidgets_fire_between_pitches_when_enabled() {
     );
 }
 
+/// Arms exactly one pitch: while `armed`, the first frame the phase is
+/// `PrePitch` gets a one-shot `action` press, then disarms itself so the
+/// driver goes quiet for the rest of the run — unlike `e2e_cpu.rs`'s `drive`
+/// (which presses `action` on every `PrePitch` frame and would keep forcing
+/// fresh windups every time the phase cycles back), this fires exactly one
+/// pitch so the second `PrePitch` stretch in
+/// [`fidget_accumulator_survives_a_pitch_interlude`] is left alone to
+/// accumulate.
+#[derive(Resource, Default)]
+struct ArmOnePitch(bool);
+
+fn drive_one_pitch_when_armed(
+    play: Option<Res<breakneck_baseball::game::flow::Play>>,
+    mut intents: ResMut<breakneck_baseball::game::input::Intents>,
+    mut armed: ResMut<ArmOnePitch>,
+) {
+    let Some(play) = play else { return };
+    intents.home = default();
+    if armed.0 && play.phase == breakneck_baseball::game::flow::Phase::PrePitch {
+        intents.home.action = true;
+        armed.0 = false; // one pulse only — no re-arm on the next PrePitch
+    }
+}
+
+/// Regression test for the "pause, don't reset" contract on
+/// `player::batter_fidgets`'s dead-ball accumulator: a non-qualifying
+/// stretch (here, one full pitch cycle through WindUp/Pitch/Result) must
+/// only *pause* `since_stance`, never zero it — the same at-bat's fidget
+/// must still fire once the combined `PrePitch` time (across both
+/// stretches) crosses the interval, not require a fresh interval after the
+/// interlude.
+///
+/// IBARRA (away lineup slot 2, roster index 1, `fidget: Some(BatTap)` per
+/// `data/players.ron`) draws a **fixed** ~4.23 s interval for this exact
+/// seed (`inning=1, slot=2, index=1, outs=0` — `player.rs`'s
+/// `batter_fidgets` seed formula, replicated offline against `ai::hash01`'s
+/// actual `f32` arithmetic, not just checked in `f64`: the two disagree
+/// noticeably at this seed's magnitude). The budget below banks 1.5 s
+/// before the interlude, then caps the post-interlude wait at 3.75 s —
+/// comfortably past the ~2.73 s still needed if the accumulator correctly
+/// resumed, but well short of the ~4.23 s a from-scratch reset would need —
+/// so the test fails exactly when `batter_fidgets` regresses to resetting
+/// `since_stance` on every non-qualifying frame instead of pausing it.
+#[test]
+fn fidget_accumulator_survives_a_pitch_interlude() {
+    use breakneck_baseball::game::animation::{AnimClip, FidgetsDisabled, Playing};
+    use breakneck_baseball::game::flow::Phase;
+
+    let mut app = headless_app();
+    app.world_mut().remove_resource::<FidgetsDisabled>(); // harness default off
+    app.init_resource::<ArmOnePitch>();
+    app.add_systems(common::DriveGame, drive_one_pitch_when_armed);
+    start_game(&mut app, KeyCode::Digit1);
+    breakneck_baseball::game::scenario::apply_to_world(
+        app.world_mut(),
+        &breakneck_baseball::game::scenario::Scenario {
+            batter_slot: Some(2), // IBARRA — same seed as `fidgets_fire_between_pitches_when_enabled`
+            ..Default::default()
+        },
+    )
+    .expect("ball is dead at PrePitch");
+
+    let is_fidgeting = |app: &mut App| {
+        app.world_mut()
+            .query_filtered::<&Playing, With<Batter>>()
+            .iter(app.world())
+            .next()
+            .map(|p| matches!(p.clip, AnimClip::FidgetBatTap | AnimClip::FidgetHalfSwing))
+            .unwrap_or(false)
+    };
+
+    // Stretch 1: bank 1.5 s of PrePitch time (well under the ~4.23 s
+    // interval — no fidget should fire yet).
+    const STRETCH1_FRAMES: u64 = 360; // 1.5 s @ 240 Hz
+    for _ in 0..STRETCH1_FRAMES {
+        app.update();
+    }
+    assert!(
+        !is_fidgeting(&mut app),
+        "premise broken: the fidget already fired inside stretch 1 — \
+         the interlude below would no longer split the accumulation"
+    );
+
+    // The interlude: force exactly one full pitch cycle (non-qualifying
+    // frames throughout — WindUp/Pitch/Result), then land back on PrePitch
+    // with the same batter still up.
+    app.world_mut().resource_mut::<ArmOnePitch>().0 = true;
+    const INTERLUDE_MAX_FRAMES: u64 = 960; // 4 s — generous over one pitch's WindUp+flight+Result
+    let back_to_pre_pitch = run_until(&mut app, INTERLUDE_MAX_FRAMES, |app| {
+        app.world()
+            .resource::<breakneck_baseball::game::flow::Play>()
+            .phase
+            == Phase::PrePitch
+    });
+    assert!(
+        back_to_pre_pitch.is_some(),
+        "the forced pitch never resolved back to PrePitch"
+    );
+    let batter_id = *app
+        .world_mut()
+        .query_filtered::<&PlayerIdentity, With<Batter>>()
+        .single(app.world());
+    assert_eq!(
+        batter_id,
+        PlayerIdentity {
+            team: Team::Away,
+            index: 1
+        },
+        "the interlude's single pitch must not have ended IBARRA's at-bat"
+    );
+    assert!(
+        !is_fidgeting(&mut app),
+        "no fidget should have fired during the interlude itself"
+    );
+
+    // Stretch 2: resume PrePitch. A correctly-pausing accumulator only
+    // needs ~2.73 s more; a buggy reset would need the full ~4.23 s again —
+    // this cap sits strictly between the two.
+    const STRETCH2_MAX_FRAMES: u64 = 900; // 3.75 s
+    let fidgeted = run_until(&mut app, STRETCH2_MAX_FRAMES, |app| is_fidgeting(app));
+    assert!(
+        fidgeted.is_some(),
+        "the fidget must fire once combined PrePitch time (both stretches) \
+         crosses the interval — since_stance was reset by the interlude \
+         instead of merely paused"
+    );
+}
+
 /// Top 1st: Away bats (CPU by default), Home pitches — a human key press, so
 /// this test scripts it directly (the `e2e_cpu.rs` `drive` pattern) rather
 /// than waiting on an idle keyboard.

@@ -172,7 +172,11 @@ pub struct PlayerPlugin;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(crate::game::game_start(), spawn_players)
+        app.init_resource::<BatterFidgetTimer>()
+            .add_systems(
+                crate::game::game_start(),
+                (spawn_players, reset_batter_fidget_timer),
+            )
             .add_systems(
                 Update,
                 (
@@ -280,6 +284,28 @@ fn batter_stance(
     }
 }
 
+/// [`batter_fidgets`]'s dead-ball accumulator. A `Resource` rather than the
+/// system's own `Local`s specifically so [`reset_batter_fidget_timer`] can
+/// clear it from the `game_start()` transition schedule: a `Local` would
+/// otherwise survive untouched across a same-process replay (`GameOver` ->
+/// `MainMenu` -> `Playing` again without restarting the app), and the
+/// leadoff batter's `PlayerIdentity` at kickoff is often *identical* between
+/// two games with the same rosters (`BattingOrder::default()` always starts
+/// both teams at slot 1) — so the system's own "batter changed" reset
+/// wouldn't catch it either, letting time banked in a previous, finished
+/// game silently carry into the next one's first at-bat.
+#[derive(Resource, Default)]
+struct BatterFidgetTimer {
+    since_stance: f32,
+    current_batter: Option<PlayerIdentity>,
+}
+
+/// Fresh accumulator whenever a game (re)starts — see [`BatterFidgetTimer`]'s
+/// doc comment for why a `game_start()` clear is needed at all.
+fn reset_batter_fidget_timer(mut timer: ResMut<BatterFidgetTimer>) {
+    *timer = BatterFidgetTimer::default();
+}
+
 /// Between pitches a batter with an authored fidget occasionally breaks his
 /// stance hold — helmet tap, practice half-swing — then settles back into it
 /// (`Playing::then`). Dead-ball only: accumulates on qualifying frames —
@@ -291,7 +317,7 @@ fn batter_stance(
 /// well under the 4-9 s interval, so the accumulator must survive across
 /// stretches within the same at-bat or fidgets would never fire — it resets
 /// only on the three events that actually invalidate the count: the batter
-/// at the plate changes (tracked via `Local<Option<PlayerIdentity>>`,
+/// at the plate changes (tracked via [`BatterFidgetTimer::current_batter`],
 /// compared each frame), a fidget actually fires, or fidgets are disabled.
 /// `batter_stance`'s continuation-cut arm still owns getting any in-flight
 /// fidget back out before the windup, so this system never has to worry
@@ -314,24 +340,23 @@ fn batter_fidgets(
     rosters: Res<Rosters>,
     time: Res<Time>,
     disabled: Option<Res<animation::FidgetsDisabled>>,
-    mut since_stance: Local<f32>,
-    mut current_batter: Local<Option<PlayerIdentity>>,
+    mut timer: ResMut<BatterFidgetTimer>,
     batters: Query<(Entity, &PlayerIdentity, Option<&Playing>), With<Batter>>,
     mut commands: Commands,
 ) {
     if disabled.is_some() {
-        *since_stance = 0.0;
-        *current_batter = None;
+        timer.since_stance = 0.0;
+        timer.current_batter = None;
         return;
     }
     let Ok((entity, id, playing)) = batters.get_single() else {
         return;
     };
-    if *current_batter != Some(*id) {
+    if timer.current_batter != Some(*id) {
         // New batter at the plate (substitution or the next at-bat): any
         // accumulated dead-ball time belonged to someone else.
-        *current_batter = Some(*id);
-        *since_stance = 0.0;
+        timer.current_batter = Some(*id);
+        timer.since_stance = 0.0;
     }
     let qualifies = play.phase == Phase::PrePitch
         && !play.in_steal_window()
@@ -346,7 +371,7 @@ fn batter_fidgets(
     let Some(fidget) = card.appearance.style.fidget else {
         return;
     };
-    *since_stance += time.delta_secs();
+    timer.since_stance += time.delta_secs();
     // Deterministic per-at-bat interval in [4, 9): hash the inning, the
     // batter's lineup slot, his roster index, and the out count.
     let seed = score.inning as f32 * 31.0
@@ -354,8 +379,8 @@ fn batter_fidgets(
         + id.index as f32 * 13.0
         + score.outs as f32 * 17.0;
     let interval = 4.0 + 5.0 * crate::game::ai::hash01(seed);
-    if *since_stance >= interval {
-        *since_stance = 0.0;
+    if timer.since_stance >= interval {
+        timer.since_stance = 0.0;
         commands.entity(entity).insert(Playing::then(
             animation::fidget_clip(fidget),
             animation::stance_clip(card.appearance.style.stance),
