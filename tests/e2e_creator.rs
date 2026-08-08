@@ -278,3 +278,76 @@ fn external_reload_syncs_creator_state_and_survives_exit() {
         "exiting the Creator with no user edits must not clobber an external reload"
     );
 }
+
+/// Regression coverage (fix round 2): an earlier version of
+/// `sync_creator_from_external_reload` inferred "external reload" by
+/// comparing `defs.0` against `cs.working`/`cs.snapshot` directly. That has
+/// a false-positive hole once `cs.snapshot` has drifted away from the
+/// in-flight edit — which any widget whose `.changed()` fires on 2+
+/// consecutive frames (e.g. a held numeric drag) does immediately: the
+/// first edit frame moves `defs.0` away from `cs.snapshot` (no Revert/Save
+/// in between to bring them back together), so the *second* consecutive
+/// edit frame reads as external — `defs.0` (one frame behind the panel)
+/// differs from both the newer `cs.working` and the untouched
+/// `cs.snapshot` — and gets misclassified, stomping `cs.working` back a
+/// step and corrupting `cs.snapshot` until the next save or Creator
+/// re-entry.
+///
+/// This test drives three consecutive edit-then-`app.update()` steps (no
+/// panel, no Revert/Save between them — mimicking a 3-frame drag) and
+/// asserts `cs.working` always holds the latest edit (never stomped
+/// backward) and `cs.snapshot` never moves off its original, pre-drag
+/// value. Must keep passing alongside
+/// `external_reload_syncs_creator_state_and_survives_exit` above.
+#[test]
+fn consecutive_panel_edits_never_misread_as_an_external_reload() {
+    let mut app = headless_app();
+    tap_key(&mut app, KeyCode::KeyC);
+    let entered = run_until(&mut app, 2_000, |app| {
+        *app.world().resource::<State<GameState>>().get() == GameState::Creator
+    });
+    assert!(entered.is_some(), "C on the menu must open the creator");
+
+    // Select HOLT (home #5), same as the other tests, and let the
+    // selection settle to a steady state (working == snapshot == the live
+    // RosterDefs) before starting the simulated drag.
+    {
+        let mut cs = app.world_mut().resource_mut::<CreatorState>();
+        cs.team = Team::Home;
+        cs.index = 5;
+    }
+    let settled = run_until(&mut app, 2_000, |app| {
+        let cs = app.world().resource::<CreatorState>();
+        let defs = app.world().resource::<RosterDefs>();
+        cs.working == cs.snapshot && defs.0 == cs.working
+    });
+    assert!(
+        settled.is_some(),
+        "selection must settle before the drag starts"
+    );
+
+    let original_snapshot = app.world().resource::<CreatorState>().snapshot.clone();
+
+    // Three consecutive "drag steps": each mutates the jersey number
+    // directly on `cs.working` (no Revert/Save between them) and steps
+    // exactly one frame — the same granularity a real held DragValue drag
+    // advances by, one `.changed()` per rendered frame.
+    for (step, number) in [(1, 21u32), (2, 22u32), (3, 23u32)] {
+        {
+            let mut cs = app.world_mut().resource_mut::<CreatorState>();
+            let (team, index) = (cs.team, cs.index);
+            selected_def(&mut cs.working, team, index).number = number;
+        }
+        app.update();
+
+        let cs = app.world().resource::<CreatorState>();
+        assert_eq!(
+            cs.working.home[5].number, number,
+            "step {step}: cs.working must hold the latest drag value, not be stomped backward"
+        );
+        assert_eq!(
+            cs.snapshot, original_snapshot,
+            "step {step}: cs.snapshot must not drift during a plain field edit"
+        );
+    }
+}

@@ -196,6 +196,7 @@ fn enter_creator_stage(
     theme: Res<Theme>,
     mut cs: ResMut<CreatorState>,
     defs: Res<RosterDefs>,
+    mut last_applied: ResMut<LastAppliedRoster>,
     mut live_rosters: ResMut<Rosters>,
     jersey_assets: Option<Res<JerseyAssets>>,
     mut main_cameras: Query<&mut Camera, (With<Camera3d>, Without<CreatorStage>)>,
@@ -203,6 +204,12 @@ fn enter_creator_stage(
     cs.working = defs.0.clone();
     cs.snapshot = defs.0.clone();
     cs.status.clear();
+    // `apply_creator_edits` hasn't written anything yet this session — seed
+    // its yardstick to match `defs.0` (== working == snapshot right now) so
+    // `sync_creator_from_external_reload`'s first poll sees "nothing to do"
+    // instead of mistaking a stale value left over from a previous Creator
+    // visit for a fresh external reload.
+    last_applied.0 = defs.0.clone();
 
     // The persistent main camera (`camera.rs::spawn_camera`, active from
     // `Startup`) is still around while the Creator's own camera spawns
@@ -329,9 +336,17 @@ fn exit_creator_stage(
 /// entity. Deliberately a system separate from the egui panel (`creator_panel`
 /// only ever mutates `cs.working`/`cs.status`) so this same path is what
 /// both the panel and the headless e2e (`tests/e2e_creator.rs`) drive.
+///
+/// Also records exactly what it wrote into [`LastAppliedRoster`] — the
+/// yardstick [`sync_creator_from_external_reload`] compares `defs.0`
+/// against to tell a genuine external reload apart from this system's own
+/// (one-frame-lagged, relative to the panel) write. See that system's doc
+/// comment for why an inferred check (comparing against `cs.working`
+/// instead) misfires mid-drag.
 fn apply_creator_edits(
     cs: Res<CreatorState>,
     mut defs: ResMut<RosterDefs>,
+    mut last_applied: ResMut<LastAppliedRoster>,
     mut live_rosters: ResMut<Rosters>,
     mut commands: Commands,
     rig: Query<Entity, With<PreviewRig>>,
@@ -340,6 +355,7 @@ fn apply_creator_edits(
         return;
     }
     *defs = RosterDefs(cs.working.clone());
+    last_applied.0 = defs.0.clone();
     let (rosters, id) = preview_rosters_and_identity(&cs.working, cs.team, cs.index);
     *live_rosters = rosters;
     for entity in &rig {
@@ -371,6 +387,7 @@ fn apply_creator_edits(
 fn revert_creator_edits(
     mut cs: ResMut<CreatorState>,
     mut defs: ResMut<RosterDefs>,
+    mut last_applied: ResMut<LastAppliedRoster>,
     mut live_rosters: ResMut<Rosters>,
 ) {
     if cs.working == cs.snapshot {
@@ -378,8 +395,31 @@ fn revert_creator_edits(
     }
     cs.working = cs.snapshot.clone();
     *defs = RosterDefs(cs.working.clone());
+    last_applied.0 = defs.0.clone();
     let (rosters, _id) = preview_rosters_and_identity(&cs.working, cs.team, cs.index);
     *live_rosters = rosters;
+}
+
+/// What [`apply_creator_edits`] most recently wrote into the live
+/// `RosterDefs` — the exact yardstick [`sync_creator_from_external_reload`]
+/// uses to tell a genuine external reload apart from that system's own
+/// one-frame-lagged write (see its doc comment for the frame trace this
+/// closes). Deliberately its own resource rather than a `CreatorState`
+/// field: `apply_creator_edits` only ever *reads* `CreatorState`
+/// (`cs: Res<CreatorState>`) today, and keeping it that way means writing
+/// this yardstick can never itself flag `CreatorState` changed and confuse
+/// a system gated on `cs.is_changed()`.
+///
+/// Seeded to match `RosterDefs` on every Creator entry
+/// ([`enter_creator_stage`]) — nothing has been applied yet that session, so
+/// there is nothing to compare against until the first real write.
+#[derive(Resource, Debug, Clone)]
+struct LastAppliedRoster(RosterFile);
+
+impl Default for LastAppliedRoster {
+    fn default() -> Self {
+        Self(crate::game::appearance::embedded_roster_file())
+    }
 }
 
 /// Folds an *external* reload of `RosterDefs` (the dev watcher hot-swapping
@@ -390,26 +430,41 @@ fn revert_creator_edits(
 /// panel edit (`apply_creator_edits` always writes `defs.0 =
 /// cs.working.clone()`) would silently stomp the reload back out.
 ///
-/// The invariant that tells "external reload" apart from the Creator's own
-/// writes: [`apply_creator_edits`] is the *only* other system that touches
-/// `RosterDefs` while Creator is open, and it always sets `defs.0` to
-/// exactly `cs.working` — so `defs.0 == cs.working` covers both "nothing
-/// happened" and "our own apply/panel path just wrote this" and must no-op.
-/// A genuine external reload instead lands content the Creator has not seen
-/// from either side yet, so it differs from BOTH `cs.working` and
-/// `cs.snapshot` at once — that's the only case this system reacts to. On
-/// that case there is nothing meaningful left to revert *to* (the on-disk
-/// edit already is the new baseline), so both copies adopt the reload
-/// together; touching `cs` also flags it changed, so `apply_creator_edits`
-/// (ordered right after this system in the `Creator` chain) re-stamps the
-/// preview rig's `PlayerIdentity` and redresses it from the reload on the
-/// very same frame.
-fn sync_creator_from_external_reload(defs: Res<RosterDefs>, mut cs: ResMut<CreatorState>) {
-    if defs.0 == cs.working || defs.0 == cs.snapshot {
+/// The invariant is `defs.0 != last_applied.0`, **not** `defs.0 !=
+/// cs.working` — an earlier version compared against `cs.working` (and
+/// `cs.snapshot`) directly and had a false-positive hole: this system runs
+/// *before* `apply_creator_edits` in the `Creator` chain, so on any frame
+/// `defs.0` is one frame behind whatever the panel just wrote (e.g. mid-drag
+/// on a numeric field, which fires `.changed()` every frame the drag moves).
+/// Concretely, frame 3 of a 3-frame drag: `defs.0` still holds frame 2's
+/// applied value while `cs.working` already holds frame 3's — `defs.0 !=
+/// cs.working` and `defs.0 != cs.snapshot`, misclassifying the panel's own
+/// lag as an external reload and stomping `cs.working` back a step *and*
+/// corrupting `cs.snapshot` (breaking Revert until save or re-entry).
+///
+/// [`LastAppliedRoster`] closes that hole by recording exactly what
+/// `apply_creator_edits` wrote, not inferring it: `defs.0` can only differ
+/// from `last_applied.0` if something *other* than `apply_creator_edits`
+/// wrote `RosterDefs` — the dev watcher — since every apply keeps them
+/// identical by construction, lag included (the comparison needs no
+/// `cs.working`/`cs.snapshot` involvement at all). On a genuine mismatch
+/// there is nothing meaningful left to revert *to* (the on-disk edit
+/// already is the new baseline), so `working`, `snapshot`, and
+/// `last_applied` all adopt the reload together; touching `cs` also flags
+/// it changed, so `apply_creator_edits` (ordered right after this system in
+/// the `Creator` chain) re-stamps the preview rig's `PlayerIdentity` and
+/// redresses it from the reload on the very same frame.
+fn sync_creator_from_external_reload(
+    defs: Res<RosterDefs>,
+    mut last_applied: ResMut<LastAppliedRoster>,
+    mut cs: ResMut<CreatorState>,
+) {
+    if defs.0 == last_applied.0 {
         return;
     }
     cs.working = defs.0.clone();
     cs.snapshot = defs.0.clone();
+    last_applied.0 = defs.0.clone();
 }
 
 /// Camera position + look-at target for a tab, per the brief's tuned framing:
@@ -983,6 +1038,7 @@ pub struct CreatorPlugin;
 impl Plugin for CreatorPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CreatorState>()
+            .init_resource::<LastAppliedRoster>()
             .add_systems(OnEnter(GameState::Creator), enter_creator_stage)
             .add_systems(
                 OnExit(GameState::Creator),
