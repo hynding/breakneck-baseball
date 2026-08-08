@@ -6,7 +6,7 @@ mod common;
 
 use bevy::prelude::*;
 use breakneck_baseball::game::appearance::Headwear;
-use breakneck_baseball::game::creator::{selected_def, CreatorState, PreviewRig};
+use breakneck_baseball::game::creator::{save_working_to, selected_def, CreatorState, PreviewRig};
 use breakneck_baseball::game::gear::DressedAs;
 use breakneck_baseball::game::model_assets::RigCapMeshes;
 use breakneck_baseball::game::{GameState, Team};
@@ -142,4 +142,37 @@ fn creator_apply_path_updates_preview_without_the_panel() {
         hidden.is_some(),
         "headwear -> Bare via the working copy alone (no panel) must hide the cap mesh"
     );
+}
+
+/// End-to-end version of `save_working_to`'s unit-level validation test: a
+/// working copy edited (through the Creator, no panel) to an invalid name
+/// must be rejected on save and must not touch disk at all.
+#[test]
+fn save_rejects_an_invalid_name_and_writes_nothing() {
+    let mut app = headless_app();
+    tap_key(&mut app, KeyCode::KeyC);
+    let entered = run_until(&mut app, 2_000, |app| {
+        *app.world().resource::<State<GameState>>().get() == GameState::Creator
+    });
+    assert!(entered.is_some(), "C on the menu must open the creator");
+
+    {
+        let mut cs = app.world_mut().resource_mut::<CreatorState>();
+        let (team, index) = (cs.team, cs.index);
+        selected_def(&mut cs.working, team, index).name = "bad!".to_string();
+    }
+
+    let dir = std::env::temp_dir().join(format!("bb-creator-e2e-save-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("players.ron");
+    std::fs::remove_file(&path).ok();
+    let path_str = path.to_str().unwrap();
+
+    let cs = app.world().resource::<CreatorState>();
+    let result = save_working_to(path_str, &cs.working);
+
+    assert!(result.is_err(), "an invalid name must be rejected");
+    assert!(!path.exists(), "a rejected save must not write anything");
+
+    std::fs::remove_file(&path).ok();
 }

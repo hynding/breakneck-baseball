@@ -26,10 +26,11 @@ use bevy::window::PrimaryWindow;
 use bevy_inspector_egui::bevy_egui::EguiContext;
 use bevy_inspector_egui::egui;
 
-use crate::game::animation::{AnimClip, Playing};
+use crate::game::ai::hash01;
+use crate::game::animation::{self, Playing};
 use crate::game::appearance::{
-    Arms, CelebrationId, Eyewear, FidgetId, Headwear, PlayerDef, RosterDefs, RosterFile, SkinTone,
-    StanceId,
+    Arms, CelebrationId, Eyewear, FidgetId, Headwear, PlayerAppearance, PlayerDef, RosterDefs,
+    RosterFile, SkinTone, StanceId, StyleSet, TrotId,
 };
 use crate::game::jersey::{self, JerseyAssets};
 use crate::game::model_assets::{GltfJerseyMesh, GltfPart, GltfTeamMaterials};
@@ -64,6 +65,11 @@ pub struct CreatorState {
     pub working: RosterFile,
     pub snapshot: RosterFile,
     pub status: String,
+    /// Bumped once per Randomize click and fed to [`randomize_player`] as its
+    /// seed — a plain counter (not a clock/hash of real time) so repeated
+    /// clicks visibly cycle through different curated looks while staying
+    /// fully deterministic for anything driving the panel headlessly.
+    pub randomize_seed: u32,
 }
 
 impl Default for CreatorState {
@@ -81,6 +87,7 @@ impl Default for CreatorState {
             working: file.clone(),
             snapshot: file,
             status: String::new(),
+            randomize_seed: 0,
         }
     }
 }
@@ -96,6 +103,18 @@ pub fn selected_def(file: &mut RosterFile, team: Team, index: usize) -> &mut Pla
     };
     let clamped = index.min(pool.len() - 1);
     &mut pool[clamped]
+}
+
+/// Read-only twin of [`selected_def`] — same clamp, no `&mut` needed. Used by
+/// systems (camera framing, preview clip selection) that only need to look
+/// at the selection, not edit it.
+fn selected_def_ref(file: &RosterFile, team: Team, index: usize) -> &PlayerDef {
+    let pool = match team {
+        Team::Home => &file.home,
+        Team::Away => &file.away,
+    };
+    let clamped = index.min(pool.len() - 1);
+    &pool[clamped]
 }
 
 /// Preview `Rosters` + `PlayerIdentity` for a selection, built fresh from
@@ -351,12 +370,111 @@ fn revert_creator_edits(
     *live_rosters = rosters;
 }
 
-/// A preview rig with nothing playing settles into `Idle` — Task 3 makes
-/// this tab-aware (stance/fidget/celebration previews).
-fn preview_idle(mut commands: Commands, rig: Query<Entity, (With<PreviewRig>, Without<Playing>)>) {
-    for entity in &rig {
-        commands.entity(entity).insert(Playing::new(AnimClip::Idle));
+/// Camera position + look-at target for a tab, per the brief's tuned framing:
+/// Identity gets a full-body shot, Gear/Colors share a head close-up (both
+/// tabs edit things worn on/near the head), Animations backs off to a
+/// batter's-box-ish three-quarter so a stance/swing preview reads.
+fn camera_target(tab: CreatorTab) -> (Vec3, Vec3) {
+    match tab {
+        CreatorTab::Identity => (Vec3::new(0.0, 1.1, 3.2), Vec3::new(0.0, 1.0, 0.0)),
+        CreatorTab::Gear | CreatorTab::Colors => {
+            (Vec3::new(0.35, 1.55, 1.1), Vec3::new(0.0, 1.5, 0.0))
+        }
+        CreatorTab::Animations => (Vec3::new(2.2, 1.4, 2.2), Vec3::new(0.0, 1.0, 0.0)),
     }
+}
+
+/// Eases the Creator camera toward the active tab's framing every frame
+/// rather than cutting — an exponential approach
+/// (`1 - (-8.0 * dt).exp()`, tuned by eye) so faster machines and slower
+/// ones converge to the same target in the same wall-clock time regardless
+/// of frame rate. Targets only translation + look-at rotation; the camera
+/// never rolls.
+fn lerp_creator_camera(
+    cs: Res<CreatorState>,
+    time: Res<Time>,
+    mut camera: Query<&mut Transform, (With<Camera3d>, With<CreatorStage>)>,
+) {
+    let Ok(mut transform) = camera.get_single_mut() else {
+        return;
+    };
+    let (target_pos, look_at) = camera_target(cs.tab);
+    let t = 1.0 - (-8.0 * time.delta_secs()).exp();
+    let new_translation = transform.translation.lerp(target_pos, t);
+    let target_rotation = Transform::from_translation(new_translation)
+        .looking_at(look_at, Vec3::Y)
+        .rotation;
+    transform.translation = new_translation;
+    transform.rotation = transform.rotation.slerp(target_rotation, t);
+}
+
+/// Which specific selection state a preview clip choice was last computed
+/// from — compared each frame so [`preview_idle`] only (re)inserts `Playing`
+/// on an actual change (tab, player, or a style field), never every frame.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct PreviewKey {
+    team: Team,
+    index: usize,
+    tab: CreatorTab,
+    stance: StanceId,
+    fidget: Option<FidgetId>,
+    celebration: CelebrationId,
+}
+
+/// Tab-aware preview clip: on Identity/Gear/Colors the rig holds the
+/// player's resolved stance loop (livelier than a bare `Idle` and shows the
+/// bat); on Animations the *selected* style element previews directly —
+/// picking a stance loops it immediately, picking a fidget or celebration
+/// plays it once (`Playing::then`) and returns to the stance loop, matching
+/// how that element actually surfaces in a real at-bat. Re-triggers only on
+/// a genuine selection change (tracked via [`PreviewKey`]), and only treats a
+/// fidget/celebration change as "just selected" (one-shot preview) when the
+/// player/tab stayed put — switching players or tabs always lands back on a
+/// plain stance loop instead of replaying whatever that player's last-picked
+/// fidget happened to be.
+fn preview_idle(
+    cs: Res<CreatorState>,
+    mut commands: Commands,
+    mut last: Local<Option<PreviewKey>>,
+    rig: Query<(Entity, Option<&Playing>), With<PreviewRig>>,
+) {
+    let Ok((entity, playing)) = rig.get_single() else {
+        return;
+    };
+    let def = selected_def_ref(&cs.working, cs.team, cs.index);
+    let key = PreviewKey {
+        team: cs.team,
+        index: cs.index,
+        tab: cs.tab,
+        stance: def.appearance.style.stance,
+        fidget: def.appearance.style.fidget,
+        celebration: def.appearance.style.celebration,
+    };
+
+    if Some(key) == *last && playing.is_some() {
+        return;
+    }
+
+    let stance_clip = animation::stance_clip(key.stance);
+    let steady_selection = last.is_some_and(|p| p.team == key.team && p.index == key.index);
+    let new_playing = if key.tab == CreatorTab::Animations && steady_selection {
+        let prev = last.expect("steady_selection implies last.is_some()");
+        if let Some(fidget) = key.fidget.filter(|_| prev.fidget != key.fidget) {
+            Playing::then(animation::fidget_clip(fidget), stance_clip)
+        } else if prev.celebration != key.celebration {
+            match animation::celebration_clip(key.celebration) {
+                Some(clip) => Playing::then(clip, stance_clip),
+                None => Playing::new(stance_clip),
+            }
+        } else {
+            Playing::new(stance_clip)
+        }
+    } else {
+        Playing::new(stance_clip)
+    };
+
+    *last = Some(key);
+    commands.entity(entity).insert(new_playing);
 }
 
 /// Keeps the preview rig's jersey/cap uniform matching `CreatorState::team`.
@@ -520,10 +638,25 @@ fn render_creator_panel(ui: &mut egui::Ui, cs: &mut CreatorState) -> bool {
             cs.status = "reverted to last entry".to_string();
             changed = true;
         }
-        ui.add_enabled(false, egui::Button::new("Save"))
-            .on_disabled_hover_text("lands in a later task");
-        ui.add_enabled(false, egui::Button::new("Randomize"))
-            .on_disabled_hover_text("lands in a later task");
+        if ui.button("Save").clicked() {
+            // Not `apply_creator_edits`'s job (that path never touches
+            // disk) — the panel calls the pure save fn directly and routes
+            // the result into `cs.status`/`cs.snapshot` itself.
+            match save_working(&cs.working) {
+                Ok(()) => {
+                    cs.snapshot = cs.working.clone();
+                    cs.status = "saved to data/players.ron".to_string();
+                }
+                Err(e) => cs.status = format!("save failed: {e}"),
+            }
+            changed = true;
+        }
+        if ui.button("Randomize").clicked() {
+            cs.randomize_seed = cs.randomize_seed.wrapping_add(1);
+            let seed = cs.randomize_seed;
+            randomize_player(selected_def(&mut cs.working, team, index), seed);
+            changed = true;
+        }
         ui.add_enabled(false, egui::Button::new("Portraits"))
             .on_disabled_hover_text("lands in a later task");
     });
@@ -660,6 +793,140 @@ fn render_animations_tab(ui: &mut egui::Ui, def: &mut PlayerDef) -> bool {
     changed
 }
 
+// ── Randomize ────────────────────────────────────────────────────────────────
+
+/// Deterministic 0..1 roll for one randomize "channel" (skin, headwear, ...)
+/// off a shared `seed` — large, distinct per-channel offsets keep channels
+/// decorrelated since [`hash01`] is a `sin`-based hash where nearby inputs
+/// produce nearby outputs.
+fn roll(seed: u32, channel: u32) -> f32 {
+    hash01(seed as f32 * 7.0 + channel as f32 * 101.0)
+}
+
+/// Uniform pick across every variant of a slice (used where the brief calls
+/// a field "uniform" — skin, arms, stance).
+fn pick_uniform<T: Copy>(roll: f32, variants: &[T]) -> T {
+    let n = variants.len();
+    let idx = ((roll * n as f32) as usize).min(n - 1);
+    variants[idx]
+}
+
+/// Cap 40% / Helmet 25% / CapBackwards 20% / Bare 15%.
+fn pick_headwear(roll: f32) -> Headwear {
+    if roll < 0.40 {
+        Headwear::Cap
+    } else if roll < 0.65 {
+        Headwear::Helmet
+    } else if roll < 0.85 {
+        Headwear::CapBackwards
+    } else {
+        Headwear::Bare
+    }
+}
+
+/// Bare 60%, the other three variants split evenly over the remaining 40%.
+fn pick_eyewear(roll: f32) -> Eyewear {
+    const REST: f32 = (1.0 - 0.60) / 3.0;
+    if roll < 0.60 {
+        Eyewear::Bare
+    } else if roll < 0.60 + REST {
+        Eyewear::Glasses
+    } else if roll < 0.60 + 2.0 * REST {
+        Eyewear::Shades
+    } else {
+        Eyewear::EyeBlack
+    }
+}
+
+/// None 40%, the two real fidgets split evenly over the remaining 60%.
+fn pick_fidget(roll: f32) -> Option<FidgetId> {
+    if roll < 0.40 {
+        None
+    } else if roll < 0.70 {
+        Some(FidgetId::HalfSwing)
+    } else {
+        Some(FidgetId::BatTap)
+    }
+}
+
+/// Standard 70% / BatFlip 30%.
+fn pick_celebration(roll: f32) -> CelebrationId {
+    if roll < 0.70 {
+        CelebrationId::Standard
+    } else {
+        CelebrationId::BatFlip
+    }
+}
+
+/// Curated randomize: coherent combinations, not uniform RGB clown output.
+/// Deterministic in `seed` ([`hash01`] mixes) so the same seed always
+/// reproduces the same look — the panel's bumping `randomize_seed` counter
+/// gets a fresh look per click while staying pinnable in tests. Builds a
+/// whole fresh [`PlayerAppearance`] literal (every field named explicitly,
+/// no `..PlayerAppearance::default()` spread) so a field can never be
+/// silently left un-rolled; `name`/`number` are untouched — randomize only
+/// covers appearance, per the brief's curation table.
+pub fn randomize_player(def: &mut PlayerDef, seed: u32) {
+    let skin = pick_uniform(roll(seed, 0), SkinTone::VARIANTS);
+    let headwear = pick_headwear(roll(seed, 1));
+    let eyewear = pick_eyewear(roll(seed, 2));
+    let chain = roll(seed, 3) < 0.25;
+    let arms = pick_uniform(roll(seed, 4), Arms::VARIANTS);
+    let stance = pick_uniform(roll(seed, 5), StanceId::VARIANTS);
+    let fidget = pick_fidget(roll(seed, 6));
+    let celebration = pick_celebration(roll(seed, 7));
+
+    def.appearance = PlayerAppearance {
+        skin,
+        headwear,
+        eyewear,
+        arms,
+        chain,
+        style: StyleSet {
+            stance,
+            fidget,
+            // The only `TrotId` variant today — written explicitly (not via
+            // a `..default()` spread) so a future second trot is forced
+            // through this same curated seam instead of silently defaulting.
+            trot: TrotId::Standard,
+            celebration,
+        },
+    };
+}
+
+// ── Save ─────────────────────────────────────────────────────────────────────
+
+/// Where [`save_working`] writes by default — the repo's authored roster
+/// file. Anchored by `CARGO_MANIFEST_DIR` (not the process's cwd, which
+/// nothing guarantees points at the workspace).
+const PLAYERS_RON_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data/players.ron");
+
+/// Validates then writes `working` as pretty RON to `path`. Pulled the path
+/// out into a parameter (rather than hardcoding [`PLAYERS_RON_PATH`] here) so
+/// tests can point this at a temp file instead of the repo's real data —
+/// [`save_working`] is the thin wrapper that supplies the real path. Validates
+/// *before* writing so a bad working copy (e.g. an unauthored `!` in a name)
+/// never touches disk. NOTE: a save always re-serializes the *whole* file in
+/// this pretty-RON formatting, so the first save after this lands produces a
+/// one-time diff of formatting-only churn against the hand-authored
+/// `data/players.ron` — accepted; the Creator hub owns the file's format from
+/// here on.
+pub fn save_working_to(path: &str, working: &RosterFile) -> Result<(), String> {
+    RosterDefs::validate(working)?;
+    let text = ron::ser::to_string_pretty(working, ron::ser::PrettyConfig::new())
+        .map_err(|e| e.to_string())?;
+    std::fs::write(path, text).map_err(|e| e.to_string())
+}
+
+/// Saves `working` to the repo's real `data/players.ron`. The panel's Save
+/// button calls this directly; on `Ok` it also refreshes `cs.snapshot` (the
+/// saved state becomes the new revert point) and on `Err` routes the message
+/// into `cs.status` — both at the call site, since this fn only ever touches
+/// the file, never `CreatorState`.
+pub fn save_working(working: &RosterFile) -> Result<(), String> {
+    save_working_to(PLAYERS_RON_PATH, working)
+}
+
 pub struct CreatorPlugin;
 
 impl Plugin for CreatorPlugin {
@@ -681,6 +948,7 @@ impl Plugin for CreatorPlugin {
                 (
                     exit_creator,
                     apply_creator_edits,
+                    lerp_creator_camera,
                     preview_idle,
                     retint_preview,
                     creator_panel,
@@ -774,6 +1042,164 @@ mod tests {
                 .iter()
                 .map(|c| &c.name)
                 .collect::<Vec<_>>(),
+        );
+    }
+
+    fn blank_def() -> PlayerDef {
+        PlayerDef {
+            name: "TEST".to_string(),
+            number: 0,
+            appearance: PlayerAppearance::default(),
+        }
+    }
+
+    #[test]
+    fn randomize_is_deterministic_for_the_same_seed() {
+        let mut a = blank_def();
+        let mut b = blank_def();
+        randomize_player(&mut a, 42);
+        randomize_player(&mut b, 42);
+        assert_eq!(a.appearance, b.appearance);
+    }
+
+    #[test]
+    fn randomize_leaves_name_and_number_untouched() {
+        let mut def = blank_def();
+        randomize_player(&mut def, 7);
+        assert_eq!(def.name, "TEST");
+        assert_eq!(def.number, 0);
+    }
+
+    /// Every curated field must vary across enough seeds to prove it's
+    /// actually driven by the roll, not silently left at a default via a
+    /// `..PlayerAppearance::default()` spread — "every field written" from
+    /// the brief. Headwear additionally must hit every one of its four
+    /// variants (the brief's explicit coverage requirement). None of the
+    /// appearance enums derive `Hash`, so coverage is tracked with plain
+    /// `Vec::contains` rather than a `HashSet`.
+    #[test]
+    fn randomize_covers_every_field_over_many_seeds() {
+        let mut skins = Vec::new();
+        let mut headwears = Vec::new();
+        let mut eyewears = Vec::new();
+        let mut chains = Vec::new();
+        let mut arms = Vec::new();
+        let mut stances = Vec::new();
+        let mut fidgets = Vec::new();
+        let mut celebrations = Vec::new();
+
+        for seed in 0..100u32 {
+            let mut def = blank_def();
+            randomize_player(&mut def, seed);
+            let a = &def.appearance;
+            if !skins.contains(&a.skin) {
+                skins.push(a.skin);
+            }
+            if !headwears.contains(&a.headwear) {
+                headwears.push(a.headwear);
+            }
+            if !eyewears.contains(&a.eyewear) {
+                eyewears.push(a.eyewear);
+            }
+            if !chains.contains(&a.chain) {
+                chains.push(a.chain);
+            }
+            if !arms.contains(&a.arms) {
+                arms.push(a.arms);
+            }
+            if !stances.contains(&a.style.stance) {
+                stances.push(a.style.stance);
+            }
+            if !fidgets.contains(&a.style.fidget) {
+                fidgets.push(a.style.fidget);
+            }
+            if !celebrations.contains(&a.style.celebration) {
+                celebrations.push(a.style.celebration);
+            }
+            assert_eq!(a.style.trot, TrotId::Standard);
+        }
+
+        assert_eq!(
+            headwears.len(),
+            Headwear::VARIANTS.len(),
+            "every headwear variant must appear over 100 seeds"
+        );
+        assert!(skins.len() > 1, "skin must vary across seeds");
+        assert!(eyewears.len() > 1, "eyewear must vary across seeds");
+        assert!(
+            chains.contains(&true) && chains.contains(&false),
+            "chain must land both true and false across seeds"
+        );
+        assert!(arms.len() > 1, "arms must vary across seeds");
+        assert!(stances.len() > 1, "stance must vary across seeds");
+        assert!(
+            fidgets.contains(&None)
+                && fidgets.contains(&Some(FidgetId::HalfSwing))
+                && fidgets.contains(&Some(FidgetId::BatTap)),
+            "fidget must hit None and both real variants across seeds"
+        );
+        assert!(
+            celebrations.contains(&CelebrationId::Standard)
+                && celebrations.contains(&CelebrationId::BatFlip),
+            "celebration must hit both variants across seeds"
+        );
+    }
+
+    /// Loose statistical check on the curated weights (not a strict RNG —
+    /// `ai::hash01` is a sin-based hash, so give it a generous band) over a
+    /// much bigger sample: headwear's `Cap` is the plurality pick (~40%),
+    /// never a minority sliver, and never a de-facto uniform 25% either.
+    #[test]
+    fn randomize_headwear_weights_favor_cap() {
+        let mut cap_count = 0u32;
+        let n = 2000u32;
+        for seed in 0..n {
+            let mut def = blank_def();
+            randomize_player(&mut def, seed);
+            if def.appearance.headwear == Headwear::Cap {
+                cap_count += 1;
+            }
+        }
+        let frac = cap_count as f32 / n as f32;
+        assert!(
+            (0.30..=0.50).contains(&frac),
+            "Cap should land near its curated 40% weight, got {frac}"
+        );
+    }
+
+    #[test]
+    fn save_working_to_round_trips_through_ron() {
+        let dir = std::env::temp_dir().join(format!("bb-creator-save-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("valid.ron");
+        let path_str = path.to_str().unwrap();
+
+        let working = embedded_roster_file();
+        let result = save_working_to(path_str, &working);
+        assert!(result.is_ok(), "valid roster file must save: {result:?}");
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        let reparsed: RosterFile = ron::from_str(&text).unwrap();
+        assert_eq!(reparsed, working);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn save_working_to_rejects_an_invalid_name_and_writes_nothing() {
+        let dir = std::env::temp_dir().join(format!("bb-creator-save-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("invalid.ron");
+        let path_str = path.to_str().unwrap();
+        std::fs::remove_file(&path).ok();
+
+        let mut working = embedded_roster_file();
+        working.home[0].name = "bad!".to_string();
+        let result = save_working_to(path_str, &working);
+        assert!(result.is_err(), "an invalid name must be rejected");
+        assert!(
+            !path.exists(),
+            "a rejected save must not write anything to disk"
         );
     }
 }
