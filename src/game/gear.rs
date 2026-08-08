@@ -44,6 +44,7 @@ impl SkinMaterials {
 #[derive(Resource)]
 pub struct GearAssets {
     helmet: Handle<Mesh>,
+    helmet_brim: Handle<Mesh>,
     cap_crown: Handle<Mesh>,
     cap_brim: Handle<Mesh>,
     lens: Handle<Mesh>,
@@ -62,9 +63,20 @@ fn build_gear_assets(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     commands.insert_resource(GearAssets {
-        // Slightly bigger than the baked skin head sphere (radius 0.16, see
-        // `spawn_prop`'s call sites below) so the shell doesn't z-fight it.
-        helmet: meshes.add(Sphere::new(0.185)),
+        // Bigger than the baked skin head sphere (radius 0.16, see
+        // `spawn_prop`'s call sites below) so the shell doesn't z-fight it —
+        // sized up from the original 0.185 (Task 5 QA sweep, item 1): a bare
+        // sphere that close to the head radius read as "a recoloured head"
+        // in the portrait harness's close framing, not a helmet. The extra
+        // clearance also gives `helmet_brim` room to sit flush against the
+        // shell instead of floating.
+        helmet: meshes.add(Sphere::new(0.205)),
+        // The batting helmet's bill — the one shape feature that actually
+        // reads as "helmet" from a close, mostly-frontal portrait shot
+        // rather than just a bigger, recoloured head (Task 5 QA sweep, item
+        // 1). Smaller than `cap_brim` (which reads fine at cap scale) so it
+        // doesn't look bulky against the rounder helmet shell.
+        helmet_brim: meshes.add(Cuboid::new(0.16, 0.02, 0.09)),
         cap_crown: meshes.add(Cylinder::new(0.13, 0.08)),
         cap_brim: meshes.add(Cuboid::new(0.20, 0.02, 0.12)),
         lens: meshes.add(Cuboid::new(0.07, 0.05, 0.02)),
@@ -160,6 +172,13 @@ fn dress_rigs(
         )>,
     >,
     mut mesh_mats: Query<&mut MeshMaterial3d<StandardMaterial>>,
+    // `Query<&mut Visibility>` idiom (Task 5 QA sweep, item 7 — the
+    // `runner.rs::batter_returns` precedent): the baked cap meshes already
+    // carry a `Visibility` component from spawn, so mutating in place with a
+    // change-guard is a plain component write instead of an unconditional
+    // `Commands::insert` re-stamp (which flags `Changed<Visibility>`
+    // downstream every time, even when the value doesn't actually change).
+    mut cap_visibilities: Query<&mut Visibility>,
 ) {
     let Some(anims) = anims else { return };
     let Some(team_mats) = team_mats else { return };
@@ -188,7 +207,11 @@ fn dress_rigs(
             Visibility::Hidden
         };
         for &mesh in &cap_meshes.0 {
-            commands.entity(mesh).insert(cap_visibility);
+            if let Ok(mut vis) = cap_visibilities.get_mut(mesh) {
+                if *vis != cap_visibility {
+                    *vis = cap_visibility;
+                }
+            }
         }
 
         // 2. Despawn this rig's old props before rebuilding.
@@ -218,6 +241,29 @@ fn dress_rigs(
                     gear.helmet.clone(),
                     team_mats.cap(team),
                     Transform::from_xyz(0.0, 0.16, 0.0),
+                ));
+                // The bill, projecting off the front of the enlarged shell
+                // at roughly eye height (Task 5 QA sweep, item 1 — see
+                // `helmet`/`helmet_brim`'s doc comments on `GearAssets` for
+                // the "recoloured head" problem this fixes). Z=0.21 clears
+                // the shell's front surface at this height (radius 0.205,
+                // dy=0.05 from the shell's own centre) with a hair of
+                // clearance, the same z-fight margin `helmet`'s own comment
+                // budgets against the skin sphere. Tilted ~23° down off
+                // horizontal (`rx`, the bill's leading edge dropping toward
+                // -Z/-Y) — a bill this thin (0.02 m) reads as a bare sliver
+                // face-on to the Gear tab's near-level camera; angling it
+                // presents an actual shaded face to that camera instead
+                // (confirmed empirically via the portrait harness: a flat
+                // horizontal bill rendered as a near-invisible thin line in
+                // `/tmp/bb-portraits2`, the angled version reads as a clear
+                // helmet bill).
+                props.push(spawn_prop(
+                    &mut commands,
+                    bones.head,
+                    gear.helmet_brim.clone(),
+                    team_mats.cap(team),
+                    Transform::from_xyz(0.0, 0.20, 0.21).with_rotation(Quat::from_rotation_x(-0.4)),
                 ));
             }
             Headwear::CapBackwards => {
