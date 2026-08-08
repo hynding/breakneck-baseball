@@ -400,6 +400,18 @@ impl Plugin for JerseyPlugin {
                         .after(crate::game::runner::sync_runners),
                     dress_jerseys.after(crate::game::player::IdentitySet),
                 )
+                    // `sync_identities` reads `ScoreBoard`/`BattingOrder`,
+                    // both of which `flow::PhaseSet` (specifically
+                    // `resolve_live_play`/`result_phase`) can mutate on the
+                    // very frame a half-inning flips or the batting order
+                    // advances. Without this, the two are otherwise
+                    // unordered — an ambiguous-executor tie-break could run
+                    // `sync_identities` first and pick up the change only a
+                    // frame late. Closes the QA sweep's IdentitySet <->
+                    // PhaseSet ordering hole (`player::PlayerPlugin`'s batter
+                    // chain already carries its own `.after(PhaseSet)`; this
+                    // is the matching edge for the identity chain itself).
+                    .after(crate::game::flow::PhaseSet)
                     .run_if(crate::game::dressing_active),
             )
             .add_systems(
