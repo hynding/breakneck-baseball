@@ -40,6 +40,12 @@ macro_rules! appearance_enum {
         impl $name {
             /// Every variant's RON identifier, in declaration order.
             pub const NAMES: &'static [&'static str] = &[$(stringify!($variant)),+];
+            /// Every variant value, same declaration order as [`Self::NAMES`]
+            /// — built from the identical token list, so the two lists are
+            /// compiler-structurally incapable of drifting apart. The
+            /// Creator panel's radio grids iterate this to render a button
+            /// per variant labelled from `NAMES`.
+            pub const VARIANTS: &'static [Self] = &[$(Self::$variant),+];
         }
     };
 }
@@ -268,7 +274,12 @@ impl RosterDefs {
 }
 
 /// Applies edited file content to the live defs: parse, validate, swap.
-/// Pure so the dev watcher stays a thin shell around a tested core.
+/// Pure so the dev watcher stays a thin shell around a tested core. Watcher
+/// note: the `file == defs.0` short-circuit here is a *content* compare and
+/// stays correct on its own; it's the watcher's *disk-text* short-circuit
+/// (`dev_watch::watch_players_file`'s `last_disk_text`) that keeps this
+/// function from ever being called on an unchanged poll once something else
+/// (the Creator panel) has diverged `defs.0` from disk without saving.
 pub fn apply_reload(text: &str, defs: &mut RosterDefs) -> Result<bool, String> {
     let file = parse_roster_file(text).map_err(|e| e.to_string())?;
     RosterDefs::validate(&file)?;
@@ -277,6 +288,20 @@ pub fn apply_reload(text: &str, defs: &mut RosterDefs) -> Result<bool, String> {
     }
     defs.0 = file;
     Ok(true)
+}
+
+/// Whether the watcher should reconsider reloading at all: `true` only when
+/// `current` (freshly read off disk) differs from `last_seen` (the disk text
+/// as of the previous poll — `None` on the very first poll, so that one
+/// always proceeds). Pulled out as a pure, always-compiled helper — rather
+/// than inlined in `dev_watch::watch_players_file`, which only compiles
+/// under `dev` + native — so the watcher-clobber fix has real unit coverage
+/// under the default test suite. See `dev_watch::watch_players_file`'s doc
+/// comment for the bug this closes: comparing against live `defs.0` (which
+/// the Creator panel diverges from disk without saving) instead of the last
+/// *disk* text made an unedited-on-disk file look "new" on every poll.
+pub fn disk_text_changed(last_seen: &Option<String>, current: &str) -> bool {
+    last_seen.as_deref() != Some(current)
 }
 
 /// The dev-only watcher (native only — wasm has no fs) polls the repo file
@@ -295,9 +320,21 @@ mod dev_watch {
     /// Polls `data/players.ron` and hot-swaps definitions into the running
     /// game — the AI/editor round-trip seam. NOTE: rebuilding [`Rosters`]
     /// mid-game discards substitutions made this game (dev-only trade-off).
+    ///
+    /// Watcher-clobber note: this used to compare freshly-read disk text
+    /// against the *live* `defs.0` (re-serialized implicitly by
+    /// `apply_reload`'s `file == defs.0` check). Once the Creator panel
+    /// (`creator.rs`) starts writing edited content straight into
+    /// `RosterDefs` — diverging it from disk without a save — that compare
+    /// treats the unchanged-on-disk file as "new" on the very next 1 s poll
+    /// and silently reverts the panel's edit. Comparing against the last
+    /// *disk* text instead (held in `last_disk_text`) makes an unchanged
+    /// file a true no-op regardless of what's live, while a real disk edit
+    /// still reloads exactly as before.
     pub fn watch_players_file(
         time: Res<Time<Real>>,
         mut timer: Local<Option<Timer>>,
+        mut last_disk_text: Local<Option<String>>,
         mut defs: ResMut<RosterDefs>,
         mut rosters: ResMut<crate::game::roster::Rosters>,
     ) {
@@ -308,6 +345,10 @@ mod dev_watch {
         let Ok(text) = std::fs::read_to_string(PLAYERS_PATH) else {
             return; // transient editor save states are fine to skip
         };
+        if !disk_text_changed(&last_disk_text, &text) {
+            return; // disk hasn't moved since our last poll — don't reconsider
+        }
+        last_disk_text.replace(text.clone());
         match apply_reload(&text, &mut defs) {
             Ok(true) => {
                 *rosters = crate::game::roster::Rosters::from_defs(&defs);
@@ -401,6 +442,35 @@ mod tests {
             "rejection reason should mention the version mismatch: {err}"
         );
         assert!(defs.0.home.iter().any(|d| d.name == "VEGO"));
+    }
+
+    #[test]
+    fn disk_text_changed_only_flags_real_disk_edits() {
+        // First poll: no baseline yet, always reconsider.
+        assert!(disk_text_changed(&None, "a"));
+        // Same text as last poll — the watcher-clobber bug this guards
+        // against: a live-only edit (Creator panel) must not look like a
+        // fresh disk change just because it diverged from `defs.0`.
+        assert!(!disk_text_changed(&Some("a".to_string()), "a"));
+        // A genuinely different disk read still wins.
+        assert!(disk_text_changed(&Some("a".to_string()), "b"));
+    }
+
+    #[test]
+    fn variants_len_matches_names_for_every_appearance_enum() {
+        // Both consts are generated from the same token list inside
+        // `appearance_enum!`, but pin the invariant explicitly per every
+        // enum the macro produces so a future hand-edit that breaks the
+        // pattern (e.g. a manually-added variant to one list only) fails
+        // loudly here instead of silently mis-sizing a radio grid.
+        assert_eq!(SkinTone::VARIANTS.len(), SkinTone::NAMES.len());
+        assert_eq!(Headwear::VARIANTS.len(), Headwear::NAMES.len());
+        assert_eq!(Eyewear::VARIANTS.len(), Eyewear::NAMES.len());
+        assert_eq!(Arms::VARIANTS.len(), Arms::NAMES.len());
+        assert_eq!(StanceId::VARIANTS.len(), StanceId::NAMES.len());
+        assert_eq!(FidgetId::VARIANTS.len(), FidgetId::NAMES.len());
+        assert_eq!(TrotId::VARIANTS.len(), TrotId::NAMES.len());
+        assert_eq!(CelebrationId::VARIANTS.len(), CelebrationId::NAMES.len());
     }
 
     #[test]
