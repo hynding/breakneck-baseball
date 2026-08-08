@@ -28,12 +28,40 @@ fn main() {
         watch_for_changes_override: Some(true),
         ..Default::default()
     });
-    App::new()
+    let mut app = App::new();
+    app
         // ── Core Bevy plugins (windowing, rendering via wgpu, asset loading …) ──
         .add_plugins(default_plugins)
         // ── 3-D physics via Rapier ───────────────────────────────────────────────
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
         // ── All game-specific systems ────────────────────────────────────────────
-        .add_plugins(GamePlugin)
-        .run();
+        .add_plugins(GamePlugin);
+
+    // The portrait harness (Phase 4, Task 4): `--portraits <dir>` boots
+    // windowed, force-enters the dev Creator stage, and walks every player
+    // to a PNG for AI visual QA — see `game::portraits`. Native + debug only:
+    // wasm has neither a CLI to parse this from nor a filesystem to write
+    // PNGs to. Inserted after `add_plugins(GamePlugin)` (which registers
+    // `portraits::PortraitsPlugin`) — resource insertion doesn't depend on
+    // plugin build order, only on landing before `app.run()`.
+    #[cfg(all(feature = "debug", not(target_arch = "wasm32")))]
+    if let Some(dir) = parse_portraits_arg() {
+        std::fs::create_dir_all(&dir)
+            .unwrap_or_else(|e| panic!("--portraits {}: {e}", dir.display()));
+        app.insert_resource(breakneck_baseball::game::portraits::PortraitRun::new(dir));
+    }
+
+    app.run();
+}
+
+/// Pulls `--portraits <dir>` out of `std::env::args`, if present. Not a
+/// general-purpose CLI parser — one flag, one value, first occurrence wins —
+/// this harness has no other arguments to worry about conflicting with.
+#[cfg(all(feature = "debug", not(target_arch = "wasm32")))]
+fn parse_portraits_arg() -> Option<std::path::PathBuf> {
+    let args: Vec<String> = std::env::args().collect();
+    args.iter()
+        .position(|a| a == "--portraits")
+        .and_then(|i| args.get(i + 1))
+        .map(std::path::PathBuf::from)
 }

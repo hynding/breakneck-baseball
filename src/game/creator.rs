@@ -106,9 +106,10 @@ pub fn selected_def(file: &mut RosterFile, team: Team, index: usize) -> &mut Pla
 }
 
 /// Read-only twin of [`selected_def`] — same clamp, no `&mut` needed. Used by
-/// systems (camera framing, preview clip selection) that only need to look
-/// at the selection, not edit it.
-fn selected_def_ref(file: &RosterFile, team: Team, index: usize) -> &PlayerDef {
+/// systems (camera framing, preview clip selection, `portraits.rs`'s
+/// filename-from-selection lookup) that only need to look at the selection,
+/// not edit it.
+pub(crate) fn selected_def_ref(file: &RosterFile, team: Team, index: usize) -> &PlayerDef {
     let pool = match team {
         Team::Home => &file.home,
         Team::Away => &file.away,

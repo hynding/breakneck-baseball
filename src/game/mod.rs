@@ -25,6 +25,8 @@ pub mod juice;
 pub mod menu;
 pub mod model_assets;
 pub mod player;
+#[cfg(feature = "debug")]
+pub mod portraits;
 pub mod roster;
 pub mod rules;
 pub mod runner;
@@ -280,7 +282,11 @@ impl Plugin for GamePlugin {
                 JuicePlugin,
             ));
         #[cfg(feature = "debug")]
-        app.add_plugins((debug::DebugPlugin, creator::CreatorPlugin));
+        app.add_plugins((
+            debug::DebugPlugin,
+            creator::CreatorPlugin,
+            portraits::PortraitsPlugin,
+        ));
         app
             // Fresh scoreboard/rosters each time a game starts from the menu;
             // tear the scene down once the game is over. Pausing stays inside
