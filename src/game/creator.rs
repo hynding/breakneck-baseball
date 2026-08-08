@@ -360,15 +360,56 @@ fn apply_creator_edits(
 /// run directly instead of relying on `apply_creator_edits` picking the
 /// change up next frame (it won't: by the time `OnExit` fires, the state has
 /// already left `Creator`, and that system is gated on being in it).
+///
+/// Guarded on `cs.working == cs.snapshot`: with no user edits there is
+/// nothing to revert, and writing `defs` unconditionally here would clobber
+/// a live `RosterDefs` the dev watcher hot-swapped while the Creator was
+/// open (see [`sync_creator_from_external_reload`]) — the old
+/// `working`/`snapshot` pair would stomp the fresh disk content right back
+/// out on the way to the menu. `working != snapshot` still reverts exactly
+/// as before.
 fn revert_creator_edits(
     mut cs: ResMut<CreatorState>,
     mut defs: ResMut<RosterDefs>,
     mut live_rosters: ResMut<Rosters>,
 ) {
+    if cs.working == cs.snapshot {
+        return;
+    }
     cs.working = cs.snapshot.clone();
     *defs = RosterDefs(cs.working.clone());
     let (rosters, _id) = preview_rosters_and_identity(&cs.working, cs.team, cs.index);
     *live_rosters = rosters;
+}
+
+/// Folds an *external* reload of `RosterDefs` (the dev watcher hot-swapping
+/// `data/players.ron` after an AI/editor edit, per `appearance::dev_watch`)
+/// into the Creator's own `working`/`snapshot` copies while the Creator is
+/// open — otherwise the Creator has no idea `defs.0` moved out from under it,
+/// and either the unconditional exit-time revert (guarded above) or the next
+/// panel edit (`apply_creator_edits` always writes `defs.0 =
+/// cs.working.clone()`) would silently stomp the reload back out.
+///
+/// The invariant that tells "external reload" apart from the Creator's own
+/// writes: [`apply_creator_edits`] is the *only* other system that touches
+/// `RosterDefs` while Creator is open, and it always sets `defs.0` to
+/// exactly `cs.working` — so `defs.0 == cs.working` covers both "nothing
+/// happened" and "our own apply/panel path just wrote this" and must no-op.
+/// A genuine external reload instead lands content the Creator has not seen
+/// from either side yet, so it differs from BOTH `cs.working` and
+/// `cs.snapshot` at once — that's the only case this system reacts to. On
+/// that case there is nothing meaningful left to revert *to* (the on-disk
+/// edit already is the new baseline), so both copies adopt the reload
+/// together; touching `cs` also flags it changed, so `apply_creator_edits`
+/// (ordered right after this system in the `Creator` chain) re-stamps the
+/// preview rig's `PlayerIdentity` and redresses it from the reload on the
+/// very same frame.
+fn sync_creator_from_external_reload(defs: Res<RosterDefs>, mut cs: ResMut<CreatorState>) {
+    if defs.0 == cs.working || defs.0 == cs.snapshot {
+        return;
+    }
+    cs.working = defs.0.clone();
+    cs.snapshot = defs.0.clone();
 }
 
 /// Camera position + look-at target for a tab, per the brief's tuned framing:
@@ -658,8 +699,17 @@ fn render_creator_panel(ui: &mut egui::Ui, cs: &mut CreatorState) -> bool {
             randomize_player(selected_def(&mut cs.working, team, index), seed);
             changed = true;
         }
+        // Disabled rather than wired up: the portrait harness
+        // (`portraits.rs`) is a `PortraitRun` phase machine that starts at
+        // `Phase::WaitForMenu` and drives the *menu* into the Creator itself
+        // (`start_next_shot`/`advance_after_capture`) — invoking it from
+        // inside an already-open Creator would need a phase tweak to skip
+        // that leg. Not required for this task; the real entry point is the
+        // CLI flag below, which the tooltip now points at directly.
         ui.add_enabled(false, egui::Button::new("Portraits"))
-            .on_disabled_hover_text("lands in a later task");
+            .on_disabled_hover_text(
+            "run from the command line:\ncargo run --features \"dev debug\" -- --portraits <dir>",
+        );
     });
     ui.label(cs.status.as_str());
     changed
@@ -948,6 +998,7 @@ impl Plugin for CreatorPlugin {
                 Update,
                 (
                     exit_creator,
+                    sync_creator_from_external_reload,
                     apply_creator_edits,
                     lerp_creator_camera,
                     preview_idle,

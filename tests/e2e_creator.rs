@@ -5,7 +5,7 @@
 mod common;
 
 use bevy::prelude::*;
-use breakneck_baseball::game::appearance::Headwear;
+use breakneck_baseball::game::appearance::{Headwear, RosterDefs};
 use breakneck_baseball::game::creator::{save_working_to, selected_def, CreatorState, PreviewRig};
 use breakneck_baseball::game::gear::DressedAs;
 use breakneck_baseball::game::model_assets::RigCapMeshes;
@@ -175,4 +175,106 @@ fn save_rejects_an_invalid_name_and_writes_nothing() {
     assert!(!path.exists(), "a rejected save must not write anything");
 
     std::fs::remove_file(&path).ok();
+}
+
+fn cap_visibility(app: &mut App) -> Option<Visibility> {
+    let world = app.world_mut();
+    let rig = world
+        .query_filtered::<Entity, With<PreviewRig>>()
+        .iter(world)
+        .next()?;
+    let caps = world.get::<RigCapMeshes>(rig)?;
+    if caps.0.is_empty() {
+        return None;
+    }
+    let visibilities: Vec<Visibility> = caps
+        .0
+        .iter()
+        .filter_map(|&mesh| world.get::<Visibility>(mesh).copied())
+        .collect();
+    if visibilities.len() != caps.0.len() {
+        return None;
+    }
+    visibilities
+        .windows(2)
+        .all(|w| w[0] == w[1])
+        .then(|| visibilities[0])
+}
+
+/// Finding 1 (creator-open watcher clobber): while the Creator is open, an
+/// external `RosterDefs` reload (the dev watcher hot-swapping
+/// `data/players.ron` after an AI/editor edit — simulated here by writing
+/// straight to the `RosterDefs` resource, exactly like
+/// `dev_watch::watch_players_file` would) must (a) flow into
+/// `CreatorState::working`/`snapshot` and re-dress the preview, and (b)
+/// survive leaving the Creator — the unconditional `OnExit` revert must not
+/// stomp it back out just because the user made no panel edits of their own.
+#[test]
+fn external_reload_syncs_creator_state_and_survives_exit() {
+    let mut app = headless_app();
+    tap_key(&mut app, KeyCode::KeyC);
+    let entered = run_until(&mut app, 2_000, |app| {
+        *app.world().resource::<State<GameState>>().get() == GameState::Creator
+    });
+    assert!(entered.is_some(), "C on the menu must open the creator");
+
+    // Select HOLT (home index 5), same as the panel-less-apply test above:
+    // default appearance, so `Headwear::Cap` starts the cap mesh visible —
+    // a real transition to prove once the simulated reload flips it.
+    {
+        let mut cs = app.world_mut().resource_mut::<CreatorState>();
+        cs.team = Team::Home;
+        cs.index = 5;
+    }
+    let selected = run_until(&mut app, 2_000, |app| {
+        cap_visibility(app) == Some(Visibility::Inherited)
+    });
+    assert!(
+        selected.is_some(),
+        "HOLT's default Cap headwear must start the cap mesh visible"
+    );
+
+    // Simulate the dev watcher: build fresh content that diverges from both
+    // `cs.working` and `cs.snapshot` (the external-reload invariant) and
+    // write it straight into `RosterDefs`, exactly as
+    // `dev_watch::watch_players_file` does on a real disk change — no panel,
+    // no `apply_creator_edits`, in the loop at all.
+    let reloaded = {
+        let defs = app.world().resource::<RosterDefs>();
+        let mut file = defs.0.clone();
+        file.home[5].appearance.headwear = Headwear::Bare;
+        file
+    };
+    *app.world_mut().resource_mut::<RosterDefs>() = RosterDefs(reloaded.clone());
+
+    // (part a) The reload must fold into both copies and re-dress the
+    // preview — no panel edit involved anywhere in this test.
+    let synced = run_until(&mut app, 2_000, |app| {
+        let cs = app.world().resource::<CreatorState>();
+        cs.working == reloaded && cs.snapshot == reloaded
+    });
+    assert!(
+        synced.is_some(),
+        "an external RosterDefs reload must sync into cs.working and cs.snapshot"
+    );
+    let redressed = run_until(&mut app, 2_000, |app| {
+        cap_visibility(app) == Some(Visibility::Hidden)
+    });
+    assert!(
+        redressed.is_some(),
+        "the synced reload must re-dress the preview (cap hidden for Headwear::Bare)"
+    );
+
+    // (part b) Leaving the Creator now, with zero panel edits, must not
+    // revert the live RosterDefs back to the pre-reload content.
+    tap_key(&mut app, KeyCode::Escape);
+    let left = run_until(&mut app, 2_000, |app| {
+        *app.world().resource::<State<GameState>>().get() == GameState::MainMenu
+    });
+    assert!(left.is_some(), "Esc must return to the menu");
+    assert_eq!(
+        app.world().resource::<RosterDefs>().0,
+        reloaded,
+        "exiting the Creator with no user edits must not clobber an external reload"
+    );
 }
