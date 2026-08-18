@@ -119,17 +119,37 @@ check.
   suffixes.
 - `BatLibrary` resource — `BatId → (scene handle, BatSpec, BatProfile)`.
   Built by polling `Assets<Gltf>` (the `build_rig_animations` pattern).
-  Under `--features dev`, rebuilt on `AssetEvent<Gltf>::Modified` so marker
-  edits in Blender aren't visually-live-but-data-stale.
+  Under `--features dev`, rebuilt on `AssetEvent<Gltf>::Modified`, which
+  also clears every `BatDressed` stamp (dev-only) so already-dressed rigs
+  respawn their bat scene — otherwise a reload would refresh the data but
+  leave the stale visual in hand.
+- Registration: `bat_assets.rs` exposes a `BatAssetsPlugin`, registered in
+  `mod.rs`'s **second** `add_plugins` tuple (the first is at Bevy's
+  15-plugin cap); `dress_bats` rides `GearPlugin` alongside `dress_rigs`.
 
 **`BatProfile { perfect_scale, solid_scale, exit_scale }`** — the pure
 rules-facing collapse, computed by `BatSpec::profile(&self, classic: &BatSpec)`
-as geometry ratios against the Classic spec: sweet-segment length ratio →
-`perfect_scale`, contact-segment length ratio → `solid_scale`, a
-length·radius² mass proxy → `exit_scale` (with a window trade so heavier ≠
-strictly better). `BatProfile::NEUTRAL` is all-1.0; `profile(classic,
-classic) == NEUTRAL` exactly (ratios of identical f32s are exactly 1.0).
-The model **is** the stats — no hand-tuned side table.
+from exact, pinned formulas (all marker coordinates are bat-local; `.y` is the
+grip→barrel axis):
+
+- `contact_len = End.y − Start.y`
+- `sweet_len = 2 · min(Sweet.y − Start.y, End.y − Sweet.y)` (the symmetric
+  zone around the sweet point, capped by the contact segment's ends)
+- `mass_proxy = (End.y − Knob.y) · r_sweet²` (knob-to-tip length times the
+  sweet-point radius squared)
+- `perfect_scale = sweet_len / classic.sweet_len`
+- `solid_scale = contact_len / classic.contact_len`
+- `exit_scale = sqrt(mass_proxy / classic.mass_proxy)` (square-root shaping
+  so mass moves exit speed gently)
+
+The heavier-isn't-strictly-better trade is **authored into each bat's
+geometry** (Lumber's longer barrel is drawn with a proportionally smaller
+sweet zone), never a formula term. `BatProfile::NEUTRAL` is all-1.0;
+`profile(classic, classic) == NEUTRAL` exactly (ratios of identical f32s are
+exactly 1.0). The model **is** the stats — no hand-tuned side table.
+`BatSpec` is plain data with a public constructor from marker positions +
+radii (no Bevy types), so the contract test can compute profiles by parsing
+the glb with the `gltf` crate alone.
 
 ## 3. Runtime attachment & swapping
 
@@ -143,17 +163,20 @@ The model **is** the stats — no hand-tuned side table.
   - Only on rigs `With<Batter>` — the plate rig and the Creator preview carry
     the marker; run-out rigs spawn `RigUnit::Batter` *without* it and stay
     bat-less (current semantics, pinned by `e2e_gltf_rig.rs`).
-  - Uses a **presence-marker** re-stamp guard (the `wire_rigs`
-    `Without<...>` pattern plus a stamped `BatId` compare), not pure change
-    filters — a rig wired before `bats.glb` finishes loading self-heals
-    instead of consuming its trigger. (Known side effect: adding `bat` to
+  - Guard (pinned): a `BatDressed { id: BatId, scene: Entity }` component on
+    the rig root, **stamped only after a successful spawn** — not pure
+    change filters, whose trigger an early return would consume. Each run,
+    a `Batter` rig with no `BatDressed` or a mismatched `id` re-dresses; a
+    rig wired before `BatLibrary` exists therefore retries every frame and
+    self-heals when the asset lands. (Known side effect: adding `bat` to
     `PlayerAppearance` makes gear's `DressedAs` compare re-dress on bat
     change; harmless.)
-  - On change: `despawn_recursive` the old bat scene, spawn the new bat's
-    scene as a child of `RigBones.bat`, offset so `Grip.Knob` sits at the
-    bone origin (bone head = the hands). Orientation is identity — the bat's
-    +Y is the bone's +Y by the axis convention above; bats are rotationally
-    symmetric so roll doesn't matter.
+  - On change: `despawn_recursive` the old bat scene via the stamp's stored
+    `scene` entity, then spawn the new bat's scene as a child of
+    `RigBones.bat`, offset so `Grip.Knob` sits at the bone origin (bone head
+    = the hands). Orientation is identity — the bat's +Y is the bone's +Y by
+    the axis convention above; bats are rotationally symmetric so roll
+    doesn't matter.
 - `CelebrateBatFlip` runs on the `With<Batter>` rig, which holds a bat — the
   flip keeps its bat in hand for free.
 
@@ -172,11 +195,18 @@ The model **is** the stats — no hand-tuned side table.
   outer band and the reach gate (`flow::late_swing_z`, Swing Meter's forced
   whiff) and is deliberately unscaled. Required:
   `perfect_scale·perfect_ms ≤ solid_scale·solid_ms ≤ foul_ms` per bat × per
-  shipped variant (contract-tested), **and** clamped at profile-application
-  time, since the debug Tune tab live-edits windows at runtime.
-- `flow.rs` resolves the batter's `BatId` from `Rosters` appearance
-  (`rosters.team(batting_team).batting(order.current(...))`) →
-  `Option<Res<BatLibrary>>`, grading with `NEUTRAL` while the asset loads.
+  shipped variant (contract-tested). Enforced at runtime by a single shared
+  helper (`rules::effective_windows(&Ruleset, &BatProfile)`) that all three
+  grading paths call, with the pinned clamp chain
+  `eff_solid = min(solid_scale·solid_ms, foul_ms)`,
+  `eff_perfect = min(perfect_scale·perfect_ms, eff_solid)` — clamped on
+  every call, so debug Tune-tab live edits can never invert the bands.
+- Both NEUTRAL rules converge in one named helper,
+  `flow::bat_profile_for(...) -> BatProfile`: resolves the batter's `BatId`
+  from `Rosters` appearance
+  (`rosters.team(batting_team).batting(order.current(...))`) via
+  `Option<Res<BatLibrary>>`, returning `NEUTRAL` while the asset loads
+  **and** for CPU batters.
 - **CPU batters always grade with `NEUTRAL`**, mirroring `batting::style_for`'s
   "CPU always bats Classic" rule and decided the same way
   (`controllers.player_index(team) == None`). Bats are cosmetic for the CPU;
@@ -194,10 +224,12 @@ The model **is** the stats — no hand-tuned side table.
   already covers it — the shipped `data/players.ron` carries no bat fields and
   every player resolves `Classic`; hot-reload path unaffected).
 - Creator Gear tab adds bat cycling via `radio_grid`, **with a bat-visible
-  camera framing**: while the bat row is the focused control the Gear tab
-  uses the full-body framing (the Identity/portrait framing), otherwise it
-  keeps its head close-up — `camera_target` becomes focused-row-aware for
-  this one tab.
+  camera framing**. Mechanism (pinned — no focus concept exists in the
+  Creator today): `render_gear_tab` records whether the pointer is over the
+  bat row's rect this frame into a new `CreatorState` bool, and
+  `camera_target` (today a pure function of `CreatorTab`) gains that flag as
+  an input — Gear tab + flag set → the full-body Identity framing, otherwise
+  the head close-up.
 - Randomize may roll bats (cosmetic for CPU per the NEUTRAL rule).
 - Portraits: unaffected; the bat appears naturally in the Full framing.
 
@@ -208,7 +240,8 @@ The model **is** the stats — no hand-tuned side table.
   marker suffixes present as direct children of each bat root; marker scales
   uniform and in a sane radius band; `Contact.Start < Sweet < End` on glTF Y;
   tri budget; embedded-size cap (wasm pays per byte); the window-ordering
-  invariant per bat × shipped variant.
+  invariant per bat × shipped variant (`Standard`, `FrontYard`), computable
+  in the same test via `BatSpec`'s pure constructor.
 - **Unit tests** (`rules.rs` / `bat_assets.rs`):
   `profile(classic, classic) == NEUTRAL` exactly; Lumber/Quick monotonicity
   (each field on the intended side of 1.0); profile-scaled window grading
@@ -224,19 +257,27 @@ The model **is** the stats — no hand-tuned side table.
   `variants_len_matches_names` gains `BatId`; the two `PlayerAppearance`
   struct literals without `..Default::default()` (appearance round-trip test,
   `creator::randomize_player`) gain the field.
-- **Invariant:** existing e2e + balance suites pass **unchanged** (every
-  default is `Classic → NEUTRAL`).
+- **Invariant:** existing e2e + balance suites pass **unchanged, except
+  those listed under Updated tests above** (every default is
+  `Classic → NEUTRAL`).
 - `cargo check` on native **and** `wasm32-unknown-unknown`; full `cargo test`
   after touching flow/rules/menu/input/ai.
 
 ## Implementation order (suggested for the plan)
 
 1. `docs/BASEBALL.md` bat-dimensions section (sources).
-2. `BatId` in `appearance.rs` + appearance/creator contract-test updates.
-3. `tools/build_bats.py` + export + `bats.glb` + `tests/bat_contract.rs`.
-4. `bat_assets.rs` (`BatSpec`/`BatProfile`/`BatLibrary`) + unit tests.
-5. Rules parameterization (`&BatProfile`) + flow resolution + CPU-NEUTRAL +
-   invariant clamp + tests.
+2. `BatId` **and the `PlayerAppearance.bat` field** in `appearance.rs`, plus
+   every appearance-side edit from §6 (contract-test rows, typo fixture,
+   struct literals in the round-trip test and `randomize_player`) — this
+   step compiles and tests green on its own.
+3. `tools/build_bats.py` + generalized export + `bats.glb` +
+   `tests/bat_contract.rs` (geometric checks only — scenes, markers, radii,
+   ordering, budgets).
+4. `bat_assets.rs` (`BatSpec` pure constructor / `BatProfile` formulas /
+   `BatLibrary` + `BatAssetsPlugin`) + unit tests; add the window-ordering
+   invariant rows to `bat_contract.rs` now that profiles exist.
+5. Rules parameterization (`&BatProfile`, `rules::effective_windows` clamp)
+   + `flow::bat_profile_for` (CPU-NEUTRAL + load fallback) + tests.
 6. Player-model surgery (`build_player.py`, `model_contract.rs`,
    `wire_rigs` cleanup) + `dress_bats` + `e2e_gltf_rig.rs` rewrite.
 7. Creator Gear-tab bat cycling + framing + randomize.
