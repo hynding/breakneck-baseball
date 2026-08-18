@@ -61,7 +61,7 @@ composition):
 | `Grip.Choke` | Upper end of the legal grip segment (future choke-up lever) |
 | `Contact.Start` | Barrel contact segment start |
 | `Contact.Sweet` | Sweet spot |
-| `Contact.End` | Barrel tip end of contact segment |
+| `Contact.End` | Contact segment end, **at the physical bat tip** (Classic: `End.y = 0.713`) — pinned so `mass_proxy`'s knob-to-tip length is honest and contract-checkable |
 
 Blender object names are globally unique **per file**, so authored names are
 prefixed (`BatClassic.Grip.Knob`, …). Both the runtime extractor and the
@@ -93,8 +93,12 @@ stay). Verified empirically: the exporter does **not** prune a weightless bone
 - `BatClassic` — replicates the current in-game bat: 0.713 m knob-to-tip
   (the `Bat` bone's exact head→tail length), 0.032 m barrel radius. Visual
   no-op at swap-in; the resting pose and silhouette do not change.
-- `BatLumber` — longer/heavier: smaller sweet segment, higher exit.
-- `BatQuick` — shorter/lighter: bigger perfect window, lower exit.
+- `BatLumber` — longer/heavier: `perfect_scale < 1`, `solid_scale > 1`,
+  `exit_scale > 1`.
+- `BatQuick` — shorter/lighter: `perfect_scale > 1`, `solid_scale < 1`,
+  `exit_scale < 1`.
+
+(These six directions are the monotonicity pins §6's unit tests assert.)
 
 Real regulation dimensions (≈42 in max length, 2.61 in max barrel diameter)
 are documented **with sources** in a new `docs/BASEBALL.md` bat section first,
@@ -119,10 +123,13 @@ check.
   suffixes.
 - `BatLibrary` resource — `BatId → (scene handle, BatSpec, BatProfile)`.
   Built by polling `Assets<Gltf>` (the `build_rig_animations` pattern).
-  Under `--features dev`, rebuilt on `AssetEvent<Gltf>::Modified`, which
-  also clears every `BatDressed` stamp (dev-only) so already-dressed rigs
-  respawn their bat scene — otherwise a reload would refresh the data but
-  leave the stale visual in hand.
+  Under `--features dev`, rebuilt on `AssetEvent<Gltf>::Modified`; the same
+  handler (dev-only) despawns each `BatDressed` stamp's stored `scene`
+  entity recursively **before** removing the stamp, so already-dressed rigs
+  respawn cleanly — clearing the stamp alone would orphan the old scene
+  under `RigBones.bat` and leave duplicate bats in hand. No cross-plugin
+  ordering constraint vs `dress_bats` is needed: both act through
+  `Commands`, worst case re-dress lands a frame later.
 - Registration: `bat_assets.rs` exposes a `BatAssetsPlugin`, registered in
   `mod.rs`'s **second** `add_plugins` tuple (the first is at Bevy's
   15-plugin cap); `dress_bats` rides `GearPlugin` alongside `dress_rigs`.
@@ -229,7 +236,11 @@ the glb with the `gltf` crate alone.
   bat row's rect this frame into a new `CreatorState` bool, and
   `camera_target` (today a pure function of `CreatorTab`) gains that flag as
   an input — Gear tab + flag set → the full-body Identity framing, otherwise
-  the head close-up.
+  the head close-up. The hover write rides the panel's existing
+  `bypass_change_detection()` borrow and must **not** feed the `changed`
+  report (hovering is not an edit — otherwise `apply_creator_edits` would
+  rebuild rosters every hovered frame); the camera system reads
+  `Res<CreatorState>` unconditionally, so the bypassed write is still seen.
 - Randomize may roll bats (cosmetic for CPU per the NEUTRAL rule).
 - Portraits: unaffected; the bat appears naturally in the Full framing.
 
