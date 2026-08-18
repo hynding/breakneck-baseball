@@ -100,6 +100,15 @@ stay). Verified empirically: the exporter does **not** prune a weightless bone
 
 (These six directions are the monotonicity pins §6's unit tests assert.)
 
+**Authoring coupling:** Quick's `perfect_scale > 1` needs
+`sweet_len_quick > sweet_len_classic` inside a *shorter* contact segment —
+so Classic's sweet zone must be authored deliberately small relative to its
+own contact length, or Quick's direction is unauthorable. Lumber/Quick
+concrete dimensions, the bat material name/colour, and tri/size budget
+numbers are implementer-chosen within the pinned directions and bands.
+(Classic's 0.713 m is the `Bat` bone's head→tail length rounded from
+0.71297 m.)
+
 Real regulation dimensions (≈42 in max length, 2.61 in max barrel diameter)
 are documented **with sources** in a new `docs/BASEBALL.md` bat section first,
 with the arcade deviation (Classic ≈ 0.713 m) noted, per house rules.
@@ -213,7 +222,13 @@ the glb with the `gltf` crate alone.
   from `Rosters` appearance
   (`rosters.team(batting_team).batting(order.current(...))`) via
   `Option<Res<BatLibrary>>`, returning `NEUTRAL` while the asset loads
-  **and** for CPU batters.
+  **and** for CPU batters. **System-param note:** `pitch_live` is at 14
+  params under `--features debug`; the three new ones (`Res<Rosters>`,
+  `Res<Controllers>`, `Option<Res<BatLibrary>>`) would hit 17, over Bevy's
+  16-param function-system limit — group them in one
+  `#[derive(SystemParam)]` struct (or tuple param) from the start, or the
+  failure surfaces late as a confusing trait-bound error in the debug
+  build only.
 - **CPU batters always grade with `NEUTRAL`**, mirroring `batting::style_for`'s
   "CPU always bats Classic" rule and decided the same way
   (`controllers.player_index(team) == None`). Bats are cosmetic for the CPU;
@@ -241,6 +256,10 @@ the glb with the `gltf` crate alone.
   report (hovering is not an edit — otherwise `apply_creator_edits` would
   rebuild rosters every hovered frame); the camera system reads
   `Res<CreatorState>` unconditionally, so the bypassed write is still seen.
+  Mechanically: `render_gear_tab(ui, def)` doesn't see `CreatorState`, so
+  it returns the hover bool to `render_creator_panel` (disjoint field
+  borrows make the write legal there), and `radio_grid` must surface the
+  row's egui response instead of discarding it.
 - Randomize may roll bats (cosmetic for CPU per the NEUTRAL rule).
 - Portraits: unaffected; the bat appears naturally in the Full framing.
 
@@ -283,7 +302,8 @@ the glb with the `gltf` crate alone.
    step compiles and tests green on its own.
 3. `tools/build_bats.py` + generalized export + `bats.glb` +
    `tests/bat_contract.rs` (geometric checks only — scenes, markers, radii,
-   ordering, budgets).
+   ordering, budgets — with the §1 names hardcoded; step 4 rebases them
+   onto `BAT_TABLE`).
 4. `bat_assets.rs` (`BatSpec` pure constructor / `BatProfile` formulas /
    `BatLibrary` + `BatAssetsPlugin`) + unit tests; add the window-ordering
    invariant rows to `bat_contract.rs` now that profiles exist.
