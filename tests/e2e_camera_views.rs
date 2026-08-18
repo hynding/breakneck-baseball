@@ -37,13 +37,15 @@ fn cycling_v_changes_view_and_toggles_the_catchers_visibility() {
     });
     assert!(ready.is_some(), "never reached a PrePitch dead ball");
 
-    // Default view: catcher POV. His own eye placement already keeps him
-    // out of frame, and the occlusion system agrees: Inherited, not Hidden.
+    // Default view: catcher POV. The duel eye sits fractionally *inside*
+    // the catcher's silhouette (see `FieldSpec::duel_eye`), so the
+    // dedicated catcher-POV arm of `hide_occluders` hides him outright
+    // while the duel framing holds.
     assert_eq!(*app.world().resource::<DuelView>(), DuelView::CatcherPov);
     assert_eq!(
         catcher_visibility(&mut app),
-        Visibility::Inherited,
-        "catcher POV must not hide the catcher (he's already off-camera by eye placement)"
+        Visibility::Hidden,
+        "catcher POV must hide the catcher (the eye sits inside his silhouette)"
     );
 
     // V: behind-pitcher — the reference shot that must keep him visible.

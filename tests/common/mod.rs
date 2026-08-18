@@ -97,11 +97,15 @@ fn build_headless_app(single_threaded: bool) -> App {
     // headless test must neither read the developer's real settings.json
     // (their volume/batting-style choices would silently steer test
     // behaviour) nor overwrite it when a test mutates `Settings` (the
-    // pause board's strike-zone toggle really persists).
-    std::env::set_var(
-        "BREAKNECK_SETTINGS_PATH",
-        std::env::temp_dir().join(format!("bb-e2e-settings-{}.json", std::process::id())),
-    );
+    // pause board's strike-zone toggle really persists). Default only: a
+    // test that set its own `BREAKNECK_SETTINGS_PATH` before booting (the
+    // seam e2e_settings reads back through) keeps it.
+    if std::env::var_os("BREAKNECK_SETTINGS_PATH").is_none() {
+        std::env::set_var(
+            "BREAKNECK_SETTINGS_PATH",
+            std::env::temp_dir().join(format!("bb-e2e-settings-{}.json", std::process::id())),
+        );
+    }
     let mut app = App::new();
     let default_plugins = DefaultPlugins
         // No window, no winit event loop, and no GPU at all: CI runners
