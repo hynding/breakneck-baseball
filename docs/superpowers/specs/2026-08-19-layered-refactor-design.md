@@ -23,7 +23,11 @@ changes anywhere.
    (`pub use sim::flow;` style), so tests, CLAUDE.md references, and
    cross-module `use crate::game::flow::…` imports never change.
 5. **Moves are pure moves.** Phase 2/3 commits contain no semantic edits.
-   Semantic changes live only in Phases 1 and 4.
+   Semantic changes live only in Phases 1 and 4. Two named exceptions exist
+   (see "Named Phase-2 exceptions" below): file-path-relative macros
+   (`include_str!`, `embedded_asset!`) resolve against the source file's
+   directory, so relocated files that use them need exactly the edits listed
+   there — nothing else.
 6. Work happens on branch `refactor/layered-modules`; `main` gets a single
    merge at the end (CI deploys `web/` to Pages on every push to `main`).
 7. No Blender/glTF artifacts are touched; `tests/model_contract.rs` and
@@ -34,6 +38,9 @@ changes anywhere.
 ```
 src/game/
 ├─ mod.rs                  # GameState, ScoreBoard, GamePlugin + layer re-exports (facade)
+├─ model_assets.rs         # STAYS AT TOP LEVEL — embedded_asset!("models/player.glb")
+├─ models/                 #   derives both its include path and its embedded:// asset
+│                          #   path from this file's location (see Named Phase-2 exceptions)
 ├─ core/                   # pure rules & data — no Bevy systems, no rendering
 │  ├─ mod.rs
 │  ├─ rules/               # split of rules.rs (3,177 lines; ~1,490 code + ~1,685 tests)
@@ -44,12 +51,12 @@ src/game/
 │  │  ├─ count.rs          # call_ball/call_strike/foul, charge_out/record_out, OutPlay, apply_batted_out/DP/FC
 │  │  ├─ advance.rs        # advance_hit/advance_walk/apply_hit, advance_runners_only/advance_trailing, tag_up
 │  │  ├─ steal.rs          # steal_candidate, attempt_steal, attempt_pickoff, double_off_lead_runner
-│  │  └─ predict.rs        # predict_landing*, catch_time, fence_at, best_catcher, geometry helpers
+│  │  ├─ predict.rs        # predict_landing*, catch_time, fence_at, best_catcher, geometry helpers
+│  │  └─ test_support.rs   # #[cfg(test)] shared fixtures (std_rules, base-state builders, std_field)
 │  ├─ variant.rs           # Ruleset, FieldSpec (699 lines — stays whole)
 │  ├─ roster.rs
 │  ├─ theme.rs
-│  ├─ scenario.rs
-│  └─ model_assets.rs
+│  └─ scenario.rs
 ├─ sim/                    # gameplay systems that decide what happens
 │  ├─ mod.rs
 │  ├─ flow/                # split of flow.rs (1,408)
@@ -119,7 +126,15 @@ Rules of thumb:
   file. `variant.rs` (699), `runner.rs` (647), `debug.rs` (593), `audio.rs`
   (580), `fielding.rs` (574) stay whole — each is one coherent concern.
 - **Unit tests travel with their functions** (`test-cfg-test-module`): each
-  `rules/` submodule carries its own `#[cfg(test)] mod tests`.
+  `rules/` submodule carries its own `#[cfg(test)] mod tests`. The rules.rs
+  test suite (~1,685 lines, one flat `mod tests` today) shares fixture
+  helpers (`std_rules()`, `pace()`, `empty()`/`with()`/`loaded()` base-state
+  builders, `std_field()`) across tests destined for at least five different
+  submodules — so the split introduces `core/rules/test_support.rs`
+  (`#[cfg(test)]`-gated, holding those fixtures as `pub(super)`), and each
+  submodule's `mod tests` imports it. This is a real (if small) design step,
+  not pure movement — budget it inside the rules split, and keep the
+  fixtures byte-identical so test behavior can't drift.
 - **Visibility widens only as far as needed**: helpers that were private and
   are now called across sibling submodules become `pub(super)`; `pub(crate)`
   only where a different layer needs them (`proj-pub-super-parent`,
@@ -155,7 +170,36 @@ Rules of thumb:
   `self::core::…` (in `game/mod.rs`) or `crate::game::core::…` — never a bare
   leading `core::`. If this proves noisy in practice, the fallback layer name
   is `corelogic`; the facade re-exports make either choice invisible to callers.
-- No content edits beyond `mod`/`use` wiring.
+- No content edits beyond `mod`/`use` wiring, except the named exceptions below.
+
+#### Named Phase-2 exceptions (file-path-relative macros)
+
+1. **`model_assets.rs` does not move.** It stays at `src/game/model_assets.rs`
+   (re-exported from the facade like everything else). Its
+   `embedded_asset!(app, "models/player.glb")` (model_assets.rs:468) resolves
+   `include_bytes!` against the file's own directory **and** derives the
+   registered `embedded://breakneck_baseball/game/models/player.glb` path from
+   `file!()` — which must keep matching the literal in `player_model_path()`
+   (model_assets.rs:92), the path used in every non-`dev` build (default, CI,
+   Pages). Relocating it would fail `cargo check` on the include and, once
+   "fixed", silently break model loading at runtime. `src/game/models/` stays
+   put with it, and the `tools/build_player.py`/`export_glb.py` pipeline is
+   untouched.
+2. **`appearance.rs` moves with one named edit.** Its
+   `include_str!("../../data/players.ron")` (appearance.rs:217) is relative to
+   the source file; from `meta/appearance.rs` it needs one more `..`:
+   `"../../../data/players.ron"`. This single-literal edit lands in the same
+   commit as the move and is the commit message's headline. (The dev
+   file-watcher path at appearance.rs:318 uses `env!("CARGO_MANIFEST_DIR")`
+   and is unaffected.)
+
+#### Sanctioned layer back-reference
+
+`flow::pitch_live` reads `crate::game::debug::ForcedContact` behind
+`#[cfg(feature = "debug")]` (flow.rs:639) — a `sim` → `meta` dependency that
+exists only in debug builds so the panel can force contact quality. This is
+deliberate and stays; the Phase 4 lint pass and future cleanups must not
+"fix" it, and the Phase 5 CLAUDE.md update documents it.
 
 ### Phase 3 — Big-file splits
 
