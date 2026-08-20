@@ -247,6 +247,7 @@ pub enum OutKind {
 
 /// The result of a batted ball.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use]
 pub enum Outcome {
     Foul,
     Out(OutKind),
@@ -275,6 +276,7 @@ pub enum RunnerCall {
 
 /// What a taken ball did to the count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use]
 pub enum BallCall {
     /// The count advanced.
     Ball,
@@ -284,6 +286,7 @@ pub enum BallCall {
 
 /// What a strike did to the count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use]
 pub enum StrikeCall {
     /// The count advanced.
     Strike,

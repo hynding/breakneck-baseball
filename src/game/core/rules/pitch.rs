@@ -170,6 +170,7 @@ pub fn hits_batter(crossing: Vec2) -> bool {
 
 /// Awards first base after a hit-by-pitch: dead ball, forced runners only.
 /// Returns runs forced in.
+#[must_use]
 pub fn hit_by_pitch(score: &mut ScoreBoard, bases: &mut Bases) -> u32 {
     let runs = advance_walk(bases);
     score.add_runs(runs);

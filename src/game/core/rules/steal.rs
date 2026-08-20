@@ -16,6 +16,7 @@ pub fn steal_candidate(bases: &Bases) -> Option<usize> {
 
 /// What sending the runner produced once the pitch reached the catcher.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use]
 pub enum StealResult {
     /// Safe — the runner now stands on `base` (0-indexed).
     Stolen { base: usize },
@@ -54,6 +55,7 @@ pub fn attempt_steal(
 
 /// What a pickoff throw during the pre-pitch window produced.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use]
 pub enum PickoffResult {
     /// Caught off the bag mid-extension — the runner is out.
     PickedOff { base: usize },

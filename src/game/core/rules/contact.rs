@@ -63,6 +63,7 @@ pub enum ContactClass {
 /// How a base runner breaks off contact. Purely a *choreography* decision —
 /// the rigs move on this while the umpire's call is still being raced out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use]
 pub enum RunnerBreak {
     /// Break for the next bag immediately (run on contact).
     GoNow,
@@ -138,6 +139,7 @@ pub fn landed_past_infield(landing: Vec3, field: &FieldSpec) -> bool {
 /// shrunk timing window instead, has a quality to report without widening
 /// this enum later; keep matches on it exhaustive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use]
 pub enum ContactQuality {
     /// No contact: the swing missed entirely.
     Whiff,

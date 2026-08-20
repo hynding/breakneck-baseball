@@ -8,6 +8,7 @@ use super::{Bases, reset_count};
 /// Advances runners for a clean hit where everyone moves up `hit_bases`.
 /// `hit_bases` may exceed the base count by one (a home run clears the field
 /// and scores the batter). Returns the number of runs that scored.
+#[must_use]
 pub fn advance_hit(bases: &mut Bases, hit_bases: u32) -> u32 {
     advance_hit_with_jump(bases, hit_bases, false)
 }
@@ -15,6 +16,7 @@ pub fn advance_hit(bases: &mut Bases, hit_bases: u32) -> u32 {
 /// [`advance_hit`], but `jump` gives every *existing* runner one extra base —
 /// the hit-and-run reward for breaking with the pitch (first-to-third on a
 /// single). The batter still takes exactly `hit_bases`.
+#[must_use]
 pub fn advance_hit_with_jump(bases: &mut Bases, hit_bases: u32, jump: bool) -> u32 {
     debug_assert!(hit_bases >= 1, "a hit is worth at least one base");
     let n = bases.count();
@@ -48,6 +50,7 @@ pub fn advance_hit_with_jump(bases: &mut Bases, hit_bases: u32, jump: bool) -> u
 /// Advances only forced runners for a walk: the batter takes first and pushes
 /// the chain ahead of them. Returns runs scored (a fully-loaded walk forces in
 /// one run).
+#[must_use]
 pub fn advance_walk(bases: &mut Bases) -> u32 {
     for base in 0..bases.count() {
         if !bases.is_occupied(base) {
@@ -61,6 +64,7 @@ pub fn advance_walk(bases: &mut Bases) -> u32 {
 /// Applies a hit worth `hit_bases` bases: advances runners (with the
 /// hit-and-run `jump` when runners were going), credits runs to the batting
 /// team, and ends the at-bat. Returns the runs scored.
+#[must_use]
 pub fn apply_hit(score: &mut ScoreBoard, bases: &mut Bases, hit_bases: u32, jump: bool) -> u32 {
     let runs = advance_hit_with_jump(bases, hit_bases, jump);
     score.add_runs(runs);
