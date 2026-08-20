@@ -3,39 +3,18 @@
 //! `GamePlugin` registers every sub-plugin in dependency order and exposes the
 //! shared [`GameState`] state machine to all systems.
 
-pub mod ai;
-pub mod animation;
-pub mod appearance;
-pub mod audio;
-pub mod ball;
-pub mod batting;
-pub mod camera;
-#[cfg(feature = "debug")]
-pub mod creator;
-#[cfg(feature = "debug")]
-pub mod debug;
-pub mod field;
-pub mod fielding;
-pub mod flow;
-pub mod fx;
-pub mod gear;
-pub mod input;
-pub mod jersey;
-pub mod juice;
-pub mod menu;
+pub mod core;
+pub mod meta;
 pub mod model_assets;
-pub mod player;
+pub mod present;
+pub mod sim;
+
+pub use self::core::{roster, rules, theme, variant};
+pub use self::meta::{appearance, gear, input, menu, settings, subs};
 #[cfg(feature = "debug")]
-pub mod portraits;
-pub mod roster;
-pub mod rules;
-pub mod runner;
-pub mod scenario;
-pub mod settings;
-pub mod subs;
-pub mod theme;
-pub mod ui;
-pub mod variant;
+pub use self::meta::{creator, debug, portraits};
+pub use self::present::{animation, audio, camera, field, fx, jersey, juice, player, ui};
+pub use self::sim::{ai, ball, batting, fielding, flow, runner, scenario};
 
 use bevy::prelude::*;
 

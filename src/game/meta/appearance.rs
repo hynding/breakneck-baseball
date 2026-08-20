@@ -214,7 +214,7 @@ use bevy::prelude::Resource;
 
 /// The shipped definitions, embedded so wasm and release builds need no
 /// filesystem. `data/` lives at the repo root, beside `src/`.
-pub const EMBEDDED_PLAYERS_RON: &str = include_str!("../../data/players.ron");
+pub const EMBEDDED_PLAYERS_RON: &str = include_str!("../../../data/players.ron");
 
 /// Parses the embedded file. Panicking is correct here: the contract test
 /// (`tests/appearance_contract.rs`) makes a bad file unshippable, so at
