@@ -183,7 +183,7 @@ ends the inning the instant it is recorded, so no run scores on the play
 
 Count thresholds (4 balls / 3 strikes / 3 outs), the strike zone, tag-ups,
 double plays, hit-by-pitch, dropped third strike, steals, leadoffs and
-pickoffs are modeled deterministically in `src/game/rules.rs` — see
+pickoffs are modeled deterministically in `game::rules` — see
 CLAUDE.md's architecture notes for how each maps.
 
 ## Sources
