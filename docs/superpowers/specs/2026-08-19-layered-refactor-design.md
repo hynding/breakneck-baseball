@@ -41,7 +41,8 @@ src/game/
 ├─ model_assets.rs         # STAYS AT TOP LEVEL — embedded_asset!("models/player.glb")
 ├─ models/                 #   derives both its include path and its embedded:// asset
 │                          #   path from this file's location (see Named Phase-2 exceptions)
-├─ core/                   # pure rules & data — no Bevy systems, no rendering
+├─ core/                   # rules & data — no Bevy systems (a few constant imports from
+│                          #   other layers exist; see "Sanctioned layer back-references")
 │  ├─ mod.rs
 │  ├─ rules/               # split of rules.rs (3,177 lines; ~1,490 code + ~1,685 tests)
 │  │  ├─ mod.rs            # zone/physics consts, Bases, BattingOrder, Outcome/OutKind, pub use of submodules
@@ -55,8 +56,7 @@ src/game/
 │  │  └─ test_support.rs   # #[cfg(test)] shared fixtures (std_rules, base-state builders, std_field)
 │  ├─ variant.rs           # Ruleset, FieldSpec (699 lines — stays whole)
 │  ├─ roster.rs
-│  ├─ theme.rs
-│  └─ scenario.rs
+│  └─ theme.rs
 ├─ sim/                    # gameplay systems that decide what happens
 │  ├─ mod.rs
 │  ├─ flow/                # split of flow.rs (1,408)
@@ -68,7 +68,8 @@ src/game/
 │  ├─ runner.rs
 │  ├─ ball.rs
 │  ├─ batting.rs
-│  └─ ai.rs
+│  ├─ ai.rs
+│  └─ scenario.rs          # situation-setup harness: mutates World, depends on flow::Play — sim, not core
 ├─ present/                # everything the player sees/hears
 │  ├─ mod.rs
 │  ├─ field/               # split of field.rs (1,511)
@@ -193,13 +194,28 @@ Rules of thumb:
    file-watcher path at appearance.rs:318 uses `env!("CARGO_MANIFEST_DIR")`
    and is unaffected.)
 
-#### Sanctioned layer back-reference
+#### Sanctioned layer back-references
 
-`flow::pitch_live` reads `crate::game::debug::ForcedContact` behind
-`#[cfg(feature = "debug")]` (flow.rs:639) — a `sim` → `meta` dependency that
-exists only in debug builds so the panel can force contact quality. This is
-deliberate and stays; the Phase 4 lint pass and future cleanups must not
-"fix" it, and the Phase 5 CLAUDE.md update documents it.
+The layering is a reading aid, not an enforced dependency rule — the facade
+means every `crate::game::…` path resolves regardless of layer. Known
+upward references, all deliberate:
+
+1. `flow::pitch_live` reads `crate::game::debug::ForcedContact` behind
+   `#[cfg(feature = "debug")]` (flow.rs:639) — `sim` → `meta`, debug builds
+   only, so the panel can force contact quality. Stays as-is; the Phase 4
+   lint pass and future cleanups must not "fix" it.
+2. `variant.rs` imports `field::{HALF_DIAGONAL, PITCH_DISTANCE}`
+   (variant.rs:13) and `rules.rs` imports `ball::BALL_RADIUS` (rules.rs:13)
+   — `core` reaching into `present`/`sim` for pure geometry/physics
+   constants. Phase 4 resolves these by **hoisting the constants into
+   `core`** (moved verbatim, with `pub use` re-exports left at their old
+   homes so no call site changes); until then they are sanctioned. While
+   hoisting, check whether `ball::BALL_RADIUS` and `rules::BALL_RADIUS_M`
+   are duplicates that should collapse into one const (DRY) — collapse only
+   if the values are identical.
+
+The Phase 5 CLAUDE.md update documents both the layering-as-guideline rule
+and item 1.
 
 ### Phase 3 — Big-file splits
 
@@ -222,18 +238,28 @@ deliberate and stays; the Phase 4 lint pass and future cleanups must not
    spawns, field texture synthesis, per-frame HUD string updates — only
    where the fix is locally provable. No speculative optimization
    (`perf-profile-first`).
-3. **Idiom fixes**: `matches!`/`let-else` where clippy suggests;
+3. **Constant hoisting** (per "Sanctioned layer back-references" item 2):
+   move `field::{HALF_DIAGONAL, PITCH_DISTANCE}` and `ball::BALL_RADIUS`
+   verbatim into `core`, leaving `pub use` re-exports at their old homes;
+   collapse `ball::BALL_RADIUS` / `rules::BALL_RADIUS_M` into one const only
+   if their values are identical.
+4. **Idiom fixes**: `matches!`/`let-else` where clippy suggests;
    iterator-over-index where it removes a bounds check and stays readable;
    `#[must_use]` on pure `rules::` result types (`Outcome`, `OutPlay`,
    `ContactQuality`, steal/pickoff results) where dropping one is a bug.
-4. **Out of scope**: error-handling overhaul (startup-invariant panics are
+5. **Out of scope**: error-handling overhaul (startup-invariant panics are
    the accepted idiom in this game loop), `thiserror`/`anyhow`, async
    anything, `clippy::pedantic`, any tuning-value or timing change.
 
 ### Phase 5 — Docs & landing
 
 - Update CLAUDE.md architecture section for the new layout (module paths,
-  the layer map, the facade rule for future modules).
+  the layer map, the facade rule for future modules, layering-as-guideline
+  plus the sanctioned debug back-reference).
+- Sweep `docs/*.md` for stale `src/game/…` file-path citations
+  (docs/BASEBALL.md:11 cites `animation.rs`, docs/BASEBALL.md:186 cites
+  `rules.rs`); reword citations to module level (`game::animation`,
+  `game::rules`) so they survive future splits.
 - Check off the corresponding TODO.md entry if one exists; note completion
   in TADA.md per project convention.
 - Merge `refactor/layered-modules` → `main` (single merge, phase commits
@@ -248,7 +274,10 @@ export PATH="/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$PATH"
 cargo test
 cargo check --target wasm32-unknown-unknown
 cargo fmt --check
-cargo clippy --all-targets   # from Phase 4 on
+cargo clippy --all-targets -- -D warnings   # EVERY phase: CI already runs this
+                                            # (-D warnings, native + wasm) on every
+                                            # non-main push, so the branch must stay
+                                            # clippy-clean from Phase 1, not Phase 4
 ```
 
 Also once per phase: `cargo check --features "dev debug"` so the debug-only
