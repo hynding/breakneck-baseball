@@ -23,7 +23,7 @@ use breakneck_baseball::game::input::Intents;
 use breakneck_baseball::game::variant::Ruleset;
 use breakneck_baseball::game::{GameState, ScoreBoard, Team};
 
-use common::{headless_app, run_until, start_game, tap_key, DriveGame};
+use common::{DriveGame, headless_app, run_until, start_game, tap_key};
 
 /// Hard cap: the scripted game needs ~10 pitches plus the full walk-off trot
 /// (which must finish before the game can end, now that it's deferred).

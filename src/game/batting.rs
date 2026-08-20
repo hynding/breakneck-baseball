@@ -312,8 +312,8 @@ impl Plugin for BattingPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::input::assign_controllers;
     use crate::game::GameMode;
+    use crate::game::input::assign_controllers;
 
     #[test]
     fn meter_release_fires_the_swing() {

@@ -44,7 +44,7 @@ use breakneck_baseball::game::rules::ContactQuality;
 use breakneck_baseball::game::settings::{BattingStyle, Settings};
 use breakneck_baseball::game::{GameState, ScoreBoard};
 
-use common::{headless_app, run_until, start_game, DriveGame};
+use common::{DriveGame, headless_app, run_until, start_game};
 
 /// Generous per-stage budget: steal windows can gate a pitch once a runner
 /// reaches base, and a mistimed swing may burn an extra pitch or two.
@@ -197,7 +197,8 @@ fn swing_meter_and_pci_cursor_route_and_grade() {
     // corrupt every other test that boots expecting the default Classic style.
     let dir = std::env::temp_dir().join(format!("bb-e2e-styles-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    std::env::set_var("BREAKNECK_SETTINGS_PATH", dir.join("settings.json"));
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("BREAKNECK_SETTINGS_PATH", dir.join("settings.json")) };
 
     let mut app = headless_app();
     app.init_resource::<Stage>();
@@ -308,6 +309,7 @@ fn swing_meter_and_pci_cursor_route_and_grade() {
         "the dead-center PCI swing must put a ball in play"
     );
 
-    std::env::remove_var("BREAKNECK_SETTINGS_PATH");
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::remove_var("BREAKNECK_SETTINGS_PATH") };
     let _ = std::fs::remove_dir_all(&dir);
 }

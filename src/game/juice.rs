@@ -26,7 +26,7 @@ use bevy::prelude::*;
 
 use crate::game::flow::{ContactEvent, Phase, Play};
 use crate::game::rules::ContactQuality;
-use crate::game::{game_start, GameState};
+use crate::game::{GameState, game_start};
 
 /// Insert to skip every hit-stop/slow-mo effect outright. Nothing in the
 /// shipping game inserts this — it exists for headless/test contexts where

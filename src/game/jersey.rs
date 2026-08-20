@@ -20,10 +20,10 @@ use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
+use crate::game::Team;
 use crate::game::model_assets::RigBones;
 use crate::game::roster::{PlayerCard, PlayerIdentity, Rosters};
 use crate::game::theme::Theme;
-use crate::game::Team;
 
 // ── The 5×7 font ──────────────────────────────────────────────────────────────
 

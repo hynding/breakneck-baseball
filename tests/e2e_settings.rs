@@ -11,7 +11,8 @@ fn settings_edit_persists_and_game_starts() {
     let dir = std::env::temp_dir().join(format!("bb-e2e-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("settings.json");
-    std::env::set_var("BREAKNECK_SETTINGS_PATH", &path);
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("BREAKNECK_SETTINGS_PATH", &path) };
 
     let mut app = common::headless_app();
     app.update();
@@ -48,6 +49,7 @@ fn settings_edit_persists_and_game_starts() {
     assert!(!app.world().resource::<SettingsOpen>().0);
     common::start_game(&mut app, KeyCode::Digit1);
 
-    std::env::remove_var("BREAKNECK_SETTINGS_PATH");
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::remove_var("BREAKNECK_SETTINGS_PATH") };
     let _ = std::fs::remove_dir_all(dir);
 }

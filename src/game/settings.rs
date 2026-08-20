@@ -11,9 +11,9 @@ use bevy::log::warn;
 
 use bevy::color::Alpha;
 
+use crate::game::GameState;
 use crate::game::theme::Theme;
 use crate::game::ui::hidden_tint;
-use crate::game::GameState;
 
 /// Which batting input front-end a player uses (spec §3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -607,13 +607,15 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("settings.json");
         // Env var is the documented test seam for the native store.
-        std::env::set_var("BREAKNECK_SETTINGS_PATH", &path);
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("BREAKNECK_SETTINGS_PATH", &path) };
         let mut s = Settings::default();
         s.batting_style[1] = BattingStyle::PciCursor;
         s.volume = 0.4;
         save_settings(&s);
         assert_eq!(load_settings(), s);
-        std::env::remove_var("BREAKNECK_SETTINGS_PATH");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("BREAKNECK_SETTINGS_PATH") };
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -624,9 +626,11 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("settings.json");
         std::fs::write(&path, b"{ not json").unwrap();
-        std::env::set_var("BREAKNECK_SETTINGS_PATH", &path);
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("BREAKNECK_SETTINGS_PATH", &path) };
         assert_eq!(load_settings(), Settings::default());
-        std::env::remove_var("BREAKNECK_SETTINGS_PATH");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("BREAKNECK_SETTINGS_PATH") };
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -637,9 +641,11 @@ mod tests {
         assert_eq!(s.next().next(), BattingStyle::PciCursor);
         assert_eq!(s.next().next().next(), BattingStyle::ClassicTiming);
         assert_eq!(s.prev(), BattingStyle::PciCursor);
-        assert!(BattingStyle::PciCursor
-            .label()
-            .contains("gamepad recommended"));
+        assert!(
+            BattingStyle::PciCursor
+                .label()
+                .contains("gamepad recommended")
+        );
     }
 
     #[test]
@@ -699,7 +705,8 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("bb-plugin-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("settings.json");
-        std::env::set_var("BREAKNECK_SETTINGS_PATH", &path);
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("BREAKNECK_SETTINGS_PATH", &path) };
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -722,7 +729,8 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert!((on_disk.volume - 0.25).abs() < 1e-5);
 
-        std::env::remove_var("BREAKNECK_SETTINGS_PATH");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("BREAKNECK_SETTINGS_PATH") };
         let _ = std::fs::remove_dir_all(dir);
     }
 

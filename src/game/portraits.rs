@@ -26,9 +26,9 @@ use std::path::PathBuf;
 
 use bevy::app::AppExit;
 use bevy::prelude::*;
-use bevy::render::view::screenshot::{save_to_disk, Screenshot};
+use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 
-use crate::game::creator::{selected_def_ref, CreatorState, CreatorTab};
+use crate::game::creator::{CreatorState, CreatorTab, selected_def_ref};
 use crate::game::{GameState, Team};
 
 /// Which shot of a player is being framed. Maps onto the two

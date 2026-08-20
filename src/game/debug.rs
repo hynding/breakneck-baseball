@@ -530,11 +530,7 @@ fn debug_panel(world: &mut World) {
                     ui.horizontal(|ui| {
                         if ui.button(if paused { "resume" } else { "pause" }).clicked() {
                             let mut virt = world.resource_mut::<Time<Virtual>>();
-                            if paused {
-                                virt.unpause()
-                            } else {
-                                virt.pause()
-                            }
+                            if paused { virt.unpause() } else { virt.pause() }
                         }
                         if ui.button("step").clicked() {
                             world.resource_mut::<Time<Virtual>>().unpause();

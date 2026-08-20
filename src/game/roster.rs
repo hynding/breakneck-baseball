@@ -10,9 +10,9 @@
 
 use bevy::prelude::{Component, Resource};
 
+use crate::game::Team;
 use crate::game::appearance::{PlayerAppearance, PlayerDef, RosterDefs};
 use crate::game::rules::LINEUP_SIZE;
-use crate::game::Team;
 
 /// One player: jersey name (A–Z only — the procedural jersey font's
 /// alphabet), number, and personal appearance recipe (authored in
@@ -176,8 +176,8 @@ mod tests {
 
     #[test]
     fn roster_roles_resolve_to_identities() {
-        use crate::game::rules::BattingOrder;
         use crate::game::ScoreBoard;
+        use crate::game::rules::BattingOrder;
         // ScoreBoard::default() is *not* top-1st (top_of_inning defaults to
         // false); construct it the way `mod.rs`'s game-start insert and
         // `ScoreBoard::reset` do.

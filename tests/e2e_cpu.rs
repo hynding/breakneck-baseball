@@ -9,7 +9,7 @@ use breakneck_baseball::game::flow::{Phase, Play};
 use breakneck_baseball::game::input::Intents;
 use breakneck_baseball::game::{GameState, ScoreBoard, Team};
 
-use common::{headless_app, run_until, start_game, DriveGame};
+use common::{DriveGame, headless_app, run_until, start_game};
 
 /// ≈ 10 sim-minutes — dozens of pitches, far beyond a normal half-inning even
 /// with steal windows whenever the CPU puts runners aboard.

@@ -22,7 +22,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy_rapier3d::prelude::*;
 
 use crate::game::ai::hash01;
-use crate::game::batting::{style_for, PciState};
+use crate::game::batting::{PciState, style_for};
 use crate::game::flow::{ContactEvent, Phase, Play};
 use crate::game::input::Controllers;
 use crate::game::rules;
@@ -107,7 +107,7 @@ fn grass_image() -> Image {
     const STRIPE: usize = 8;
     let mut data = vec![0u8; SIZE * SIZE * 4];
     for y in 0..SIZE {
-        let light = (y / STRIPE).is_multiple_of(2);
+        let light = (y / STRIPE) % 2 == 0;
         for x in 0..SIZE {
             let n = hash01(x as f32 * 12.9 + y as f32 * 78.2) * 14.0 - 7.0;
             let (r, g, b) = if light {

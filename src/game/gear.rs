@@ -8,12 +8,12 @@ use std::mem::take;
 
 use bevy::prelude::*;
 
+use crate::game::Team;
 use crate::game::appearance::{Arms, Eyewear, Headwear, PlayerAppearance, SkinTone};
 use crate::game::model_assets::{
     GltfTeamMaterials, RigAnimations, RigBones, RigCapMeshes, RigSkinMeshes,
 };
 use crate::game::roster::{PlayerIdentity, Rosters};
-use crate::game::Team;
 
 /// Lazy cache of tinted skin materials, one per swatch — bounded by the
 /// palette, not the roster (the `JerseyCache` precedent).

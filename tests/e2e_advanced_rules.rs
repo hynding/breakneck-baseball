@@ -24,7 +24,7 @@ use breakneck_baseball::game::runner::Runner;
 use breakneck_baseball::game::variant::Ruleset;
 use breakneck_baseball::game::{GameState, ScoreBoard, Team};
 
-use common::{headless_app, run_until, start_game, DriveGame};
+use common::{DriveGame, headless_app, run_until, start_game};
 
 /// Generous per-milestone budget (~60 sim-seconds — pitches wait out the
 /// steal window, `Ruleset::steal_window_secs`, whenever runners are aboard).

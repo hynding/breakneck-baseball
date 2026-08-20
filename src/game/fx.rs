@@ -6,7 +6,7 @@ use bevy_rapier3d::prelude::{CollisionEvent, Velocity};
 
 use crate::game::ai::{hash01, noise};
 use crate::game::ball::{
-    Baseball, HitEvent, InFlight, WallBangEvent, BALL_DRAG_FACTOR, MAGNUS_FACTOR,
+    BALL_DRAG_FACTOR, Baseball, HitEvent, InFlight, MAGNUS_FACTOR, WallBangEvent,
 };
 use crate::game::flow::{BallInPlayEvent, Phase, Play};
 use crate::game::rules::{self, ContactKind, ContactQuality};

@@ -13,7 +13,7 @@ use bevy_rapier3d::prelude::*;
 
 use crate::game::animation;
 use crate::game::animation::{
-    bat_idle_rotation, AnimClip, LimbKind, MoveIntent, Playing, RigBaseY, RigLimb,
+    AnimClip, LimbKind, MoveIntent, Playing, RigBaseY, RigLimb, bat_idle_rotation,
 };
 use crate::game::ball::PLAYER_GROUP;
 use crate::game::flow::{BallInPlayEvent, Phase, Play};

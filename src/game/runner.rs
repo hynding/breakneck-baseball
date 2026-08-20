@@ -5,7 +5,7 @@ use bevy::prelude::*;
 
 use crate::game::animation::{AnimClip, MoveIntent, Playing};
 use crate::game::flow::{BallInPlayEvent, LeadState, LiveBallEvent, Phase, Play};
-use crate::game::player::{spawn_rig, Batter, RigModel, RigUnit, TeamPalette};
+use crate::game::player::{Batter, RigModel, RigUnit, TeamPalette, spawn_rig};
 use crate::game::rules::{self, Bases, ContactKind, RunnerBreak};
 use crate::game::variant::{FieldSpec, Ruleset};
 use crate::game::{GameState, ScoreBoard};

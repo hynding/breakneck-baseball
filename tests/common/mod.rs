@@ -8,8 +8,8 @@ use bevy::app::{MainScheduleOrder, PluginsState};
 use bevy::core::{TaskPoolOptions, TaskPoolPlugin};
 use bevy::ecs::schedule::{ExecutorKind, ScheduleLabel};
 use bevy::prelude::*;
-use bevy::render::settings::{RenderCreation, WgpuSettings};
 use bevy::render::RenderPlugin;
+use bevy::render::settings::{RenderCreation, WgpuSettings};
 use bevy::time::TimeUpdateStrategy;
 use bevy::winit::WinitPlugin;
 use bevy_rapier3d::prelude::{NoUserData, RapierPhysicsPlugin};
@@ -101,10 +101,13 @@ fn build_headless_app(single_threaded: bool) -> App {
     // test that set its own `BREAKNECK_SETTINGS_PATH` before booting (the
     // seam e2e_settings reads back through) keeps it.
     if std::env::var_os("BREAKNECK_SETTINGS_PATH").is_none() {
-        std::env::set_var(
-            "BREAKNECK_SETTINGS_PATH",
-            std::env::temp_dir().join(format!("bb-e2e-settings-{}.json", std::process::id())),
-        );
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe {
+            std::env::set_var(
+                "BREAKNECK_SETTINGS_PATH",
+                std::env::temp_dir().join(format!("bb-e2e-settings-{}.json", std::process::id())),
+            )
+        };
     }
     let mut app = App::new();
     let default_plugins = DefaultPlugins

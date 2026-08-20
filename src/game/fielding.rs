@@ -15,7 +15,7 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::Velocity;
 
 use crate::game::animation::{AnimClip, MoveIntent, Playing};
-use crate::game::ball::{Baseball, InFlight, BALL_DRAG_FACTOR, MAGNUS_FACTOR};
+use crate::game::ball::{BALL_DRAG_FACTOR, Baseball, InFlight, MAGNUS_FACTOR};
 use crate::game::flow::{BallInPlayEvent, LiveBallEvent, Phase, Play};
 use crate::game::input::{Controllers, InputSource, Intents};
 use crate::game::player::Fielder;
@@ -160,7 +160,7 @@ fn assign_on_contact(
                 .iter()
                 .enumerate()
                 .min_by(|a, b| {
-                    horizontal_distance(a.1 .1, spot).total_cmp(&horizontal_distance(b.1 .1, spot))
+                    horizontal_distance(a.1.1, spot).total_cmp(&horizontal_distance(b.1.1, spot))
                 })
                 .map(|(i, _)| i)
             else {

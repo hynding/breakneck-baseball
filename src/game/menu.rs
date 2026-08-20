@@ -8,7 +8,7 @@
 use bevy::color::Alpha;
 use bevy::prelude::*;
 
-use crate::game::input::{assign_controllers, Controllers};
+use crate::game::input::{Controllers, assign_controllers};
 use crate::game::theme::Theme;
 use crate::game::variant::{self, FieldSpec, Ruleset};
 use crate::game::{GameConfig, GameMode, GameState, ScoreBoard};

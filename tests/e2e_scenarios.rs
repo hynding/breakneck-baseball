@@ -4,10 +4,10 @@
 mod common;
 
 use bevy::prelude::*;
+use breakneck_baseball::game::ScoreBoard;
 use breakneck_baseball::game::flow::Play;
 use breakneck_baseball::game::runner::Runner;
-use breakneck_baseball::game::scenario::{apply_to_world, presets, PRESET_LOADED};
-use breakneck_baseball::game::ScoreBoard;
+use breakneck_baseball::game::scenario::{PRESET_LOADED, apply_to_world, presets};
 use common::{headless_app, run_until, start_game};
 
 #[test]

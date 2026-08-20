@@ -2294,26 +2294,30 @@ mod tests {
         // A can-of-corn to shallow centre hangs ~3 s; the middle infield
         // reaches it with time to spare.
         let f = std_field();
-        assert!(best_catcher(
-            &f.fielder_positions,
-            Vec3::new(0.0, 0.0, 44.0),
-            3.0,
-            &PaceTuning::default()
-        )
-        .is_some());
+        assert!(
+            best_catcher(
+                &f.fielder_positions,
+                Vec3::new(0.0, 0.0, 44.0),
+                3.0,
+                &PaceTuning::default()
+            )
+            .is_some()
+        );
     }
 
     #[test]
     fn sinking_liner_falls_in() {
         // A liner dying at 55 m hangs ~1.5 s: nobody can get there.
         let f = std_field();
-        assert!(best_catcher(
-            &f.fielder_positions,
-            Vec3::new(0.0, 0.0, 55.0),
-            1.5,
-            &PaceTuning::default()
-        )
-        .is_none());
+        assert!(
+            best_catcher(
+                &f.fielder_positions,
+                Vec3::new(0.0, 0.0, 55.0),
+                1.5,
+                &PaceTuning::default()
+            )
+            .is_none()
+        );
     }
 
     #[test]

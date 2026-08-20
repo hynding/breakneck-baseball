@@ -20,12 +20,12 @@ use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::Velocity;
 
-use crate::game::ball::{Baseball, HitEvent, WallBangEvent, BALL_DRAG_FACTOR, MAGNUS_FACTOR};
+use crate::game::GameState;
+use crate::game::ball::{BALL_DRAG_FACTOR, Baseball, HitEvent, MAGNUS_FACTOR, WallBangEvent};
 use crate::game::flow::{Phase, Play};
 use crate::game::player::{CatcherRole, PlateUmpire};
 use crate::game::rules;
 use crate::game::variant::FieldSpec;
-use crate::game::GameState;
 
 // ── Mode ──────────────────────────────────────────────────────────────────────
 

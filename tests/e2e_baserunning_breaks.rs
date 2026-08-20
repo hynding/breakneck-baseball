@@ -21,7 +21,7 @@ use breakneck_baseball::game::runner::Runner;
 use breakneck_baseball::game::variant::FieldSpec;
 use breakneck_baseball::game::{GameState, ScoreBoard};
 
-use common::{headless_app, run_until, start_game, DriveGame};
+use common::{DriveGame, headless_app, run_until, start_game};
 
 const STAGE_FRAMES: u64 = 15_000;
 

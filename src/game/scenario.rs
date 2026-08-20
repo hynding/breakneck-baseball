@@ -5,10 +5,10 @@
 
 use bevy::prelude::*;
 
+use crate::game::ScoreBoard;
 use crate::game::flow::Play;
 use crate::game::rules::{Bases, BattingOrder, PitchKind};
 use crate::game::variant::{FieldSpec, Ruleset};
-use crate::game::ScoreBoard;
 
 pub const PRESET_LOADED: &str = "Bases loaded, 2 out, full count";
 

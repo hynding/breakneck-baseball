@@ -13,9 +13,9 @@ use std::time::Duration;
 
 use bevy::prelude::*;
 
+use crate::game::GameState;
 use crate::game::appearance::{CelebrationId, FidgetId, StanceId};
 use crate::game::model_assets::{RigAnimations, RigPlayer};
-use crate::game::GameState;
 
 /// Every animation the game can play, by name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

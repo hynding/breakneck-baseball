@@ -20,7 +20,7 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
-use crate::game::ai::{cpu_defense, cpu_offense, CpuConfig, CpuState};
+use crate::game::ai::{CpuConfig, CpuState, cpu_defense, cpu_offense};
 use crate::game::animation::{AnimClip, Playing};
 use crate::game::ball::{Baseball, HitEvent, InFlight, PitchEvent, WallBangEvent};
 use crate::game::input::Intents;

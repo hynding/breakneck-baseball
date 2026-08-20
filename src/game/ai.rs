@@ -9,13 +9,13 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::Velocity;
 
+use crate::game::ScoreBoard;
 use crate::game::ball::Baseball;
-use crate::game::flow::{late_swing_z, swing_dt_ms, LeadState, Phase, Play};
+use crate::game::flow::{LeadState, Phase, Play, late_swing_z, swing_dt_ms};
 use crate::game::input::{Controllers, InputSource, Intents};
-use crate::game::rules::{steal_candidate, Bases, GRAVITY};
+use crate::game::rules::{Bases, GRAVITY, steal_candidate};
 use crate::game::scenario::PitchOverride;
 use crate::game::variant::Ruleset;
-use crate::game::ScoreBoard;
 
 /// A single knob for opponent difficulty (0.0 = easy, 1.0 = tough).
 #[derive(Resource)]

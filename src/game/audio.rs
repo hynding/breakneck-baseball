@@ -18,7 +18,7 @@ use crate::game::ai::hash01;
 use crate::game::flow::{BallInPlayEvent, ContactEvent, LiveBallEvent, PitchCaughtEvent};
 use crate::game::flow::{BannerTone, PlayBanner};
 use crate::game::rules::{ContactClass, ContactKind, ContactQuality};
-use crate::game::{ball::WallBangEvent, game_start, GameState, GameplayEntity};
+use crate::game::{GameState, GameplayEntity, ball::WallBangEvent, game_start};
 
 /// Mono synthesis rate — plenty for percussive game sounds, tiny in memory.
 const SAMPLE_RATE: u32 = 22_050;
@@ -319,8 +319,8 @@ impl Plugin for SoundPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::rules::ContactKind;
     use crate::game::Team;
+    use crate::game::rules::ContactKind;
     use bevy::state::app::StatesPlugin;
 
     #[test]
