@@ -1,7 +1,7 @@
 //! Game feel: hit-stop on solid contact, and a slow-motion tail on a
 //! dead-on Perfect swing. Driven entirely by `ContactEvent` quality and
 //! implemented by dialing `Time<Virtual>`'s `relative_speed` — like
-//! `fx.rs`'s own hit-stop, this module is purely cosmetic and never touches
+//! `game::fx`'s own hit-stop, this module is purely cosmetic and never touches
 //! `ScoreBoard`/`Bases`/rules outcomes.
 //!
 //! Insert [`JuiceDisabled`] to suppress every effect outright. The test

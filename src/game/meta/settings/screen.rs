@@ -201,7 +201,7 @@ pub(super) fn paint_settings_screen(
 
 /// **S** / gamepad **Select** toggles the screen open/closed; **Esc** /
 /// gamepad **East** (B) closes it while open. MainMenu only. `Select` is
-/// also `camera.rs`'s duel-view toggle, and `East` is `menu.rs`'s
+/// also `game::camera`'s duel-view toggle, and `East` is `menu.rs`'s
 /// innings-cycle key — no clash: those systems run only in `Playing`
 /// (`Select`) or are gated `.run_if(settings_closed)` (`East`), so they
 /// never fire alongside this system's `MainMenu`-only, open-state-gated

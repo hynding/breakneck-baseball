@@ -44,7 +44,7 @@ impl BattingStyle {
     }
 }
 
-/// Which look the pitch trail wears (consumed by `fx.rs`'s trail systems):
+/// Which look the pitch trail wears (consumed by `game::fx`'s trail systems):
 /// the classic fading path, or one of five interchangeable 3D styles.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum PitchTrailStyle {
@@ -341,14 +341,18 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("settings.json");
         // Env var is the documented test seam for the native store.
-        // FIXME: Audit that the environment access only happens in single-threaded code.
+        // SAFETY: `ENV_LOCK` (held by `_guard` for this whole test) serializes
+        // every test in this module that reads or writes
+        // `BREAKNECK_SETTINGS_PATH`, and `store_path()` — the only reader —
+        // is only ever called from inside that same critical section, so no
+        // other thread can observe the environment mid-mutation.
         unsafe { std::env::set_var("BREAKNECK_SETTINGS_PATH", &path) };
         let mut s = Settings::default();
         s.batting_style[1] = BattingStyle::PciCursor;
         s.volume = 0.4;
         save_settings(&s);
         assert_eq!(load_settings(), s);
-        // FIXME: Audit that the environment access only happens in single-threaded code.
+        // SAFETY: still under `ENV_LOCK` via `_guard`; see the set_var above.
         unsafe { std::env::remove_var("BREAKNECK_SETTINGS_PATH") };
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -360,10 +364,14 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("settings.json");
         std::fs::write(&path, b"{ not json").unwrap();
-        // FIXME: Audit that the environment access only happens in single-threaded code.
+        // SAFETY: `ENV_LOCK` (held by `_guard` for this whole test) serializes
+        // every test in this module that reads or writes
+        // `BREAKNECK_SETTINGS_PATH`, and `store_path()` — the only reader —
+        // is only ever called from inside that same critical section, so no
+        // other thread can observe the environment mid-mutation.
         unsafe { std::env::set_var("BREAKNECK_SETTINGS_PATH", &path) };
         assert_eq!(load_settings(), Settings::default());
-        // FIXME: Audit that the environment access only happens in single-threaded code.
+        // SAFETY: still under `ENV_LOCK` via `_guard`; see the set_var above.
         unsafe { std::env::remove_var("BREAKNECK_SETTINGS_PATH") };
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -439,7 +447,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("bb-plugin-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("settings.json");
-        // FIXME: Audit that the environment access only happens in single-threaded code.
+        // SAFETY: `ENV_LOCK` (held by `_guard` for this whole test) serializes
+        // every test in this module that reads or writes
+        // `BREAKNECK_SETTINGS_PATH`, and `store_path()` — the only reader —
+        // is only ever called from inside that same critical section, so no
+        // other thread can observe the environment mid-mutation.
         unsafe { std::env::set_var("BREAKNECK_SETTINGS_PATH", &path) };
 
         let mut app = App::new();
@@ -463,7 +475,7 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert!((on_disk.volume - 0.25).abs() < 1e-5);
 
-        // FIXME: Audit that the environment access only happens in single-threaded code.
+        // SAFETY: still under `ENV_LOCK` via `_guard`; see the set_var above.
         unsafe { std::env::remove_var("BREAKNECK_SETTINGS_PATH") };
         let _ = std::fs::remove_dir_all(dir);
     }

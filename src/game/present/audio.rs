@@ -254,7 +254,7 @@ fn play_event_sounds(
             }
             // `Weak` never comes from the Classic windows (Plan-C PCI
             // adapter only) but is bucketed with `Solid` here just as
-            // ui.rs/field.rs already do for presentation.
+            // `game::ui`/`game::field` already do for presentation.
             ContactQuality::Solid | ContactQuality::Weak => {
                 play(&mut commands, &bank.crack_solid, 0.8);
             }

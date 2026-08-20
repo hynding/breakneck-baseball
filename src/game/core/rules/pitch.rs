@@ -157,7 +157,7 @@ pub fn is_in_zone(crossing: Vec2) -> bool {
 }
 
 /// Inner edge of the batter's body window; he stands at x ≈ +0.7 (see
-/// `player.rs`).
+/// `game::player`).
 const BATTER_X_MIN: f32 = 0.52;
 /// Above this the pitch sails over the batter's head.
 const BATTER_Y_MAX: f32 = 1.7;

@@ -299,7 +299,7 @@ pub(super) fn pitch_live(
             dt_ms,
         });
         // Remember this swing's grade for presentation — the home-run
-        // fireworks scale up off a dead-on Perfect (see fx.rs).
+        // fireworks scale up off a dead-on Perfect (see `game::fx`).
         play.last_contact_quality = Some(quality);
         match quality {
             // A ball in play, shaped by the quality's exit multiplier and the

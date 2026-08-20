@@ -99,7 +99,7 @@ pub struct CountRules {
 // `rules::contact_quality` maps a swing's timing error (milliseconds,
 // signed: negative = early) to a `ContactQuality` using these windows —
 // data, not code, so each variant can feel different without touching
-// `rules.rs`. The B7 balance harness is the tuning arbiter for these
+// `game::rules`. The B7 balance harness is the tuning arbiter for these
 // numbers: they start at the plan's defaults and only that harness
 // should move them.
 #[derive(Clone, Debug, Reflect)]
@@ -356,7 +356,7 @@ impl VariantId {
             VariantId::Standard => FieldSpec {
                 // Regulation diamond: 90 ft base paths mean each bag sits
                 // HALF_DIAGONAL (27.43/√2 m) off-axis — matching the dirt
-                // infield drawn in `field.rs`. The behind-home cameras render
+                // infield drawn in `game::field`. The behind-home cameras render
                 // world −X on screen-right, so first base lives at −X (the
                 // right-field line as the viewer sees it).
                 base_positions: vec![

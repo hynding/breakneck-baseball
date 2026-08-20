@@ -2,8 +2,8 @@
 //!
 //! Everything in this module is a plain function over plain data: given the
 //! current count/bases/score and an input (a batted-ball velocity, a called
-//! pitch), it mutates the state and reports what happened. `flow.rs` owns the
-//! real-time state machine and translates these results into banners and
+//! pitch), it mutates the state and reports what happened. `game::flow` owns
+//! the real-time state machine and translates these results into banners and
 //! phase transitions; this module owns the *rules of baseball* and the
 //! *balance constants* that make the arcade game fair.
 
@@ -37,11 +37,11 @@ pub use steal::*;
 // layer back-references". `present::field` and `sim::ball` re-export these
 // under their original names via `pub use` so no call site changed.
 
-/// Distance between consecutive bases (90 ft). Kept private here — only
-/// [`HALF_DIAGONAL`] needs it — `field::BASE_DISTANCE` is present's own copy
-/// for spawning field geometry (not hoisted; nothing in `core` needs it
-/// directly).
-const BASE_DISTANCE_M: f32 = 27.43;
+/// Distance between consecutive bases (90 ft). `present::field::BASE_DISTANCE`
+/// re-exports this under its original name via `pub use` so the two literals
+/// can never drift apart (see the invariant `present::field::stadium` derives
+/// from it).
+pub const BASE_DISTANCE_M: f32 = 27.43;
 /// Home plate → pitching rubber (60.5 ft).
 pub const PITCH_DISTANCE: f32 = 18.44;
 /// Half the base-path diagonal, used to place second base along the Z axis.
@@ -58,7 +58,7 @@ const CONTACT_HEIGHT: f32 = 0.6;
 pub const PITCH_SPEED: f32 = 38.0;
 
 /// Home plate half-width (17 in across the front / 2 — docs/BASEBALL.md).
-/// The single source of truth: `field.rs` builds the plate slab and the
+/// The single source of truth: `game::field` builds the plate slab and the
 /// drawn zone from it, and the called zone below adds the ball allowance.
 pub const PLATE_HALF_WIDTH_M: f32 = 0.216;
 /// Official ball radius — the canonical definition; `ball::BALL_RADIUS` is a

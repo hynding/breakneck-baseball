@@ -59,7 +59,7 @@ pub(super) fn enter_creator_stage(
     // visit for a fresh external reload.
     last_applied.0 = defs.0.clone();
 
-    // The persistent main camera (`camera.rs::spawn_camera`, active from
+    // The persistent main camera (`game::camera::spawn_camera`, active from
     // `Startup`) is still around while the Creator's own camera spawns
     // below. Two active `Camera3d`s at the same default order targeting the
     // primary window trip Bevy's `sort_cameras` order-ambiguity warning

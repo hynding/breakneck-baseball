@@ -9,7 +9,7 @@
 //! pair through both framings the brief cares about (full-body on the
 //! Identity tab, head close-up on Gear), and capture each via Bevy 0.15's
 //! `Screenshot::primary_window()` + `save_to_disk` one-shot API — this
-//! module is the only place in the crate that uses it; `creator.rs` itself
+//! module is the only place in the crate that uses it; `game::creator` itself
 //! never touches screenshotting, it only supplies the `CreatorState`/
 //! `CreatorTab` seam this driver steers. When the queue drains, it fires
 //! `AppExit`.

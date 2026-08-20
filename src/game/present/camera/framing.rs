@@ -294,7 +294,7 @@ mod tests {
     }
 
     /// The catcher/umpire spawn spots (`FieldSpec::fielder_positions` /
-    /// `umpire_positions`, offset by the same `Vec3::Y * 0.6` `player.rs`
+    /// `umpire_positions`, offset by the same `Vec3::Y * 0.6` `game::player`
     /// adds at spawn) really do sit inside the occlusion cone for
     /// `BattingZoom` and really do sit outside it for `BehindPitcher`, for
     /// every variant — the concrete regression the e2e test also drives

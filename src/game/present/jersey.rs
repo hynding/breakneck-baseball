@@ -367,7 +367,7 @@ fn dress_jerseys(
                 alpha_mode: AlphaMode::Blend,
                 // Printed lettering, not a lit surface: scene lighting was
                 // otherwise darkening (sometimes to near-black, see the
-                // AmbientLight fix in field.rs) exactly the numbers a jersey
+                // AmbientLight fix in `game::field`) exactly the numbers a jersey
                 // needs to stay legible.
                 unlit: true,
                 ..default()

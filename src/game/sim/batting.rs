@@ -266,7 +266,7 @@ pub fn adapt_swings(
             // cursor toward screen-right; from the behind-home camera that is
             // world −X (first base side), matching the pitch-aim mapping's
             // negation (CLAUDE.md). Note the stick does double duty this frame:
-            // the Down-hold runner-send read (`wants_send` in flow.rs) also
+            // the Down-hold runner-send read (`wants_send` in `game::flow`) also
             // watches aim, so steering the cursor and sending a runner mid-pitch
             // share the stick by design — but the leadoff send decision
             // (`steal_armed`) is committed pre-delivery, so the real conflict

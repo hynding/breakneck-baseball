@@ -1,7 +1,7 @@
 //! Heads-up display — scoreboard card, count dots, base ring, and banners.
 //!
 //! All live game data comes from the [`ScoreBoard`] and [`Bases`] resources
-//! and from [`PlayBanner`] events fired by `flow.rs`. Every colour and
+//! and from [`PlayBanner`] events fired by `game::flow`. Every colour and
 //! styling knob comes from the active [`Theme`] — the HUD owns layout only.
 
 use bevy::prelude::*;

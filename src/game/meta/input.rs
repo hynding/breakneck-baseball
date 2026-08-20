@@ -6,7 +6,7 @@
 //! assigned to that team (a game controller, a keyboard scheme, or the CPU).
 //!
 //! This is what lets pitching/batting code run identically for a human and the
-//! AI: the CPU systems (see `flow.rs`/`player.rs`) simply write into the same
+//! AI: the CPU systems (see `game::flow`/`game::player`) simply write into the same
 //! [`TeamIntent`] the human input would have produced.
 
 use bevy::input::gamepad::GamepadConnectionEvent;

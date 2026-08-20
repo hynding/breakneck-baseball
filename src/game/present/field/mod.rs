@@ -25,14 +25,13 @@ mod textures;
 mod zone;
 
 // ── Distances in metres ───────────────────────────────────────────────────────
-/// Distance between consecutive bases (90 ft).
-pub const BASE_DISTANCE: f32 = 27.43;
-/// Home plate → pitching rubber (60.5 ft) and half the base-path diagonal
-/// (used to place second base along the Z axis) are pure geometry the rules
-/// engine also needs, so they're canonically defined in `core::rules` —
-/// re-exported here so every existing `field::PITCH_DISTANCE`-style path
-/// still resolves unchanged.
-pub use crate::game::rules::{HALF_DIAGONAL, PITCH_DISTANCE};
+/// Distance between consecutive bases (90 ft), home plate → pitching rubber
+/// (60.5 ft), and half the base-path diagonal (used to place second base
+/// along the Z axis) are pure geometry the rules engine also needs, so
+/// they're canonically defined in `core::rules` — re-exported here so every
+/// existing `field::BASE_DISTANCE`/`field::PITCH_DISTANCE`-style path still
+/// resolves unchanged.
+pub use crate::game::rules::{BASE_DISTANCE_M as BASE_DISTANCE, HALF_DIAGONAL, PITCH_DISTANCE};
 
 pub use stadium::WALL_HEIGHT;
 
@@ -71,7 +70,7 @@ pub struct StrikeZoneOverlay;
 /// zone plane. Public so e2e tests can query its `Visibility`, like
 /// [`StrikeZoneOverlay`]. Shown only while a human PCI batter is up (see
 /// [`zone::pci_cursor_visibility`]); a non-rig marker, so its transform is moved
-/// directly (like `fx.rs`'s landing ring).
+/// directly (like `game::fx`'s landing ring).
 #[derive(Component)]
 pub struct PciCursorMarker;
 

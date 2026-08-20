@@ -123,7 +123,7 @@ fn trajectory_gizmo(
         MAGNUS_FACTOR,
     );
     // A sightline + landing circle reads the play; exact touchdown already
-    // lives in fx.rs's landing ring.
+    // lives in `game::fx`'s landing ring.
     gizmos.line(
         tf.translation,
         landing + Vec3::Y * 0.02,

@@ -121,7 +121,7 @@ pub(super) fn settle_removed(
 
 /// The Swing Meter's visible load: the batter's stance deepens as the meter
 /// fills — a bounded root sink composed over `RigBaseY`, owned here because
-/// animation.rs owns rig root height. Runs last so it wins the frame over the
+/// `game::animation` owns rig root height. Runs last so it wins the frame over the
 /// settle systems that restore the batter root to `RigBaseY`.
 const METER_SINK_M: f32 = 0.12;
 pub(super) fn meter_stance_sink(

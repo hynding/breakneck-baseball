@@ -2,7 +2,7 @@
 //!
 //! The AI never bypasses gameplay logic — it writes into the very same
 //! [`TeamIntent`] that a controller or keyboard would produce, so the pitching
-//! and batting systems in `flow.rs` cannot tell a human from the CPU. These
+//! and batting systems in `game::flow` cannot tell a human from the CPU. These
 //! systems run *before* the flow systems (see `FlowPlugin`) so the intent they
 //! write is visible the same frame.
 

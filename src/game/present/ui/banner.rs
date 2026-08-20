@@ -242,7 +242,7 @@ pub(super) fn fade_banner(
 
 /// Stamps the graded swing timing over the zone-box area: `PERFECT!` for
 /// dead-on contact; `EARLY`/`LATE` for `Solid` (and the as-yet-unreachable
-/// `Weak`, per its doc comment in `rules.rs`) by `dt_ms`'s sign; `FOUL TIP`
+/// `Weak`, per its doc comment in `game::rules`) by `dt_ms`'s sign; `FOUL TIP`
 /// for a foul; nothing for `Whiff` — the classic strike/ball banner already
 /// covers a swing-and-miss.
 pub(super) fn show_contact_stamp(

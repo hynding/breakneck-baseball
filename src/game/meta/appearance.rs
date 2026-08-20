@@ -124,7 +124,7 @@ appearance_enum! {
 /// Batting-stance id. All four resolve to a clip (`animation::stance_clip`) —
 /// `Standard` to the shared `BattingStance`, the other three to their own
 /// personality clips (`StanceOpen`/`StanceClosed`/`StanceWaggle`). Kept here
-/// rather than in animation.rs so the schema module stays serde-pure with no
+/// rather than in `game::animation` so the schema module stays serde-pure with no
 /// animation dependency.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StanceId {
@@ -324,7 +324,7 @@ mod dev_watch {
     /// Watcher-clobber note: this used to compare freshly-read disk text
     /// against the *live* `defs.0` (re-serialized implicitly by
     /// `apply_reload`'s `file == defs.0` check). Once the Creator panel
-    /// (`creator.rs`) starts writing edited content straight into
+    /// (`game::creator`) starts writing edited content straight into
     /// `RosterDefs` — diverging it from disk without a save — that compare
     /// treats the unchanged-on-disk file as "new" on the very next 1 s poll
     /// and silently reverts the panel's edit. Comparing against the last
