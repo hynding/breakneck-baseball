@@ -220,7 +220,9 @@ mod tests {
         // authored 1.85 m rig — see the consts' derivation).
         assert!((ZONE_LOW - 0.45).abs() < 1e-6);
         assert!((ZONE_HIGH - 1.275).abs() < 1e-6);
-        // The pure module's duplicated ball radius must track the physics.
+        // `ball::BALL_RADIUS` is a `pub use` shim back to this const (Task
+        // 15 collapsed the former duplicate) — this pins that it still
+        // resolves to the same value if that ever changes.
         assert!((BALL_RADIUS_M - crate::game::ball::BALL_RADIUS).abs() < 1e-9);
     }
 

@@ -10,7 +10,7 @@
 use bevy::math::Vec3;
 use bevy::prelude::{Reflect, Resource};
 
-use crate::game::field::{HALF_DIAGONAL, PITCH_DISTANCE};
+use crate::game::rules::{HALF_DIAGONAL, PITCH_DISTANCE};
 
 /// Countable-rule knobs read by the rules engine and game flow, grouped so
 /// the debug inspector renders each group as its own collapsible section.

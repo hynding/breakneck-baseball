@@ -16,8 +16,11 @@ use crate::game::theme::Theme;
 use crate::game::variant::FieldSpec;
 use crate::game::{GameState, GameplayEntity};
 
-/// Official ball radius in metres.
-pub const BALL_RADIUS: f32 = 0.037;
+/// Official ball radius in metres — canonically defined in `core::rules` as
+/// `BALL_RADIUS_M` (the pure rules module needs it too); re-exported here
+/// under its original name so every existing `ball::BALL_RADIUS` path still
+/// resolves unchanged.
+pub use crate::game::rules::BALL_RADIUS_M as BALL_RADIUS;
 /// Official ball mass in kilograms.
 pub const BALL_MASS: f32 = 0.148;
 /// Aerodynamic drag coefficient × reference area (simplified).

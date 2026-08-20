@@ -11,7 +11,6 @@ use bevy::math::Vec3;
 use bevy::prelude::Resource;
 
 use crate::game::Team;
-use crate::game::ball::BALL_RADIUS;
 
 mod advance;
 mod contact;
@@ -31,6 +30,23 @@ pub use predict::*;
 pub use resolve::*;
 pub use steal::*;
 
+// ── Field geometry constants ──────────────────────────────────────────────────
+// Pure geometry, hoisted here (rather than read from `present::field`) so
+// `core` never reaches upward into a higher layer for a plain number — see
+// docs/superpowers/specs/2026-08-19-layered-refactor-design.md, "Sanctioned
+// layer back-references". `present::field` and `sim::ball` re-export these
+// under their original names via `pub use` so no call site changed.
+
+/// Distance between consecutive bases (90 ft). Kept private here — only
+/// [`HALF_DIAGONAL`] needs it — `field::BASE_DISTANCE` is present's own copy
+/// for spawning field geometry (not hoisted; nothing in `core` needs it
+/// directly).
+const BASE_DISTANCE_M: f32 = 27.43;
+/// Home plate → pitching rubber (60.5 ft).
+pub const PITCH_DISTANCE: f32 = 18.44;
+/// Half the base-path diagonal, used to place second base along the Z axis.
+pub const HALF_DIAGONAL: f32 = BASE_DISTANCE_M * std::f32::consts::SQRT_2 / 2.0;
+
 // ── Tuning constants ──────────────────────────────────────────────────────────
 
 /// Gravity magnitude used for landing-point prediction (matches Rapier default).
@@ -45,8 +61,9 @@ pub const PITCH_SPEED: f32 = 38.0;
 /// The single source of truth: `field.rs` builds the plate slab and the
 /// drawn zone from it, and the called zone below adds the ball allowance.
 pub const PLATE_HALF_WIDTH_M: f32 = 0.216;
-/// Official ball radius — matches `ball::BALL_RADIUS` (asserted in tests;
-/// duplicated here so the pure rules module stays free of engine imports).
+/// Official ball radius — the canonical definition; `ball::BALL_RADIUS` is a
+/// `pub use` shim pointing back here (the values were already identical, so
+/// Task 15 collapsed the former duplicate into this one const).
 pub const BALL_RADIUS_M: f32 = 0.037;
 /// Horizontal half-width of the *called* strike zone (metres from plate
 /// centre): the plate plus the rulebook's "any part of the ball" allowance
@@ -109,7 +126,7 @@ const POP_RADIUS: f32 = 30.0;
 
 /// Where the ball rests before each pitch (top of the mound / rubber).
 pub fn mound_reset_pos(pitch_distance: f32) -> Vec3 {
-    Vec3::new(0.0, BALL_RADIUS + 0.25, pitch_distance)
+    Vec3::new(0.0, BALL_RADIUS_M + 0.25, pitch_distance)
 }
 
 // ── Data ──────────────────────────────────────────────────────────────────────
