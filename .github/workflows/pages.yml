@@ -73,19 +73,27 @@ jobs:
       - name: Optimize WASM (wasm-opt -Oz)
         id: wasmopt
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends binaryen
+          # Pinned upstream release, NOT apt: Ubuntu ships binaryen 108,
+          # which silently mangles wasm-bindgen 0.2.126's externref table —
+          # the deployed module then dies at init with
+          # "WebAssembly.Table.grow(): failed to grow table by 4"
+          # (verified 2026-08-21: same input + flags boots with binaryen 132,
+          # bricks with the apt build).
+          BINARYEN=version_132
+          curl -sSfL "https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN}/binaryen-${BINARYEN}-x86_64-linux.tar.gz" | tar xz
           IN=web/out/breakneck-baseball_bg.wasm
           BEFORE=$(stat -c%s "$IN")
-          # Rust ships these two proposals enabled by default; binaryen must
-          # be told or it rejects the module.
-          wasm-opt -Oz \
+          # Rust ships these proposals enabled by default; binaryen must be
+          # told or it rejects the module.
+          "binaryen-${BINARYEN}/bin/wasm-opt" -Oz \
             --enable-bulk-memory --enable-nontrapping-float-to-int \
+            --enable-reference-types \
             --output "$IN.opt" "$IN"
           mv "$IN.opt" "$IN"
           AFTER=$(stat -c%s "$IN")
           echo "wasm-opt -Oz: $BEFORE -> $AFTER bytes"
           echo "wasm_size=$AFTER" >> "$GITHUB_OUTPUT"
+          rm -rf "binaryen-${BINARYEN}"
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
