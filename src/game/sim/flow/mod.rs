@@ -339,7 +339,7 @@ pub struct PlayBanner {
 }
 
 impl PlayBanner {
-    fn new(text: impl Into<String>, tone: BannerTone) -> Self {
+    pub fn new(text: impl Into<String>, tone: BannerTone) -> Self {
         Self {
             text: text.into(),
             tone,

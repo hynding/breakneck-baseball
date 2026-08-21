@@ -20,8 +20,10 @@
 
 use bevy::prelude::*;
 
+use bevy::window::{WindowFocused, WindowOccluded};
+
 use crate::game::ball::{Baseball, InFlight};
-use crate::game::flow::{Phase, Play};
+use crate::game::flow::{BannerTone, Phase, Play, PlayBanner};
 use crate::game::roster::Rosters;
 use crate::game::rules::LINEUP_SIZE;
 use crate::game::settings::Settings;
@@ -93,7 +95,10 @@ impl Plugin for SubsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SubsMenu>()
             .add_systems(crate::game::game_start(), spawn_board)
-            .add_systems(Update, open_pause.run_if(in_state(GameState::Playing)))
+            .add_systems(
+                Update,
+                (open_pause, auto_pause_on_focus_loss).run_if(in_state(GameState::Playing)),
+            )
             .add_systems(Update, board_controls.run_if(in_state(GameState::Paused)))
             .add_systems(Update, (update_board, update_controls_dialog));
     }
@@ -105,9 +110,15 @@ fn pause_pressed(keyboard: &ButtonInput<KeyCode>, pads: &Query<&Gamepad>) -> boo
         || pads.iter().any(|p| p.just_pressed(GamepadButton::Start))
 }
 
-/// Pauses only while the ball is truly dead: between plays, and never while
-/// the ball is still physically in flight (Rapier steps regardless of game
-/// state, so a "paused" flying ball would keep moving under the board).
+/// The ball is dead enough to pause: between plays, and never while it is
+/// still physically in flight (Rapier steps regardless of game state, so a
+/// "paused" flying ball would keep moving under the board).
+fn ball_is_dead(play: &Play, flying: &Query<(), (With<Baseball>, With<InFlight>)>) -> bool {
+    matches!(play.phase, Phase::PrePitch | Phase::Result) && flying.is_empty()
+}
+
+/// Pauses only while the ball is truly dead; a refused press mid-play flashes
+/// the banner so the Esc feels acknowledged rather than ignored.
 #[allow(clippy::too_many_arguments)]
 fn open_pause(
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -116,12 +127,10 @@ fn open_pause(
     score: Res<ScoreBoard>,
     flying: Query<(), (With<Baseball>, With<InFlight>)>,
     mut menu: ResMut<SubsMenu>,
+    mut banner: EventWriter<PlayBanner>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     if !pause_pressed(&keyboard, &pads) {
-        return;
-    }
-    if !matches!(play.phase, Phase::PrePitch | Phase::Result) || !flying.is_empty() {
         return;
     }
     // Never clobber a transition already decided this frame (e.g. the
@@ -129,6 +138,46 @@ fn open_pause(
     if !matches!(*next_state, NextState::Unchanged) {
         return;
     }
+    if !ball_is_dead(&play, &flying) {
+        banner.send(PlayBanner::new("PLAY IN PROGRESS", BannerTone::Info));
+        return;
+    }
+    *menu = SubsMenu {
+        team: score.batting_team(),
+        ..default()
+    };
+    next_state.set(GameState::Paused);
+}
+
+/// Auto-pause when the player stops watching: the browser tab going hidden
+/// (winit surfaces `visibilitychange` as `WindowOccluded`) or the window
+/// losing focus. A loss mid-play arms a pending pause that lands at the first
+/// dead-ball moment instead of freezing the clock under a live ball —
+/// `Time<Virtual>` stays `juice`'s to dial. Regaining focus before that
+/// moment disarms it: the player is back and watching.
+fn auto_pause_on_focus_loss(
+    mut occluded: EventReader<WindowOccluded>,
+    mut focused: EventReader<WindowFocused>,
+    play: Res<Play>,
+    score: Res<ScoreBoard>,
+    flying: Query<(), (With<Baseball>, With<InFlight>)>,
+    mut pending: Local<bool>,
+    mut menu: ResMut<SubsMenu>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    for ev in occluded.read() {
+        *pending = ev.occluded;
+    }
+    for ev in focused.read() {
+        *pending = !ev.focused;
+    }
+    if !*pending || !ball_is_dead(&play, &flying) {
+        return;
+    }
+    if !matches!(*next_state, NextState::Unchanged) {
+        return;
+    }
+    *pending = false;
     *menu = SubsMenu {
         team: score.batting_team(),
         ..default()
@@ -158,26 +207,32 @@ fn board_controls(
         settings.show_strike_zone = !settings.show_strike_zone;
     }
 
+    // Keyboard and gamepad drive the same cursor: D-pad mirrors the arrows,
+    // South swaps (Enter), North switches team (T) — Start resumes via
+    // `pause_pressed` above. (Bindings are exercised headlessly only via
+    // keyboard; the pad path needs a hardware pass.)
+    let pad_pressed = |button: GamepadButton| pads.iter().any(|p| p.just_pressed(button));
+
     let lineup_len = rosters.team(menu.team).lineup.len();
     let bench_len = rosters.team(menu.team).bench.len().max(1);
-    if keyboard.just_pressed(KeyCode::ArrowUp) {
+    if keyboard.just_pressed(KeyCode::ArrowUp) || pad_pressed(GamepadButton::DPadUp) {
         menu.slot = (menu.slot + lineup_len - 1) % lineup_len;
     }
-    if keyboard.just_pressed(KeyCode::ArrowDown) {
+    if keyboard.just_pressed(KeyCode::ArrowDown) || pad_pressed(GamepadButton::DPadDown) {
         menu.slot = (menu.slot + 1) % lineup_len;
     }
-    if keyboard.just_pressed(KeyCode::ArrowLeft) {
+    if keyboard.just_pressed(KeyCode::ArrowLeft) || pad_pressed(GamepadButton::DPadLeft) {
         menu.bench = (menu.bench + bench_len - 1) % bench_len;
     }
-    if keyboard.just_pressed(KeyCode::ArrowRight) {
+    if keyboard.just_pressed(KeyCode::ArrowRight) || pad_pressed(GamepadButton::DPadRight) {
         menu.bench = (menu.bench + 1) % bench_len;
     }
-    if keyboard.just_pressed(KeyCode::KeyT) {
+    if keyboard.just_pressed(KeyCode::KeyT) || pad_pressed(GamepadButton::North) {
         menu.team = menu.team.other();
         menu.slot = 0;
         menu.bench = 0;
     }
-    if keyboard.just_pressed(KeyCode::Enter) {
+    if keyboard.just_pressed(KeyCode::Enter) || pad_pressed(GamepadButton::South) {
         let (slot, bench) = (menu.slot, menu.bench);
         rosters.team_mut(menu.team).substitute(slot, bench);
     }
@@ -379,7 +434,7 @@ fn update_board(
                 },
             ),
             SubsLineKind::Hint => (
-                "Up/Down slot   Left/Right bench   Enter swap   T team   Z zone   Esc/P resume"
+                "Up/Down slot   Left/Right bench   Enter/A swap   T/Y team   Z zone   Esc/P/Start resume"
                     .to_string(),
                 ui.text_dim,
             ),

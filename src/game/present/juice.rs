@@ -115,7 +115,7 @@ impl Plugin for JuicePlugin {
                 Update,
                 (trigger_juice, tick_freeze, tick_slowmo)
                     .chain()
-                    .run_if(juice_enabled)
+                    .run_if(motion_enabled)
                     .run_if(in_state(GameState::Playing)),
             )
             .add_systems(
@@ -130,8 +130,16 @@ impl Plugin for JuicePlugin {
     }
 }
 
-fn juice_enabled(disabled: Option<Res<JuiceDisabled>>) -> bool {
-    disabled.is_none()
+/// The shared game-feel gate: motion effects (hit-stop, slow-mo, the camera
+/// kick) run only when neither the harness's [`JuiceDisabled`] nor the
+/// player's reduce-motion setting suppresses them. `Settings` is optional so
+/// minimal test apps without `SettingsPlugin` keep full motion — and the
+/// harness's inserted `JuiceDisabled` is never touched, only read.
+pub fn motion_enabled(
+    disabled: Option<Res<JuiceDisabled>>,
+    settings: Option<Res<crate::game::settings::Settings>>,
+) -> bool {
+    disabled.is_none() && !settings.is_some_and(|s| s.reduce_motion)
 }
 
 fn reset_juice(

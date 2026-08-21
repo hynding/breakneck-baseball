@@ -172,8 +172,9 @@ impl Plugin for CameraPlugin {
                 (
                     toggle_camera_mode,
                     toggle_duel_view,
-                    kick_on_hit,
-                    kick_on_wall_bang,
+                    // Kick impulses honour reduce-motion; decay still runs so
+                    // any residue drains if the setting flips mid-kick.
+                    (kick_on_hit, kick_on_wall_bang).run_if(crate::game::juice::motion_enabled),
                     decay_kick,
                     hide_occluders,
                 )
@@ -197,8 +198,18 @@ impl Plugin for CameraPlugin {
 // ── Startup ───────────────────────────────────────────────────────────────────
 
 fn spawn_camera(mut commands: Commands) {
+    // Explicit anti-aliasing choice per target (was the implicit Bevy
+    // default, Sample4 everywhere): 4x holds on native GPUs; on
+    // wasm/WebGL2 the MSAA resolve is a measurable per-frame cost at
+    // stadium resolution, so the web build takes 2x — edges on the blocky
+    // art style read nearly the same and the resolve is half the work.
+    #[cfg(not(target_arch = "wasm32"))]
+    let msaa = Msaa::Sample4;
+    #[cfg(target_arch = "wasm32")]
+    let msaa = Msaa::Sample2;
     commands.spawn((
         Camera3d::default(),
+        msaa,
         Transform::from_translation(BROADCAST_EYE).looking_at(BROADCAST_HOME_TARGET, Vec3::Y),
         Projection::Perspective(PerspectiveProjection {
             fov: BROADCAST_FOV,

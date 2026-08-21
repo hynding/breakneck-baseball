@@ -404,6 +404,15 @@ const SUN_ILLUMINANCE: f32 = 50_000.0;
 /// ambient at all" at this scale — invisible from a distance, but glaring
 /// once the duel camera sits close enough to see a shadowed cube face.
 pub(super) fn spawn_lighting(commands: &mut Commands, yaw: f32, ambient_fraction: f32) {
+    // Explicit shadow-map budget for the one shadow-casting light (was the
+    // implicit 2048 default everywhere): keep 2048 texels on native, halve
+    // to 1024 on wasm/WebGL2 where the shadow pass fill rate is the
+    // constraint — the blocky rigs' soft field shadows don't need the
+    // resolution.
+    #[cfg(not(target_arch = "wasm32"))]
+    commands.insert_resource(bevy::pbr::DirectionalLightShadowMap { size: 2048 });
+    #[cfg(target_arch = "wasm32")]
+    commands.insert_resource(bevy::pbr::DirectionalLightShadowMap { size: 1024 });
     commands.spawn((
         GameplayEntity,
         DirectionalLight {

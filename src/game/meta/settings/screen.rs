@@ -41,11 +41,12 @@ pub(super) struct SettingsRowText(usize);
 #[derive(Resource, Default)]
 pub(super) struct SettingsCursorRow(usize);
 
-const ROW_LABELS: [&str; 5] = [
+const ROW_LABELS: [&str; 6] = [
     "P1 BATTING STYLE",
     "P2 BATTING STYLE",
     "PITCH TRAIL",
     "TRAIL COLOR",
+    "REDUCE MOTION",
     "VOLUME",
 ];
 
@@ -174,7 +175,10 @@ pub(super) fn paint_settings_screen(
         bg.0 = ui.panel_bg.with_alpha(0.9);
     }
     for (mut bg, mut border) in &mut cards {
-        bg.0 = ui.panel_bg;
+        // Theme panel colours carry their own translucency (~0.85 alpha) for
+        // layering over the 3D field; here the menu sits directly behind, so
+        // the card must be fully opaque or its text collides with the menu's.
+        bg.0 = ui.panel_bg.with_alpha(1.0);
         border.0 = ui.panel_border;
     }
     **title_text = "SETTINGS".to_string();
@@ -194,6 +198,7 @@ pub(super) fn paint_settings_screen(
             1 => settings.batting_style[1].label().to_string(),
             2 => settings.pitch_trail.label().to_string(),
             3 => settings.trail_color.label().to_string(),
+            4 => (if settings.reduce_motion { "On" } else { "Off" }).to_string(),
             _ => format!("{:.0}%", settings.volume * 100.0),
         };
     }
@@ -267,6 +272,7 @@ pub(super) fn edit_settings(
             let c = settings.trail_color;
             settings.trail_color = if right { c.next() } else { c.prev() };
         }
+        4 => settings.reduce_motion = !settings.reduce_motion,
         _ => {
             let dv = if right { 0.1 } else { -0.1 };
             settings.volume = (settings.volume + dv).clamp(0.0, 1.0);

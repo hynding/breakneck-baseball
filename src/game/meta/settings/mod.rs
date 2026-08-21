@@ -167,6 +167,11 @@ pub struct Settings {
     /// mid-game; defaults on, serde-defaulted for old stores.
     #[serde(default = "default_true")]
     pub show_strike_zone: bool,
+    /// Accessibility: suppress hit-stop, slow-mo, and the camera kick
+    /// (`juice::motion_enabled` is the gate). Serde-defaulted off so old
+    /// stores keep their other options.
+    #[serde(default)]
+    pub reduce_motion: bool,
     /// Master volume, 0.0..=1.0, applied via [`bevy::audio::GlobalVolume`].
     pub volume: f32,
 }
@@ -182,6 +187,7 @@ impl Default for Settings {
             pitch_trail: PitchTrailStyle::default(),
             trail_color: TrailColor::default(),
             show_strike_zone: true,
+            reduce_motion: false,
             volume: 0.7,
         }
     }
@@ -210,12 +216,23 @@ fn store_path() -> Option<std::path::PathBuf> {
 }
 
 /// Reads persisted settings; any failure (missing, unreadable, corrupt)
-/// falls back to defaults so a bad store can never brick startup.
+/// falls back to defaults so a bad store can never brick startup. A store
+/// that *exists but won't parse* is first preserved under the `.bak` key —
+/// the reset is silent either way, but the player's old choices stay
+/// recoverable instead of being overwritten by the next save. (No schema
+/// `version` field yet: every change so far is additive and serde-defaulted;
+/// add one at the first genuinely breaking rename.)
 pub fn load_settings() -> Settings {
-    read_store()
-        .and_then(|text| serde_json::from_str::<Settings>(&text).ok())
-        .unwrap_or_default()
-        .clamped()
+    let Some(text) = read_store() else {
+        return Settings::default();
+    };
+    match serde_json::from_str::<Settings>(&text) {
+        Ok(s) => s.clamped(),
+        Err(_) => {
+            back_up_store(&text);
+            Settings::default()
+        }
+    }
 }
 
 /// Best-effort persist; failures are logged, never fatal (a read-only FS or
@@ -232,6 +249,15 @@ pub fn save_settings(s: &Settings) {
 #[cfg(not(target_arch = "wasm32"))]
 fn read_store() -> Option<String> {
     std::fs::read_to_string(store_path()?).ok()
+}
+
+/// Best-effort copy of an unparseable store to `<store>.bak` before the
+/// defaults overwrite it.
+#[cfg(not(target_arch = "wasm32"))]
+fn back_up_store(text: &str) {
+    if let Some(path) = store_path() {
+        let _ = std::fs::write(path.with_extension("json.bak"), text);
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -259,6 +285,15 @@ fn write_store(text: &str) -> Result<(), String> {
         .ok_or("no localStorage")?
         .set_item(STORE_KEY, text)
         .map_err(|_| "localStorage set_item failed".into())
+}
+
+/// Best-effort copy of an unparseable store to the `.bak` key before the
+/// defaults overwrite it.
+#[cfg(target_arch = "wasm32")]
+fn back_up_store(text: &str) {
+    if let Some(storage) = local_storage() {
+        let _ = storage.set_item(&format!("{STORE_KEY}.bak"), text);
+    }
 }
 
 /// Whether the settings screen is currently shown (toggled with **S** on
@@ -371,6 +406,9 @@ mod tests {
         // other thread can observe the environment mid-mutation.
         unsafe { std::env::set_var("BREAKNECK_SETTINGS_PATH", &path) };
         assert_eq!(load_settings(), Settings::default());
+        // The unparseable blob is preserved for recovery, not just dropped.
+        let bak = std::fs::read(path.with_extension("json.bak")).unwrap();
+        assert_eq!(bak, b"{ not json");
         // SAFETY: still under `ENV_LOCK` via `_guard`; see the set_var above.
         unsafe { std::env::remove_var("BREAKNECK_SETTINGS_PATH") };
         let _ = std::fs::remove_dir_all(dir);
@@ -416,6 +454,7 @@ mod tests {
         assert_eq!(s.pitch_trail, PitchTrailStyle::Comet);
         assert_eq!(s.trail_color, TrailColor::Ember);
         assert!(s.show_strike_zone, "zone overlay defaults on");
+        assert!(!s.reduce_motion, "full motion defaults on");
         assert_eq!(s.batting_style[0], BattingStyle::SwingMeter);
         assert!((s.volume - 0.5).abs() < 1e-6);
     }
