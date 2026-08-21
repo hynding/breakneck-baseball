@@ -45,3 +45,73 @@
 37. [x] Audit TODO 15 — loading progress + wasm-opt. — `web/index.html` streams the wasm fetch with a real progress bar (percent against Content-Length when served raw; MB counter under gzip where decoded-byte percent would lie) and a "Compiling…" stage; `pages.yml` gained a `wasm-opt -Oz` step (bulk-memory + nontrapping-fp flags). Verified under Fast-4G throttle (screenshot 12). Residual: raw size still ~43 MB pre-opt vs the ≤30 MB budget — follow-up filed.
 38. [x] Audit TODO 19 — `src/game/.DS_Store` untracked; `.DS_Store` gitignored.
 39. [x] Audit TODO 28 — favicon (⚾ emoji SVG data URI) in `web/index.html`.
+
+## Batch 4 — release-polish backlog (2026-08-21)
+
+40. [x] TODO 16-18, 25 — release hygiene. — `LICENSE-MIT` + `LICENSE-APACHE` matching
+    `Cargo.toml`'s declared dual license; `README.md` rewritten against the four-layer map,
+    the five-pitch/steal-duel controls, the live Pages link, and current build commands;
+    `pages.yml` gained a post-deploy smoke-test job (curls the live page and wasm artifact,
+    asserting 200 / `application/wasm` / byte size matching the built binary); the menu
+    shows `v0.1.0` (`env!("CARGO_PKG_VERSION")`) bottom-right, verified in the browser.
+41. [x] TODO 20 — browser focus-loss auto-pause. — tab-hidden (`WindowOccluded`) or focus
+    loss arms a pending pause that lands at the first dead-ball moment (reusing the subs
+    pause path) instead of freezing `Time<Virtual>` under a live ball, so the juice
+    invariant stays intact; regaining focus first disarms it.
+42. [x] TODO 22 — subs-board gamepad bindings. — D-pad mirrors the arrows, South swaps,
+    North switches team, Start already resumed via `pause_pressed`; hint line updated.
+    Hardware pass still owed (TODO 33).
+43. [x] TODO 23 — reduce-motion accessibility toggle. — new serde-defaulted
+    `Settings::reduce_motion` + REDUCE MOTION settings row; `juice::motion_enabled` gates
+    hit-stop/slow-mo and the camera-kick impulses, reading (never writing) the harness's
+    `JuiceDisabled`. Verified end-to-end on web incl. localStorage persistence.
+44. [x] TODO 24 — settings schema decision. — no version field until a genuinely breaking
+    rename (every change so far is additive + serde-defaulted); an unparseable store is now
+    preserved under `settings.json.bak` / the `.bak` localStorage key before defaults load,
+    with a regression test.
+45. [x] TODO 26 — pause-refusal feedback. — a refused mid-play Esc flashes PLAY IN PROGRESS
+    through the existing banner channel (`PlayBanner::new` made pub for meta emitters).
+46. [x] TODO 21 — explicit Msaa/shadow choices. — camera spawns `Msaa::Sample4` native /
+    `Sample2` wasm; `DirectionalLightShadowMap` 2048 native / 1024 wasm (was implicit
+    defaults everywhere). Measured wasm: 120 fps display-capped at 2560×1488 on M4 Max.
+    Native F1 readout owed (TODO 33).
+47. [x] TODO 30 — fielder set-spot drift (the CRUZ-at-home bug). — root cause: on an
+    instantly-resolved play (liner caught the same frame covers went out),
+    `fielding::return_to_spots` fired while every fielder was still within its already-set
+    tolerance, sent nobody home, consumed its one-shot state, and left the cover
+    `MoveIntent`s live — the defense then ran to the bases *after* the play and parked.
+    Fix: play end voids every outstanding fielding order. New `e2e_fielder_spots`
+    regression (full CPU game, no fielder off-spot 3+ consecutive deliveries).
+49. [x] TODO 32 + deploy boot regression — wasm-opt sizing and the binaryen fix. — CI
+    wasm-opt (first run) cut the deployed binary 43.3 MB → 16.9 MB raw (−61%, inside the
+    ≤30 MB budget); gzip wire 5.6 MB (was 7.96 MB, inside ≤10 MB). But apt's binaryen 108
+    mangled wasm-bindgen 0.2.126's externref table — the deploy died at init with
+    `WebAssembly.Table.grow(): failed to grow table by 4` (the TODO-12 panic surface caught
+    it with a clean reload card). `pages.yml` now pins the upstream binaryen `version_132`
+    release with `--enable-reference-types`; the exact flag set verified booting locally.
+50. [x] TODO 6 — settings card translucency. — the open card now paints `panel_bg` at full
+    alpha (theme panels carry ~0.85 alpha for field layering); menu text no longer bleeds
+    through. Verified on web.
+51. [x] TODO 7 — the "floating tan ring" at the batter's chest. — identified: STONE #21's
+    gold-chain gear prop (`meta/gear.rs`), whose 7 cm spine-bone standoff detached visually
+    in the stance lean. Re-anchored to (0, 0.24, 0.135); reads as worn gear on both themes.
+52. [x] TODO 5 — bat parked vertically behind the back between pitches. — the `Idle` clip
+    never keyed the `Bat` bone, so idle frames showed the rest pose (solved for
+    raised-arm stances). `Idle` now keys the barrel down-forward — a loose at-the-side
+    carry (rebuilt `player.blend`/`player.glb`, `model_contract` green). The
+    shoulder-quad "float" sighting resolved with the chain fix (51).
+53. [x] TODO 8 — chest number wrapping onto the torso side. — the chest quad standoff
+    dropped 0.16 → 0.14 off the spine bone, killing the parallax that read as
+    side-face lettering at oblique angles.
+54. [x] TODO 9 — catcher-POV batter dominance. — `duel_eye` steps 0.4 m (0.35 m FrontYard)
+    toward first base plus a half-step closer to hold the 80–90% batter-height contract;
+    the zone box and pitcher now fully clear the batter's silhouette (screenshot
+    03-duel-offset-eye). Camera framing tests re-pinned.
+55. [x] TODO 27 — colour-blind emulation pass. — deuteranopia + protanopia (SVG
+    colour-matrix over the canvas) on both themes: team split stays legible (yellow-olive
+    vs lavender), jersey lettering backstops, B/S/O dots are position-labelled. Recorded in
+    `theme.rs` module docs; screenshots in `docs/agent/playtest/2026-08-21/`.
+56. [x] TODO 31 — BallHalo oversized-disc sighting. — not reproduced across a browser
+    session; clamp math re-verified by inspection (dist × 0.007 into [0.05, 0.9] m world
+    radius; the multi-camera fallback degrades to the *minimum*, not max). Closed as
+    unreproducible; reopen with a screenshot if it recurs.
