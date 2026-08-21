@@ -542,6 +542,15 @@ fn return_to_spots(
         if Vec2::new(tf.translation.x - spot.x, tf.translation.z - spot.z).length() > 0.3 {
             intent.target = Some(*spot);
             intent.speed = RETURN_SPEED;
+        } else {
+            // Still (near) set — but on an instantly-resolved play (a liner
+            // caught the same frame the covers went out) this fielder may
+            // hold a live cover order he hasn't taken a step on yet. The
+            // play is over, so every outstanding fielding order is void:
+            // without this clear he'd run to his cover base *after* the
+            // play and park there, and this one-shot system has already
+            // consumed the state that would call him back (TODO 30).
+            intent.target = None;
         }
     }
 }
