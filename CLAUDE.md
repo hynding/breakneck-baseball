@@ -82,6 +82,11 @@ Loaded on trigger from `.claude/skills/`; each SKILL.md says when.
 - `gameplay-rules` — flow phases, steal window/pickoff, live-play resolution, batting spine, balance economy. Load before touching `src/game/core/rules/`, `src/game/sim/`, or `src/game/meta/input.rs`.
 - `rigs-and-animation` — AnimClip API, CLIP_TABLE/model contract, Blender pipeline, jerseys. Load before touching `src/game/present/animation/`, `src/game/present/player/`, `player.glb`, `tools/*.py`, `jersey.rs`.
 - `wasm-ui-and-present` — the wasm UI gotcha in full, Theme/BannerTone, cameras, juice, settings persistence. Load before touching `src/game/present/ui/`, `camera/`, `menu.rs`, `subs.rs`, `settings/`.
+- `verify-change` — routes what-you-touched to the checks/tests to run, with durations. Load before committing or claiming "done".
+- `tune-balance` — the dial → `balance_sim` → bands loop; bands in its `reference/bands.md`. Load before touching any `Ruleset` window/multiplier/spread.
+- `playtest-review` — moment list + rubric producing a ranked TODO.md work queue. Load for "review the game" / "what should I work on next".
+- `production-readiness` — web-first ship audit; checklist in its `reference/checklist.md`. Load before a release.
+- `bevy-perf` — Bevy-0.15 performance practice (ECS, change detection, Rapier, wasm limits). Load for "slow"/"stutter"/"optimize".
 - `run-web` — build, serve, and verify the browser build.
 - `rust-skills` — generic Rust guidelines (265 rules); use for any Rust authoring/review.
 
