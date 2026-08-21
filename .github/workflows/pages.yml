@@ -122,6 +122,17 @@ jobs:
     needs: [build, deploy]
     runs-on: ubuntu-latest
     steps:
+      # Only tools/web_boot_check.mjs is needed; the site under test is live.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: tools
+
+      # The boot-check script speaks CDP over Node's built-in WebSocket
+      # client, which needs Node >= 22.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Smoke-test live deployment
         run: |
           BASE="${{ needs.deploy.outputs.page_url }}"
@@ -149,3 +160,12 @@ jobs:
           esac
           [ "$SIZE" = "$EXPECTED_SIZE" ] || {
             echo "wasm: size $SIZE != built artifact $EXPECTED_SIZE" >&2; exit 1; }
+
+      # The byte-level checks above cannot catch a wasm that dies at init
+      # (the binaryen-108 table clamp shipped exactly that — TADA 49). Boot
+      # the live page in headless Chrome (preinstalled on the runner;
+      # SwiftShader WebGL2) and fail on the "Something broke" panic card or
+      # a missing canvas. Runs after the curl checks, so the Pages CDN has
+      # already propagated this build's exact artifact.
+      - name: Headless boot check
+        run: node tools/web_boot_check.mjs "${{ needs.deploy.outputs.page_url }}" 240
