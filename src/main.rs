@@ -8,6 +8,24 @@ use bevy_rapier3d::prelude::*;
 use breakneck_baseball::game::GamePlugin;
 
 fn main() {
+    // On the web a panic aborts the wasm instance and freezes the canvas
+    // with nothing but a cryptic "unreachable" in the console. Surface it:
+    // log the real panic message, and post it to the page so index.html can
+    // swap the dead canvas for an honest "reload" card (TODO 12). Installed
+    // before the App builds so even a plugin-construction panic is caught.
+    #[cfg(target_arch = "wasm32")]
+    std::panic::set_hook(Box::new(|info| {
+        let msg = info.to_string();
+        web_sys::console::error_1(&wasm_bindgen::JsValue::from_str(&msg));
+        if let Some(win) = web_sys::window() {
+            let payload = wasm_bindgen::JsValue::from_str(&format!("bb-panic:{msg}"));
+            // Same-window mail drop; the page listens for the "bb-panic:"
+            // prefix. A failed post changes nothing — the console line above
+            // already happened.
+            let _ = win.post_message(&payload, "*");
+        }
+    }));
+
     let default_plugins = DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
             title: "Breakneck Baseball".into(),

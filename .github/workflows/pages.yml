@@ -70,6 +70,21 @@ jobs:
             --target web \
             "target/wasm32-unknown-unknown/wasm-release/${BIN_NAME}.wasm"
 
+      - name: Optimize WASM (wasm-opt -Oz)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends binaryen
+          IN=web/out/breakneck-baseball_bg.wasm
+          BEFORE=$(stat -c%s "$IN")
+          # Rust ships these two proposals enabled by default; binaryen must
+          # be told or it rejects the module.
+          wasm-opt -Oz \
+            --enable-bulk-memory --enable-nontrapping-float-to-int \
+            --output "$IN.opt" "$IN"
+          mv "$IN.opt" "$IN"
+          AFTER=$(stat -c%s "$IN")
+          echo "wasm-opt -Oz: $BEFORE -> $AFTER bytes"
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

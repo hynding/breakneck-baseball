@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Breakneck Baseball</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚾</text></svg>" />
     <style>
         * {
             margin: 0;
@@ -23,7 +24,7 @@
             height: 100vh;
         }
 
-        #loading {
+        .overlay {
             position: fixed;
             inset: 0;
             display: flex;
@@ -34,16 +35,19 @@
             font-family: system-ui, sans-serif;
             z-index: 10;
             background: #1a1a2e;
+            text-align: center;
+            padding: 0 24px;
         }
 
-        #loading h1 {
+        .overlay h1 {
             font-size: 2rem;
             margin-bottom: 1rem;
         }
 
-        #loading p {
+        .overlay p {
             font-size: 1rem;
             opacity: 0.7;
+            margin-top: 0.4rem;
         }
 
         .spinner {
@@ -59,22 +63,163 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+
+        #bar-track {
+            width: min(420px, 70vw);
+            height: 10px;
+            border-radius: 5px;
+            background: rgba(255,255,255,0.12);
+            margin-top: 1.2rem;
+            overflow: hidden;
+        }
+
+        #bar-fill {
+            width: 0%;
+            height: 100%;
+            border-radius: 5px;
+            background: #e8c15a;
+            transition: width 0.15s linear;
+        }
+
+        #error-detail {
+            font-family: ui-monospace, monospace;
+            font-size: 0.8rem;
+            opacity: 0.6;
+            max-width: min(700px, 90vw);
+            white-space: pre-wrap;
+            word-break: break-word;
+            margin-top: 1rem;
+        }
+
+        button.reload {
+            margin-top: 1.4rem;
+            font-size: 1rem;
+            padding: 10px 26px;
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.35);
+            background: rgba(255,255,255,0.08);
+            color: #e0e0e0;
+            cursor: pointer;
+        }
+
+        button.reload:hover { background: rgba(255,255,255,0.16); }
+
+        .hidden { display: none !important; }
     </style>
 </head>
 <body>
-    <div id="loading">
+    <div id="loading" class="overlay">
         <div class="spinner"></div>
         <h1>Breakneck Baseball</h1>
-        <p>Loading…</p>
+        <div id="bar-track"><div id="bar-fill"></div></div>
+        <p id="status">Downloading…</p>
+    </div>
+
+    <div id="fatal" class="overlay hidden">
+        <h1>Something broke</h1>
+        <p id="fatal-reason">The game hit an error it can't recover from.</p>
+        <div id="error-detail"></div>
+        <button class="reload" onclick="location.reload()">Reload</button>
+    </div>
+
+    <div id="touch-note" class="overlay hidden">
+        <h1>⚾ Breakneck Baseball</h1>
+        <p>This game needs a <strong>keyboard or gamepad</strong> — touch controls aren't supported yet.</p>
+        <p>Play it on a desktop, or connect a gamepad and continue.</p>
+        <button class="reload" onclick="document.getElementById('touch-note').classList.add('hidden')">Continue anyway</button>
     </div>
 
     <script type="module">
         import init from './out/breakneck-baseball.js';
 
+        const $ = (id) => document.getElementById(id);
+        const status = (text) => { $('status').textContent = text; };
+
+        function fatal(reason, detail) {
+            $('loading').classList.add('hidden');
+            $('fatal-reason').textContent = reason;
+            $('error-detail').textContent = detail || '';
+            $('fatal').classList.remove('hidden');
+        }
+
+        // Runtime panics: the wasm side installs a panic hook (src/main.rs)
+        // that posts the panic text with this prefix before the instance dies.
+        window.addEventListener('message', (event) => {
+            if (typeof event.data === 'string' && event.data.startsWith('bb-panic:')) {
+                fatal('The game crashed. Reloading is the only way back — sorry!',
+                      event.data.slice('bb-panic:'.length));
+            }
+        });
+
+        // Touch-only devices get an honest notice instead of a silently
+        // unresponsive canvas (dismissible — a tablet with a gamepad works).
+        const touchOnly = matchMedia('(pointer: coarse)').matches
+            && !matchMedia('(any-pointer: fine)').matches;
+        if (touchOnly) {
+            $('touch-note').classList.remove('hidden');
+        }
+
+        // Bevy can't recreate a lost WebGL2 context; an honest reload prompt
+        // beats a silent freeze. The canvas appears only after init, so the
+        // listener attaches then.
+        function watchContextLoss() {
+            const canvas = document.querySelector('canvas');
+            if (!canvas) { setTimeout(watchContextLoss, 500); return; }
+            canvas.addEventListener('webglcontextlost', (e) => {
+                e.preventDefault();
+                fatal('The graphics context was lost (GPU reset or memory pressure).');
+            });
+        }
+
+        // Streamed download with real progress. When the server sends the
+        // wasm compressed (GitHub Pages: gzip), Content-Length is the wire
+        // size while the reader yields decoded bytes — percent would lie, so
+        // fall back to a byte counter with an indeterminate bar.
+        async function fetchWasm() {
+            const response = await fetch('./out/breakneck-baseball_bg.wasm');
+            if (!response.ok) {
+                throw new Error(`wasm download failed: HTTP ${response.status}`);
+            }
+            const encoded = !!response.headers.get('content-encoding');
+            const total = encoded ? 0 : Number(response.headers.get('content-length') || 0);
+            const reader = response.body.getReader();
+            const chunks = [];
+            let received = 0;
+            for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                chunks.push(value);
+                received += value.length;
+                const mb = (received / 1048576).toFixed(1);
+                if (total > 0) {
+                    const pct = Math.min(100, received / total * 100);
+                    $('bar-fill').style.width = pct + '%';
+                    status(`Downloading… ${mb} MB (${pct.toFixed(0)}%)`);
+                } else {
+                    $('bar-fill').style.width = '100%';
+                    status(`Downloading… ${mb} MB`);
+                }
+            }
+            const bytes = new Uint8Array(received);
+            let offset = 0;
+            for (const chunk of chunks) {
+                bytes.set(chunk, offset);
+                offset += chunk.length;
+            }
+            return bytes;
+        }
+
         async function run() {
-            await init();
+            const bytes = await fetchWasm();
+            $('bar-fill').style.width = '100%';
+            status('Compiling…');
+            // Yield a frame so the "Compiling…" paint lands before the
+            // compile blocks the main thread.
+            await new Promise(requestAnimationFrame);
+            await init({ module_or_path: bytes });
             // init() only returns on non-throwing runtimes; hide the overlay here too.
-            document.getElementById('loading').style.display = 'none';
+            $('loading').classList.add('hidden');
+            watchContextLoss();
         }
 
         run().catch((error) => {
@@ -82,14 +227,12 @@
             // "Using exceptions for control flow" exception to hand control to
             // the browser. Reaching it means the game started successfully.
             if (error.message && error.message.includes('Using exceptions for control flow')) {
-                document.getElementById('loading').style.display = 'none';
+                $('loading').classList.add('hidden');
+                watchContextLoss();
                 return;
             }
-            const el = document.getElementById('loading');
-            el.querySelector('p').textContent =
-                'Failed to start: ' + error.message;
-            el.querySelector('.spinner').style.display = 'none';
             console.error(error);
+            fatal('Failed to start.', String(error && error.message || error));
         });
     </script>
 </body>
