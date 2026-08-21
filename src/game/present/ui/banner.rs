@@ -122,20 +122,34 @@ pub(super) fn spawn_duel_panels(commands: &mut Commands, theme: &Theme) {
     }
 }
 
-/// Fills the duel cards during the pitch duel and blanks them (keeping every
-/// alpha nonzero for wasm) once the ball is in play.
+/// Fills the duel cards during the pitch duel and hides them once the ball
+/// is in play. Hiding flips root `Visibility` (the subtree skips rendering
+/// entirely — the mechanism the pause board relies on) *and* still keeps
+/// every colour's alpha nonzero: on wasm/WebGL2 the tint-and-blank idiom
+/// alone left a dim ghost of the painted card floating over the sky
+/// (playtest 2026-08-20, TODO 2) — stale glyphs/chrome kept rendering after
+/// the mutation. The roots spawn visible, so the alpha-0-at-first-extract
+/// cull never applies to them.
 pub(super) fn update_duel_panels(
     play: Res<Play>,
     score: Res<ScoreBoard>,
     order: Res<BattingOrder>,
     rosters: Res<Rosters>,
     theme: Res<Theme>,
-    mut panels: Query<(&mut BackgroundColor, &mut BorderColor), With<DuelPanel>>,
+    mut panels: Query<(&mut BackgroundColor, &mut BorderColor, &mut Visibility), With<DuelPanel>>,
     mut lines: Query<(&DuelLine, &mut Text, &mut TextColor)>,
 ) {
     let visible = matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch);
     let ui = &theme.ui;
-    for (mut bg, mut border) in &mut panels {
+    for (mut bg, mut border, mut visibility) in &mut panels {
+        let desired = if visible {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        if *visibility != desired {
+            *visibility = desired;
+        }
         if visible {
             bg.0 = ui.panel_bg;
             border.0 = ui.panel_border;

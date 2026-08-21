@@ -49,15 +49,20 @@ pub(super) fn hide_occluders(
         Or<(With<CatcherRole>, With<PlateUmpire>)>,
     >,
 ) {
-    let dueling = matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch);
-    let pov_inside_catcher = *mode == CameraMode::Broadcast
-        && *view == DuelView::CatcherPov
-        && duel_framing_wanted(&play, time.elapsed_secs());
+    // The same predicate the broadcast rig uses to *hold* the duel framing
+    // gates the hiding: while the lens is parked at the plate — the duel
+    // itself, the post-contact hold, and a gloved pitch's result pause —
+    // nothing may pop into it. Gating on the duel phases alone let the
+    // plate umpire stand up out of his crouch straight into the parked
+    // catcher-POV lens during the result pause (playtest 2026-08-20).
+    let framing_held =
+        *mode == CameraMode::Broadcast && duel_framing_wanted(&play, time.elapsed_secs());
+    let pov_at_plate = framing_held && *view == DuelView::CatcherPov;
     // The FOV this call computes is discarded (occlusion only cares about the
     // eye/target axis), so the aspect passed through doesn't matter — the
     // reference aspect keeps this a no-op correction.
     let (eye, target, _) = view.framing(&field, DUEL_REFERENCE_ASPECT);
-    for (transform, mut visibility, is_catcher) in &mut subjects {
+    for (transform, mut visibility, _is_catcher) in &mut subjects {
         // Occlusion only makes sense for the camera actually looking through
         // this axis: in Orbit the player is free-looking with a completely
         // different eye/target, so a rig hidden for a Broadcast duel view
@@ -65,9 +70,13 @@ pub(super) fn hide_occluders(
         // changed — the system still runs every frame (unconditionally, not
         // gated out entirely) so switching back to Broadcast, or into
         // Orbit, both re-evaluate and settle on the right state immediately.
-        let blocking = (is_catcher && pov_inside_catcher)
-            || (dueling
-                && *mode == CameraMode::Broadcast
+        //
+        // Catcher-POV hides both plate rigs outright: the eye sits inside
+        // the catcher's silhouette with the umpire crouched *behind* it,
+        // where a look-ahead cone can never flag him, yet his geometry
+        // pokes through the near plane.
+        let blocking = pov_at_plate
+            || (framing_held
                 && occludes(
                     eye,
                     target,

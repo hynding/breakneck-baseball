@@ -146,6 +146,78 @@ pub(super) fn update_landing_ring(
     }
 }
 
+// ── Ball halo ─────────────────────────────────────────────────────────────────
+
+/// The live-ball beacon: a soft unlit shell around the batted ball, scaled
+/// with camera distance so the ball stays findable once the chase camera
+/// pulls back to outfield range — at distance the bare ball is a couple of
+/// pale pixels against pale grass (playtest 2026-08-20, TODO 1). Ball-sized
+/// up close, so it never reads inside the duel framing.
+#[derive(Component)]
+pub(super) struct BallHalo;
+
+/// Halo radius per metre of camera distance (≈ constant screen size), and
+/// its world-space clamps: never smaller than a ball, never a beach ball.
+const HALO_PER_METER: f32 = 0.007;
+const HALO_MIN: f32 = 0.05;
+const HALO_MAX: f32 = 0.9;
+
+pub(super) fn spawn_ball_halo(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    theme: Res<Theme>,
+) {
+    commands.spawn((
+        BallHalo,
+        GameplayEntity,
+        Mesh3d(meshes.add(Sphere::new(1.0))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: theme.ball.trail.with_alpha(0.45),
+            unlit: true,
+            alpha_mode: AlphaMode::Blend,
+            ..default()
+        })),
+        Transform::from_xyz(0.0, -5.0, 0.0).with_scale(Vec3::splat(HALO_MIN)),
+        Visibility::Hidden,
+    ));
+}
+
+/// Parks the halo on the live ball while a play is running, sized by the
+/// broadcast camera's distance; hidden the rest of the time (the pitch has
+/// its trail, and a held/settled ball has a fielder holding it).
+#[allow(clippy::type_complexity)]
+pub(super) fn update_ball_halo(
+    play: Res<Play>,
+    ball_q: Query<&Transform, (With<Baseball>, With<InFlight>, Without<BallHalo>)>,
+    camera_q: Query<&GlobalTransform, (With<Camera3d>, Without<BallHalo>)>,
+    mut halo_q: Query<(&mut Transform, &mut Visibility), With<BallHalo>>,
+) {
+    let Ok((mut halo_tf, mut visibility)) = halo_q.get_single_mut() else {
+        return;
+    };
+    let ball = if play.phase == Phase::InPlay {
+        ball_q.get_single().ok()
+    } else {
+        None
+    };
+    let Some(ball) = ball else {
+        if *visibility != Visibility::Hidden {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    };
+    let dist = camera_q
+        .get_single()
+        .map(|cam| cam.translation().distance(ball.translation))
+        .unwrap_or(0.0);
+    halo_tf.translation = ball.translation;
+    halo_tf.scale = Vec3::splat((dist * HALO_PER_METER).clamp(HALO_MIN, HALO_MAX));
+    if *visibility != Visibility::Inherited {
+        *visibility = Visibility::Inherited;
+    }
+}
+
 /// Sparks fly off the bat at contact.
 pub(super) fn contact_burst(
     mut hits: EventReader<HitEvent>,

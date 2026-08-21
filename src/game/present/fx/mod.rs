@@ -14,8 +14,8 @@ pub use particles::FireworkSpark;
 pub use trail::TrailMote;
 
 use particles::{
-    Fireworks, bounce_dust, build_fx_assets, contact_burst, home_run_fireworks, spawn_landing_ring,
-    tick_particles, update_landing_ring, wall_bang_burst,
+    Fireworks, bounce_dust, build_fx_assets, contact_burst, home_run_fireworks, spawn_ball_halo,
+    spawn_landing_ring, tick_particles, update_ball_halo, update_landing_ring, wall_bang_burst,
 };
 use trail::{pitch_trail, tick_trail};
 
@@ -88,7 +88,7 @@ impl Plugin for FxPlugin {
             .init_resource::<Fireworks>()
             .add_systems(
                 crate::game::game_start(),
-                (build_fx_assets, spawn_landing_ring),
+                (build_fx_assets, spawn_landing_ring, spawn_ball_halo),
             )
             .add_systems(
                 Update,
@@ -100,6 +100,7 @@ impl Plugin for FxPlugin {
                     home_run_fireworks,
                     bounce_dust,
                     update_landing_ring,
+                    update_ball_halo,
                     tick_particles,
                     pitch_trail,
                     tick_trail,
