@@ -155,6 +155,7 @@ fn open_pause(
 /// dead-ball moment instead of freezing the clock under a live ball —
 /// `Time<Virtual>` stays `juice`'s to dial. Regaining focus before that
 /// moment disarms it: the player is back and watching.
+#[allow(clippy::too_many_arguments)]
 fn auto_pause_on_focus_loss(
     mut occluded: EventReader<WindowOccluded>,
     mut focused: EventReader<WindowFocused>,
