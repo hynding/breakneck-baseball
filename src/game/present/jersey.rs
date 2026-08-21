@@ -312,7 +312,11 @@ fn mount_jerseys_on_bones(
                     Vec3::new(0.0, 0.12, -0.16),
                     std::f32::consts::PI,
                 ),
-                JerseyFace::Number => (bones.spine, Vec3::new(0.0, 0.20, 0.16), 0.0),
+                // 0.14 hugs the torso front (face at Z≈0.12): the old 0.16
+                // standoff let the number hover with enough parallax to read
+                // as painted on the torso's *side* face at oblique angles
+                // (playtest 2026-08-20, TODO 8).
+                JerseyFace::Number => (bones.spine, Vec3::new(0.0, 0.20, 0.14), 0.0),
                 JerseyFace::ShoulderL => (bones.upper_arm_l, Vec3::new(0.0, -0.04, 0.09), half),
                 JerseyFace::ShoulderR => (bones.upper_arm_r, Vec3::new(0.0, -0.04, -0.09), half),
             };

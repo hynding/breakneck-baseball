@@ -6,6 +6,14 @@
 //! and world-spawn systems read the [`Theme`] resource instead of hardcoding
 //! colours, so a whole new look is a new [`ThemeId`] arm — not new systems.
 //! **T** on the main menu cycles themes.
+//!
+//! Colour-vision check (2026-08-21, deuteranopia + protanopia emulation over
+//! the web build, screenshots in `docs/agent/playtest/2026-08-21/`): both
+//! built-in themes keep the team split legible — the warm team collapses
+//! toward yellow-olive and the cool team toward lavender, distinct hues in
+//! all three conditions — and jersey names/numbers back-stop any remaining
+//! ambiguity. HUD count dots are position-labelled (B/S/O), so their colours
+//! are redundant. No palette change needed.
 
 use bevy::color::LinearRgba;
 use bevy::prelude::{Color, Resource};

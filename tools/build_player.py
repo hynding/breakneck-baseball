@@ -102,6 +102,11 @@ TAU = 2 * math.pi
 CLIPS = {
     "Idle": (1.0, True, {
         "Spine": {"rx": [(0, 0), (0.5, 0.03), (1, 0)]},
+        # The Bat bone's rest pose is solved for the raised-arm stances; with
+        # idle arms it reads as a bat parked vertically behind the back
+        # (playtest 2026-08-20, TODO 5). Swing the barrel down-forward so the
+        # batter carries it loose at his side between pitches.
+        "Bat": {"rx": [(0, -2.6), (1, -2.6)]},
     }),
     "WindUp": (0.5, False, {
         "UpperArm.R": {"rx": [(0, 0), (1, -2.6)]},

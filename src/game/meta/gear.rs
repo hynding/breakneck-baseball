@@ -343,14 +343,16 @@ fn dress_rigs(
             // The baked jersey torso cube (`tools/build_player.py`'s Spine
             // part) reaches to local Z≈0.12 in front of the Spine bone — a
             // chain at Z=0.02 sits inside the mesh and z-fights invisibly
-            // (confirmed via a web build screenshot); Z=0.19 clears its front
-            // face and drapes over the collar instead.
+            // (confirmed via a web build screenshot). Z=0.15 clears the
+            // front face by 3 cm; the original 0.19 standoff read as a
+            // detached floating ring at the batter's chest once the stance
+            // lean tilted the spine (playtest 2026-08-20, TODO 7).
             props.push(spawn_prop(
                 &mut commands,
                 bones.spine,
                 gear.chain.clone(),
                 gear.gold.clone(),
-                Transform::from_xyz(0.0, 0.27, 0.19)
+                Transform::from_xyz(0.0, 0.24, 0.135)
                     .with_rotation(Quat::from_rotation_x(85f32.to_radians())),
             ));
         }

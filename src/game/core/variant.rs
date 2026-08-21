@@ -405,7 +405,16 @@ impl VariantId {
                 // capsule's forward surface is ~z=-1.1), which is why
                 // `camera::hide_occluders` hides the catcher outright in
                 // this view for as long as the duel framing holds.
-                duel_eye: Vec3::new(0.0, 1.4, -1.2),
+                // The eye also sits 0.4 m toward first base (away from the
+                // right-handed batter's box at x=+0.7): at 2560-wide the
+                // dead-centre framing let the batter fill a third of the
+                // screen and shade the zone; the small lateral step keeps
+                // him large but clears the zone box and the pitcher
+                // (playtest 2026-08-20, TODO 9).
+                // The half-step closer (z −1.2 → −1.15) pays back the
+                // distance the lateral step added, keeping the 80–90%
+                // batter-height contract intact.
+                duel_eye: Vec3::new(-0.4, 1.4, -1.15),
                 duel_target: Vec3::new(0.0, 0.2, 4.0),
                 // Behind and above the mound (rubber at z=`pitch_distance`),
                 // looking back at the batter's box — the reference
@@ -461,7 +470,10 @@ impl VariantId {
                 // contract as Standard's `duel_eye` (80–90% of screen
                 // height, camera test is the arbiter), scaled a touch lower
                 // for the lawn's cosier geometry.
-                duel_eye: Vec3::new(0.0, 1.3, -1.25),
+                // Same 0.35 m step toward first as Standard (TODO 9), sized
+                // down with the lawn, with the same half-step closer to keep
+                // the batter-height contract.
+                duel_eye: Vec3::new(-0.35, 1.3, -1.2),
                 duel_target: Vec3::new(0.0, 0.3, 4.0),
                 // Same reasoning as Standard's `behind_pitcher_eye`, scaled
                 // to the shorter lawn pitch distance: 3 m behind the rubber

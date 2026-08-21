@@ -83,6 +83,11 @@ const RING_MIN: f32 = 0.55;
 const RING_MAX: f32 = 3.5;
 /// Below this ball height the ring retires (the ball is basically down).
 const RING_OFF_HEIGHT: f32 = 1.2;
+/// Landings this close to home get no ring: the at-bat framing still holds
+/// the plate, and a ground ring that near reads as a floating hoop "on" the
+/// batter in catcher POV (playtest 2026-08-20, TODO 7). Shallow pops resolve
+/// in the duel view without it.
+const RING_HOME_SUPPRESS_M: f32 = 6.0;
 
 pub(super) fn spawn_landing_ring(
     mut commands: Commands,
@@ -138,6 +143,12 @@ pub(super) fn update_landing_ring(
         BALL_DRAG_FACTOR,
         MAGNUS_FACTOR,
     );
+    if Vec2::new(landing.x, landing.z).length() < RING_HOME_SUPPRESS_M {
+        if *visibility != Visibility::Hidden {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    }
     ring_tf.translation = Vec3::new(landing.x, 0.06, landing.z);
     let radius = (RING_MIN + RING_PER_SECOND * hang).clamp(RING_MIN, RING_MAX);
     ring_tf.scale = Vec3::new(radius, 1.0, radius);
