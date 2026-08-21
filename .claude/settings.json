@@ -11,6 +11,18 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"${CLAUDE_PROJECT_DIR:-.}\" && out=$(PATH=\"/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$PATH\" cargo clippy --all-targets 2>&1 | grep -E '^(warning|error)' | grep -v '^warning: the following packages contain code' | tail -12); if [ -n \"$out\" ]; then printf 'clippy:\\n%s\\n' \"$out\"; fi; true",
+            "timeout": 120,
+            "statusMessage": "Running cargo clippy"
+          }
+        ]
+      }
     ]
   }
 }
