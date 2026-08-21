@@ -71,6 +71,7 @@ jobs:
             "target/wasm32-unknown-unknown/wasm-release/${BIN_NAME}.wasm"
 
       - name: Optimize WASM (wasm-opt -Oz)
+        id: wasmopt
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends binaryen
@@ -84,11 +85,15 @@ jobs:
           mv "$IN.opt" "$IN"
           AFTER=$(stat -c%s "$IN")
           echo "wasm-opt -Oz: $BEFORE -> $AFTER bytes"
+          echo "wasm_size=$AFTER" >> "$GITHUB_OUTPUT"
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: web
+
+    outputs:
+      wasm_size: ${{ steps.wasmopt.outputs.wasm_size }}
 
   deploy:
     needs: build
@@ -100,3 +105,39 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
+
+  # A deploy that ships a broken or missing artifact must not pass silently:
+  # verify the live site actually serves the page and the exact wasm we built.
+  smoke-test:
+    needs: [build, deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Smoke-test live deployment
+        run: |
+          BASE="${{ needs.deploy.outputs.page_url }}"
+          BASE="${BASE%/}"
+          EXPECTED_SIZE="${{ needs.build.outputs.wasm_size }}"
+
+          # Pages CDN propagation can lag the deploy step by a few seconds.
+          for attempt in 1 2 3 4 5; do
+            PAGE_CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/")
+            [ "$PAGE_CODE" = "200" ] && break
+            echo "attempt $attempt: page returned $PAGE_CODE; retrying"
+            sleep 15
+          done
+          [ "$PAGE_CODE" = "200" ] || { echo "page: expected 200, got $PAGE_CODE" >&2; exit 1; }
+          echo "page: 200 OK"
+
+          WASM_URL="$BASE/out/breakneck-baseball_bg.wasm"
+          read -r CODE TYPE SIZE <<< "$(curl -s -o /dev/null \
+            -w '%{http_code} %{content_type} %{size_download}' "$WASM_URL")"
+          echo "wasm: $CODE $TYPE $SIZE bytes (expected $EXPECTED_SIZE)"
+          [ "$CODE" = "200" ] || { echo "wasm: expected 200, got $CODE" >&2; exit 1; }
+          case "$TYPE" in
+            application/wasm*) ;;
+            *) echo "wasm: expected application/wasm, got $TYPE" >&2; exit 1 ;;
+          esac
+          [ "$SIZE" = "$EXPECTED_SIZE" ] || {
+            echo "wasm: size $SIZE != built artifact $EXPECTED_SIZE" >&2; exit 1; }

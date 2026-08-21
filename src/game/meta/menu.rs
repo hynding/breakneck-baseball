@@ -178,6 +178,22 @@ fn build_menu(commands: &mut Commands, config: &GameConfig, theme: &Theme) {
                         TextLayout::new_with_justify(JustifyText::Center),
                     ));
                 });
+
+            // Build identifier so bug reports can name a version.
+            screen.spawn((
+                Text::new(concat!("v", env!("CARGO_PKG_VERSION"))),
+                TextFont {
+                    font_size: 12.0,
+                    ..default()
+                },
+                TextColor(ui.text_dim),
+                Node {
+                    position_type: PositionType::Absolute,
+                    right: Val::Px(10.0),
+                    bottom: Val::Px(8.0),
+                    ..default()
+                },
+            ));
         });
 }
 
