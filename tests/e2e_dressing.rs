@@ -96,7 +96,7 @@ fn batter_redresses_on_half_inning_flip() {
 fn runner_rigs_are_dressed() {
     use breakneck_baseball::game::gear::DressedAs;
     use breakneck_baseball::game::runner::Runner;
-    use breakneck_baseball::game::scenario::{apply_to_world, presets, PRESET_LOADED};
+    use breakneck_baseball::game::scenario::{PRESET_LOADED, apply_to_world, presets};
     let mut app = headless_app();
     start_game(&mut app, KeyCode::Digit1);
     let s = presets()

@@ -6,7 +6,7 @@ mod common;
 
 use bevy::prelude::*;
 use breakneck_baseball::game::appearance::{Headwear, RosterDefs};
-use breakneck_baseball::game::creator::{save_working_to, selected_def, CreatorState, PreviewRig};
+use breakneck_baseball::game::creator::{CreatorState, PreviewRig, save_working_to, selected_def};
 use breakneck_baseball::game::gear::DressedAs;
 use breakneck_baseball::game::model_assets::RigCapMeshes;
 use breakneck_baseball::game::{GameState, Team};

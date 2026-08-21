@@ -335,8 +335,8 @@ fn shoulder_jersey_quads_share_the_same_mount_yaw() {
     }
 }
 
-use breakneck_baseball::game::input::Intents;
 use breakneck_baseball::game::ScoreBoard;
+use breakneck_baseball::game::input::Intents;
 use common::DriveGame;
 
 /// Task 18: the plate batter holds his batting stance loop through the duel

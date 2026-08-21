@@ -33,7 +33,7 @@ use breakneck_baseball::game::rules::ContactQuality;
 use breakneck_baseball::game::variant::Ruleset;
 use breakneck_baseball::game::{GameState, ScoreBoard, Team};
 
-use common::{headless_app, run_until, start_game, DriveGame};
+use common::{DriveGame, headless_app, run_until, start_game};
 
 /// A forced spread decoupled from the tuned default: with `foul_ms` forced
 /// to 140 ms below, this comfortably spans Perfect/Solid/FoulTip so the

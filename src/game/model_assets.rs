@@ -133,7 +133,7 @@ fn load_player_model(asset_server: Res<AssetServer>, mut commands: Commands) {
 }
 
 /// Team-tinted clones of the model's named materials, plus the umpires'
-/// fixed blacks — mirrors player.rs's `TeamPalette` caching pattern, but for
+/// fixed blacks — mirrors `game::player`'s `TeamPalette` caching pattern, but for
 /// the glTF rigs' shared skinned-mesh materials.
 #[derive(Resource)]
 pub struct GltfTeamMaterials {

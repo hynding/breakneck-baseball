@@ -3,12 +3,12 @@
 mod common;
 
 use bevy::prelude::*;
+use breakneck_baseball::game::Team;
 use breakneck_baseball::game::jersey::JerseyQuad;
 use breakneck_baseball::game::player::{Batter, Pitcher};
 use breakneck_baseball::game::roster::PlayerIdentity;
 use breakneck_baseball::game::runner::Runner;
-use breakneck_baseball::game::scenario::{apply_to_world, presets, PRESET_LOADED};
-use breakneck_baseball::game::Team;
+use breakneck_baseball::game::scenario::{PRESET_LOADED, apply_to_world, presets};
 use common::{headless_app, run_until, start_game};
 
 /// JerseyQuads start as rig-root children and re-parent onto bones once the
@@ -322,7 +322,7 @@ fn drive_pitch_in_pre_pitch(
 
 #[test]
 fn fidget_is_cut_before_the_windup() {
-    use breakneck_baseball::game::animation::{is_fidget, AnimClip, Playing};
+    use breakneck_baseball::game::animation::{AnimClip, Playing, is_fidget};
     use breakneck_baseball::game::flow::{Phase, Play};
     let mut app = headless_app();
     app.add_systems(common::DriveGame, drive_pitch_in_pre_pitch);

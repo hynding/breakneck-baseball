@@ -23,7 +23,7 @@ use breakneck_baseball::game::input::Intents;
 use breakneck_baseball::game::rules::ContactQuality;
 use breakneck_baseball::game::{GameState, ScoreBoard};
 
-use common::{headless_app, run_until, start_game, DriveGame};
+use common::{DriveGame, headless_app, run_until, start_game};
 
 /// Generous per-stage budget (steal windows, `Ruleset::steal_window_secs`,
 /// gate the pitch once a runner reaches base).

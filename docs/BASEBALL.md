@@ -51,7 +51,7 @@ the white 0.61 × 0.152 m rubber.
   long — i.e. the front line sits the same 3 ft ahead, symmetric either
   way. (A pre-research assumption for this task guessed a small forward
   offset toward the pitcher; the sourced groundskeeping template disagrees,
-  so the game keeps the box centred — see `field.rs`'s `BOX_HALF_LENGTH`.)
+  so the game keeps the box centred — see `game::field`'s `BOX_HALF_LENGTH`.)
 - Foul lines run in chalk from home plate through first and third base and
   on to the outfield fence. Per the Official Baseball Rules (Rule 2.03,
   "the first and third base bags shall be entirely within the infield" —
@@ -113,7 +113,7 @@ past the drawn frame. Players can toggle the overlay from the pause board
 
 In the game: the stadium ground uses a procedurally generated striped-grass
 texture and the infield diamond / mound / cutout circles use a speckled dirt
-texture (`field.rs`, runtime images — no asset files, same philosophy as the
+texture (`game::field`, runtime images — no asset files, same philosophy as the
 procedural audio and jerseys).
 
 ## People and presentation
@@ -183,7 +183,7 @@ ends the inning the instant it is recorded, so no run scores on the play
 
 Count thresholds (4 balls / 3 strikes / 3 outs), the strike zone, tag-ups,
 double plays, hit-by-pitch, dropped third strike, steals, leadoffs and
-pickoffs are modeled deterministically in `src/game/rules.rs` — see
+pickoffs are modeled deterministically in `game::rules` — see
 CLAUDE.md's architecture notes for how each maps.
 
 ## Sources

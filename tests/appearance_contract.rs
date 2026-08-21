@@ -3,8 +3,8 @@
 //! rendering silently. Mirrors the invariants `roster.rs` unit tests pin.
 
 use breakneck_baseball::game::appearance::{
-    embedded_roster_file, Arms, CelebrationId, Eyewear, FidgetId, Headwear, RosterDefs, SkinTone,
-    StanceId, TrotId, APPEARANCE_VERSION, EMBEDDED_PLAYERS_RON,
+    APPEARANCE_VERSION, Arms, CelebrationId, EMBEDDED_PLAYERS_RON, Eyewear, FidgetId, Headwear,
+    RosterDefs, SkinTone, StanceId, TrotId, embedded_roster_file,
 };
 use breakneck_baseball::game::rules::LINEUP_SIZE;
 

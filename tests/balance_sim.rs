@@ -68,7 +68,7 @@ use breakneck_baseball::game::input::{Controllers, InputSource};
 use breakneck_baseball::game::rules::BattingOrder;
 use breakneck_baseball::game::{GameState, ScoreBoard, Team};
 
-use common::{deterministic_headless_app, run_until, start_game, tap_key, DriveGame};
+use common::{DriveGame, deterministic_headless_app, run_until, start_game, tap_key};
 
 /// Hard cap per game. A one-inning CPU game settles in a few thousand frames;
 /// this is a generous backstop (and covers a tie that spills into extras)

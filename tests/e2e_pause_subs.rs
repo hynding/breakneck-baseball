@@ -44,7 +44,7 @@ use breakneck_baseball::game::settings::Settings;
 use breakneck_baseball::game::subs::ControlsDialog;
 use breakneck_baseball::game::{GameState, ScoreBoard};
 
-use common::{headless_app, run_until, start_game, tap_key, DriveGame};
+use common::{DriveGame, headless_app, run_until, start_game, tap_key};
 
 const MAX_FRAMES: u64 = 20_000;
 

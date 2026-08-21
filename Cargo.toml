@@ -1,7 +1,8 @@
 [package]
 name = "breakneck-baseball"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+rust-version = "1.85"
 description = "A 3D baseball game built with Bevy, wgpu, and Rapier"
 license = "MIT OR Apache-2.0"
 
@@ -48,6 +49,16 @@ dev = ["bevy/dynamic_linking", "bevy/file_watcher"]
 
 # Debug mode: F1-toggled tabbed egui panel + gizmo overlays (see `game::debug`)
 debug = ["dep:bevy-inspector-egui"]
+
+[lints.rust]
+unexpected_cfgs = "warn"
+
+[lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
 
 [profile.dev]
 opt-level = 1
