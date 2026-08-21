@@ -49,3 +49,7 @@ wasm fps, touch hardware behavior, 1366×768 HUD legibility.
 26. [ ] nice accessibility — The mid-flight pause refusal is silent; flash the existing banner ("PLAY IN PROGRESS") so the Esc press feels acknowledged (`meta/subs.rs` refusal path → `BannerTone`).
 27. [ ] nice accessibility — Colour-blind check: pink-vs-light-blue built-ins are plausibly deuteranopia-safe and jerseys carry names/numbers, but nobody has run the devtools deficiency emulation; do so for both themes and record it in the theme docs.
 28. [ ] nice load — Add a favicon to `web/` (two 404s on every load; also makes the tab identifiable).
+
+## Engine upgrade
+
+29. [ ] nice engine — Bevy 0.15.3 / bevy_rapier3d 0.28 → latest is Bevy 0.19.1 / rapier 0.35 (four majors). Recommendation: **ship first, upgrade after** the production-readiness ship-blockers (items 12–15) — then do it as four sequential gated migrations (~4–5 sessions), not one jump. Full analysis: `docs/agent/BEVY-UPGRADE-ASSESSMENT.md`.
