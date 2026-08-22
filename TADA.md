@@ -115,3 +115,16 @@
     session; clamp math re-verified by inspection (dist × 0.007 into [0.05, 0.9] m world
     radius; the multi-camera fallback degrades to the *minimum*, not max). Closed as
     unreproducible; reopen with a screenshot if it recurs.
+
+## Batch 5 — release robustness (2026-08-21)
+
+57. [x] TODO 34 — headless boot check in the deploy pipeline. — the smoke test could not
+    catch a wasm that dies at init (the binaryen-108 clamp passed every byte-level signal —
+    TADA 49). `tools/web_boot_check.mjs` now boots the live page in headless Chrome
+    (SwiftShader WebGL2, raw CDP over Node 22's built-in WebSocket, zero deps) as a final
+    `pages.yml` smoke-test step: PASS needs the canvas up and the loading overlay gone,
+    held 10 s for late panics; FAIL on the "Something broke" card or a stalled boot.
+    Proven both ways before shipping: the healthy artifact boots, and a wasm with the
+    externref table max clamped to min (the exact 108 corruption, byte-level simulated)
+    fails with `WebAssembly.Table.grow(): failed to grow table by 4`. First CI run booted
+    the live deploy in ~34 s on the runner; verified independently from this machine.

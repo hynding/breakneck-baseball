@@ -14,6 +14,11 @@ NOTE: Everything that has been completed gets moved to TADA.md
     wasm numbers (120 fps display-capped at 2560×1488, Msaa 2x/1024 shadow map — TADA 46),
     and a real-gamepad pass over the subs board bindings (D-pad + South/North added
     2026-08-21, exercised headlessly only via the keyboard path).
+    *Progress 2026-08-21 (session cut short, resume here):* Perfect-contact capture banked —
+    PERFECT! stamp + landing ring + FLY OUT sequence (playtest 24-25); hit-stop/slow-mo feel
+    unconfirmed (stills can't show it, need the player's yes/no). Still open: HR + force-play
+    captures, fps readout, gamepad subs pass, and the item-11 crowd-loop listen. Walkthrough
+    steps 5-12 in the 2026-08-21 session transcript still apply.
 
 ## Balance-gated (attempted 2026-08-21, reverted — the bands said no)
 
@@ -28,14 +33,6 @@ NOTE: Everything that has been completed gets moved to TADA.md
     tuned as one package through `tests/balance_sim.rs`. (Post-revert baseline with the
     TADA-47 fielding fix in place is healthy and stable: K% 20.6-21.0, runs/9 4.16-4.84,
     HR/9 2.14-2.59 across repeat runs — squarely inside the historical anchors.)
-
-## Release robustness follow-up
-
-34. [ ] nice release — The post-deploy smoke test verifies 200/content-type/byte-size but
-    cannot catch boot failures (the binaryen-108 table clamp shipped a deploy that died at
-    init while every smoke signal passed — TADA 49). Consider a headless boot check in CI:
-    fetch the deployed page in headless Chrome (or instantiate the wasm in Node with a
-    stubbed import object) and assert the canvas appears / no `bb-panic` message fires.
 
 ## Engine upgrade
 
