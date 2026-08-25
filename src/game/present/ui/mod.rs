@@ -12,8 +12,8 @@ mod banner;
 mod hud;
 
 use banner::{
-    BannerTimer, ContactStampTimer, fade_banner, fade_contact_stamp, show_banner,
-    show_contact_stamp, update_duel_panels,
+    BannerFadeAt, StampFadeAt, fade_banner, fade_contact_stamp, show_banner, show_contact_stamp,
+    update_duel_panels,
 };
 use hud::{
     spawn_hud, update_base_ring, update_count_dots, update_inning_text, update_meter_bar,
@@ -61,6 +61,10 @@ struct MeterFill;
 #[derive(Component)]
 struct BannerText;
 
+/// The contact stamp's painted chip root (see the wasm note at its spawn).
+#[derive(Component)]
+pub(crate) struct StampChip;
+
 /// The contact-quality stamp (PERFECT! / EARLY / LATE / FOUL TIP), painted at
 /// spawn near the zone-box screen area and shown by text mutation only — see
 /// the wasm UI rule on [`hidden_tint`]. Public so e2e tests can query its
@@ -104,8 +108,8 @@ pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<BannerTimer>()
-            .init_resource::<ContactStampTimer>()
+        app.init_resource::<BannerFadeAt>()
+            .init_resource::<StampFadeAt>()
             .add_systems(crate::game::game_start(), spawn_hud)
             .add_systems(
                 Update,

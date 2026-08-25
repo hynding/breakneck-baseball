@@ -14,28 +14,29 @@ use super::{
 };
 
 /// How long the current banner stays visible before clearing.
-#[derive(Resource)]
-pub(super) struct BannerTimer(Timer);
-
-impl Default for BannerTimer {
-    fn default() -> Self {
-        Self(Timer::from_seconds(1.6, TimerMode::Once))
-    }
-}
+pub(super) const BANNER_SECS: f64 = 1.6;
 
 /// How long the contact stamp (Task B4) stays up before clearing — quick
 /// enough to read as a reaction to *this* swing, gone well before the next.
-const CONTACT_STAMP_SECS: f32 = 0.8;
+const CONTACT_STAMP_SECS: f64 = 0.8;
 
-/// How long the current contact stamp stays visible before clearing.
-#[derive(Resource)]
-pub(super) struct ContactStampTimer(Timer);
+/// When (in `Time::elapsed_secs_f64` terms) the banner pill should clear;
+/// `None` while nothing is showing.
+///
+/// A deadline, deliberately not a ticking `Timer`: on wasm/WebGL2 a system
+/// that ticks a `ResMut` timer every frame while also holding the pill's
+/// queries kept the pill from ever rendering — ECS said visible, the screen
+/// stayed empty (bisected build-by-build 2026-08-25, TODO 29; the same
+/// system with an untouched body was harmless). The fade systems therefore
+/// only *read* until the deadline passes, and take their one mutable step
+/// when it does.
+#[derive(Resource, Default)]
+pub(super) struct BannerFadeAt(pub(super) Option<f64>);
 
-impl Default for ContactStampTimer {
-    fn default() -> Self {
-        Self(Timer::from_seconds(CONTACT_STAMP_SECS, TimerMode::Once))
-    }
-}
+/// When the contact stamp should clear; `None` while nothing is showing.
+/// Same deadline-not-timer rule as [`BannerFadeAt`].
+#[derive(Resource, Default)]
+pub(super) struct StampFadeAt(Option<f64>);
 
 /// The two cards anchored to the bottom-left (batter/"AT BAT") and top-right
 /// (pitcher/"PITCHING", with the pitch-selection legend) corners — visible
@@ -96,7 +97,7 @@ pub(super) fn spawn_duel_panels(commands: &mut Commands, theme: &Theme) {
                 GameplayEntity,
                 node,
                 BackgroundColor(ui.panel_bg),
-                BorderColor(ui.panel_border),
+                BorderColor::all(ui.panel_border),
                 BorderRadius::all(Val::Px(12.0)),
             ))
             .with_children(|card| {
@@ -152,10 +153,10 @@ pub(super) fn update_duel_panels(
         }
         if visible {
             bg.0 = ui.panel_bg;
-            border.0 = ui.panel_border;
+            *border = BorderColor::all(ui.panel_border);
         } else {
             bg.0 = hidden_tint(ui.panel_bg);
-            border.0 = hidden_tint(ui.panel_border);
+            *border = BorderColor::all(hidden_tint(ui.panel_border));
         }
     }
 
@@ -205,10 +206,11 @@ pub(super) fn update_duel_panels(
 
 /// Paints the pill and its text for the latest banner event.
 pub(super) fn show_banner(
-    mut events: EventReader<PlayBanner>,
+    mut events: MessageReader<PlayBanner>,
     theme: Res<Theme>,
-    mut timer: ResMut<BannerTimer>,
-    mut pill_q: Query<(&mut BackgroundColor, &mut BorderColor, &mut Visibility), With<BannerPill>>,
+    time: Res<Time>,
+    mut fade_at: ResMut<BannerFadeAt>,
+    mut pill_q: Query<&mut Visibility, With<BannerPill>>,
     mut text_q: Query<(&mut Text, &mut TextColor), With<BannerText>>,
 ) {
     // Show only the latest banner this frame.
@@ -226,31 +228,32 @@ pub(super) fn show_banner(
         **text = banner.text.clone();
         color.0 = tone_color;
     }
-    for (mut bg, mut border, mut visibility) in &mut pill_q {
-        bg.0 = ui.panel_bg;
-        border.0 = ui.panel_border;
+    for mut visibility in &mut pill_q {
         *visibility = Visibility::Inherited;
     }
-    timer.0 = Timer::from_seconds(1.6, TimerMode::Once);
+    fade_at.0 = Some(time.elapsed_secs_f64() + BANNER_SECS);
 }
 
-/// Clears the pill once its display time is up.
+/// Clears the pill once its display time is up. Reads only until the
+/// deadline passes (see [`BannerFadeAt`] for why this must not tick).
 pub(super) fn fade_banner(
     time: Res<Time>,
-    mut timer: ResMut<BannerTimer>,
+    mut fade_at: ResMut<BannerFadeAt>,
     mut pill_q: Query<&mut Visibility, With<BannerPill>>,
     mut text_q: Query<(&mut Text, &mut TextColor), With<BannerText>>,
 ) {
-    if timer.0.finished() {
+    let Some(at) = fade_at.0 else {
+        return;
+    };
+    if time.elapsed_secs_f64() < at {
         return;
     }
-    if timer.0.tick(time.delta()).just_finished() {
-        for mut visibility in &mut pill_q {
-            *visibility = Visibility::Hidden;
-        }
-        for (mut text, _color) in &mut text_q {
-            **text = String::new();
-        }
+    fade_at.0 = None;
+    for mut visibility in &mut pill_q {
+        *visibility = Visibility::Hidden;
+    }
+    for (mut text, _color) in &mut text_q {
+        **text = String::new();
     }
 }
 
@@ -260,10 +263,12 @@ pub(super) fn fade_banner(
 /// for a foul; nothing for `Whiff` — the classic strike/ball banner already
 /// covers a swing-and-miss.
 pub(super) fn show_contact_stamp(
-    mut events: EventReader<ContactEvent>,
+    mut events: MessageReader<ContactEvent>,
     theme: Res<Theme>,
-    mut timer: ResMut<ContactStampTimer>,
+    time: Res<Time>,
+    mut fade_at: ResMut<StampFadeAt>,
     mut text_q: Query<(&mut Text, &mut TextColor), With<ContactStampText>>,
+    mut chip_q: Query<&mut Visibility, With<super::StampChip>>,
 ) {
     let Some(ev) = events.read().last() else {
         return;
@@ -285,21 +290,31 @@ pub(super) fn show_contact_stamp(
         **text = label.to_string();
         text_color.0 = color;
     }
-    timer.0 = Timer::from_seconds(CONTACT_STAMP_SECS, TimerMode::Once);
+    for mut visibility in &mut chip_q {
+        *visibility = Visibility::Inherited;
+    }
+    fade_at.0 = Some(time.elapsed_secs_f64() + CONTACT_STAMP_SECS);
 }
 
-/// Blanks the contact stamp once its display time is up.
+/// Blanks the contact stamp once its display time is up. Deadline-driven,
+/// never ticking — see [`BannerFadeAt`].
 pub(super) fn fade_contact_stamp(
     time: Res<Time>,
-    mut timer: ResMut<ContactStampTimer>,
+    mut fade_at: ResMut<StampFadeAt>,
     mut text_q: Query<&mut Text, With<ContactStampText>>,
+    mut chip_q: Query<&mut Visibility, With<super::StampChip>>,
 ) {
-    if timer.0.finished() {
+    let Some(at) = fade_at.0 else {
+        return;
+    };
+    if time.elapsed_secs_f64() < at {
         return;
     }
-    if timer.0.tick(time.delta()).just_finished() {
-        for mut text in &mut text_q {
-            **text = String::new();
-        }
+    fade_at.0 = None;
+    for mut text in &mut text_q {
+        **text = String::new();
+    }
+    for mut visibility in &mut chip_q {
+        *visibility = Visibility::Hidden;
     }
 }

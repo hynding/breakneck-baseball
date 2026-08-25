@@ -107,8 +107,8 @@ fn drive(
 fn capture(
     stage: Res<Stage>,
     play: Option<Res<Play>>,
-    mut contact_ev: EventReader<ContactEvent>,
-    mut in_play_ev: EventReader<BallInPlayEvent>,
+    mut contact_ev: MessageReader<ContactEvent>,
+    mut in_play_ev: MessageReader<BallInPlayEvent>,
     ball: Query<&Velocity, With<Baseball>>,
     mut cap: ResMut<Captured>,
 ) {

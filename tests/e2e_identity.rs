@@ -383,7 +383,7 @@ fn home_run_queues_the_authored_celebration() {
     app.world_mut()
         .entity_mut(batter)
         .insert(Playing::new(AnimClip::BatterSwing));
-    app.world_mut().send_event(BallInPlayEvent {
+    app.world_mut().write_message(BallInPlayEvent {
         kind: ContactKind::HomeRun,
         landing: Vec3::new(0.0, 0.0, 120.0),
         contact_class: ContactClass::DeepFly,

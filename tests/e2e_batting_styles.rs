@@ -158,8 +158,8 @@ fn in_press_band(ball: &Query<(&Transform, &Velocity), With<Baseball>>) -> bool 
 
 fn capture(
     stage: Res<Stage>,
-    mut contact_ev: EventReader<ContactEvent>,
-    mut hit_ev: EventReader<HitEvent>,
+    mut contact_ev: MessageReader<ContactEvent>,
+    mut hit_ev: MessageReader<HitEvent>,
     mut cap: ResMut<Captured>,
 ) {
     let s = stage.0.min(STAGE_COUNT - 1);

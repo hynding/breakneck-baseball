@@ -279,7 +279,7 @@ impl Plugin for GamePlugin {
             })
             .init_resource::<Rosters>()
             .init_resource::<scenario::PitchOverride>()
-            .add_event::<scenario::ScenarioAppliedEvent>()
+            .add_message::<scenario::ScenarioAppliedEvent>()
             // Sub-plugins (input/menu first so their resources exist for the
             // rest); split across two tuples — `add_plugins` tops out at 15.
             .add_plugins((

@@ -35,7 +35,7 @@ pub(super) fn in_play(mut play: ResMut<Play>, time: Res<Time>, rules: Res<Rulese
         return;
     }
     play.timer.tick(time.delta());
-    if play.resolved && play.pending_call.is_none() && play.timer.finished() {
+    if play.resolved && play.pending_call.is_none() && play.timer.is_finished() {
         play.phase = Phase::Result;
         play.timer = Timer::from_seconds(rules.pace.result_secs, TimerMode::Once);
     }
@@ -47,7 +47,7 @@ pub(super) fn in_play(mut play: ResMut<Play>, time: Res<Time>, rules: Res<Rulese
 #[allow(clippy::too_many_arguments)]
 pub(super) fn resolve_live_play(
     time: Res<Time>,
-    mut events: EventReader<LiveBallEvent>,
+    mut events: MessageReader<LiveBallEvent>,
     mut play: ResMut<Play>,
     rules_res: Res<Ruleset>,
     field: Res<FieldSpec>,
@@ -55,7 +55,7 @@ pub(super) fn resolve_live_play(
     mut score: ResMut<ScoreBoard>,
     mut bases: ResMut<Bases>,
     mut order: ResMut<BattingOrder>,
-    mut banner: EventWriter<PlayBanner>,
+    mut banner: MessageWriter<PlayBanner>,
     ball_q: Query<&Transform, With<Baseball>>,
 ) {
     if play.phase != Phase::InPlay {
@@ -67,7 +67,7 @@ pub(super) fn resolve_live_play(
     // with the flight cap as a backstop — bang-bang plays look bang-bang.
     if play.resolved {
         let arrived = events.read().any(|ev| matches!(ev, LiveBallEvent::Settled));
-        if play.pending_call.is_some() && (arrived || play.timer.finished()) {
+        if play.pending_call.is_some() && (arrived || play.timer.is_finished()) {
             let outcome = play.pending_call.take().unwrap();
             let batter = score.batting_team();
             resolve_contact(
@@ -128,7 +128,7 @@ pub(super) fn resolve_live_play(
     }
     // Play clock expired with the ball still loose: call it from where the
     // ball is right now.
-    if resolution.is_none() && play.timer.finished() {
+    if resolution.is_none() && play.timer.is_finished() {
         let pos = ball_q
             .single()
             .map(|t| t.translation)
@@ -167,9 +167,9 @@ pub(super) fn resolve_live_play(
 /// plays (a rare home run clipping the top of the wall) stay silent — the
 /// call was already made.
 pub(super) fn announce_wall_bang(
-    mut bangs: EventReader<WallBangEvent>,
+    mut bangs: MessageReader<WallBangEvent>,
     mut play: ResMut<Play>,
-    mut banner: EventWriter<PlayBanner>,
+    mut banner: MessageWriter<PlayBanner>,
 ) {
     let banged = bangs.read().next().is_some();
     if banged && play.phase == Phase::InPlay && !play.resolved && !play.wall_called {
@@ -185,7 +185,7 @@ pub(super) fn resolve_contact(
     score: &mut ScoreBoard,
     bases: &mut Bases,
     ruleset: &Ruleset,
-    banner: &mut EventWriter<PlayBanner>,
+    banner: &mut MessageWriter<PlayBanner>,
     runners_going: bool,
 ) {
     match outcome {

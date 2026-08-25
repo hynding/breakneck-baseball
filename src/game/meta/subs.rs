@@ -127,7 +127,7 @@ fn open_pause(
     score: Res<ScoreBoard>,
     flying: Query<(), (With<Baseball>, With<InFlight>)>,
     mut menu: ResMut<SubsMenu>,
-    mut banner: EventWriter<PlayBanner>,
+    mut banner: MessageWriter<PlayBanner>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     if !pause_pressed(&keyboard, &pads) {
@@ -157,8 +157,8 @@ fn open_pause(
 /// moment disarms it: the player is back and watching.
 #[allow(clippy::too_many_arguments)]
 fn auto_pause_on_focus_loss(
-    mut occluded: EventReader<WindowOccluded>,
-    mut focused: EventReader<WindowFocused>,
+    mut occluded: MessageReader<WindowOccluded>,
+    mut focused: MessageReader<WindowFocused>,
     play: Res<Play>,
     score: Res<ScoreBoard>,
     flying: Query<(), (With<Baseball>, With<InFlight>)>,
@@ -275,7 +275,7 @@ fn spawn_board(mut commands: Commands, theme: Res<Theme>) {
                         ..default()
                     },
                     BackgroundColor(hidden_tint(ui.panel_bg)),
-                    BorderColor(hidden_tint(ui.panel_border)),
+                    BorderColor::all(hidden_tint(ui.panel_border)),
                     BorderRadius::all(Val::Px(16.0)),
                 ))
                 .with_children(|card| {
@@ -314,7 +314,7 @@ fn spawn_board(mut commands: Commands, theme: Res<Theme>) {
                         ..default()
                     },
                     BackgroundColor(hidden_tint(ui.panel_bg)),
-                    BorderColor(hidden_tint(ui.panel_border)),
+                    BorderColor::all(hidden_tint(ui.panel_border)),
                     BorderRadius::all(Val::Px(12.0)),
                 ))
                 .with_children(|card| {
@@ -326,7 +326,7 @@ fn spawn_board(mut commands: Commands, theme: Res<Theme>) {
                             ..default()
                         },
                         TextColor(ui.text_dim),
-                        TextLayout::new_with_justify(JustifyText::Center),
+                        TextLayout::new_with_justify(Justify::Center),
                     ));
                 });
         });
@@ -367,10 +367,10 @@ fn update_board(
     for (mut bg, mut border) in &mut cards {
         if visible {
             bg.0 = ui.panel_bg;
-            border.0 = ui.panel_border;
+            *border = BorderColor::all(ui.panel_border);
         } else {
             bg.0 = hidden_tint(ui.panel_bg);
-            border.0 = hidden_tint(ui.panel_border);
+            *border = BorderColor::all(hidden_tint(ui.panel_border));
         }
     }
 
@@ -462,10 +462,10 @@ fn update_controls_dialog(
     for (mut bg, mut border) in &mut cards {
         if visible {
             bg.0 = ui.panel_bg;
-            border.0 = ui.panel_border;
+            *border = BorderColor::all(ui.panel_border);
         } else {
             bg.0 = hidden_tint(ui.panel_bg);
-            border.0 = hidden_tint(ui.panel_border);
+            *border = BorderColor::all(hidden_tint(ui.panel_border));
         }
     }
     for mut text in &mut text {

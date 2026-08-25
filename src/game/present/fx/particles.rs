@@ -231,7 +231,7 @@ pub(super) fn update_ball_halo(
 
 /// Sparks fly off the bat at contact.
 pub(super) fn contact_burst(
-    mut hits: EventReader<HitEvent>,
+    mut hits: MessageReader<HitEvent>,
     ball_q: Query<&Transform, With<Baseball>>,
     assets: Option<Res<FxAssets>>,
     time: Res<Time>,
@@ -268,7 +268,7 @@ pub(super) fn contact_burst(
 
 /// Sparks spray back off the padding when the ball bangs the wall.
 pub(super) fn wall_bang_burst(
-    mut bangs: EventReader<WallBangEvent>,
+    mut bangs: MessageReader<WallBangEvent>,
     assets: Option<Res<FxAssets>>,
     time: Res<Time>,
     mut commands: Commands,
@@ -334,7 +334,7 @@ pub(super) struct Fireworks {
 /// trot. Scales up the same spark burst the wall bang uses; like every fx
 /// system it only spawns cosmetic motes and never touches the score.
 pub(super) fn home_run_fireworks(
-    mut in_play: EventReader<BallInPlayEvent>,
+    mut in_play: MessageReader<BallInPlayEvent>,
     play: Res<Play>,
     assets: Option<Res<FxAssets>>,
     time: Res<Time>,
@@ -353,11 +353,11 @@ pub(super) fn home_run_fireworks(
     if !show.active {
         return;
     }
-    if show.remaining.tick(time.delta()).finished() {
+    if show.remaining.tick(time.delta()).is_finished() {
         show.active = false;
         return;
     }
-    if !show.next.tick(time.delta()).finished() {
+    if !show.next.tick(time.delta()).is_finished() {
         return;
     }
     let interval = if show.perfect {
@@ -406,7 +406,7 @@ const DUST_MIN_SPEED: f32 = 4.0;
 
 /// A puff of dirt wherever the ball thumps the ground.
 pub(super) fn bounce_dust(
-    mut collisions: EventReader<CollisionEvent>,
+    mut collisions: MessageReader<CollisionEvent>,
     ball_q: Query<(Entity, &Transform, &Velocity), With<Baseball>>,
     assets: Option<Res<FxAssets>>,
     time: Res<Time>,
@@ -470,7 +470,7 @@ pub(super) fn tick_particles(
         } else {
             (1.0 - f).max(0.01)
         });
-        if particle.timer.finished() {
+        if particle.timer.is_finished() {
             commands.entity(entity).despawn();
         }
     }

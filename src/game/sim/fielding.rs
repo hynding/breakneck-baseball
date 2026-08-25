@@ -149,7 +149,7 @@ fn cover_pos(field: &FieldSpec, base: usize) -> Vec3 {
 /// the nearest free fielder, and the best remaining fielder backs up the
 /// landing spot from deeper.
 fn assign_on_contact(
-    mut events: EventReader<BallInPlayEvent>,
+    mut events: MessageReader<BallInPlayEvent>,
     field: Res<FieldSpec>,
     ruleset: Res<Ruleset>,
     mut fielders: Query<(Entity, &Transform, &mut MoveIntent), With<Fielder>>,
@@ -239,7 +239,7 @@ fn chase_and_gather(
     ruleset: Res<Ruleset>,
     mut ball_q: Query<(Entity, &Transform, &mut Velocity), With<Baseball>>,
     mut fielders: Query<(Entity, &Transform, &mut MoveIntent), With<Fielder>>,
-    mut reports: EventWriter<LiveBallEvent>,
+    mut reports: MessageWriter<LiveBallEvent>,
     mut commands: Commands,
 ) {
     let PlayState::Chasing { chaser, bounced } = active.state else {
@@ -345,7 +345,7 @@ fn hold_and_throw(
     mut active: ResMut<ActivePlay>,
     mut ball_q: Query<(&mut Transform, &mut Velocity), With<Baseball>>,
     fielders: FielderSpots,
-    mut reports: EventWriter<LiveBallEvent>,
+    mut reports: MessageWriter<LiveBallEvent>,
     mut commands: Commands,
 ) {
     let PlayState::Holding {
@@ -454,7 +454,7 @@ fn receive_throw(
     mut active: ResMut<ActivePlay>,
     mut ball_q: Query<(Entity, &Transform, &mut Velocity), With<Baseball>>,
     fielders: FielderSpots,
-    mut reports: EventWriter<LiveBallEvent>,
+    mut reports: MessageWriter<LiveBallEvent>,
     mut commands: Commands,
 ) {
     let PlayState::Thrown { catcher, relay_to } = active.state else {

@@ -36,7 +36,7 @@ pub(super) fn result_phase(
     if play.phase != Phase::Result {
         return;
     }
-    if !play.timer.tick(time.delta()).finished() {
+    if !play.timer.tick(time.delta()).is_finished() {
         return;
     }
     // The play isn't over while runner rigs are still moving (the home-run
@@ -91,7 +91,7 @@ pub(super) fn result_phase(
 pub(super) fn hit(
     score: &mut ScoreBoard,
     bases: &mut Bases,
-    banner: &mut EventWriter<PlayBanner>,
+    banner: &mut MessageWriter<PlayBanner>,
     hit_bases: u32,
     label: &str,
     tone: BannerTone,
@@ -112,7 +112,7 @@ pub(super) fn add_ball(
     score: &mut ScoreBoard,
     bases: &mut Bases,
     ruleset: &Ruleset,
-    banner: &mut EventWriter<PlayBanner>,
+    banner: &mut MessageWriter<PlayBanner>,
 ) -> bool {
     match rules::call_ball(score, bases, ruleset) {
         BallCall::Walk { .. } => {
@@ -133,7 +133,7 @@ pub(super) fn resolve_steal(
     score: &mut ScoreBoard,
     bases: &mut Bases,
     ruleset: &Ruleset,
-    banner: &mut EventWriter<PlayBanner>,
+    banner: &mut MessageWriter<PlayBanner>,
 ) {
     let off_speed = play.live_kind != Some(rules::PitchKind::Fastball);
     match rules::attempt_steal(score, bases, ruleset, off_speed, play.big_jump) {
@@ -151,7 +151,7 @@ pub(super) fn add_strike(
     score: &mut ScoreBoard,
     bases: &mut Bases,
     ruleset: &Ruleset,
-    banner: &mut EventWriter<PlayBanner>,
+    banner: &mut MessageWriter<PlayBanner>,
     swinging: bool,
     dropped_third: bool,
 ) -> StrikeCall {

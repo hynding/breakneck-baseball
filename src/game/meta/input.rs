@@ -227,7 +227,7 @@ fn keyboard_intent(keyboard: &ButtonInput<KeyCode>, scheme: KeyScheme) -> TeamIn
 /// Keeps [`Controllers`] valid when a gamepad is unplugged: a disconnected pad
 /// falls back to keyboard input so the game keeps running.
 fn handle_gamepad_hotplug(
-    mut events: EventReader<GamepadConnectionEvent>,
+    mut events: MessageReader<GamepadConnectionEvent>,
     mut controllers: ResMut<Controllers>,
 ) {
     for event in events.read() {
@@ -284,7 +284,13 @@ mod tests {
     use crate::game::GameMode;
 
     fn pad(index: u32) -> Entity {
-        Entity::from_raw(index)
+        // 0.17 removed Entity::from_raw(u32); real spawns keep the tests'
+        // value-equality semantics (same index -> same Entity) honestly.
+        let mut world = World::new();
+        (0..=index)
+            .map(|_| world.spawn_empty().id())
+            .last()
+            .unwrap()
     }
 
     #[test]

@@ -39,8 +39,12 @@ NOTE: Everything that has been completed gets moved to TADA.md
 29. [ ] nice engine — Bevy 0.15.3 / bevy_rapier3d 0.28 → latest is Bevy 0.19.1 / rapier 0.35
     (four majors). Recommendation: **ship first, upgrade after** the production-readiness
     ship-blockers (resolved 2026-08-20 — TADA Batch 3) — then do it as four sequential gated
-    migrations (~4–5 sessions), not one jump. Full analysis:
+    migrations (~4–5 sessions), not one jump. Full analysis + progress log:
     `docs/agent/BEVY-UPGRADE-ASSESSMENT.md`.
+    Steps 1–2 DONE on branch `upgrade/bevy-0.17` (2026-08-25): 0.16.1 then 0.17.3, all gates
+    green incl. browser wasm — the week-long wasm banner bug root-caused (per-frame `ResMut`
+    tick in a UI-writing system; fixed with fade deadlines, see the wasm-ui-and-present skill).
+    Remaining: 0.18 (AnimationTarget split + UI extraction rework), then 0.19.
 
 ## Coach findings 2026-08-24
 

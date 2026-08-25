@@ -410,9 +410,9 @@ pub(super) fn spawn_lighting(commands: &mut Commands, yaw: f32, ambient_fraction
     // constraint — the blocky rigs' soft field shadows don't need the
     // resolution.
     #[cfg(not(target_arch = "wasm32"))]
-    commands.insert_resource(bevy::pbr::DirectionalLightShadowMap { size: 2048 });
+    commands.insert_resource(bevy::light::DirectionalLightShadowMap { size: 2048 });
     #[cfg(target_arch = "wasm32")]
-    commands.insert_resource(bevy::pbr::DirectionalLightShadowMap { size: 1024 });
+    commands.insert_resource(bevy::light::DirectionalLightShadowMap { size: 1024 });
     commands.spawn((
         GameplayEntity,
         DirectionalLight {

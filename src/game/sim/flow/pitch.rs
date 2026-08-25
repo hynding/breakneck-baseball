@@ -108,7 +108,7 @@ pub(super) fn pre_pitch(
     mut bases: ResMut<Bases>,
     rules_res: Res<Ruleset>,
     mut lead: ResMut<LeadState>,
-    mut banner: EventWriter<PlayBanner>,
+    mut banner: MessageWriter<PlayBanner>,
     pitcher_q: Query<Entity, With<Pitcher>>,
     mut commands: Commands,
 ) {
@@ -132,7 +132,7 @@ pub(super) fn pre_pitch(
         // The duel window: the ball is held. A defensive action here is a
         // pickoff throw at the leading runner, not a pitch — one throw per
         // reload, so a held button can't spam the bag.
-        if intent.action && play.pickoff_cooldown.finished() {
+        if intent.action && play.pickoff_cooldown.is_finished() {
             play.pickoff_cooldown =
                 Timer::from_seconds(rules_res.pace.pickoff_cooldown_secs, TimerMode::Once);
             match rules::attempt_pickoff(&mut score, &mut bases, &rules_res, lead.extended) {
@@ -188,7 +188,7 @@ pub(super) fn wind_up(
     score: Res<ScoreBoard>,
     bases: Res<Bases>,
     mut lead: ResMut<LeadState>,
-    mut pitch_ev: EventWriter<PitchEvent>,
+    mut pitch_ev: MessageWriter<PitchEvent>,
 ) {
     if play.phase != Phase::WindUp {
         return;
@@ -201,7 +201,7 @@ pub(super) fn wind_up(
         play.steal_armed = true;
         lead.extended = true;
     }
-    if play.timer.tick(time.delta()).finished() {
+    if play.timer.tick(time.delta()).is_finished() {
         let (aim, kind) = play
             .pending_pitch
             .take()
@@ -232,10 +232,10 @@ pub(super) fn pitch_live(
     mut score: ResMut<ScoreBoard>,
     mut bases: ResMut<Bases>,
     ball_q: Query<(&Transform, &Velocity), With<Baseball>>,
-    mut hit_ev: EventWriter<HitEvent>,
-    mut in_play_ev: EventWriter<BallInPlayEvent>,
-    mut contact_ev: EventWriter<ContactEvent>,
-    mut banner: EventWriter<PlayBanner>,
+    mut hit_ev: MessageWriter<HitEvent>,
+    mut in_play_ev: MessageWriter<BallInPlayEvent>,
+    mut contact_ev: MessageWriter<ContactEvent>,
+    mut banner: MessageWriter<PlayBanner>,
     mut order: ResMut<BattingOrder>,
     #[cfg(feature = "debug")] forced: Res<crate::game::debug::ForcedContact>,
 ) {
@@ -458,7 +458,7 @@ pub(super) fn catcher_receives(
         (Entity, &mut Transform, &mut Velocity, &mut Visibility),
         (With<Baseball>, With<InFlight>),
     >,
-    mut caught: EventWriter<PitchCaughtEvent>,
+    mut caught: MessageWriter<PitchCaughtEvent>,
     mut commands: Commands,
 ) {
     let Some((catcher, catcher_tf)) = catchers.iter().next() else {

@@ -22,6 +22,13 @@ children are added — and **UI roots spawned mid-`Playing` don't render at all*
 - Spawn-at-game-start systems key on the `game_start()` transition schedule
   (`OnTransition { MainMenu → Playing }`), never `OnEnter(Playing)` — otherwise they re-run on
   every unpause (`Playing ⇄ Paused` leaves the scene intact; teardown is `Playing → GameOver`).
+- **Never tick a per-frame `ResMut` (e.g. a `Timer` resource) inside a system that also holds
+  `&mut` queries on wasm-rendered UI.** On Bevy 0.16/0.17 wasm/WebGL2 such a system keeps the
+  queried entities from ever being extracted — ECS visibility stays correct, native renders
+  fine, and the bug survives every data-side probe (root-caused by system bisect 2026-08-25,
+  TODO 29). Hold a deadline instead: the show system stamps `Some(elapsed + linger)` once, the
+  fade system only *reads* until the deadline passes, then takes its single mutable step —
+  `BannerFadeAt`/`StampFadeAt` in `src/game/present/ui/banner.rs` are the reference.
 
 Verify UI changes on the web target (the `/run-web` skill), not just natively.
 

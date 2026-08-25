@@ -89,7 +89,7 @@ fn build_menu(commands: &mut Commands, config: &GameConfig, theme: &Theme) {
                         ..default()
                     },
                     BackgroundColor(ui.panel_bg),
-                    BorderColor(ui.panel_border),
+                    BorderColor::all(ui.panel_border),
                     BorderRadius::all(Val::Px(16.0)),
                 ))
                 .with_children(|card| {
@@ -175,7 +175,7 @@ fn build_menu(commands: &mut Commands, config: &GameConfig, theme: &Theme) {
                             ..default()
                         },
                         TextColor(ui.text_dim),
-                        TextLayout::new_with_justify(JustifyText::Center),
+                        TextLayout::new_with_justify(Justify::Center),
                     ));
                 });
 
@@ -346,7 +346,7 @@ fn spawn_game_over(mut commands: Commands, score: Res<ScoreBoard>, theme: Res<Th
                         ..default()
                     },
                     BackgroundColor(ui.panel_bg),
-                    BorderColor(ui.panel_border),
+                    BorderColor::all(ui.panel_border),
                     BorderRadius::all(Val::Px(16.0)),
                 ))
                 .with_children(|card| {

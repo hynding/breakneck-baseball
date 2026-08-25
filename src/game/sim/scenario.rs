@@ -56,7 +56,7 @@ pub struct PitchOverride(pub Option<PitchKind>);
 /// future consumer that wants to react to a scenario jump specifically
 /// (e.g. a debug-panel toast, or an e2e test asserting a jump happened)
 /// rather than to the resource changes it causes.
-#[derive(Event)]
+#[derive(Message)]
 pub struct ScenarioAppliedEvent {
     pub name: &'static str,
 }
@@ -137,7 +137,7 @@ pub fn apply_to_world(world: &mut World, s: &Scenario) -> Result<(), &'static st
         play.reset_for_scenario(world.resource::<Bases>(), world.resource::<Ruleset>());
     });
     world.resource_mut::<PitchOverride>().0 = s.next_cpu_pitch;
-    world.send_event(ScenarioAppliedEvent { name: s.name });
+    world.write_message(ScenarioAppliedEvent { name: s.name });
     Ok(())
 }
 
@@ -176,7 +176,7 @@ mod tests {
         assert_eq!((score.balls, score.strikes, score.outs), (3, 2, 2));
         let bases = world.resource::<Bases>();
         assert!(bases.is_occupied(0) && bases.is_occupied(1) && bases.is_occupied(2));
-        assert!(!world.resource::<Events<ScenarioAppliedEvent>>().is_empty());
+        assert!(!world.resource::<Messages<ScenarioAppliedEvent>>().is_empty());
     }
 
     #[test]
@@ -202,7 +202,7 @@ mod tests {
         world.insert_resource(VariantId::Standard.rules());
         world.insert_resource(VariantId::Standard.field());
         world.init_resource::<PitchOverride>();
-        world.init_resource::<Events<ScenarioAppliedEvent>>();
+        world.init_resource::<Messages<ScenarioAppliedEvent>>();
         world
     }
 }

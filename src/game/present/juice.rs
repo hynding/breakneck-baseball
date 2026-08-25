@@ -155,7 +155,7 @@ fn reset_juice(
 /// qualities (Whiff, FoulTip, and the currently-unreachable Weak) get no
 /// hit-stop.
 fn trigger_juice(
-    mut events: EventReader<ContactEvent>,
+    mut events: MessageReader<ContactEvent>,
     mut virt: ResMut<Time<Virtual>>,
     mut state: ResMut<JuiceState>,
     base: Res<BaseSpeed>,
@@ -207,7 +207,7 @@ fn tick_slowmo(
     let finished = state
         .slowmo_timer
         .as_mut()
-        .is_some_and(|t| t.tick(delta).finished());
+        .is_some_and(|t| t.tick(delta).is_finished());
     if finished {
         virt.set_relative_speed(base.0);
         state.clear();
@@ -240,7 +240,7 @@ fn tick_watchdog(
     let elapsed = state
         .watchdog
         .as_mut()
-        .is_some_and(|t| t.tick(real.delta()).finished());
+        .is_some_and(|t| t.tick(real.delta()).is_finished());
     if elapsed {
         virt.set_relative_speed(base.0);
         state.clear();
@@ -276,7 +276,7 @@ mod tests {
             .add_plugins(bevy::state::app::StatesPlugin)
             .init_state::<GameState>()
             .init_resource::<Play>()
-            .add_event::<ContactEvent>()
+            .add_message::<ContactEvent>()
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 Duration::from_secs_f64(1.0 / 60.0),
             ))
@@ -289,7 +289,7 @@ mod tests {
     }
 
     fn send_perfect(app: &mut App) {
-        app.world_mut().send_event(ContactEvent {
+        app.world_mut().write_message(ContactEvent {
             quality: ContactQuality::Perfect,
             batting_team: Team::Home,
             dt_ms: 0.0,

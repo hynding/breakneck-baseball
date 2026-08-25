@@ -73,9 +73,7 @@ impl Plugin for DebugPlugin {
         }
         app.init_resource::<DebugState>()
             .init_resource::<ForcedContact>()
-            .add_plugins(EguiPlugin {
-                enable_multipass_for_primary_context: false,
-            })
+            .add_plugins(EguiPlugin::default())
             .add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default())
             .add_plugins(bevy_rapier3d::render::RapierDebugRenderPlugin::default().disabled())
             .add_systems(Update, toggle_panel)
@@ -743,14 +741,14 @@ mod tests {
             // EguiPlugin's build wants shader/image assets that normally come
             // from the render stack; provide bare asset storage instead.
             .add_plugins(bevy::asset::AssetPlugin::default());
-        app.init_asset::<bevy::render::render_resource::Shader>();
+        app.init_asset::<bevy::shader::Shader>();
         app.init_asset::<bevy::image::Image>();
         // DefaultPlugins registers these in the real app; the inspector's
         // config plugin asserts on them, so the bare harness must too.
         app.register_type::<Entity>();
-        app.register_type::<bevy::asset::Handle<bevy::render::mesh::Mesh>>();
+        app.register_type::<bevy::asset::Handle<bevy::mesh::Mesh>>();
         app.register_type::<bevy::asset::Handle<bevy::image::Image>>();
-        app.register_type::<bevy::render::view::RenderLayers>();
+        app.register_type::<bevy::camera::visibility::RenderLayers>();
         app.init_state::<crate::game::GameState>();
         app.add_plugins(DebugPlugin);
 

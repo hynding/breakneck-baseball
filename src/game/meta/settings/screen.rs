@@ -83,7 +83,7 @@ pub(super) fn spawn_settings_screen(mut commands: Commands, theme: Res<Theme>) {
                     ..default()
                 },
                 BackgroundColor(hidden_tint(ui.panel_bg)),
-                BorderColor(hidden_tint(ui.panel_border)),
+                BorderColor::all(hidden_tint(ui.panel_border)),
                 BorderRadius::all(Val::Px(16.0)),
             ))
             .with_children(|card| {
@@ -160,7 +160,7 @@ pub(super) fn paint_settings_screen(
         }
         for (mut bg, mut border) in &mut cards {
             bg.0 = hidden_tint(ui.panel_bg);
-            border.0 = hidden_tint(ui.panel_border);
+            *border = BorderColor::all(hidden_tint(ui.panel_border));
         }
         **title_text = String::new();
         for (_, mut text, _) in &mut labels {
@@ -179,7 +179,7 @@ pub(super) fn paint_settings_screen(
         // layering over the 3D field; here the menu sits directly behind, so
         // the card must be fully opaque or its text collides with the menu's.
         bg.0 = ui.panel_bg.with_alpha(1.0);
-        border.0 = ui.panel_border;
+        *border = BorderColor::all(ui.panel_border);
     }
     **title_text = "SETTINGS".to_string();
     title_color.0 = ui.accent;

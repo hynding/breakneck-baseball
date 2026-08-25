@@ -146,7 +146,7 @@ pub(super) struct CameraKick(Vec3);
 type BallQuery<'w, 's> =
     Query<'w, 's, (&'static Transform, &'static Velocity), (With<Baseball>, Without<Camera3d>)>;
 
-pub(super) fn kick_on_hit(mut hits: EventReader<HitEvent>, mut kick: ResMut<CameraKick>) {
+pub(super) fn kick_on_hit(mut hits: MessageReader<HitEvent>, mut kick: ResMut<CameraKick>) {
     for _ in hits.read() {
         kick.0 += Vec3::new(0.0, 0.18, -0.35);
     }
@@ -154,7 +154,7 @@ pub(super) fn kick_on_hit(mut hits: EventReader<HitEvent>, mut kick: ResMut<Came
 
 /// A smaller thump when the ball bangs off the outfield wall.
 pub(super) fn kick_on_wall_bang(
-    mut bangs: EventReader<WallBangEvent>,
+    mut bangs: MessageReader<WallBangEvent>,
     mut kick: ResMut<CameraKick>,
 ) {
     for _ in bangs.read() {
@@ -317,7 +317,7 @@ pub(super) fn orbit_camera(
 }
 
 pub(super) fn zoom_camera(
-    mut scroll: EventReader<MouseWheel>,
+    mut scroll: MessageReader<MouseWheel>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mut orbit: ResMut<OrbitState>,
     mut camera_query: Query<&mut Transform, With<Camera3d>>,

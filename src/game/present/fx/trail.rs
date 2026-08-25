@@ -168,7 +168,7 @@ pub(super) fn tick_trail(
         // Bubbles pop before their fade completes; everything else rides
         // the ladder to the end.
         let done =
-            mote.timer.finished() || (mote.style == PitchTrailStyle::Bubbles && frac >= 0.85);
+            mote.timer.is_finished() || (mote.style == PitchTrailStyle::Bubbles && frac >= 0.85);
         if done {
             commands.entity(entity).despawn();
             continue;

@@ -52,7 +52,7 @@ pub struct CoachConfig {
 
 /// One finding, as a Bevy event, for anything that wants to react live
 /// (the debug tab feed, the autoplay JSON logger).
-#[derive(Event, Clone, Debug)]
+#[derive(Message, Clone, Debug)]
 pub struct CoachFindingEvent(pub CoachFinding);
 
 /// Accumulated findings: counts by check/severity plus a ring buffer of the
@@ -162,8 +162,8 @@ struct WorldFacts<'w> {
 /// The play-by-play reports the per-frame tracker consumes.
 #[derive(bevy::ecs::system::SystemParam)]
 struct PlayReports<'w, 's> {
-    in_play: EventReader<'w, 's, BallInPlayEvent>,
-    live: EventReader<'w, 's, LiveBallEvent>,
+    in_play: MessageReader<'w, 's, BallInPlayEvent>,
+    live: MessageReader<'w, 's, LiveBallEvent>,
 }
 
 /// The rigs and the ball, as the sampler sees them.
@@ -200,7 +200,7 @@ fn observe(
     facts: WorldFacts,
     mut reports: PlayReports,
     rigs: WorldRigs,
-    mut findings: EventWriter<CoachFindingEvent>,
+    mut findings: MessageWriter<CoachFindingEvent>,
 ) {
     let WorldFacts {
         play,
@@ -383,7 +383,7 @@ impl Plugin for CoachPlugin {
         app.init_resource::<CoachConfig>()
             .init_resource::<CoachReport>()
             .init_resource::<CoachState>()
-            .add_event::<CoachFindingEvent>()
+            .add_message::<CoachFindingEvent>()
             .add_systems(crate::game::game_start(), reset_coach)
             .add_systems(
                 Update,

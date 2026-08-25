@@ -57,6 +57,7 @@ Violating any of these breaks the build, breaks wasm, or corrupts gameplay state
 
 - Spawn-at-game-start systems key on the `game_start()` transition schedule, never `OnEnter(Playing)` — otherwise they re-run on every unpause (`src/game/mod.rs`).
 - wasm UI: an element that is alpha-0 at first extract never renders again; container roots need a `BackgroundColor`; UI roots spawned mid-`Playing` don't render — show/hide by mutating children of roots painted at spawn (`ui::hidden_tint`, `src/game/present/ui/`).
+- wasm UI: never tick a per-frame `ResMut` (Timer resource) in a system that also holds `&mut` queries on rendered UI — the queried entities stop being extracted on WebGL2; hold a fade *deadline* instead (`BannerFadeAt` in `src/game/present/ui/banner.rs`, wasm-ui-and-present skill).
 - `model_assets.rs` and `src/game/models/` never move from `src/game/` top level — `embedded_asset!` derives both the `include_bytes!` path and the `embedded://` asset path from the file's own location (`src/game/model_assets.rs`).
 - No RNG anywhere in `src/game/core/rules/` — advanced rules are deterministic, keyed off data the engine already computes.
 - `fx`, `fielding`, and `runner` never mutate `ScoreBoard` or `Bases` — they report or mirror; only `flow` applies rules (`src/game/sim/flow/`).

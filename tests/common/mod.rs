@@ -122,6 +122,7 @@ fn build_headless_app(single_threaded: bool) -> App {
             primary_window: None,
             exit_condition: bevy::window::ExitCondition::DontExit,
             close_when_requested: false,
+            ..Default::default()
         })
         .set(RenderPlugin {
             render_creation: RenderCreation::Automatic(WgpuSettings {

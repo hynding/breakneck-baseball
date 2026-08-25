@@ -28,7 +28,7 @@ struct HitStop(Option<Timer>);
 
 /// Freezes the world for a beat when bat meets ball.
 fn start_hit_stop(
-    mut hits: EventReader<HitEvent>,
+    mut hits: MessageReader<HitEvent>,
     mut virt: ResMut<Time<Virtual>>,
     mut stop: ResMut<HitStop>,
     base: Res<crate::game::juice::BaseSpeed>,
@@ -49,7 +49,7 @@ fn end_hit_stop(
     let finished = stop
         .0
         .as_mut()
-        .is_some_and(|t| t.tick(real.delta()).finished());
+        .is_some_and(|t| t.tick(real.delta()).is_finished());
     if finished {
         virt.set_relative_speed(base.0);
         stop.0 = None;

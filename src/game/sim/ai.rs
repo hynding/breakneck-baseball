@@ -144,7 +144,7 @@ pub fn cpu_defense(
         return;
     }
 
-    if cpu.pitch_delay.tick(time.delta()).finished() {
+    if cpu.pitch_delay.tick(time.delta()).is_finished() {
         let t = time.elapsed_secs();
         // Better skill → tighter aim around the strike zone. The aim then
         // gets a pitch-selection bias: held-aim direction is what picks the

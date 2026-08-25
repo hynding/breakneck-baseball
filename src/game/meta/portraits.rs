@@ -161,7 +161,7 @@ fn drive_portraits(
     mut cs: ResMut<CreatorState>,
     time: Res<Time>,
     shots: Query<Entity, With<Screenshot>>,
-    mut exit: EventWriter<AppExit>,
+    mut exit: MessageWriter<AppExit>,
 ) {
     let Some(mut run) = run else { return };
 
@@ -194,7 +194,7 @@ fn drive_portraits(
 
         Phase::Settle(timer) => {
             timer.tick(time.delta());
-            if timer.finished() {
+            if timer.is_finished() {
                 capture_current(&mut commands, &run, &cs);
                 run.phase =
                     Phase::PostCapture(Timer::from_seconds(POST_CAPTURE_SECS, TimerMode::Once));
@@ -203,14 +203,14 @@ fn drive_portraits(
 
         Phase::PostCapture(timer) => {
             timer.tick(time.delta());
-            if timer.finished() {
+            if timer.is_finished() {
                 advance_after_capture(&mut run, &mut cs);
             }
         }
 
         Phase::Draining(timer) => {
             timer.tick(time.delta());
-            if shots.is_empty() || timer.finished() {
+            if shots.is_empty() || timer.is_finished() {
                 exit.write(AppExit::Success);
                 run.phase = Phase::Exited;
             }
