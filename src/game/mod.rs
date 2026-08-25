@@ -9,7 +9,7 @@ pub mod model_assets;
 pub mod present;
 pub mod sim;
 
-pub use self::core::{roster, rules, theme, variant};
+pub use self::core::{coach, roster, rules, theme, variant};
 pub use self::meta::{appearance, gear, input, menu, settings, subs};
 #[cfg(feature = "debug")]
 pub use self::meta::{creator, debug, portraits};
