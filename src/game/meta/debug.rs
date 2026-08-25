@@ -15,6 +15,7 @@ pub enum DebugTab {
     State,
     Gizmos,
     Time,
+    Coach,
 }
 
 /// Sub-tabs within the Tune tab — one per `Ruleset` sub-struct plus the
@@ -36,6 +37,9 @@ pub struct GizmoToggles {
     pub pci: bool,
     pub runner_targets: bool,
     pub colliders: bool,
+    /// Coach overlays: the chaser's intercept, expected runner-break
+    /// arrows, and uncovered force bags (toggled from the Coach tab).
+    pub coach: bool,
 }
 
 #[derive(Resource, Default)]
@@ -83,6 +87,7 @@ impl Plugin for DebugPlugin {
                     throw_target_gizmo,
                     runner_target_gizmo,
                     pci_gizmo,
+                    coach_gizmo,
                 )
                     .run_if(in_state(crate::game::GameState::Playing)),
             )
@@ -239,6 +244,117 @@ fn pci_gizmo(
     );
 }
 
+/// Coach overlays: what the rules expect, drawn over what the rigs do —
+/// the chaser's live intercept (magenta), each runner's expected break
+/// (green arrow / lime halfway mark / red hold ring), and uncovered
+/// force-relevant bags (red rings). Reads the same observer state the
+/// Coach checks sample; draws nothing while no live play is on.
+#[allow(clippy::too_many_arguments)]
+fn coach_gizmo(
+    state: Res<DebugState>,
+    coach_state: Res<crate::game::coach::CoachState>,
+    active: Res<crate::game::fielding::ActivePlay>,
+    play: Res<crate::game::flow::Play>,
+    field: Res<crate::game::variant::FieldSpec>,
+    fielders: Query<
+        (&Transform, &crate::game::animation::MoveIntent),
+        With<crate::game::player::Fielder>,
+    >,
+    runners: Query<(&Transform, &crate::game::runner::Runner)>,
+    mut gizmos: Gizmos,
+) {
+    use crate::game::rules;
+    use bevy::color::palettes::css;
+
+    if !state.gizmos.coach || play.phase != crate::game::flow::Phase::InPlay {
+        return;
+    }
+    // The chaser's current intercept order.
+    if let Some((tf, intent)) = active.chaser().and_then(|e| fielders.get(e).ok()) {
+        if let Some(target) = intent.target {
+            gizmos.line(
+                tf.translation + Vec3::Y * 0.2,
+                target + Vec3::Y * 0.2,
+                css::MAGENTA,
+            );
+            gizmos.circle(
+                Isometry3d::new(
+                    target + Vec3::Y * 0.05,
+                    Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2),
+                ),
+                0.7,
+                css::MAGENTA,
+            );
+        }
+    }
+    let Some(contact) = coach_state.contact_facts() else {
+        return;
+    };
+    // Expected runner breaks, from the same rule the Coach checks against.
+    let bases = {
+        let mut b = rules::Bases::new(contact.bases_at_contact.len());
+        for (i, &occ) in contact.bases_at_contact.iter().enumerate() {
+            b.set(i, occ);
+        }
+        b
+    };
+    for (tf, runner) in &runners {
+        let Some(bag) = field.base_positions.get(runner.base).copied() else {
+            continue;
+        };
+        let next = field
+            .base_positions
+            .get(runner.base + 1)
+            .copied()
+            .unwrap_or(Vec3::ZERO);
+        let expected = rules::runner_break(
+            contact.outs_at_contact,
+            rules::is_forced(&bases, runner.base),
+            contact.class,
+        );
+        let from = tf.translation + Vec3::Y * 0.3;
+        match expected {
+            rules::RunnerBreak::GoNow => {
+                gizmos.arrow(from, next + Vec3::Y * 0.3, css::LIMEGREEN);
+            }
+            rules::RunnerBreak::Halfway => {
+                gizmos.arrow(from, bag.lerp(next, 0.5) + Vec3::Y * 0.3, css::YELLOW);
+            }
+            rules::RunnerBreak::TagUp => {
+                gizmos.circle(
+                    Isometry3d::new(
+                        bag + Vec3::Y * 0.05,
+                        Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2),
+                    ),
+                    1.2,
+                    css::RED,
+                );
+            }
+        }
+    }
+    // Force-relevant bags without a coverer: red rings.
+    let mut wanted = vec![0usize];
+    for (base, &occ) in contact.bases_at_contact.iter().enumerate() {
+        if occ && rules::is_forced(&bases, base) {
+            wanted.push(base + 1);
+        }
+    }
+    for bag in wanted {
+        if active.covers().iter().any(|&(b, _)| b == bag) {
+            continue;
+        }
+        let pos = field.base_positions.get(bag).copied().unwrap_or(Vec3::ZERO);
+        gizmos.circle(
+            Isometry3d::new(
+                pos + Vec3::Y * 0.08,
+                Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2),
+            ),
+            1.5,
+            css::RED,
+        );
+    }
+}
+
 fn panel_open(state: Res<DebugState>) -> bool {
     state.open
 }
@@ -296,6 +412,7 @@ fn debug_panel(world: &mut World) {
             (KeyCode::Digit3, DebugTab::State),
             (KeyCode::Digit4, DebugTab::Gizmos),
             (KeyCode::Digit5, DebugTab::Time),
+            (KeyCode::Digit6, DebugTab::Coach),
         ]
         .into_iter()
         .find(|(key, _)| keys.just_pressed(*key))
@@ -320,6 +437,7 @@ fn debug_panel(world: &mut World) {
                     ("State", DebugTab::State),
                     ("Gizmos", DebugTab::Gizmos),
                     ("Time", DebugTab::Time),
+                    ("Coach", DebugTab::Coach),
                 ] {
                     ui.selectable_value(&mut tab, t, label);
                 }
@@ -515,6 +633,68 @@ fn debug_panel(world: &mut World) {
                             .enabled = gizmos.colliders;
                     }
                     world.resource_mut::<DebugState>().gizmos = gizmos;
+                }
+                DebugTab::Coach => {
+                    use crate::game::coach::{CheckId, CoachEnabled, CoachReport, Severity};
+                    // The privileged-reader rule: this tab reads the report
+                    // and flips only the Coach's own toggles — never
+                    // gameplay state.
+                    let mut enabled = world.contains_resource::<CoachEnabled>();
+                    if ui.checkbox(&mut enabled, "Coach enabled").changed() {
+                        if enabled {
+                            world.init_resource::<CoachEnabled>();
+                        } else {
+                            world.remove_resource::<CoachEnabled>();
+                        }
+                    }
+                    let mut coach_overlay = world.resource::<DebugState>().gizmos.coach;
+                    if ui
+                        .checkbox(&mut coach_overlay, "Overlays (intercept / breaks / bags)")
+                        .changed()
+                    {
+                        world.resource_mut::<DebugState>().gizmos.coach = coach_overlay;
+                    }
+                    ui.separator();
+                    ui.label("Checks");
+                    {
+                        let mut config = world.resource_mut::<crate::game::coach::CoachConfig>();
+                        for check in CheckId::ALL {
+                            let mut on = !config.disabled.contains(&check);
+                            if ui.checkbox(&mut on, check.label()).changed() {
+                                if on {
+                                    config.disabled.retain(|&c| c != check);
+                                } else {
+                                    config.disabled.push(check);
+                                }
+                            }
+                        }
+                    }
+                    ui.separator();
+                    let report = world.resource::<CoachReport>();
+                    ui.monospace(format!("samples: {}", report.samples));
+                    for check in CheckId::ALL {
+                        let (v, l, s) = (
+                            report.count(check, Severity::Violation),
+                            report.count(check, Severity::Late),
+                            report.count(check, Severity::Style),
+                        );
+                        if v + l + s > 0 {
+                            ui.monospace(format!("{:<20} V{v} L{l} S{s}", check.label()));
+                        }
+                    }
+                    ui.separator();
+                    ui.label("Recent findings (newest first)");
+                    for f in report.recent.iter().rev().take(20) {
+                        ui.monospace(format!(
+                            "{:7.1}s {:?} {} [{}]",
+                            f.game_time,
+                            f.severity,
+                            f.subject,
+                            f.check.label()
+                        ));
+                        ui.small(format!("  expected: {}", f.expected));
+                        ui.small(format!("  observed: {}", f.observed));
+                    }
                 }
                 DebugTab::Time => {
                     ui.horizontal(|ui| {

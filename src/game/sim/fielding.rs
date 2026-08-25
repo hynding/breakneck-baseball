@@ -46,10 +46,38 @@ const GROUND_FENCE_MARGIN: f32 = 0.6;
 
 /// Choreography state for the current live ball.
 #[derive(Resource, Default)]
-struct ActivePlay {
+pub(crate) struct ActivePlay {
     state: PlayState,
     /// Base index (`base_count()` = home) → the fielder sent to cover it.
     cover: Vec<(usize, Entity)>,
+}
+
+impl ActivePlay {
+    // Read-only observer seams (the Coach and the debug panel read these;
+    // nothing outside this module may steer the play through them).
+
+    /// The fielder currently assigned to chase the live ball, if any.
+    pub(crate) fn chaser(&self) -> Option<Entity> {
+        match self.state {
+            PlayState::Chasing { chaser, .. } => Some(chaser),
+            _ => None,
+        }
+    }
+
+    /// The standing cover assignments: (base index, fielder), where base ==
+    /// `base_count()` means home plate.
+    pub(crate) fn covers(&self) -> &[(usize, Entity)] {
+        &self.cover
+    }
+
+    /// `Time::elapsed_secs` at which the current holder gathered the ball,
+    /// while one is deciding a throw.
+    pub(crate) fn holding_since(&self) -> Option<f32> {
+        match self.state {
+            PlayState::Holding { held_at, .. } => Some(held_at),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Default, Clone, Copy, PartialEq)]

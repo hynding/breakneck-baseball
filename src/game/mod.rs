@@ -9,7 +9,16 @@ pub mod model_assets;
 pub mod present;
 pub mod sim;
 
-pub use self::core::{coach, roster, rules, theme, variant};
+pub use self::core::{roster, rules, theme, variant};
+
+/// The Coach facade: the pure expectation checks (`core::coach`) and the
+/// sim-side observer that samples the world for them (`sim::coach`) share
+/// one canonical import path, the same way a split file's `mod.rs` merges
+/// its halves — item paths stay `game::coach::…` whichever side owns them.
+pub mod coach {
+    pub use super::core::coach::*;
+    pub use super::sim::coach::*;
+}
 pub use self::meta::{appearance, gear, input, menu, settings, subs};
 #[cfg(feature = "debug")]
 pub use self::meta::{creator, debug, portraits};
@@ -259,6 +268,7 @@ impl Plugin for GamePlugin {
                 SubsPlugin,
                 settings::SettingsPlugin,
                 JuicePlugin,
+                sim::coach::CoachPlugin,
             ));
         #[cfg(feature = "debug")]
         app.add_plugins((

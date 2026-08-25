@@ -85,7 +85,7 @@ impl CheckId {
 }
 
 /// How badly reality drifted from the expectation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Severity {
     /// Legal but ugly (e.g. an intercept line lagging the ball).
     Style,

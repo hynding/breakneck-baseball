@@ -154,6 +154,10 @@ fn build_headless_app(single_threaded: bool) -> App {
         // other timing-sensitive system reads. This insert is load-bearing,
         // not just belt-and-braces.
         .insert_resource(breakneck_baseball::game::juice::JuiceDisabled)
+        // The Coach observes every headless run (default-on in tests): it
+        // never mutates gameplay, and any e2e may read its `CoachReport`.
+        // `e2e_coach.rs` is the suite that asserts on it.
+        .insert_resource(breakneck_baseball::game::coach::CoachEnabled)
         // `player.rs`'s `batter_fidgets` occasionally replaces the batter's
         // held-stance `Playing` with a fidget clip between pitches — real
         // gameplay flavour, but it would perturb any scripted e2e that
