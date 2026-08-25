@@ -81,6 +81,7 @@ pub(super) fn result_phase(
     play.wall_called = false;
     play.home_run = false;
     play.last_contact_quality = None;
+    play.last_strike_call = None;
     // A runner in stealing position opens the duel window for the next at-bat.
     play.hold = steal_window_for(&bases, &rules_res);
     lead.extended = false;

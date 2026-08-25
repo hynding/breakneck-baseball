@@ -26,7 +26,7 @@ use crate::game::coach::{
     RunnerFacts, Severity,
 };
 use crate::game::fielding::ActivePlay;
-use crate::game::flow::{BallInPlayEvent, LiveBallEvent, Phase, Play, PlayBanner};
+use crate::game::flow::{BallInPlayEvent, LiveBallEvent, Phase, Play};
 use crate::game::player::{CatcherRole, Fielder};
 use crate::game::rules::{self, Bases, ContactKind};
 use crate::game::runner::{Runner, RunnersSettled};
@@ -115,11 +115,6 @@ pub struct CoachState {
     /// glove line (the widened `late_swing_z` window). Either observation
     /// point reading "dirt" exempts the mitt expectation.
     result_y: Option<f32>,
-    /// Announced dead-ball plays where the mitt is legitimately empty. The
-    /// dropped third is recognized by its banner text (flow keeps the
-    /// decision internal); HBP is re-derived from the crossing via the same
-    /// `rules::hits_batter` flow consults.
-    dropped_third: bool,
     last_phase: Phase,
 }
 
@@ -142,7 +137,6 @@ impl Default for CoachState {
             crossing: None,
             glove_y: None,
             result_y: None,
-            dropped_third: false,
             last_phase: Phase::PrePitch,
         }
     }
@@ -170,7 +164,6 @@ struct WorldFacts<'w> {
 struct PlayReports<'w, 's> {
     in_play: EventReader<'w, 's, BallInPlayEvent>,
     live: EventReader<'w, 's, LiveBallEvent>,
-    banners: EventReader<'w, 's, PlayBanner>,
 }
 
 /// The rigs and the ball, as the sampler sees them.
@@ -218,11 +211,7 @@ fn observe(
         active,
         settled,
     } = facts;
-    let (in_play_ev, live_ev, banners) = (
-        &mut reports.in_play,
-        &mut reports.live,
-        &mut reports.banners,
-    );
+    let (in_play_ev, live_ev) = (&mut reports.in_play, &mut reports.live);
     let (ball_q, catcher_q, fielder_q, runner_q) =
         (&rigs.ball, &rigs.catcher, &rigs.fielders, &rigs.runners);
     let now = time.elapsed_secs();
@@ -244,14 +233,6 @@ fn observe(
     for ev in live_ev.read() {
         if matches!(ev, LiveBallEvent::Landed { .. }) {
             state.bounced = true;
-        }
-    }
-    for banner in banners.read() {
-        // Flow keeps the dropped-third decision internal; its banner is the
-        // announcement, and the one play whose untouched pitch legitimately
-        // never reaches the mitt (strike three in the dirt).
-        if banner.text.starts_with("DROPPED 3RD") {
-            state.dropped_third = true;
         }
     }
     let ball = ball_q.get_single().ok();
@@ -289,7 +270,6 @@ fn observe(
         state.crossing = None;
         state.glove_y = None;
         state.result_y = None;
-        state.dropped_third = false;
     }
     state.last_phase = play.phase;
 
@@ -309,10 +289,14 @@ fn observe(
     let hbp = state.crossing.is_some_and(rules::hits_batter);
     let out_of_band = |y: f32| !(0.12..=2.4).contains(&y);
     let dirt = state.glove_y.is_some_and(out_of_band) || state.result_y.is_some_and(out_of_band);
+    // A dropped third's untouched pitch legitimately never reaches the mitt —
+    // read straight off the umpire's decision (`Play::last_strike_call`,
+    // cleared at the next PrePitch), not the banner announcement.
+    let dropped_third = play.last_strike_call() == Some(rules::StrikeCall::DroppedThird);
     let untouched_pitch_result = phase == CoachPhase::Result
         && state.crossing.is_some()
         && !state.contacted
-        && !state.dropped_third
+        && !dropped_third
         && !hbp
         && !dirt;
 

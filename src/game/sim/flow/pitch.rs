@@ -376,6 +376,7 @@ pub(super) fn pitch_live(
                 let dropped =
                     play.live_kind == Some(rules::PitchKind::Curveball) && !bases.is_occupied(0);
                 let call = add_strike(&mut score, &mut bases, &rules, &mut banner, true, dropped);
+                play.last_strike_call = Some(call);
                 // The catcher gloves everything except the strike three that
                 // got away (that one is in the dirt by definition).
                 play.pitch_taken = call != StrikeCall::DroppedThird;
@@ -410,6 +411,7 @@ pub(super) fn pitch_live(
             play.pitch_taken = true;
             let (pa_over, walked) = if rules::is_in_zone(cross) {
                 let call = add_strike(&mut score, &mut bases, &rules, &mut banner, false, false);
+                play.last_strike_call = Some(call);
                 (call != StrikeCall::Strike, false)
             } else {
                 let walked = add_ball(&mut score, &mut bases, &rules, &mut banner);

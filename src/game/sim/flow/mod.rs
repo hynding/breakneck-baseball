@@ -128,6 +128,11 @@ pub struct Play {
     /// This play is a home run: set at contact, held through the trot and the
     /// result pause (so the camera can orbit the trot), cleared at reset.
     home_run: bool,
+    /// The umpire's call on this play's last judged strike (take or swing),
+    /// held through the result pause, cleared at the PrePitch reset. The
+    /// read-only seam observers use to recognize a dropped third without
+    /// string-matching the banner (the Coach — TODO 59).
+    last_strike_call: Option<rules::StrikeCall>,
 }
 
 impl Play {
@@ -195,6 +200,14 @@ impl Play {
         self.pitch_gloved
     }
 
+    /// The call on this play's last judged strike (`None` before one lands;
+    /// cleared at the next PrePitch). Observers read this for the decision
+    /// itself — notably `StrikeCall::DroppedThird`, whose untouched pitch
+    /// legitimately never reaches the mitt.
+    pub fn last_strike_call(&self) -> Option<rules::StrikeCall> {
+        self.last_strike_call
+    }
+
     /// Test-only constructor for camera/flow unit tests that need a `Play`
     /// in a given phase without driving the whole machine there.
     #[cfg(test)]
@@ -256,6 +269,7 @@ impl Default for Play {
             wall_called: false,
             last_contact_quality: None,
             home_run: false,
+            last_strike_call: None,
         }
     }
 }
@@ -423,5 +437,12 @@ mod tests {
         assert!(!play.pitch_gloved());
         let play = Play::test_play(Phase::Result, true);
         assert!(play.pitch_gloved());
+    }
+
+    /// A fresh play has no strike call on record — the observer seam only
+    /// ever reports a decision the umpire actually made this play.
+    #[test]
+    fn last_strike_call_defaults_none() {
+        assert_eq!(Play::default().last_strike_call(), None);
     }
 }
