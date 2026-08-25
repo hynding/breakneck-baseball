@@ -29,7 +29,11 @@ For `--profile wasm-release`, the wasm path changes to `target/wasm32-unknown-un
 
 ## Verifying it runs
 
-Use the Chrome DevTools MCP tools: navigate to `http://localhost:8080`, wait for the canvas, and check `list_console_messages` for panics. A debug wasm is ~85 MB, so allow generous load time; wasm-release is far smaller.
+Use the Chrome DevTools MCP tools: navigate to `http://localhost:8080`, wait for the canvas, and check `list_console_messages` for panics. A debug wasm is ~85 MB, so allow generous load time; wasm-release is far smaller. The wasm build always logs beacon breadcrumbs (`bb-state menu/playing`, `bb-first-pitch`) — the quickest "did input work" signals.
+
+## Self-driving run (autoplay)
+
+Add `--features autoplay` to the cargo build in step 1 and the page plays itself: menus scripted, CPU vs CPU, Coach on. Click the canvas once (audio gesture), then watch the console for `COACH_FINDING` lines and pull the report any time via `localStorage.getItem('bb-coach-report')`. `node tools/web_input_check.mjs <url>` smoke-tests the *real* keyboard path (plain build only — autoplay's menu driver would defeat it). Full detail: the `auto-playtest` skill.
 
 ## Common Mistakes
 

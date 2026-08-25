@@ -1,4 +1,5 @@
 pub mod appearance;
+pub mod autoplay;
 #[cfg(feature = "debug")]
 pub mod creator;
 #[cfg(feature = "debug")]

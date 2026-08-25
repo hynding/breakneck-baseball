@@ -19,7 +19,7 @@ pub mod coach {
     pub use super::core::coach::*;
     pub use super::sim::coach::*;
 }
-pub use self::meta::{appearance, gear, input, menu, settings, subs};
+pub use self::meta::{appearance, autoplay, gear, input, menu, settings, subs};
 #[cfg(feature = "debug")]
 pub use self::meta::{creator, debug, portraits};
 pub use self::present::{animation, audio, camera, field, fx, jersey, juice, player, ui};
@@ -277,6 +277,13 @@ impl Plugin for GamePlugin {
             creator::CreatorPlugin,
             portraits::PortraitsPlugin,
         ));
+        // Self-driving visual runs (attract mode + Coach reports).
+        #[cfg(feature = "autoplay")]
+        app.add_plugins(autoplay::AutoplayPlugin);
+        // Console breadcrumbs browser automation watches (always on for the
+        // web target — the real-input smoke test needs them on a plain build).
+        #[cfg(target_arch = "wasm32")]
+        app.add_plugins(autoplay::WebBeaconPlugin);
         app
             // Fresh scoreboard/rosters each time a game starts from the menu;
             // tear the scene down once the game is over. Pausing stays inside

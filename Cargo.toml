@@ -50,6 +50,13 @@ dev = ["bevy/dynamic_linking", "bevy/file_watcher"]
 # Debug mode: F1-toggled tabbed egui panel + gizmo overlays (see `game::debug`)
 debug = ["dep:bevy-inspector-egui"]
 
+# Self-driving visual runs: menu navigation scripted, slots handed to the
+# Director, Coach findings streamed as JSON lines + coach-report.json at
+# game end (see `game::autoplay`). Additive — composes with any profile and
+# both targets, which is why it is not folded into `dev` (whose dylib
+# linking / hot-reload semantics it does not want).
+autoplay = []
+
 [lints.rust]
 unexpected_cfgs = "warn"
 

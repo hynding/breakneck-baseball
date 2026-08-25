@@ -29,3 +29,7 @@ web/out/
 
 # macOS Finder metadata
 .DS_Store
+
+# Autoplay/playtest artifacts (reports, screenshots) — never committed
+/coach-report.json
+/playtest-artifacts/
