@@ -91,7 +91,7 @@ fn drive(
             intents.get_mut(fielding).action = true;
         }
         Phase::Pitch => {
-            if let (Some((zmin, zmax)), Ok(t)) = (window, ball.get_single()) {
+            if let (Some((zmin, zmax)), Ok(t)) = (window, ball.single()) {
                 let z = t.translation.z;
                 if z >= zmin && z <= zmax {
                     intents.get_mut(batting).action = true;
@@ -127,7 +127,7 @@ fn capture(
     if matches!(play.as_deref().map(|p| p.phase), Some(Phase::InPlay)) {
         let slot = cap.live_slot;
         if slot < 3 {
-            if let Ok(v) = ball.get_single() {
+            if let Ok(v) = ball.single() {
                 cap.speed[slot] = cap.speed[slot].max(v.linvel.length());
             }
         }

@@ -270,7 +270,7 @@ pub fn attach_jerseys(commands: &mut Commands, rig: Entity, assets: &JerseyAsset
                 Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(yaw)),
             ))
             .id();
-        commands.entity(quad).set_parent(rig);
+        commands.entity(quad).insert(bevy::prelude::ChildOf(rig));
     }
 }
 
@@ -320,7 +320,7 @@ fn mount_jerseys_on_bones(
                 JerseyFace::ShoulderL => (bones.upper_arm_l, Vec3::new(0.0, -0.04, 0.09), half),
                 JerseyFace::ShoulderR => (bones.upper_arm_r, Vec3::new(0.0, -0.04, -0.09), half),
             };
-            commands.entity(child).set_parent(bone).insert(
+            commands.entity(child).insert(bevy::prelude::ChildOf(bone)).insert(
                 Transform::from_translation(translation).with_rotation(Quat::from_rotation_y(yaw)),
             );
         }
@@ -455,11 +455,11 @@ mod tests {
         };
         let image = build_texture(&card, JerseyFace::Back, [255, 255, 255, 255]);
         let data = image.data;
-        let lit = data.chunks(4).filter(|px| px[3] == 255).count();
+        let lit = data.as_ref().expect("cpu image data").chunks(4).filter(|px| px[3] == 255).count();
         // A six-letter name plus two big digits lights up plenty of pixels.
         assert!(lit > 200, "only {lit} opaque pixels drawn");
         // Everything else stays transparent (the jersey shows through).
-        let clear = data.chunks(4).filter(|px| px[3] == 0).count();
+        let clear = data.as_ref().expect("cpu image data").chunks(4).filter(|px| px[3] == 0).count();
         assert!(clear > lit);
     }
 
@@ -471,7 +471,7 @@ mod tests {
             appearance: Default::default(),
         };
         let one = build_texture(&card, JerseyFace::Number, [255, 255, 255, 255]);
-        let lit = one.data.chunks(4).filter(|px| px[3] == 255).count();
+        let lit = one.data.as_ref().expect("cpu image data").chunks(4).filter(|px| px[3] == 255).count();
         assert!(lit > 100, "a lone digit should be drawn large ({lit} px)");
     }
 

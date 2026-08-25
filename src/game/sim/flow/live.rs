@@ -130,7 +130,7 @@ pub(super) fn resolve_live_play(
     // ball is right now.
     if resolution.is_none() && play.timer.finished() {
         let pos = ball_q
-            .get_single()
+            .single()
             .map(|t| t.translation)
             .unwrap_or(Vec3::ZERO);
         let t = time.elapsed_secs() - play.contact_at;
@@ -174,7 +174,7 @@ pub(super) fn announce_wall_bang(
     let banged = bangs.read().next().is_some();
     if banged && play.phase == Phase::InPlay && !play.resolved && !play.wall_called {
         play.wall_called = true;
-        banner.send(PlayBanner::new("OFF THE WALL!", BannerTone::Good));
+        banner.write(PlayBanner::new("OFF THE WALL!", BannerTone::Good));
     }
 }
 
@@ -191,7 +191,7 @@ pub(super) fn resolve_contact(
     match outcome {
         Outcome::Foul => {
             rules::foul(score, ruleset);
-            banner.send(PlayBanner::new("FOUL", BannerTone::Info));
+            banner.write(PlayBanner::new("FOUL", BannerTone::Info));
         }
         Outcome::Out(kind) => {
             let play = rules::apply_batted_out(score, bases, ruleset, kind, runners_going);
@@ -214,7 +214,7 @@ pub(super) fn resolve_contact(
             } else {
                 base_text.to_string()
             };
-            banner.send(PlayBanner::new(text, BannerTone::Bad));
+            banner.write(PlayBanner::new(text, BannerTone::Bad));
         }
         Outcome::DoublePlay => {
             let play = rules::apply_double_play(score, bases, ruleset);
@@ -223,11 +223,11 @@ pub(super) fn resolve_contact(
             } else {
                 "DOUBLE PLAY!".to_string()
             };
-            banner.send(PlayBanner::new(text, BannerTone::Bad));
+            banner.write(PlayBanner::new(text, BannerTone::Bad));
         }
         Outcome::FieldersChoice { out_base } => {
             rules::apply_fielders_choice(score, bases, ruleset, out_base);
-            banner.send(PlayBanner::new("FIELDER'S CHOICE", BannerTone::Bad));
+            banner.write(PlayBanner::new("FIELDER'S CHOICE", BannerTone::Bad));
         }
         Outcome::Hit(n) => {
             let label = match n {

@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 use bevy::app::PluginsState;
-use bevy::core::{TaskPoolOptions, TaskPoolPlugin};
+use bevy::app::{TaskPoolOptions, TaskPoolPlugin};
 use bevy::ecs::schedule::ExecutorKind;
 use bevy::prelude::*;
 use bevy::render::RenderPlugin;

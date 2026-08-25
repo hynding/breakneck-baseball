@@ -149,7 +149,7 @@ pub(super) fn batter_fidgets(
         timer.current_batter = None;
         return;
     }
-    let Ok((entity, id, playing)) = batters.get_single() else {
+    let Ok((entity, id, playing)) = batters.single() else {
         return;
     };
     if timer.current_batter != Some(*id) {

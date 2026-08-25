@@ -139,7 +139,7 @@ fn open_pause(
         return;
     }
     if !ball_is_dead(&play, &flying) {
-        banner.send(PlayBanner::new("PLAY IN PROGRESS", BannerTone::Info));
+        banner.write(PlayBanner::new("PLAY IN PROGRESS", BannerTone::Info));
         return;
     }
     *menu = SubsMenu {

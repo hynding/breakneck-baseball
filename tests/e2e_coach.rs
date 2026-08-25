@@ -83,7 +83,7 @@ fn scripted_drive(
             intents.get_mut(score.fielding_team()).action = true;
         }
         Phase::Pitch if score.batting_team() == Team::Home => {
-            if let Ok(t) = ball.get_single() {
+            if let Ok(t) = ball.single() {
                 intents.home.aim = Vec2::new(0.0, 1.0);
                 if t.translation.z <= 0.45 && t.translation.z >= 0.0 {
                     intents.home.action = true;

@@ -42,7 +42,7 @@ use super::{CreatorState, CreatorTab, selected_def};
 pub(super) fn creator_panel(world: &mut World) {
     let Ok(ctx) = world
         .query_filtered::<&mut EguiContext, With<PrimaryWindow>>()
-        .get_single_mut(world)
+        .single_mut(world)
         .map(|mut c| c.get_mut().clone())
     else {
         return;

@@ -134,7 +134,7 @@ fn advance_paths(
             intent.speed = ruleset.pace.runner_speed;
             path.next += 1;
         } else if despawn.is_some() {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         } else {
             // Path exhausted and arrived: the rig has settled on its base.
             commands.entity(entity).remove::<BasePath>();
@@ -287,9 +287,9 @@ pub(crate) fn sync_runners(
             .iter()
             .next()
             .map(|(_, _, id)| *id)
-            .or_else(|| batter_identity.get_single().ok().copied());
+            .or_else(|| batter_identity.single().ok().copied());
         let start = ghosts.iter().next().map_or(PLATE_START, |(ghost, tf, _)| {
-            commands.entity(ghost).despawn_recursive();
+            commands.entity(ghost).despawn();
             tf.translation
         });
         let mats = palette.for_team(score.batting_team());
@@ -377,7 +377,7 @@ fn batter_runs(
         if ghost {
             commands.entity(entity).insert(BatterGhost);
         }
-        if let Ok(id) = batter_identity.get_single() {
+        if let Ok(id) = batter_identity.single() {
             commands.entity(entity).insert(*id);
         }
         if let Some(assets) = &assets {

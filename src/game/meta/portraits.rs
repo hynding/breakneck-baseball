@@ -211,7 +211,7 @@ fn drive_portraits(
         Phase::Draining(timer) => {
             timer.tick(time.delta());
             if shots.is_empty() || timer.finished() {
-                exit.send(AppExit::Success);
+                exit.write(AppExit::Success);
                 run.phase = Phase::Exited;
             }
         }

@@ -353,7 +353,7 @@ fn reset_scoreboard(
 /// the scene cleanly (each sub-plugin re-spawns on the next `OnEnter`).
 fn cleanup_gameplay(mut commands: Commands, query: Query<Entity, With<GameplayEntity>>) {
     for entity in &query {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 }
 

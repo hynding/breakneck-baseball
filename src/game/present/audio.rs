@@ -208,7 +208,7 @@ fn play(commands: &mut Commands, handle: &Handle<AudioSource>, volume: f32) {
     commands.spawn((
         GameplayEntity,
         AudioPlayer::new(handle.clone()),
-        PlaybackSettings::DESPAWN.with_volume(Volume::new(volume)),
+        PlaybackSettings::DESPAWN.with_volume(Volume::Linear(volume)),
     ));
 }
 
@@ -221,7 +221,7 @@ fn start_crowd_loop(bank: Option<Res<SoundBank>>, mut commands: Commands) {
     commands.spawn((
         GameplayEntity,
         AudioPlayer::new(bank.crowd.clone()),
-        PlaybackSettings::LOOP.with_volume(Volume::new(0.12)),
+        PlaybackSettings::LOOP.with_volume(Volume::Linear(0.12)),
     ));
 }
 

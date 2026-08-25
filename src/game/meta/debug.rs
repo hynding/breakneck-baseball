@@ -73,8 +73,10 @@ impl Plugin for DebugPlugin {
         }
         app.init_resource::<DebugState>()
             .init_resource::<ForcedContact>()
-            .add_plugins(EguiPlugin)
-            .add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin)
+            .add_plugins(EguiPlugin {
+                enable_multipass_for_primary_context: false,
+            })
+            .add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default())
             .add_plugins(bevy_rapier3d::render::RapierDebugRenderPlugin::default().disabled())
             .add_systems(Update, toggle_panel)
             .add_systems(Update, debug_panel.run_if(panel_open))
@@ -116,7 +118,7 @@ fn trajectory_gizmo(
     if !state.gizmos.trajectory {
         return;
     }
-    let Ok((tf, vel)) = ball.get_single() else {
+    let Ok((tf, vel)) = ball.single() else {
         return;
     };
     use crate::game::ball::{BALL_DRAG_FACTOR, MAGNUS_FACTOR};
@@ -177,7 +179,7 @@ fn throw_target_gizmo(
     if !state.gizmos.intercept || play.phase != crate::game::flow::Phase::InPlay {
         return;
     }
-    let Ok(tf) = ball.get_single() else {
+    let Ok(tf) = ball.single() else {
         return;
     };
     let race = play.since_contact(time.elapsed_secs());
@@ -234,7 +236,7 @@ fn pci_gizmo(
     if !state.gizmos.pci {
         return;
     }
-    let Ok(tf) = cursor.get_single() else {
+    let Ok(tf) = cursor.single() else {
         return;
     };
     gizmos.circle(
@@ -397,7 +399,7 @@ fn toggle_panel(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<DebugState>) 
 fn debug_panel(world: &mut World) {
     let Ok(ctx) = world
         .query_filtered::<&mut EguiContext, With<PrimaryWindow>>()
-        .get_single_mut(world)
+        .single_mut(world)
         .map(|mut c| c.get_mut().clone())
     else {
         return;
@@ -602,7 +604,7 @@ fn debug_panel(world: &mut World) {
                         &Transform,
                         &bevy_rapier3d::prelude::Velocity,
                     ), With<crate::game::ball::Baseball>>();
-                    if let Ok((tf, vel)) = q.get_single(world) {
+                    if let Ok((tf, vel)) = q.single(world) {
                         ui.monospace(format!(
                             "ball: h {:.1} m, v {:.1} m/s",
                             tf.translation.y,

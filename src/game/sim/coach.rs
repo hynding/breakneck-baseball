@@ -235,7 +235,7 @@ fn observe(
             state.bounced = true;
         }
     }
-    let ball = ball_q.get_single().ok();
+    let ball = ball_q.single().ok();
     if play.phase == Phase::Pitch {
         if let Some((tf, _, _)) = ball {
             // Mirror flow's plate-crossing record (same z-gate).
@@ -244,7 +244,7 @@ fn observe(
             }
         }
     }
-    if let (Some((tf, vel, in_flight)), Ok(catcher_tf)) = (ball, catcher_q.get_single()) {
+    if let (Some((tf, vel, in_flight)), Ok(catcher_tf)) = (ball, catcher_q.single()) {
         // First arrival at the glove line, exactly as `catcher_receives`
         // gates its catch: this is what exempts dirt balls and sailed
         // pitches from the mitt expectation.
@@ -340,7 +340,7 @@ fn observe(
         untouched_pitch_result,
         result_secs: ruleset.pace.result_secs,
         auto_throw_delay_secs: ruleset.pace.auto_throw_delay_secs,
-        catcher_pos: catcher_q.get_single().ok().map(|tf| tf.translation),
+        catcher_pos: catcher_q.single().ok().map(|tf| tf.translation),
         ball: ball_facts,
         contact: state.contact.clone(),
         chaser,
@@ -372,7 +372,7 @@ fn observe(
             continue;
         }
         report.record(finding.clone());
-        findings.send(CoachFindingEvent(finding));
+        findings.write(CoachFindingEvent(finding));
     }
 }
 

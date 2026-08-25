@@ -106,7 +106,7 @@ fn detect_wall_bang(
     walls: Query<(), With<crate::game::field::OutfieldWall>>,
     mut bangs: EventWriter<WallBangEvent>,
 ) {
-    let Ok((ball_entity, ball_tf, vel)) = ball_q.get_single() else {
+    let Ok((ball_entity, ball_tf, vel)) = ball_q.single() else {
         return;
     };
     for event in collisions.read() {
@@ -121,7 +121,7 @@ fn detect_wall_bang(
             continue;
         };
         if walls.get(other).is_ok() && vel.linvel.length() >= WALL_BANG_MIN_SPEED {
-            bangs.send(WallBangEvent {
+            bangs.write(WallBangEvent {
                 pos: ball_tf.translation,
             });
         }
@@ -302,7 +302,7 @@ fn spawn_trail(
     let Some(assets) = assets else {
         return;
     };
-    let Ok((transform, vel)) = ball_q.get_single() else {
+    let Ok((transform, vel)) = ball_q.single() else {
         return;
     };
     if vel.linvel.length() < TRAIL_MIN_SPEED {

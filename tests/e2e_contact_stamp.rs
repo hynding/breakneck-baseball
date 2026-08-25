@@ -50,7 +50,7 @@ fn drive(
             intents.get_mut(fielding).action = true;
         }
         Phase::Pitch => {
-            if let Ok(t) = ball.get_single() {
+            if let Ok(t) = ball.single() {
                 let z = t.translation.z;
                 if (-0.3..=0.3).contains(&z) {
                     intents.get_mut(batting).action = true;
@@ -65,6 +65,7 @@ fn stamp_text(app: &mut App) -> String {
     app.world_mut()
         .query_filtered::<&Text, With<ContactStampText>>()
         .single(app.world())
+        .unwrap()
         .0
         .clone()
 }

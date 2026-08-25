@@ -183,13 +183,13 @@ pub(super) fn broadcast_camera(
     // framing decision so the duel FOV can correct for it — see
     // `aspect_safe_duel_vfov`. Falls back to the reference aspect (a no-op
     // correction) before the camera exists.
-    let aspect = match cam_q.get_single() {
+    let aspect = match cam_q.single() {
         Ok((_, Projection::Perspective(persp))) => persp.aspect_ratio,
         _ => DUEL_REFERENCE_ASPECT,
     };
 
     // Pick the framing the current phase wants.
-    let (desired_eye, desired_target, desired_fov) = match (play.phase, ball_q.get_single()) {
+    let (desired_eye, desired_target, desired_fov) = match (play.phase, ball_q.single()) {
         // Fresh contact: hold the plate framing for a beat — the swing, the
         // crack, the batter breaking from the box — before chasing the ball.
         (Phase::InPlay, Ok(_)) if play.since_contact(time.elapsed_secs()) < BALL_FOLLOW_DELAY => (
@@ -267,7 +267,7 @@ pub(super) fn broadcast_camera(
     rig.target = rig.target.lerp(desired_target, follow);
     rig.fov = rig.fov + (desired_fov - rig.fov) * follow;
 
-    if let Ok((mut cam, mut projection)) = cam_q.get_single_mut() {
+    if let Ok((mut cam, mut projection)) = cam_q.single_mut() {
         *cam = Transform::from_translation(rig.eye + kick.0).looking_at(rig.target, Vec3::Y);
         if let Projection::Perspective(persp) = projection.as_mut() {
             persp.fov = rig.fov;

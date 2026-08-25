@@ -208,7 +208,7 @@ pub(super) fn show_banner(
     mut events: EventReader<PlayBanner>,
     theme: Res<Theme>,
     mut timer: ResMut<BannerTimer>,
-    mut pill_q: Query<(&mut BackgroundColor, &mut BorderColor), With<BannerPill>>,
+    mut pill_q: Query<(&mut BackgroundColor, &mut BorderColor, &mut Visibility), With<BannerPill>>,
     mut text_q: Query<(&mut Text, &mut TextColor), With<BannerText>>,
 ) {
     // Show only the latest banner this frame.
@@ -226,9 +226,10 @@ pub(super) fn show_banner(
         **text = banner.text.clone();
         color.0 = tone_color;
     }
-    for (mut bg, mut border) in &mut pill_q {
+    for (mut bg, mut border, mut visibility) in &mut pill_q {
         bg.0 = ui.panel_bg;
         border.0 = ui.panel_border;
+        *visibility = Visibility::Inherited;
     }
     timer.0 = Timer::from_seconds(1.6, TimerMode::Once);
 }
@@ -237,16 +238,15 @@ pub(super) fn show_banner(
 pub(super) fn fade_banner(
     time: Res<Time>,
     mut timer: ResMut<BannerTimer>,
-    mut pill_q: Query<(&mut BackgroundColor, &mut BorderColor), With<BannerPill>>,
+    mut pill_q: Query<&mut Visibility, With<BannerPill>>,
     mut text_q: Query<(&mut Text, &mut TextColor), With<BannerText>>,
 ) {
     if timer.0.finished() {
         return;
     }
     if timer.0.tick(time.delta()).just_finished() {
-        for (mut bg, mut border) in &mut pill_q {
-            bg.0 = hidden_tint(bg.0);
-            border.0 = hidden_tint(border.0);
+        for mut visibility in &mut pill_q {
+            *visibility = Visibility::Hidden;
         }
         for (mut text, _color) in &mut text_q {
             **text = String::new();

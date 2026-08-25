@@ -160,13 +160,15 @@ pub(super) fn spawn_hud(
             GameplayEntity,
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Percent(26.0),
+                // Px, not Percent, purely for symmetry with every other HUD
+                // element; both were exonerated by the 0.16-wasm probe matrix.
+                top: Val::Px(200.0),
                 left: Val::Px(0.0),
                 width: Val::Percent(100.0),
                 justify_content: JustifyContent::Center,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.01)),
+            // (no background — see the 0.16 note on the stamp wrapper)
         ))
         .with_children(|wrap| {
             wrap.spawn((
@@ -176,14 +178,21 @@ pub(super) fn spawn_hud(
                     border: UiRect::all(Val::Px(1.5)),
                     ..default()
                 },
-                BackgroundColor(hidden_tint(ui.panel_bg)),
-                BorderColor(hidden_tint(ui.panel_border)),
+                // 0.16 wasm: near-zero-alpha extraction culls this subtree
+                // for good (the 0.15 hidden_tint trick inverted into a kill
+                // switch). The pill now debuts painted and visible — "PLAY
+                // BALL!" — so the first extract sees a real renderable, and
+                // show/fade toggle Visibility from then on.
+                BackgroundColor(ui.panel_bg),
+                BorderColor(ui.panel_border),
                 BorderRadius::all(Val::Px(26.0)),
             ))
             .with_children(|pill| {
                 pill.spawn((
                     BannerText,
-                    Text::new(""),
+                    // The debut banner: real content for the first extract,
+                    // faded on the normal timer like any other call.
+                    Text::new("PLAY BALL!"),
                     TextFont {
                         font_size: 46.0,
                         ..default()
@@ -203,16 +212,15 @@ pub(super) fn spawn_hud(
             GameplayEntity,
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Percent(38.0),
+                top: Val::Px(300.0),
                 left: Val::Px(0.0),
                 width: Val::Percent(100.0),
                 justify_content: JustifyContent::Center,
                 ..default()
             },
-            // A container root with no renderable is never re-extracted on
-            // wasm/WebGL2 once the first frame culls it — a near-invisible
-            // background (never alpha 0, see `hidden_tint`) keeps it live.
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.01)),
+            // 0.16: no background — a near-zero-alpha paint here culls the
+            // whole subtree on wasm (probe-verified); a bare container is
+            // extracted fine.
         ))
         .with_children(|wrap| {
             wrap.spawn((

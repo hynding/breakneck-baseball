@@ -96,6 +96,7 @@ fn controls_dialog_alpha(app: &mut App) -> f32 {
     app.world_mut()
         .query_filtered::<&BackgroundColor, With<ControlsDialog>>()
         .single(app.world())
+        .unwrap()
         .0
         .alpha()
 }

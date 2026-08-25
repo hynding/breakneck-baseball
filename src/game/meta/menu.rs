@@ -261,7 +261,7 @@ fn cycle_options(
     }
 
     for entity in &menu_q {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
     build_menu(&mut commands, &config, &theme);
 }
@@ -399,6 +399,6 @@ fn game_over_restart(
 /// Generic despawn-by-marker used on state exit.
 fn despawn<T: Component>(mut commands: Commands, query: Query<Entity, With<T>>) {
     for entity in &query {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 }

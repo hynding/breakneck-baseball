@@ -122,12 +122,12 @@ pub(super) fn update_landing_ring(
     ball_q: Query<(&Transform, &Velocity), (With<Baseball>, With<InFlight>, Without<LandingRing>)>,
     mut ring_q: Query<(&mut Transform, &mut Visibility), With<LandingRing>>,
 ) {
-    let Ok((mut ring_tf, mut visibility)) = ring_q.get_single_mut() else {
+    let Ok((mut ring_tf, mut visibility)) = ring_q.single_mut() else {
         return;
     };
     let live = play.phase == Phase::InPlay && !play.is_resolved();
     let flying = ball_q
-        .get_single()
+        .single()
         .ok()
         .filter(|(ball, _)| ball.translation.y > RING_OFF_HEIGHT);
     let Some((ball, vel)) = (if live { flying } else { None }) else {
@@ -204,11 +204,11 @@ pub(super) fn update_ball_halo(
     camera_q: Query<&GlobalTransform, (With<Camera3d>, Without<BallHalo>)>,
     mut halo_q: Query<(&mut Transform, &mut Visibility), With<BallHalo>>,
 ) {
-    let Ok((mut halo_tf, mut visibility)) = halo_q.get_single_mut() else {
+    let Ok((mut halo_tf, mut visibility)) = halo_q.single_mut() else {
         return;
     };
     let ball = if play.phase == Phase::InPlay {
-        ball_q.get_single().ok()
+        ball_q.single().ok()
     } else {
         None
     };
@@ -219,7 +219,7 @@ pub(super) fn update_ball_halo(
         return;
     };
     let dist = camera_q
-        .get_single()
+        .single()
         .map(|cam| cam.translation().distance(ball.translation))
         .unwrap_or(0.0);
     halo_tf.translation = ball.translation;
@@ -239,7 +239,7 @@ pub(super) fn contact_burst(
 ) {
     let Some(assets) = assets else { return };
     for _ in hits.read() {
-        let Ok(ball) = ball_q.get_single() else {
+        let Ok(ball) = ball_q.single() else {
             continue;
         };
         for i in 0..10 {
@@ -413,7 +413,7 @@ pub(super) fn bounce_dust(
     mut commands: Commands,
 ) {
     let Some(assets) = assets else { return };
-    let Ok((ball_entity, ball_tf, vel)) = ball_q.get_single() else {
+    let Ok((ball_entity, ball_tf, vel)) = ball_q.single() else {
         return;
     };
     for event in collisions.read() {

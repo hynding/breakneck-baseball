@@ -56,7 +56,7 @@ pub(super) fn result_phase(
         next_state.set(GameState::GameOver);
         return;
     }
-    if let Ok((entity, mut transform, mut vel, mut vis)) = ball_q.get_single_mut() {
+    if let Ok((entity, mut transform, mut vel, mut vis)) = ball_q.single_mut() {
         transform.translation = rules::mound_reset_pos(field.pitch_distance);
         vel.linvel = Vec3::ZERO;
         vel.angvel = Vec3::ZERO;
@@ -103,7 +103,7 @@ pub(super) fn hit(
     } else {
         label.to_string()
     };
-    banner.send(PlayBanner::new(text, tone));
+    banner.write(PlayBanner::new(text, tone));
 }
 
 /// Records a taken ball. Returns whether it was ball four (a dead-ball walk,
@@ -116,11 +116,11 @@ pub(super) fn add_ball(
 ) -> bool {
     match rules::call_ball(score, bases, ruleset) {
         BallCall::Walk { .. } => {
-            banner.send(PlayBanner::new("WALK", BannerTone::Epic));
+            banner.write(PlayBanner::new("WALK", BannerTone::Epic));
             true
         }
         BallCall::Ball => {
-            banner.send(PlayBanner::new("BALL", BannerTone::Info));
+            banner.write(PlayBanner::new("BALL", BannerTone::Info));
             false
         }
     }
@@ -138,10 +138,10 @@ pub(super) fn resolve_steal(
     let off_speed = play.live_kind != Some(rules::PitchKind::Fastball);
     match rules::attempt_steal(score, bases, ruleset, off_speed, play.big_jump) {
         StealResult::Stolen { .. } => {
-            banner.send(PlayBanner::new("STOLEN BASE!", BannerTone::Good));
+            banner.write(PlayBanner::new("STOLEN BASE!", BannerTone::Good));
         }
         StealResult::Caught => {
-            banner.send(PlayBanner::new("CAUGHT STEALING", BannerTone::Bad));
+            banner.write(PlayBanner::new("CAUGHT STEALING", BannerTone::Bad));
         }
         StealResult::NoRunner => {}
     }
@@ -158,16 +158,16 @@ pub(super) fn add_strike(
     let call = rules::call_strike(score, bases, ruleset, dropped_third);
     match call {
         StrikeCall::DroppedThird => {
-            banner.send(PlayBanner::new("DROPPED 3RD STRIKE!", BannerTone::Good));
+            banner.write(PlayBanner::new("DROPPED 3RD STRIKE!", BannerTone::Good));
         }
         StrikeCall::Strikeout => {
-            banner.send(PlayBanner::new("STRIKEOUT!", BannerTone::Bad));
+            banner.write(PlayBanner::new("STRIKEOUT!", BannerTone::Bad));
         }
         StrikeCall::Strike if swinging => {
-            banner.send(PlayBanner::new("SWING & MISS", BannerTone::Info));
+            banner.write(PlayBanner::new("SWING & MISS", BannerTone::Info));
         }
         StrikeCall::Strike => {
-            banner.send(PlayBanner::new("STRIKE", BannerTone::Info));
+            banner.write(PlayBanner::new("STRIKE", BannerTone::Info));
         }
     }
     call

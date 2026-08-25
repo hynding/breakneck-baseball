@@ -431,6 +431,7 @@ pub(super) fn spawn_lighting(commands: &mut Commands, yaw: f32, ambient_fraction
     commands.insert_resource(AmbientLight {
         color: Color::WHITE,
         brightness: ambient_fraction * SUN_ILLUMINANCE,
+        ..Default::default()
     });
 }
 

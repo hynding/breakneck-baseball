@@ -165,7 +165,7 @@ pub(super) fn exit_creator_stage(
     mut main_cameras: Query<&mut Camera, (With<Camera3d>, Without<CreatorStage>)>,
 ) {
     for entity in &stage {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
     for mut camera in &mut main_cameras {
         camera.is_active = true;
@@ -197,7 +197,7 @@ pub(super) fn lerp_creator_camera(
     time: Res<Time>,
     mut camera: Query<&mut Transform, (With<Camera3d>, With<CreatorStage>)>,
 ) {
-    let Ok(mut transform) = camera.get_single_mut() else {
+    let Ok(mut transform) = camera.single_mut() else {
         return;
     };
     let (target_pos, look_at) = camera_target(cs.tab);
@@ -240,7 +240,7 @@ pub(super) fn preview_idle(
     mut last: Local<Option<PreviewKey>>,
     rig: Query<(Entity, Option<&Playing>), With<PreviewRig>>,
 ) {
-    let Ok((entity, playing)) = rig.get_single() else {
+    let Ok((entity, playing)) = rig.single() else {
         return;
     };
     let def = selected_def_ref(&cs.working, cs.team, cs.index);
@@ -297,7 +297,7 @@ pub(super) fn retint_preview(
     mut jerseys: Query<(&GltfJerseyMesh, &mut MeshMaterial3d<StandardMaterial>)>,
 ) {
     let Some(mats) = mats else { return };
-    let Ok(root) = rig.get_single() else {
+    let Ok(root) = rig.single() else {
         return;
     };
     let mut stack = vec![root];
@@ -309,7 +309,7 @@ pub(super) fn retint_preview(
             };
         }
         if let Ok(children) = children_q.get(entity) {
-            stack.extend(children.iter().copied());
+            stack.extend(children.iter());
         }
     }
 }

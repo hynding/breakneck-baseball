@@ -150,7 +150,7 @@ pub(super) fn paint_settings_screen(
         (Without<SettingsTitle>, Without<SettingsRowLabel>),
     >,
 ) {
-    let Ok((mut title_text, mut title_color)) = title.get_single_mut() else {
+    let Ok((mut title_text, mut title_color)) = title.single_mut() else {
         return;
     };
     let ui = &theme.ui;

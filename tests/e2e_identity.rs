@@ -21,7 +21,7 @@ fn count_quads(world: &mut World, root: Entity) -> usize {
             count += 1;
         }
         if let Some(children) = world.get::<Children>(e) {
-            stack.extend(children.iter().copied());
+            stack.extend(children.iter());
         }
     }
     count
@@ -35,7 +35,7 @@ fn seated_rigs_are_identified_at_kickoff() {
     let world = app.world_mut();
     let batter_id = *world
         .query_filtered::<&PlayerIdentity, With<Batter>>()
-        .single(world);
+        .single(world).unwrap();
     assert_eq!(
         batter_id,
         PlayerIdentity {
@@ -45,7 +45,7 @@ fn seated_rigs_are_identified_at_kickoff() {
     );
     let pitcher_id = *world
         .query_filtered::<&PlayerIdentity, With<Pitcher>>()
-        .single(world);
+        .single(world).unwrap();
     assert_eq!(
         pitcher_id,
         PlayerIdentity {
@@ -279,7 +279,7 @@ fn fidget_accumulator_survives_a_pitch_interlude() {
     let batter_id = *app
         .world_mut()
         .query_filtered::<&PlayerIdentity, With<Batter>>()
-        .single(app.world());
+        .single(app.world()).unwrap();
     assert_eq!(
         batter_id,
         PlayerIdentity {
@@ -333,7 +333,7 @@ fn fidget_is_cut_before_the_windup() {
     let batter = app
         .world_mut()
         .query_filtered::<Entity, With<Batter>>()
-        .single(app.world());
+        .single(app.world()).unwrap();
     app.world_mut()
         .entity_mut(batter)
         .insert(Playing::new(AnimClip::FidgetHalfSwing));
@@ -373,7 +373,7 @@ fn home_run_queues_the_authored_celebration() {
     let batter = app
         .world_mut()
         .query_filtered::<Entity, With<Batter>>()
-        .single(app.world());
+        .single(app.world()).unwrap();
     app.world_mut().entity_mut(batter).insert(PlayerIdentity {
         team: Team::Away,
         index: 2,
@@ -431,7 +431,7 @@ fn headwear_hides_the_baked_cap_and_mounts_gear() {
         &breakneck_baseball::game::model_assets::RigCapMeshes,
         &breakneck_baseball::game::gear::RigGear,
     ), With<breakneck_baseball::game::player::Pitcher>>();
-    let (caps, gear) = pitchers.single(world);
+    let (caps, gear) = pitchers.single(world).unwrap();
     let cap_entities = caps.0.clone();
     let gear_entities = gear.0.clone();
     assert!(
@@ -451,9 +451,9 @@ fn headwear_hides_the_baked_cap_and_mounts_gear() {
         &breakneck_baseball::game::model_assets::RigBones,
         With<breakneck_baseball::game::player::Pitcher>,
     >();
-    let head = pitcher_bones.single(world).head;
+    let head = pitcher_bones.single(world).unwrap().head;
     let on_head = gear_entities
         .iter()
-        .any(|&p| world.get::<Parent>(p).map(|par| par.get()) == Some(head));
+        .any(|&p| world.get::<ChildOf>(p).map(|par| par.parent()) == Some(head));
     assert!(on_head, "the helmet prop must hang off the Head bone");
 }

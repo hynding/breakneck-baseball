@@ -137,14 +137,14 @@ pub(super) fn pre_pitch(
                 Timer::from_seconds(rules_res.pace.pickoff_cooldown_secs, TimerMode::Once);
             match rules::attempt_pickoff(&mut score, &mut bases, &rules_res, lead.extended) {
                 rules::PickoffResult::PickedOff { .. } => {
-                    banner.send(PlayBanner::new("PICKED OFF!", BannerTone::Bad));
+                    banner.write(PlayBanner::new("PICKED OFF!", BannerTone::Bad));
                     // A pickoff out is a play: it takes the same result
                     // pause as any other out (banner linger + runners
                     // settling) before the next window can open.
                     end_pitch(&mut play, rules_res.pace.result_secs);
                 }
                 rules::PickoffResult::SafeBack => {
-                    banner.send(PlayBanner::new("BACK IN TIME", BannerTone::Info));
+                    banner.write(PlayBanner::new("BACK IN TIME", BannerTone::Info));
                 }
                 rules::PickoffResult::NoRunner => {}
             }
@@ -206,7 +206,7 @@ pub(super) fn wind_up(
             .pending_pitch
             .take()
             .unwrap_or((Vec2::ZERO, rules::PitchKind::Changeup));
-        pitch_ev.send(PitchEvent {
+        pitch_ev.write(PitchEvent {
             velocity: rules::pitch_velocity_kind(
                 kind,
                 aim,
@@ -242,7 +242,7 @@ pub(super) fn pitch_live(
     if play.phase != Phase::Pitch || play.resolved {
         return;
     }
-    let Ok((ball, ball_vel)) = ball_q.get_single() else {
+    let Ok((ball, ball_vel)) = ball_q.single() else {
         return;
     };
     let pos = ball.translation;
@@ -293,7 +293,7 @@ pub(super) fn pitch_live(
         };
         // Fired on every judged swing (whiffs included) for later presentation
         // systems; the rules/physics consequence follows below.
-        contact_ev.send(ContactEvent {
+        contact_ev.write(ContactEvent {
             quality,
             batting_team: batter,
             dt_ms,
@@ -311,7 +311,7 @@ pub(super) fn pitch_live(
             | rules::ContactQuality::Weak => {
                 let base = rules::hit_velocity(pos.z, aim);
                 let velocity = rules::apply_contact_quality(base, quality, dt_ms, &rules);
-                hit_ev.send(HitEvent { velocity });
+                hit_ev.write(HitEvent { velocity });
                 let (landing, hang_time) = rules::predict_landing(
                     velocity,
                     rules::hit_spin(velocity),
@@ -320,7 +320,7 @@ pub(super) fn pitch_live(
                 );
                 let kind = rules::classify_contact(landing, &field);
                 let contact_class = rules::contact_class(landing, hang_time, &field);
-                in_play_ev.send(BallInPlayEvent {
+                in_play_ev.write(BallInPlayEvent {
                     kind,
                     landing,
                     contact_class,
@@ -364,7 +364,7 @@ pub(super) fn pitch_live(
             // ContactEvent for later presentation.
             rules::ContactQuality::FoulTip => {
                 rules::foul(&mut score, &rules);
-                banner.send(PlayBanner::new("FOUL", BannerTone::Info));
+                banner.write(PlayBanner::new("FOUL", BannerTone::Info));
                 play.pitch_taken = true; // the catcher gloves the tipped ball
                 end_pitch(&mut play, rules.pace.result_secs);
             }
@@ -405,7 +405,7 @@ pub(super) fn pitch_live(
             } else {
                 BannerTone::Good
             };
-            banner.send(PlayBanner::new("HIT BY PITCH", tone));
+            banner.write(PlayBanner::new("HIT BY PITCH", tone));
             order.advance(batter);
         } else {
             play.pitch_taken = true;
@@ -464,7 +464,7 @@ pub(super) fn catcher_receives(
     let Some((catcher, catcher_tf)) = catchers.iter().next() else {
         return;
     };
-    let Ok((ball, mut ball_tf, mut vel, mut vis)) = ball_q.get_single_mut() else {
+    let Ok((ball, mut ball_tf, mut vel, mut vis)) = ball_q.single_mut() else {
         return;
     };
     let pos = ball_tf.translation;
@@ -494,7 +494,7 @@ pub(super) fn catcher_receives(
             commands
                 .entity(catcher)
                 .insert(Playing::new(AnimClip::GloveUp));
-            caught.send(PitchCaughtEvent);
+            caught.write(PitchCaughtEvent);
         }
         play.presentational_catch = false;
         return;
@@ -520,7 +520,7 @@ pub(super) fn catcher_receives(
         commands
             .entity(catcher)
             .insert(Playing::new(AnimClip::GloveUp));
-        caught.send(PitchCaughtEvent);
+        caught.write(PitchCaughtEvent);
         return;
     }
 

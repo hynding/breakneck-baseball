@@ -148,7 +148,7 @@ fn drive_scenario(
             intents.get_mut(batting).aim = Vec2::new(0.0, -1.0);
         }
         Phase::Pitch => {
-            if let (Some((z_min, z_max, aim)), Ok(t)) = (swing, ball.get_single()) {
+            if let (Some((z_min, z_max, aim)), Ok(t)) = (swing, ball.single()) {
                 let intent = intents.get_mut(batting);
                 intent.aim = aim;
                 let z = t.translation.z;
@@ -254,7 +254,7 @@ fn drive_whiffs(
             intent.action = true;
         }
         Phase::Pitch => {
-            if let Ok(t) = ball.get_single() {
+            if let Ok(t) = ball.single() {
                 if t.translation.z > 5.0 {
                     intents.get_mut(score.batting_team()).action = true;
                 }

@@ -371,7 +371,7 @@ fn direct(
     let dt_ms = (play.phase == Phase::Pitch)
         .then(|| {
             ball_q
-                .get_single()
+                .single()
                 .ok()
                 .map(|(tf, vel)| swing_dt_ms(tf.translation.z, vel.linvel.z))
         })

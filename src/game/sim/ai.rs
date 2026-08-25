@@ -262,7 +262,7 @@ pub fn cpu_offense(
         intents.get_mut(team).action = false;
         return;
     }
-    let Ok((ball, ball_vel)) = ball_q.get_single() else {
+    let Ok((ball, ball_vel)) = ball_q.single() else {
         return;
     };
     let pos = ball.translation;

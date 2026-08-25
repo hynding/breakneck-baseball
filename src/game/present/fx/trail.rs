@@ -118,7 +118,7 @@ pub(super) fn pitch_trail(
         *last_drop = None;
         return;
     }
-    let Ok((ball, vel)) = ball_q.get_single() else {
+    let Ok((ball, vel)) = ball_q.single() else {
         return;
     };
     let pos = ball.translation;

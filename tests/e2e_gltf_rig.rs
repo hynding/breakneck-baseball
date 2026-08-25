@@ -117,9 +117,9 @@ fn gltf_rigs_recolor_and_mount_jerseys() {
     );
 
     // Jersey lettering rides bones now: every quad's parent is a named bone.
-    let mut parents = world.query::<(&JerseyQuad, &Parent)>();
+    let mut parents = world.query::<(&JerseyQuad, &ChildOf)>();
     let mut names = world.query::<&Name>();
-    let quad_parents: Vec<Entity> = parents.iter(world).map(|(_, p)| p.get()).collect();
+    let quad_parents: Vec<Entity> = parents.iter(world).map(|(_, p)| p.parent()).collect();
     assert!(!quad_parents.is_empty());
     for parent in quad_parents {
         let name = names
@@ -238,7 +238,7 @@ fn bat_shows_only_on_the_batter() {
                 }
             }
             if let Ok(children) = children_q.get(world, e) {
-                stack.extend(children.iter().copied());
+                stack.extend(children.iter());
             }
         }
         assert_eq!(
@@ -297,11 +297,11 @@ fn shoulder_jersey_quads_share_the_same_mount_yaw() {
     .expect("rigs wired");
 
     let world = app.world_mut();
-    let mut quads = world.query::<(&JerseyQuad, &Transform, &Parent)>();
+    let mut quads = world.query::<(&JerseyQuad, &Transform, &ChildOf)>();
     let mut names = world.query::<&Name>();
     let entries: Vec<(Transform, Entity)> = quads
         .iter(world)
-        .map(|(_, transform, parent)| (*transform, parent.get()))
+        .map(|(_, transform, parent)| (*transform, parent.parent()))
         .collect();
 
     let mut left_rotations = Vec::new();

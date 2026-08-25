@@ -249,7 +249,7 @@ fn chase_and_gather(
     if play.phase != Phase::InPlay {
         return;
     }
-    let Ok((ball_entity, ball_tf, mut ball_vel)) = ball_q.get_single_mut() else {
+    let Ok((ball_entity, ball_tf, mut ball_vel)) = ball_q.single_mut() else {
         return;
     };
     let ball_pos = ball_tf.translation;
@@ -278,13 +278,13 @@ fn chase_and_gather(
             if let Ok((_, _, mut intent)) = fielders.get_mut(chaser) {
                 intent.target = None;
             }
-            reports.send(LiveBallEvent::Caught { pos: ball_pos });
+            reports.write(LiveBallEvent::Caught { pos: ball_pos });
             active.state = PlayState::Done;
             return;
         }
         // First bounce: the fair/foul call point; from here it's a ground ball.
         if ball_pos.y < BOUNCE_HEIGHT && ball_vel.linvel.y <= 0.0 {
-            reports.send(LiveBallEvent::Landed { pos: ball_pos });
+            reports.write(LiveBallEvent::Landed { pos: ball_pos });
             active.state = PlayState::Chasing {
                 chaser,
                 bounced: true,
@@ -359,7 +359,7 @@ fn hold_and_throw(
     if play.phase != Phase::InPlay {
         return;
     }
-    let Ok((mut ball_tf, mut ball_vel)) = ball_q.get_single_mut() else {
+    let Ok((mut ball_tf, mut ball_vel)) = ball_q.single_mut() else {
         return;
     };
 
@@ -434,7 +434,7 @@ fn hold_and_throw(
             .entity(receiver)
             .insert(Playing::new(AnimClip::GloveUp));
     }
-    reports.send(LiveBallEvent::Thrown {
+    reports.write(LiveBallEvent::Thrown {
         pos: from,
         base,
         race_time: throw_time,
@@ -460,12 +460,12 @@ fn receive_throw(
     let PlayState::Thrown { catcher, relay_to } = active.state else {
         return;
     };
-    let Ok((ball_entity, ball_tf, mut ball_vel)) = ball_q.get_single_mut() else {
+    let Ok((ball_entity, ball_tf, mut ball_vel)) = ball_q.single_mut() else {
         return;
     };
     let Ok((_, catcher_tf)) = fielders.get(catcher) else {
         active.state = PlayState::Done;
-        reports.send(LiveBallEvent::Settled);
+        reports.write(LiveBallEvent::Settled);
         return;
     };
     let arrived = ball_tf.translation.distance(catcher_tf.translation) < 1.0
@@ -508,7 +508,7 @@ fn receive_throw(
     ball_vel.angvel = Vec3::ZERO;
     commands.entity(ball_entity).remove::<InFlight>();
     active.state = PlayState::Done;
-    reports.send(LiveBallEvent::Settled);
+    reports.write(LiveBallEvent::Settled);
 }
 
 /// A human defense steers the chaser directly: while the stick is deflected

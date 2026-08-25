@@ -112,7 +112,7 @@ fn drive(
             // then drop the button the first frame the live timing reaches the
             // solid band — which fires the meter's swing that same frame.
             1 => {
-                let in_band = ball.get_single().is_ok_and(|(t, v)| {
+                let in_band = ball.single().is_ok_and(|(t, v)| {
                     let vz = v.linvel.z.min(-f32::EPSILON);
                     let dt = 1000.0 * t.translation.z / vz; // == flow::swing_dt_ms
                     dt >= RELEASE_DT_MS
@@ -149,7 +149,7 @@ fn drive(
 /// (recomputed here exactly like `flow::swing_dt_ms`), so a PCI press lands near
 /// the plate rather than at a fixed z.
 fn in_press_band(ball: &Query<(&Transform, &Velocity), With<Baseball>>) -> bool {
-    ball.get_single().is_ok_and(|(t, v)| {
+    ball.single().is_ok_and(|(t, v)| {
         let vz = v.linvel.z.min(-f32::EPSILON);
         let dt = 1000.0 * t.translation.z / vz;
         dt >= PCI_PRESS_DT_MS
