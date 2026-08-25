@@ -47,3 +47,10 @@ All on `Ruleset` (`src/game/core/variant.rs`), consumed by `rules::contact_quali
 - `pull_yaw_per_ms` — launch direction pulled by timing error
 - `cpu_timing_spread_ms` — the single dial for CPU swing scatter (the CPU always bats Classic)
 - `sim/ai.rs` hash-noise decision distributions (swing choice, launch aim) — CPU-side only
+- `sim/ai.rs` behind-in-the-count package (TODO 10, 2026-08-24): at 2+ balls the pitcher's
+  scatter scales to 0.4 with a get-it-over arsenal (mid-zone heater at +0.3 aim, not the
+  standard +0.55, whose backspin lift parks at the top edge) **paired with** the batter's
+  ahead-count compensation (timing draw ×0.65, chase ×0.5). The pairing is load-bearing:
+  a pitcher-only pull converts walk PAs into strikeouts (K% brushed 29.7 in the reverted
+  2026-08-21 attempt). `tests/e2e_passive_walks.rs` guards the human-facing symptom
+  (passive half ≤ 3 BB; was 10); the bands here still arbitrate the CPU-vs-CPU economy.

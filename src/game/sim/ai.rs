@@ -103,6 +103,41 @@ pub(crate) fn ready_to_press(dt_ms: f32, target_dt: f32) -> bool {
     dt_ms >= target_dt
 }
 
+// ── The behind-in-the-count package (TODO 10) ────────────────────────────────
+// A passive batter used to milk the CPU for walk chains (~6-10 BB per half):
+// the wide base scatter kept missing the zone at any count. The fix is a
+// *paired* package — the pitcher tightens up when behind, and the batter
+// compensates in the very same counts, so the CPU-vs-CPU economy
+// (tests/balance_sim.rs, the arbiter) stays in its bands instead of
+// converting the walk PAs straight into strikeouts (the failure of the
+// 2026-08-21 pitcher-only attempt).
+
+/// A pitcher behind in the count (2 balls and up) stops nibbling: his aim
+/// scatter shrinks to this fraction of the base spread.
+pub(crate) fn behind_scatter_scale(balls: u32) -> f32 {
+    if balls >= 2 { 0.4 } else { 1.0 }
+}
+
+/// Whether the count calls for the get-it-over arsenal (no benders or
+/// sweepers — a heater or a changeup over the plate).
+pub(crate) fn wants_get_it_over(balls: u32) -> bool {
+    balls >= 2
+}
+
+/// A hitter ahead in the count sits on the groove he knows is coming: his
+/// swing-timing scatter tightens to this fraction. This is the K%/HR
+/// counterweight to the pitcher's pull — grooved strikes get barreled, not
+/// whiffed.
+pub(crate) fn ahead_timing_scale(balls: u32) -> f32 {
+    if balls >= 2 { 0.65 } else { 1.0 }
+}
+
+/// ...and he stops chasing: out-of-zone offers scale by this fraction when
+/// ahead, so the pitches the pitcher still misses with stay taken balls.
+pub(crate) fn ahead_chase_scale(balls: u32) -> f32 {
+    if balls >= 2 { 0.5 } else { 1.0 }
+}
+
 // ── Defense: the AI pitches ───────────────────────────────────────────────────
 
 #[allow(clippy::too_many_arguments)]
@@ -153,10 +188,22 @@ pub fn cpu_defense(
         let aim = if let Some(kind) = pitch_override.0.take() {
             kind.canonical_aim()
         } else {
-            let spread = 0.55 * (1.0 - cfg.skill) + 0.12;
+            // Behind in the count the scatter pulls in and the arsenal goes
+            // get-it-over (the TODO 10 package; the batter's ahead-count
+            // compensation below keeps the CPU-vs-CPU bands honest).
+            let spread = (0.55 * (1.0 - cfg.skill) + 0.12) * behind_scatter_scale(score.balls);
             let mut aim = Vec2::new(noise(t * 1.7) * spread, noise(t * 2.3) * spread * 0.5);
             let roll = hash01(t * 4.3);
-            if roll < 0.40 {
+            if wants_get_it_over(score.balls) {
+                if roll < 0.55 {
+                    // A get-it-over heater aims mid-zone, not the letters:
+                    // the standard +0.55 fastball bias plus backspin lift
+                    // parks at the top edge, which is exactly the coin-flip
+                    // high pitch the pull exists to stop throwing.
+                    aim.y += 0.3;
+                }
+                // else: changeup over the plate (neutral)
+            } else if roll < 0.40 {
                 aim.y += 0.55; // fastball
             } else if roll < 0.65 {
                 // changeup: neutral
@@ -272,9 +319,14 @@ pub fn cpu_offense(
     // pitch instant — the CPU's human-like timing scatter (Task B3). Same
     // signed convention as `flow::swing_dt_ms`: negative is early, positive
     // is late, drawn from ±`cpu_timing_spread_ms`.
-    let target_dt = *cpu
-        .swing_target_dt
-        .get_or_insert_with(|| draw_target_dt(t * 11.9, rules.batting.cpu_timing_spread_ms));
+    let target_dt = *cpu.swing_target_dt.get_or_insert_with(|| {
+        // Ahead in the count the hitter sits on the groove: a tighter
+        // timing draw (the batter arm of the TODO 10 package).
+        draw_target_dt(
+            t * 11.9,
+            rules.batting.cpu_timing_spread_ms * ahead_timing_scale(score.balls),
+        )
+    });
 
     // Decide whether to offer at this pitch — once, and **early**, while the
     // ball is still well in front of the plate (past `SWING_EARLY_Z`, the
@@ -309,7 +361,9 @@ pub fn cpu_offense(
         let swing = if in_zone {
             roll < 0.5 + 0.4 * cfg.skill // usually offers at strikes
         } else {
-            roll < 0.28 * (1.0 - cfg.skill) // rarely chases balls
+            // Rarely chases balls — and half as often when ahead in the
+            // count (the patience arm of the TODO 10 package).
+            roll < 0.28 * (1.0 - cfg.skill) * ahead_chase_scale(score.balls)
         };
         cpu.will_swing = Some(swing);
         if !swing {
@@ -401,5 +455,37 @@ mod tests {
     #[test]
     fn ready_to_press_holds_for_a_target_not_yet_reached() {
         assert!(!ready_to_press(-20.0, 10.0));
+    }
+
+    // ── The behind-in-the-count package (TODO 10) ─────────────────────────────
+
+    #[test]
+    fn the_package_arms_engage_together_at_two_balls() {
+        // Both sides of the package key on the same count threshold — the
+        // pairing is the whole point (a pitcher-only pull converts walks
+        // into strikeouts; see the TODO 10 history).
+        for balls in 0..=1 {
+            assert_eq!(behind_scatter_scale(balls), 1.0);
+            assert!(!wants_get_it_over(balls));
+            assert_eq!(ahead_timing_scale(balls), 1.0);
+            assert_eq!(ahead_chase_scale(balls), 1.0);
+        }
+        for balls in 2..=3 {
+            assert!(behind_scatter_scale(balls) < 1.0, "balls={balls}");
+            assert!(wants_get_it_over(balls), "balls={balls}");
+            assert!(ahead_timing_scale(balls) < 1.0, "balls={balls}");
+            assert!(ahead_chase_scale(balls) < 1.0, "balls={balls}");
+        }
+    }
+
+    #[test]
+    fn ahead_count_timing_draw_is_strictly_tighter() {
+        // Same seed, scaled spread: the drawn |target| shrinks by exactly
+        // the scale, so the ahead-count hitter's misses are proportionally
+        // smaller — whiffs become contact, not the other way around.
+        let base = draw_target_dt(12.34, 70.0);
+        let ahead = draw_target_dt(12.34, 70.0 * ahead_timing_scale(2));
+        assert!(ahead.abs() < base.abs());
+        assert_eq!(ahead, base * ahead_timing_scale(2));
     }
 }
