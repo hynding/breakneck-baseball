@@ -1,0 +1,9 @@
+// A patient statue: pitches when in the field, never offers at anything.
+// Against a scripted changeup pitcher this is a strikeout mill — the
+// catcher-receives check's favorite diet.
+Script(
+    name: "take-all",
+    rules: [
+        (when: All([OnDefense, Phase(PrePitch), Not(InStealWindow)]), then: Press),
+    ],
+)

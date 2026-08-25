@@ -1,0 +1,13 @@
+// Plays straight baseball on both sides: deliver a straightaway changeup
+// (a unit-tested called strike) once the steal window shuts, and commit a
+// dead-red swing as the pitch reaches the plate. The Swing action is
+// style-aware: the same script grades through Classic, Swing Meter, and
+// PCI because the director synthesizes the input pattern each adapter
+// expects.
+Script(
+    name: "balanced",
+    rules: [
+        (when: All([OnDefense, Phase(PrePitch), Not(InStealWindow)]), then: Press),
+        (when: All([OnOffense, Phase(Pitch), PlateEta(early_ms: 0.0)]), then: Swing),
+    ],
+)

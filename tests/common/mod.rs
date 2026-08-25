@@ -4,9 +4,9 @@
 
 use std::time::Duration;
 
-use bevy::app::{MainScheduleOrder, PluginsState};
+use bevy::app::PluginsState;
 use bevy::core::{TaskPoolOptions, TaskPoolPlugin};
-use bevy::ecs::schedule::{ExecutorKind, ScheduleLabel};
+use bevy::ecs::schedule::ExecutorKind;
 use bevy::prelude::*;
 use bevy::render::RenderPlugin;
 use bevy::render::settings::{RenderCreation, WgpuSettings};
@@ -15,17 +15,19 @@ use bevy::winit::WinitPlugin;
 use bevy_rapier3d::prelude::{NoUserData, RapierPhysicsPlugin};
 
 use breakneck_baseball::game::GamePlugin;
+use breakneck_baseball::game::director::{self, Director, Policy};
+use breakneck_baseball::game::settings::BattingStyle;
 
 /// Simulation step: 240 Hz keeps swing-timing windows (~0.12 m of ball travel
 /// per frame) tight enough for deterministic scripted contact.
 pub const DT: f64 = 1.0 / 240.0;
 
-/// Runs after `PreUpdate` (so `gather_intents` has refreshed keyboard-driven
-/// intents) and before `Update` (so the flow systems read what a test driver
-/// wrote) — the same [`breakneck_baseball::game::input::Intents`] seam the
-/// CPU AI uses.
-#[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct DriveGame;
+/// The injection schedule, re-exported from the Director — the game itself
+/// now owns the seam (after `PreUpdate`'s input clear, before `Update`), so
+/// tests, the autoplay mode, and scripted slots all drive through exactly
+/// one mechanism. Test drivers keep registering with
+/// `app.add_systems(DriveGame, drive)` unchanged.
+pub use breakneck_baseball::game::director::DriveGame;
 
 /// A queued key tap, applied from the [`DriveGame`] schedule. Pressing the
 /// `ButtonInput` resource directly from a test body doesn't work: the input
@@ -176,10 +178,8 @@ fn build_headless_app(single_threaded: bool) -> App {
             ..Default::default()
         });
 
-    app.init_schedule(DriveGame);
-    app.world_mut()
-        .resource_mut::<MainScheduleOrder>()
-        .insert_after(PreUpdate, DriveGame);
+    // The DriveGame schedule itself is created by the game's DirectorPlugin;
+    // the harness only adds its keyboard-tap injector to it.
     app.init_resource::<TapKey>();
     app.add_systems(DriveGame, apply_taps);
 
@@ -203,6 +203,51 @@ fn build_headless_app(single_threaded: bool) -> App {
         }
     }
     app
+}
+
+/// One cell of the control-configuration matrix: who drives each slot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum MatrixMode {
+    /// P1 scripted, opponent the real CPU AI.
+    OnePlayerVsCpu,
+    /// Both player slots scripted (two "humans").
+    TwoPlayers,
+    /// Both slots handed to the CPU AI (attract mode). Batting style is
+    /// irrelevant here — the CPU always bats Classic.
+    CpuVsCpu,
+}
+
+/// Starts a game in the given control configuration and batting style,
+/// driving every non-CPU slot with the named director script. This is the
+/// harness's matrix seam: any future control mechanism that routes through
+/// `Intents`/`SwingCommands` is covered by construction.
+#[allow(dead_code)]
+pub fn start_matrix_game(app: &mut App, mode: MatrixMode, style: BattingStyle, script: &str) {
+    app.world_mut()
+        .resource_mut::<breakneck_baseball::game::settings::Settings>()
+        .batting_style = [style, style];
+    let menu_key = match mode {
+        MatrixMode::TwoPlayers => KeyCode::Digit2,
+        _ => KeyCode::Digit1,
+    };
+    start_game(app, menu_key);
+    let script = director::script(script).expect("unknown director script");
+    let director = match mode {
+        MatrixMode::OnePlayerVsCpu => Director {
+            home: Policy::Scripted(script),
+            away: Policy::Cpu,
+        },
+        MatrixMode::TwoPlayers => Director {
+            home: Policy::Scripted(script.clone()),
+            away: Policy::Scripted(script),
+        },
+        MatrixMode::CpuVsCpu => Director {
+            home: Policy::Cpu,
+            away: Policy::Cpu,
+        },
+    };
+    app.insert_resource(director);
 }
 
 /// Steps the app until `done` returns true, up to `max_frames`. Returns the

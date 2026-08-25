@@ -1,0 +1,12 @@
+// Works the running game: stretches the lead through the steal window
+// (accepting pickoff risk), keeps the stick down through the delivery so
+// the runner is sent, and still swings dead-red. Exercises the
+// steal-window duel, the pickoff, and the hit-and-run jump.
+Script(
+    name: "steal-artist",
+    rules: [
+        (when: All([OnDefense, Phase(PrePitch), Not(InStealWindow)]), then: Press),
+        (when: All([OnOffense, Any([Phase(PrePitch), Phase(WindUp)])]), then: Aim(x: 0.0, y: -1.0)),
+        (when: All([OnOffense, Phase(Pitch), PlateEta(early_ms: 0.0)]), then: Swing),
+    ],
+)
