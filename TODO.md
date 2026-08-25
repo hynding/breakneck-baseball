@@ -41,3 +41,34 @@ NOTE: Everything that has been completed gets moved to TADA.md
     ship-blockers (resolved 2026-08-20 — TADA Batch 3) — then do it as four sequential gated
     migrations (~4–5 sessions), not one jump. Full analysis:
     `docs/agent/BEVY-UPGRADE-ASSESSMENT.md`.
+
+## Coach findings 2026-08-24
+
+First full instrumented run: matrix headless (7 cells, ~37 s) + e2e_coach
+(scripted game + CPU half-inning) + native watched run (150 s, 3,988 samples)
++ wasm visual CPU-vs-CPU run (3+ innings, 12,249 samples). **Zero
+violation-grade findings across all of it; KNOWN_ISSUES allowlist is empty.**
+The one violation the very first run produced (catcher-receives, game_time
+2.57 s, CPU-vs-CPU scenario, expected "untouched pitch at rest in the mitt",
+observed "ball rolling at z −11") was an *observer* gray zone — the dirt
+exemption judged at the glove line while flow judges it deeper — fixed in the
+observer (`sim/coach.rs` now samples both points), not a sim bug.
+
+Improvement items surfaced by the run (not gameplay violations):
+
+58. [ ] polish testing — One full-suite parallel-load failure (single-test
+    suite, 71.55 s — profile matches `tests/e2e_fielder_spots.rs`) that passed
+    standalone and on rerun. Suspect executor-order sensitivity (the
+    multi-threaded executor's ambiguous-order tie-break, same source
+    `deterministic_headless_app` exists to remove). Repro: full `cargo test`
+    under load. If it recurs, run fielder_spots single-threaded like
+    balance_sim. Owner: `tests/e2e_fielder_spots.rs` / `tests/common/mod.rs`.
+59. [ ] nice coach — The observer recognizes dropped-third plays by banner
+    text ("DROPPED 3RD"), the one string-match in the snapshot builder. Give
+    `flow::Play` a read-only "last strike call" getter so the Coach consumes
+    the decision, not the announcement. Owner: `src/game/sim/flow/`,
+    `src/game/sim/coach.rs`.
+60. [ ] nice autoplay — wasm autoplay always plays 9-inning CPU-vs-CPU
+    attract games; innings/script are env-configurable natively only. Add a
+    query-param (or localStorage) switch for the web build so CI browser runs
+    can be one inning. Owner: `src/game/meta/autoplay.rs`, `web/index.html`.

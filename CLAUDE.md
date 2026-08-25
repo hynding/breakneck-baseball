@@ -73,6 +73,7 @@ Violating any of these breaks the build, breaks wasm, or corrupts gameplay state
 - After physics or rendering changes, verify **both** targets: `cargo check` and `cargo check --target wasm32-unknown-unknown`.
 - Real-world baseball facts come from `docs/BASEBALL.md` (with sources) — check it before modeling something physical, extend it when short, cite it in comments ("per docs/BASEBALL.md").
 - Tests touching `BREAKNECK_SETTINGS_PATH` serialize through `ENV_LOCK` — the settings module's `set_var`/`remove_var` calls are the crate's only `unsafe` (`src/game/meta/settings/`).
+- The Coach (`game::coach`) observes and never mutates gameplay state; the Director's `DriveGame` schedule (`game::director`) is the only synthetic-input seam — new control mechanisms must route through `Intents`/`SwingCommands` so scripts, tests, and autoplay cover them automatically.
 - Keep `Cargo.lock` committed — CI derives the wasm-bindgen version from it (`.github/workflows/pages.yml`).
 
 ## Skills
@@ -87,6 +88,8 @@ Loaded on trigger from `.claude/skills/`; each SKILL.md says when.
 - `playtest-review` — moment list + rubric producing a ranked TODO.md work queue. Load for "review the game" / "what should I work on next".
 - `production-readiness` — web-first ship audit; checklist in its `reference/checklist.md`. Load before a release.
 - `bevy-perf` — Bevy-0.15 performance practice (ECS, change detection, Rapier, wasm limits). Load for "slow"/"stutter"/"optimize".
+- `coach` — the always-on expectation checker: what it checks, tolerances, reading `CoachReport`, adding a check. Load when players misbehave or before touching `sim/fielding.rs`, `sim/runner.rs`, `sim/flow/`.
+- `auto-playtest` — the Director, `.ron` scripts, the mode matrix, and self-driving native/wasm runs. Load for "playtest", "verify 2 player", "test PCI/Meter", or when adding an input device or batting adapter.
 - `run-web` — build, serve, and verify the browser build.
 - `rust-skills` — generic Rust guidelines (265 rules); use for any Rust authoring/review.
 
