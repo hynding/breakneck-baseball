@@ -217,6 +217,32 @@ impl ScoreBoard {
 #[derive(Component)]
 pub struct GameplayEntity;
 
+/// The canonical order of the gameplay pipeline within `Update`. Every
+/// system whose relative order can change the game trajectory belongs to
+/// exactly one of these sets; `GamePlugin` chains them, which is what makes
+/// the trajectory independent of the schedule's ambiguity tie-breaks (and
+/// so of the binary layout — TODO 58). The order is the same-frame event
+/// flow: input routing settles, flow decides (`PhaseSet` lives inside
+/// `Flow`), the ball applies flow's pitch/hit events, the defense reacts to
+/// the contact, the runners react to the defense's reports, and rig
+/// locomotion applies every `MoveIntent` written this frame.
+/// `tests/ambiguity_audit.rs` is the gate that keeps this exhaustive.
+#[derive(bevy::ecs::schedule::SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GameplayOrder {
+    /// Input routing (gamepad hotplug fallback).
+    Input,
+    /// The flow chain: CPU intent, batting adapter, phases, resolution.
+    Flow,
+    /// Ball flight bookkeeping: pitch/hit application, drag/Magnus, walls.
+    Ball,
+    /// The fielding choreography chain.
+    Fielding,
+    /// The base-runner choreography chain.
+    Runners,
+    /// Rig locomotion and clip driving (`animation`).
+    Rigs,
+}
+
 /// Aggregate plugin that wires every sub-system into the app.
 pub struct GamePlugin;
 
@@ -233,6 +259,18 @@ impl Plugin for GamePlugin {
             .insert_resource(VariantId::Standard.field())
             .register_type::<variant::Ruleset>()
             .register_type::<variant::FieldSpec>()
+            .configure_sets(
+                Update,
+                (
+                    GameplayOrder::Input,
+                    GameplayOrder::Flow,
+                    GameplayOrder::Ball,
+                    GameplayOrder::Fielding,
+                    GameplayOrder::Runners,
+                    GameplayOrder::Rigs,
+                )
+                    .chain(),
+            )
             .insert_resource(ThemeId::DaylightClassic.build())
             .insert_resource(ScoreBoard {
                 inning: 1,

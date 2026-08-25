@@ -605,6 +605,7 @@ impl Plugin for FieldingPlugin {
                     return_to_spots,
                 )
                     .chain()
+                    .in_set(crate::game::GameplayOrder::Fielding)
                     .run_if(in_state(GameState::Playing)),
             );
     }

@@ -641,6 +641,7 @@ impl Plugin for RunnerPlugin {
                 batter_returns,
             )
                 .chain()
+                .in_set(crate::game::GameplayOrder::Runners)
                 .run_if(in_state(GameState::Playing)),
         );
     }

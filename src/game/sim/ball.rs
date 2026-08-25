@@ -139,6 +139,12 @@ impl Plugin for BallPlugin {
             .add_systems(crate::game::game_start(), spawn_ball)
             .add_systems(
                 Update,
+                // Chained: these all touch the one ball's velocity/state, so
+                // an unpinned order would make its flight depend on the
+                // schedule's ambiguity tie-breaks (see `GameplayOrder`). The
+                // order is the physical pipeline: launch events first, then
+                // the per-frame aerodynamic corrections, then the wall/bounds
+                // reactions, then the cosmetic trail.
                 (
                     apply_pitch,
                     apply_hit,
@@ -149,6 +155,8 @@ impl Plugin for BallPlugin {
                     spawn_trail,
                     fade_trail,
                 )
+                    .chain()
+                    .in_set(crate::game::GameplayOrder::Ball)
                     .run_if(in_state(GameState::Playing)),
             );
     }

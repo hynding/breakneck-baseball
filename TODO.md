@@ -54,19 +54,4 @@ observed "ball rolling at z −11") was an *observer* gray zone — the dirt
 exemption judged at the glove line while flow judges it deeper — fixed in the
 observer (`sim/coach.rs` now samples both points), not a sim bug.
 
-Improvement items surfaced by the run (not gameplay violations):
-
-58. [ ] polish testing — One full-suite run failed `e2e_fielder_spots` (71.55 s,
-    parked-fielder assert territory; exact output lost). Diagnosis 2026-08-24: the
-    test already runs `deterministic_headless_app` (executor-order and async-asset
-    theories ruled out — `spawn_players` is synchronous on game_start), and the same
-    binary passed standalone, 6× concurrently, and under `--features debug`. The
-    consistent explanation: the schedule's ambiguous-order tie-breaks changed with
-    the binary layout (the lib changed between runs), and one layout's *legal*
-    trajectory hit a real 3-consecutive-delivery off-spot streak — i.e. a latent
-    choreography edge reachable under some system orderings, not a test bug. Next
-    step when it recurs: the assert prints the parked fielder's index and position —
-    capture that, then reproduce by pinning the failing binary. Longer-term fix:
-    run Bevy ambiguity detection over the gameplay-relevant Update systems and chain
-    the offenders so trajectories are layout-independent. Owner:
-    `src/game/sim/fielding.rs` ordering / `tests/e2e_fielder_spots.rs`.
+Improvement items surfaced by the run were filed as 58-60 (all closed; see TADA Batch 6).

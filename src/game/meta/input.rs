@@ -130,7 +130,13 @@ impl Plugin for InputPlugin {
             .init_resource::<Controllers>()
             // Rebuild intents early each frame so all gameplay systems see them.
             .add_systems(PreUpdate, gather_intents)
-            .add_systems(Update, handle_gamepad_hotplug);
+            // Hotplug rewrites `Controllers`, which the AI and fielding read
+            // — pinned first in the gameplay pipeline so the trajectory never
+            // depends on an ambiguity tie-break (see `GameplayOrder`).
+            .add_systems(
+                Update,
+                handle_gamepad_hotplug.in_set(crate::game::GameplayOrder::Input),
+            );
     }
 }
 

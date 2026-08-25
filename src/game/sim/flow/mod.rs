@@ -419,6 +419,7 @@ impl Plugin for FlowPlugin {
                 )
                     .chain()
                     .in_set(PhaseSet)
+                    .in_set(crate::game::GameplayOrder::Flow)
                     .run_if(in_state(GameState::Playing)),
             );
     }

@@ -270,7 +270,11 @@ impl Plugin for AnimationPlugin {
                 // have restored it.
                 meter_stance_sink.run_if(in_state(GameState::Playing)),
             )
-                .chain(),
+                .chain()
+                // Locomotion applies the `MoveIntent`s fielding/runner wrote
+                // this frame — pinned last in the gameplay pipeline (see
+                // `GameplayOrder`).
+                .in_set(crate::game::GameplayOrder::Rigs),
         );
     }
 }
