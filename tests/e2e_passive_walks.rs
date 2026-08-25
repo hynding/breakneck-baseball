@@ -38,7 +38,7 @@ struct BannerTally(std::collections::BTreeMap<String, u32>);
 /// Counts WALK banners from the injection schedule (events persist across
 /// the frame boundary, so a 1-per-frame reader never misses one).
 fn count_walks(
-    mut banners: EventReader<PlayBanner>,
+    mut banners: MessageReader<PlayBanner>,
     mut walks: ResMut<WalkCount>,
     mut tally: ResMut<BannerTally>,
 ) {
