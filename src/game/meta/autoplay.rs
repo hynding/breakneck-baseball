@@ -26,14 +26,18 @@ mod drive {
     /// Boot grace before the menu key is pressed (asset spawns settle).
     const MENU_GRACE_SECS: f32 = 1.0;
 
-    /// Native run configuration, read once from the environment:
-    /// `BREAKNECK_AUTOPLAY_SCRIPT=<name>` scripts the Home slot (vs CPU)
-    /// instead of the default CPU-vs-CPU attract mode;
+    /// Run configuration, read once at startup. Natively from the
+    /// environment: `BREAKNECK_AUTOPLAY_SCRIPT=<name>` scripts the Home
+    /// slot (vs CPU) instead of the default CPU-vs-CPU attract mode;
+    /// `BREAKNECK_AUTOPLAY_INNINGS=<n>` shortens the game;
     /// `BREAKNECK_AUTOPLAY_ONCE=1` exits after the first game's report;
-    /// `BREAKNECK_COACH_REPORT=<path>` moves the report file.
-    /// On wasm the defaults apply (CPU vs CPU, report to localStorage).
+    /// `BREAKNECK_COACH_REPORT=<path>` moves the report file. On wasm the
+    /// same switches ride the page URL's query string —
+    /// `?script=<name>&innings=<n>` — so a CI browser run can play one
+    /// inning without a rebuild (TODO 60).
     struct AutoplayConfig {
         script: Option<String>,
+        innings: Option<u32>,
         once: bool,
         report_path: String,
     }
@@ -43,6 +47,9 @@ mod drive {
         {
             AutoplayConfig {
                 script: std::env::var("BREAKNECK_AUTOPLAY_SCRIPT").ok(),
+                innings: std::env::var("BREAKNECK_AUTOPLAY_INNINGS")
+                    .ok()
+                    .and_then(|v| v.parse().ok()),
                 once: std::env::var("BREAKNECK_AUTOPLAY_ONCE").is_ok_and(|v| v == "1"),
                 report_path: std::env::var("BREAKNECK_COACH_REPORT")
                     .unwrap_or_else(|_| "coach-report.json".into()),
@@ -50,8 +57,20 @@ mod drive {
         }
         #[cfg(target_arch = "wasm32")]
         {
+            let search = web_sys::window()
+                .map(|w| w.location())
+                .and_then(|l| l.search().ok())
+                .unwrap_or_default();
+            let param = |key: &str| {
+                search
+                    .trim_start_matches('?')
+                    .split('&')
+                    .find_map(|kv| kv.split_once('=').filter(|(k, _)| *k == key))
+                    .map(|(_, v)| v.to_string())
+            };
             AutoplayConfig {
-                script: None,
+                script: param("script"),
+                innings: param("innings").and_then(|v| v.parse().ok()),
                 once: false,
                 report_path: String::new(),
             }
@@ -60,17 +79,11 @@ mod drive {
 
     fn setup(mut commands: Commands, mut game_config: ResMut<crate::game::GameConfig>) {
         let cfg = config();
-        // Shortening the demo game (native): equivalent to cycling the
-        // menu's I key before starting — GameConfig is the menu's own seam.
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Some(n) = std::env::var("BREAKNECK_AUTOPLAY_INNINGS")
-            .ok()
-            .and_then(|v| v.parse::<u32>().ok())
-        {
+        // Shortening the demo game: equivalent to cycling the menu's I key
+        // before starting — GameConfig is the menu's own seam.
+        if let Some(n) = cfg.innings {
             game_config.innings = n.max(1);
         }
-        #[cfg(target_arch = "wasm32")]
-        let _ = &mut game_config;
         commands.init_resource::<CoachEnabled>();
         let director = match cfg.script.as_deref().and_then(script) {
             Some(s) => Director {

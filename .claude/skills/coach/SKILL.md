@@ -38,7 +38,7 @@ intercept, expected runner-break arrows, uncovered force bags).
 | `runner-breaks` | Runners aboard break per `rules::runner_break` within tolerance; nobody leaves early on a tag-up. Skipped when the runners were sent (`steal_armed`). |
 | `chaser-convergence` | A chaser is assigned promptly and its intercept tracks the live ball (predicted landing airborne, the ball itself after the bounce). |
 | `base-coverage` | Every force-relevant bag (batter's first + each forced runner's next) has a cover assignment shortly after contact. |
-| `catcher-receives` | An untouched, catchable pitch ends at rest in the mitt (dirt/sailed/HBP/dropped-third exempt — judged at the same two points flow judges them). |
+| `catcher-receives` | An untouched, catchable pitch ends at rest in the mitt. Exempt: dirt/sailed (judged at the same two observation points flow judges them), HBP (re-derived via `rules::hits_batter` from the crossing), and the dropped third (read off `Play::last_strike_call`). |
 | `throw-discipline` | A held gathered ball auto-throws by `pace.auto_throw_delay_secs`; a decided `pending_call` is announced inside its settle cap. |
 | `steal-window` | No delivery while the window still gates the pitch. |
 | `settlement` | Runners settle inside the result pause (+ trot allowance); Result never sticks past flow's hard cap. |

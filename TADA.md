@@ -128,3 +128,8 @@
     externref table max clamped to min (the exact 108 corruption, byte-level simulated)
     fails with `WebAssembly.Table.grow(): failed to grow table by 4`. First CI run booted
     the live deploy in ~34 s on the runner; verified independently from this machine.
+
+## Batch 6 — coach follow-ups (2026-08-24)
+
+59. [x] The Coach observer recognized dropped-third plays by banner text ("DROPPED 3RD") — the one string-match in the snapshot builder. — `Play::last_strike_call` is the new read-only seam (set at both `add_strike` sites, cleared at the PrePitch reset); the observer's untouched-pitch exemption now consumes the umpire's decision directly, and the banner `EventReader` is gone from the sampler.
+60. [x] wasm autoplay always played 9-inning CPU-vs-CPU attract games (innings/script were env-configurable natively only). — the native env switches now ride the page URL on wasm: `?innings=1&script=balanced` (web-sys `Location`), one shared `AutoplayConfig` for both targets. Verified live in the browser: a `?innings=1&script=balanced` game ended at the inning-1 walk-off (`bb-state game-over` + final `COACH_REPORT`, 4,342 samples, zero findings) and the attract loop restarted with the same parameters.
