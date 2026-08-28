@@ -33,3 +33,4 @@ web/out/
 # Autoplay/playtest artifacts (reports, screenshots) — never committed
 /coach-report.json
 /playtest-artifacts/
+.playwright-mcp/

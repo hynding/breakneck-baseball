@@ -53,7 +53,7 @@ struct ControlsText;
 /// now only surfaced while paused.
 const CONTROLS_TEXT: &str = "A/Space: Pitch & Swing   Fielding: aim steers, base dir + A/Space throws   \
      Runners: hold Down = lead & steal (window: defense A = pickoff)   \
-     Batting: Down = send, Up = hold   Esc/P: Subs   C: Camera   V: At-bat view";
+     Batting: Down = send, Up = hold   Esc/P: Subs   C: Camera (orbit: Shift+move/QE, Shift+R reset)   V: At-bat view";
 
 /// One line of the board, painted by [`update_board`].
 #[derive(Component)]
@@ -77,6 +77,10 @@ struct SubsMenu {
     team: Team,
     slot: usize,
     bench: usize,
+    /// First Q/East press arms the quit-to-menu; the second confirms, any
+    /// other board key cancels (TODO 65 — abandoning a game used to require
+    /// playing it out or reloading).
+    quit_armed: bool,
 }
 
 impl Default for SubsMenu {
@@ -85,6 +89,7 @@ impl Default for SubsMenu {
             team: Team::Home,
             slot: 0,
             bench: 0,
+            quit_armed: false,
         }
     }
 }
@@ -197,8 +202,33 @@ fn board_controls(
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     if pause_pressed(&keyboard, &pads) {
+        menu.quit_armed = false;
         next_state.set(GameState::Playing);
         return;
+    }
+
+    // Keyboard and gamepad drive the same cursor: D-pad mirrors the arrows,
+    // South swaps (Enter), North switches team (T) — Start resumes via
+    // `pause_pressed` above. (Bindings are exercised headlessly only via
+    // keyboard; the pad path needs a hardware pass.)
+    let pad_pressed = |button: GamepadButton| pads.iter().any(|p| p.just_pressed(button));
+
+    // Quit to menu: Q/East arms, a second press confirms, anything else
+    // below cancels the armed state (TODO 65). The Paused → MainMenu
+    // teardown lives in `game::GamePlugin`.
+    if keyboard.just_pressed(KeyCode::KeyQ) || pad_pressed(GamepadButton::East) {
+        if menu.quit_armed {
+            next_state.set(GameState::MainMenu);
+        } else {
+            menu.quit_armed = true;
+        }
+        return;
+    }
+    if menu.quit_armed
+        && (keyboard.get_just_pressed().next().is_some()
+            || pads.iter().any(|p| p.get_just_pressed().next().is_some()))
+    {
+        menu.quit_armed = false;
     }
 
     // Z toggles the strike-zone overlay for everyone, persisted like any
@@ -207,12 +237,6 @@ fn board_controls(
     if keyboard.just_pressed(KeyCode::KeyZ) {
         settings.show_strike_zone = !settings.show_strike_zone;
     }
-
-    // Keyboard and gamepad drive the same cursor: D-pad mirrors the arrows,
-    // South swaps (Enter), North switches team (T) — Start resumes via
-    // `pause_pressed` above. (Bindings are exercised headlessly only via
-    // keyboard; the pad path needs a hardware pass.)
-    let pad_pressed = |button: GamepadButton| pads.iter().any(|p| p.just_pressed(button));
 
     let lineup_len = rosters.team(menu.team).lineup.len();
     let bench_len = rosters.team(menu.team).bench.len().max(1);
@@ -434,11 +458,20 @@ fn update_board(
                     ui.text_dim
                 },
             ),
-            SubsLineKind::Hint => (
-                "Up/Down slot   Left/Right bench   Enter/A swap   T/Y team   Z zone   Esc/P/Start resume"
-                    .to_string(),
-                ui.text_dim,
-            ),
+            SubsLineKind::Hint => {
+                if menu.quit_armed {
+                    (
+                        "QUIT TO MENU? Q/B again confirms - any other key cancels".to_string(),
+                        ui.tone_bad,
+                    )
+                } else {
+                    (
+                        "Up/Down slot   Left/Right bench   Enter/A swap   T/Y team   Z zone   Q quit   Esc/P/Start resume"
+                            .to_string(),
+                        ui.text_dim,
+                    )
+                }
+            }
         };
         **text = value;
         color.0 = tint;

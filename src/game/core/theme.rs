@@ -75,6 +75,12 @@ pub struct UiTheme {
     pub tone_bad: Color,
     pub tone_info: Color,
     pub tone_epic: Color,
+    /// Strike-zone overlay wireframe — a near-invisible "ghost" tuned per
+    /// theme so it reads against *that theme's* sky (a fixed near-black
+    /// frame disappeared entirely at night — TODO 63).
+    pub zone_frame: Color,
+    /// The zone's near-face tint (the pane the PCI cursor reads against).
+    pub zone_fill: Color,
 }
 
 /// One team's player look. Swappable per theme.
@@ -142,6 +148,9 @@ impl ThemeId {
                     tone_bad: Color::srgb(1.0, 0.5, 0.4),
                     tone_info: Color::srgb(0.95, 0.9, 0.7),
                     tone_epic: Color::srgb(1.0, 0.84, 0.25),
+                    // Dark steel ghost against the bright day sky.
+                    zone_frame: Color::srgba(0.10, 0.11, 0.14, 0.20),
+                    zone_fill: Color::srgba(0.05, 0.06, 0.08, 0.10),
                 },
                 home: PlayerTemplate {
                     jersey: Color::srgb(0.22, 0.42, 0.9),
@@ -181,6 +190,9 @@ impl ThemeId {
                     tone_bad: Color::srgb(1.0, 0.45, 0.3),
                     tone_info: Color::srgb(0.8, 0.9, 1.0),
                     tone_epic: Color::srgb(1.0, 0.25, 0.75),
+                    // Pale neon ghost against the near-black night sky.
+                    zone_frame: Color::srgba(0.75, 0.9, 1.0, 0.22),
+                    zone_fill: Color::srgba(0.6, 0.8, 1.0, 0.08),
                 },
                 home: PlayerTemplate {
                     jersey: Color::srgb(0.1, 0.85, 0.95),
@@ -234,5 +246,36 @@ mod tests {
         assert_ne!(day.ball.color, night.ball.color);
         // The ball must actually be enlarged for visibility in every theme.
         assert!(day.ball.visual_scale > 1.5 && night.ball.visual_scale > 1.5);
+    }
+
+    /// The strike-zone ghost must stay a ghost (nearly transparent, never
+    /// alpha 0 per the wasm rule) *and* actually contrast its own theme's
+    /// sky — the original fixed near-black frame vanished at night (TODO 63).
+    #[test]
+    fn zone_ghost_reads_against_every_sky() {
+        let luminance = |c: Color| {
+            let s = c.to_srgba();
+            0.2126 * s.red + 0.7152 * s.green + 0.0722 * s.blue
+        };
+        for id in [ThemeId::DaylightClassic, ThemeId::MidnightNeon] {
+            let theme = id.build();
+            let frame = theme.ui.zone_frame.to_srgba();
+            assert!(
+                frame.alpha > 0.0 && frame.alpha <= 0.25,
+                "{id:?}: frame should be nearly transparent, got alpha {}",
+                frame.alpha
+            );
+            let fill = theme.ui.zone_fill.to_srgba();
+            assert!(
+                fill.alpha > 0.0 && fill.alpha < 0.2,
+                "{id:?}: fill stays a whisper, got alpha {}",
+                fill.alpha
+            );
+            let contrast = (luminance(theme.ui.zone_frame) - luminance(theme.sky)).abs();
+            assert!(
+                contrast >= 0.05,
+                "{id:?}: zone frame luminance must clear its sky by 0.05, got {contrast}"
+            );
+        }
     }
 }

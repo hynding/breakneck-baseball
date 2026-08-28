@@ -20,15 +20,10 @@ const ZONE_DRAWN_HALF_WIDTH: f32 = rules::PLATE_HALF_WIDTH_M;
 /// The zone volume is as deep as home plate (17 in front edge to point,
 /// docs/BASEBALL.md) — the rulebook zone is a prism *over the plate*.
 const ZONE_DEPTH: f32 = super::diamond::PLATE_WIDTH;
-/// Darker wireframe per the design ask: near-black steel, nearly
-/// transparent — a ghost of a K-zone that never competes with the ball or
-/// the PCI cursor.
-const ZONE_FRAME_COLOR: Color = Color::srgba(0.10, 0.11, 0.14, 0.20);
-/// A whisper of dark tint on the near face only — enough for the PCI
-/// cursor to read against, never a bright pane.
-const ZONE_FILL_COLOR: Color = Color::srgba(0.05, 0.06, 0.08, 0.10);
 /// Wireframe bar thickness — hairline rails (halved from the first
-/// designer pass, and halved again on review).
+/// designer pass, and halved again on review). The frame/fill *colors* come
+/// from [`Theme.ui`] (`zone_frame`/`zone_fill`) so each theme's ghost
+/// contrasts its own sky — pinned by `theme::tests::zone_ghost_reads_against_every_sky`.
 const ZONE_BAR: f32 = 0.004;
 
 /// How long the zone-frame flash pulse holds before fading back.
@@ -57,8 +52,8 @@ pub(super) fn spawn_strike_zone(
             ..default()
         })
     };
-    let frame_base_color = ZONE_FRAME_COLOR;
-    let fill = translucent(ZONE_FILL_COLOR);
+    let frame_base_color = theme.ui.zone_frame;
+    let fill = translucent(theme.ui.zone_fill);
     let frame = translucent(frame_base_color);
 
     // Task B4: a Solid/Perfect contact pulses the frame bars toward the
@@ -245,32 +240,17 @@ mod tests {
 
     /// The zone overlay is a 3D wireframe the size of the rulebook zone:
     /// plate width, plate depth, knee-to-midpoint tall (docs/BASEBALL.md
-    /// "Strike zone") — darker than the old washed-out white frame (every
-    /// channel below 0.5), with nonzero alpha per the wasm UI rule.
-    /// Deliberately asserts on constants: it pins design-reviewed values
-    /// against silent drift.
+    /// "Strike zone"), drawn with hairline rails. Colors moved to the Theme
+    /// (per-theme ghosts) — their alpha/contrast pins live in
+    /// `theme::tests::zone_ghost_reads_against_every_sky`.
     #[test]
     #[allow(clippy::assertions_on_constants)]
     fn zone_wireframe_matches_rulebook_dimensions() {
         assert!((ZONE_DRAWN_HALF_WIDTH - rules::PLATE_HALF_WIDTH_M).abs() < 1e-6);
         assert!((ZONE_DEPTH - super::super::diamond::PLATE_WIDTH).abs() < 1e-6);
-        let c = ZONE_FRAME_COLOR.to_srgba();
-        assert!(
-            c.red < 0.5 && c.green < 0.5 && c.blue < 0.5,
-            "the wireframe should read dark, got {c:?}"
-        );
-        // Designer-reviewed look: hairline rails, nearly transparent — but
-        // never alpha 0 (wasm rule).
-        assert!(
-            c.alpha > 0.0 && c.alpha <= 0.25,
-            "frame should be nearly transparent, got alpha {}",
-            c.alpha
-        );
         assert!(
             ZONE_BAR <= 0.005,
             "rails should stay hairline, got {ZONE_BAR}"
         );
-        let f = ZONE_FILL_COLOR.to_srgba();
-        assert!(f.alpha > 0.0 && f.alpha < 0.2, "fill stays a whisper");
     }
 }

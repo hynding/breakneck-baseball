@@ -277,6 +277,15 @@ pub(super) fn broadcast_camera(
 
 // ── Orbit camera (free look) ──────────────────────────────────────────────────
 
+/// The orbit's key controls only engage while a Shift is held: WASD/arrows
+/// are the *gameplay* aim keys for both players, and the free-look camera
+/// stealing them mid-play meant spinning the camera with every pitch aim
+/// (TODO 64). The mouse wheel (see [`zoom_camera`]) stays modifier-free —
+/// it has no gameplay meaning.
+fn orbit_modifier_held(keyboard: &ButtonInput<KeyCode>) -> bool {
+    keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight)
+}
+
 pub(super) fn orbit_camera(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut orbit: ResMut<OrbitState>,
@@ -290,23 +299,25 @@ pub(super) fn orbit_camera(
     let mut yaw_delta = 0.0_f32;
     let mut pitch_delta = 0.0_f32;
 
-    if keyboard.pressed(KeyCode::ArrowLeft) || keyboard.pressed(KeyCode::KeyA) {
-        yaw_delta -= yaw_speed * dt;
-    }
-    if keyboard.pressed(KeyCode::ArrowRight) || keyboard.pressed(KeyCode::KeyD) {
-        yaw_delta += yaw_speed * dt;
-    }
-    if keyboard.pressed(KeyCode::ArrowUp) || keyboard.pressed(KeyCode::KeyW) {
-        pitch_delta += pitch_speed * dt;
-    }
-    if keyboard.pressed(KeyCode::ArrowDown) || keyboard.pressed(KeyCode::KeyS) {
-        pitch_delta -= pitch_speed * dt;
+    if orbit_modifier_held(&keyboard) {
+        if keyboard.pressed(KeyCode::ArrowLeft) || keyboard.pressed(KeyCode::KeyA) {
+            yaw_delta -= yaw_speed * dt;
+        }
+        if keyboard.pressed(KeyCode::ArrowRight) || keyboard.pressed(KeyCode::KeyD) {
+            yaw_delta += yaw_speed * dt;
+        }
+        if keyboard.pressed(KeyCode::ArrowUp) || keyboard.pressed(KeyCode::KeyW) {
+            pitch_delta += pitch_speed * dt;
+        }
+        if keyboard.pressed(KeyCode::ArrowDown) || keyboard.pressed(KeyCode::KeyS) {
+            pitch_delta -= pitch_speed * dt;
+        }
     }
 
     orbit.yaw += yaw_delta;
     orbit.pitch = (orbit.pitch + pitch_delta).clamp(0.1, std::f32::consts::FRAC_PI_2 - 0.05);
 
-    if keyboard.just_pressed(KeyCode::KeyR) {
+    if orbit_modifier_held(&keyboard) && keyboard.just_pressed(KeyCode::KeyR) {
         *orbit = OrbitState::default();
     }
 
@@ -329,11 +340,15 @@ pub(super) fn zoom_camera(
     for ev in scroll.read() {
         zoom_delta -= ev.y * 3.0;
     }
-    if keyboard.pressed(KeyCode::KeyQ) {
-        zoom_delta -= 15.0 * dt;
-    }
-    if keyboard.pressed(KeyCode::KeyE) {
-        zoom_delta += 15.0 * dt;
+    // Q/E ride the same Shift modifier as the orbit keys (TODO 64); the
+    // wheel needs none.
+    if orbit_modifier_held(&keyboard) {
+        if keyboard.pressed(KeyCode::KeyQ) {
+            zoom_delta -= 15.0 * dt;
+        }
+        if keyboard.pressed(KeyCode::KeyE) {
+            zoom_delta += 15.0 * dt;
+        }
     }
 
     orbit.distance = (orbit.distance + zoom_delta).clamp(10.0, 200.0);

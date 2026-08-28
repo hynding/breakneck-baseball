@@ -333,6 +333,17 @@ impl Plugin for GamePlugin {
                     entered: GameState::GameOver,
                 },
                 cleanup_gameplay,
+            )
+            // The pause board's quit-to-menu path (TODO 65) leaves from
+            // `Paused`, skipping the GameOver teardown above — tear down on
+            // that exit too or the abandoned game keeps rendering under the
+            // menu.
+            .add_systems(
+                OnTransition {
+                    exited: GameState::Paused,
+                    entered: GameState::MainMenu,
+                },
+                cleanup_gameplay,
             );
         // The game now boots to `GameState::MainMenu` (the default) and the menu
         // transitions into `Playing` once a mode is chosen.
