@@ -159,7 +159,10 @@ impl ThemeId {
                     bat: Color::srgb(0.72, 0.5, 0.28),
                 },
                 away: PlayerTemplate {
-                    jersey: Color::srgb(0.88, 0.22, 0.2),
+                    // Deep red, not the old brighter 0.88/0.22/0.2: under
+                    // the daylight sun that salmon read skin-toned at
+                    // broadcast distance (TODO 82).
+                    jersey: Color::srgb(0.74, 0.13, 0.12),
                     cap: Color::srgb(0.4, 0.06, 0.06),
                     skin: Color::srgb(0.87, 0.67, 0.5),
                     bat: Color::srgb(0.72, 0.5, 0.28),

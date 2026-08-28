@@ -154,7 +154,26 @@ fn gather_intents(
         match controllers.source(team) {
             InputSource::Gamepad(entity) => {
                 if let Ok(pad) = gamepads.get(entity) {
-                    *intents.get_mut(team) = gamepad_intent(pad);
+                    // The keyboard stays live under a pad-owned slot: a
+                    // plugged-in-but-idle controller used to make the
+                    // advertised keys completely dead (TODO 72). The pad
+                    // wins whenever it says anything; the team's own key
+                    // scheme fills the silence.
+                    let pad_intent = gamepad_intent(pad);
+                    let scheme = match team {
+                        Team::Home => KeyScheme::Primary,
+                        Team::Away => KeyScheme::Secondary,
+                    };
+                    let kb = keyboard_intent(&keyboard, scheme);
+                    *intents.get_mut(team) = TeamIntent {
+                        aim: if pad_intent.aim != Vec2::ZERO {
+                            pad_intent.aim
+                        } else {
+                            kb.aim
+                        },
+                        action: pad_intent.action || kb.action,
+                        action_held: pad_intent.action_held || kb.action_held,
+                    };
                 } else {
                     // Controller vanished this frame; neutral until hotplug fixes it.
                     *intents.get_mut(team) = TeamIntent::default();
@@ -231,17 +250,21 @@ fn keyboard_intent(keyboard: &ButtonInput<KeyCode>, scheme: KeyScheme) -> TeamIn
     }
 }
 
-/// Keeps [`Controllers`] valid when a gamepad is unplugged: a disconnected pad
-/// falls back to keyboard input so the game keeps running.
+/// Keeps [`Controllers`] valid across gamepad hotplug, both directions
+/// (TODO 72): a disconnected pad falls back to keyboard so the game keeps
+/// running, and a (re)connected pad reclaims the first human slot that is
+/// stuck on keyboard — with a banner on each edge so the player knows what
+/// their team is listening to. CPU slots are never touched.
 fn handle_gamepad_hotplug(
     mut events: EventReader<GamepadConnectionEvent>,
     mut controllers: ResMut<Controllers>,
+    mut banner: EventWriter<crate::game::flow::PlayBanner>,
 ) {
     for event in events.read() {
         if event.disconnected() {
-            for (team, scheme) in [
-                (Team::Home, KeyScheme::Primary),
-                (Team::Away, KeyScheme::Secondary),
+            for (team, scheme, label) in [
+                (Team::Home, KeyScheme::Primary, "P1"),
+                (Team::Away, KeyScheme::Secondary, "P2"),
             ] {
                 if controllers.source(team) == InputSource::Gamepad(event.gamepad) {
                     let slot = match team {
@@ -249,6 +272,25 @@ fn handle_gamepad_hotplug(
                         Team::Away => &mut controllers.away,
                     };
                     *slot = InputSource::Keyboard(scheme);
+                    banner.send(crate::game::flow::PlayBanner::new(
+                        format!("PAD LOST - {label} ON KEYBOARD"),
+                        crate::game::flow::BannerTone::Info,
+                    ));
+                }
+            }
+        } else if event.connected() {
+            for (team, label) in [(Team::Home, "P1"), (Team::Away, "P2")] {
+                if matches!(controllers.source(team), InputSource::Keyboard(_)) {
+                    let slot = match team {
+                        Team::Home => &mut controllers.home,
+                        Team::Away => &mut controllers.away,
+                    };
+                    *slot = InputSource::Gamepad(event.gamepad);
+                    banner.send(crate::game::flow::PlayBanner::new(
+                        format!("PAD CONNECTED - {label}"),
+                        crate::game::flow::BannerTone::Info,
+                    ));
+                    break;
                 }
             }
         }

@@ -90,18 +90,18 @@ cycle 2+ (autoplay auto-advances past them; needs plain build + scenario staging
     and pitch release are silent, steals/pickoffs are silent, and a WALK fires the same Epic
     stinger as a home run. Proposed fix: extend `present/audio.rs` event map; downgrade
     WALK's tone in `sim/flow/result.rs`.
-69. [ ] polish camera — C toggle hard-cuts both ways while V-cycling eases; orbit/zoom write
+69. [x] polish camera — C toggle hard-cuts both ways while V-cycling eases; orbit/zoom write
     the transform directly. Proposed fix: route through the smoothed rig in
     `present/camera/rigs.rs`.
-70. [ ] polish fx — HR fireworks (z 42..76) are behind the orbiting trot camera for ~half the
+70. [x] polish fx — HR fireworks (z 42..76) are behind the orbiting trot camera for ~half the
     show; orbit azimuth derives from wall-clock so the start phase is arbitrary. Proposed
     fix: seed azimuth at play start + bias arc behind home in `present/camera/framing.rs`.
-71. [ ] polish UX-docs — controls drift: pause help omits the P2 keyboard scheme and the
+71. [x] polish UX-docs — controls drift: pause help omits the P2 keyboard scheme and the
     pad bindings; V/Z have no pad equivalent at all; menu shows key hints but not pad
     equivalents; settings screen has no key-hint footer. Proposed fix: generate
     `CONTROLS_TEXT` from `KeyScheme` in `meta/subs.rs`; add pad bindings for view/zone;
     hint rows in `meta/menu.rs` + `settings/screen.rs`.
-72. [ ] polish input — gamepad hotplug is one-way (disconnect drops to keyboard silently,
+72. [x] polish input — gamepad hotplug is one-way (disconnect drops to keyboard silently,
     reconnect never rebinds) and in 1P a plugged-but-idle pad makes the keyboard dead.
     Proposed fix: handle the connect edge + banner both edges + merge keyboard/pad intents
     last-input-wins in `meta/input.rs`.
@@ -111,7 +111,7 @@ cycle 2+ (autoplay auto-advances past them; needs plain build + scenario staging
     dead-zone in `meta/input.rs`.
 74. [x] polish HUD — AT BAT card width jumps every batter (min_width only) and long creator
     names grow it unbounded. Proposed fix: fixed width + ellipsize in `present/ui/banner.rs`.
-75. [ ] polish legibility — instructional text (menu controls block, pause hints, version
+75. [x] polish legibility — instructional text (menu controls block, pause hints, version
     tag) is 12-13 px at 55-65% alpha, the smallest type in the game and the only place
     controls are documented. Proposed fix: 15-16 px `text_primary` in `meta/menu.rs`,
     `meta/subs.rs`.
@@ -122,18 +122,18 @@ cycle 2+ (autoplay auto-advances past them; needs plain build + scenario staging
     halo/sparks, hardcoded dust + firework colors, settings trail_color); theme swaps
     repaint only part. Proposed fix: Theme-owned fx colors in `core/theme.rs` +
     `present/fx/particles.rs`.
-78. [ ] nice perf/robustness — pause board has no max-height/scroll (clips below ~530 px
+78. [x] nice perf/robustness (meter is_changed guard shipped; the pause-board height cap for <530 px viewports remains open — rare, revisit with a real mobile pass) — pause board has no max-height/scroll (clips below ~530 px
     viewports); `update_meter_bar` dirties Node every frame forcing full-tree relayout in
     Classic. Proposed fix: height cap in `meta/subs.rs`; `is_changed` guard in
     `present/ui/hud.rs`.
-79. [ ] nice settings — `show_strike_zone` persists but has no settings row (only the
+79. [x] nice settings (STRIKE ZONE row shipped on the menu screen; in-game settings access deferred — the pause board's cursor keys would clash) — `show_strike_zone` persists but has no settings row (only the
     undiscoverable Z on the pause board), and no Settings entry is reachable in-game.
     Proposed fix: STRIKE ZONE row + run screen in Paused too (`meta/settings/`).
 80. [x] nice UX — auto-pause on focus loss never auto-resumes on refocus. Proposed fix:
     watch the refocus edge in `meta/subs.rs` (only when the auto-pause opened the board).
 81. [x] nice hygiene — `.playwright-mcp/` session artifacts got committed (734f7ce) and the
     dir isn't ignored. Proposed fix: add to `.gitignore`, `git rm -r --cached`.
-82. [ ] nice readability — AWAY's salmon jersey reads skin-toned at broadcast distance and
+82. [x] nice readability — AWAY's salmon jersey reads skin-toned at broadcast distance and
     the mound pitcher is low-contrast vs the green; verify against each Theme's
     `PlayerTemplate` and consider deepening the away tone (`core/theme.rs`).
     Screenshot: docs/agent/playtest/2026-08-27/05-sample.jpeg.

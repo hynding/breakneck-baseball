@@ -177,6 +177,7 @@ pub(super) fn broadcast_camera(
     kick: Res<CameraKick>,
     ball_q: BallQuery,
     mut rig: ResMut<BroadcastRig>,
+    mut trot_start: Local<Option<f32>>,
     mut cam_q: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
 ) {
     // The camera's actual aspect ratio (width / height), read before the
@@ -244,10 +245,16 @@ pub(super) fn broadcast_camera(
         }
         // Result pause of a home run: orbit the diamond while the batter
         // trots the bases — a sweeping victory-lap shot that lerps in from the
-        // ball-follow and back out to the duel framing at phase end.
+        // ball-follow and back out to the duel framing at phase end. The
+        // azimuth is seeded per trot and swept only through the behind-home
+        // arc, so the outfield sky — where the fireworks burst — stays in
+        // frame for the whole show (the old wall-clock phase started the
+        // orbit anywhere and faced away half the time — TODO 70).
         (Phase::Result, _) if play.is_home_run() => {
             let focus = Vec3::new(field.broadcast_target.x, 1.4, field.broadcast_target.z);
-            let eye = trot_orbit_eye(focus, time.elapsed_secs() * TROT_ORBIT_RATE);
+            let start = *trot_start.get_or_insert(time.elapsed_secs());
+            let sweep = ((time.elapsed_secs() - start) * TROT_ORBIT_RATE - 0.9).clamp(-0.9, 0.9);
+            let eye = trot_orbit_eye(focus, std::f32::consts::PI + sweep);
             (eye, focus, BROADCAST_FOV)
         }
         // Result pause of a gloved pitch (called strike/ball, strikeout
@@ -260,6 +267,11 @@ pub(super) fn broadcast_camera(
         // The duel: whichever at-bat view the player has cycled to with V.
         _ => view.framing(&field, aspect),
     };
+
+    // The trot seed lives only while the trot shot does.
+    if !(play.phase == Phase::Result && play.is_home_run()) {
+        *trot_start = None;
+    }
 
     // Critically-damped-ish smoothing so framing changes glide, never cut.
     let follow = 1.0 - (-5.0 * time.delta_secs()).exp();
