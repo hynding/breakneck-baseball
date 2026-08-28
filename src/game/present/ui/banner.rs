@@ -78,7 +78,10 @@ pub(super) fn spawn_duel_panels(commands: &mut Commands, theme: &Theme) {
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(5.0),
             border: UiRect::all(Val::Px(1.5)),
-            min_width: Val::Px(150.0),
+            // Fixed, not min: a text-driven width made the card's edge jump
+            // every at-bat as names changed (TODO 74). Wide enough for the
+            // longest legend line and the clamped batter line below.
+            width: Val::Px(214.0),
             ..default()
         };
         if side == 0 {
@@ -180,7 +183,9 @@ pub(super) fn update_duel_panels(
                         "AB {}/{}  {} #{}",
                         order.current(batting),
                         LINEUP_SIZE,
-                        card.name,
+                        // Clamped so a long creator-authored name can't
+                        // outgrow the fixed card (TODO 74).
+                        card.name.chars().take(9).collect::<String>(),
                         card.number
                     ),
                     ui.text_dim,

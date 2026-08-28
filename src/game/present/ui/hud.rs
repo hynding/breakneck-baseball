@@ -167,7 +167,10 @@ pub(super) fn spawn_hud(
     // never rendered again, even after its colors change. So every banner
     // element keeps a nonzero alpha at all times — "hidden" is a near-zero
     // alpha and an empty string, and show/fade only mutate children of this
-    // painted root.
+    // painted root. This exact two-wrapper shape is the proven-rendering
+    // one — a cycle-2 attempt to merge banner+stamp into one column with a
+    // GlobalZIndex stopped extracting on wasm (reverted; see TODO 66/67
+    // notes in the 2026-08-27 review).
     commands
         .spawn((
             GameplayEntity,
@@ -187,6 +190,10 @@ pub(super) fn spawn_hud(
                 Node {
                     padding: UiRect::axes(Val::Px(30.0), Val::Px(10.0)),
                     border: UiRect::all(Val::Px(1.5)),
+                    // The longest call ("DROPPED 3RD STRIKE!") wraps inside
+                    // this cap instead of running into the px-anchored
+                    // corner cards on narrow windows (TODO 66).
+                    max_width: Val::Percent(60.0),
                     ..default()
                 },
                 BackgroundColor(hidden_tint(ui.panel_bg)),
@@ -206,25 +213,23 @@ pub(super) fn spawn_hud(
             });
         });
 
-    // Contact stamp (Task B4): a bare text element (no pill chrome) sitting
-    // just below the banner row, over the zone-box screen area the
-    // catcher's-eye duel view frames the pitch in (`FieldSpec::duel_eye`).
-    // Painted at spawn with an empty string — same wasm-safe idiom as the
-    // banner above — then shown/blanked by mutating this one text node.
+    // Contact stamp (Task B4): a bare text element (no pill chrome) in its
+    // own wrapper — same wasm-safe idiom as the banner above. Anchored to
+    // the banner's own 26% line plus a fixed pixel drop, so however short
+    // the viewport gets the stamp can never climb into the pill (the old
+    // independent 38% anchor crossed it below ~642 px — TODO 66).
     commands
         .spawn((
             GameplayEntity,
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Percent(38.0),
+                top: Val::Percent(26.0),
                 left: Val::Px(0.0),
                 width: Val::Percent(100.0),
+                padding: UiRect::top(Val::Px(92.0)),
                 justify_content: JustifyContent::Center,
                 ..default()
             },
-            // A container root with no renderable is never re-extracted on
-            // wasm/WebGL2 once the first frame culls it — a near-invisible
-            // background (never alpha 0, see `hidden_tint`) keeps it live.
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.01)),
         ))
         .with_children(|wrap| {

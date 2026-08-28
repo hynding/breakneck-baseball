@@ -4,6 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Breakneck Baseball</title>
+    <meta name="description" content="Breakneck Baseball — a fast arcade baseball game in the browser. Keyboard or gamepad; five pitches, steals, pickoffs, and three ways to swing." />
+    <meta name="theme-color" content="#1a1a2e" />
+    <meta property="og:title" content="Breakneck Baseball" />
+    <meta property="og:description" content="A fast arcade baseball game in the browser. Keyboard or gamepad." />
+    <meta property="og:type" content="website" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚾</text></svg>" />
     <style>
         * {
@@ -108,11 +113,19 @@
     </style>
 </head>
 <body>
+    <noscript>
+        <style>#loading { display: none !important; }</style>
+        <div class="overlay">
+            <h1>⚾ Breakneck Baseball</h1>
+            <p>This game needs <strong>JavaScript and WebGL2</strong> to run — please enable JavaScript and reload.</p>
+        </div>
+    </noscript>
+
     <div id="loading" class="overlay">
         <div class="spinner"></div>
         <h1>Breakneck Baseball</h1>
-        <div id="bar-track"><div id="bar-fill"></div></div>
-        <p id="status">Downloading…</p>
+        <div id="bar-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="bar-fill"></div></div>
+        <p id="status" aria-live="polite">Downloading…</p>
     </div>
 
     <div id="fatal" class="overlay hidden">
@@ -126,7 +139,7 @@
         <h1>⚾ Breakneck Baseball</h1>
         <p>This game needs a <strong>keyboard or gamepad</strong> — touch controls aren't supported yet.</p>
         <p>Play it on a desktop, or connect a gamepad and continue.</p>
-        <button class="reload" onclick="document.getElementById('touch-note').classList.add('hidden')">Continue anyway</button>
+        <button class="reload" onclick="document.getElementById('touch-note').classList.add('hidden'); document.querySelector('canvas')?.focus()">Continue anyway</button>
     </div>
 
     <script type="module">
@@ -135,8 +148,19 @@
         const $ = (id) => document.getElementById(id);
         const status = (text) => { $('status').textContent = text; };
 
+        // The deploy workflow stamps the built wasm's uncompressed byte size
+        // here (0 = unstamped, e.g. a local debug serve): Pages gzips the
+        // stream so Content-Length can't drive the bar, but the reader
+        // yields *decoded* bytes — against this figure the percent is real.
+        const EXPECTED_WASM_BYTES = 0;
+
+        // The game reads the keyboard off the canvas element — after any
+        // overlay interaction, hand focus back or the keys go nowhere.
+        const focusCanvas = () => document.querySelector('canvas')?.focus();
+
         function fatal(reason, detail) {
             $('loading').classList.add('hidden');
+            $('touch-note').classList.add('hidden');
             $('fatal-reason').textContent = reason;
             $('error-detail').textContent = detail || '';
             $('fatal').classList.remove('hidden');
@@ -145,6 +169,7 @@
         // Runtime panics: the wasm side installs a panic hook (src/main.rs)
         // that posts the panic text with this prefix before the instance dies.
         window.addEventListener('message', (event) => {
+            if (event.source !== window) return;
             if (typeof event.data === 'string' && event.data.startsWith('bb-panic:')) {
                 fatal('The game crashed. Reloading is the only way back — sorry!',
                       event.data.slice('bb-panic:'.length));
@@ -171,55 +196,67 @@
             });
         }
 
-        // Streamed download with real progress. When the server sends the
-        // wasm compressed (GitHub Pages: gzip), Content-Length is the wire
-        // size while the reader yields decoded bytes — percent would lie, so
-        // fall back to a byte counter with an indeterminate bar.
-        async function fetchWasm() {
-            const response = await fetch('./out/breakneck-baseball_bg.wasm');
-            if (!response.ok) {
-                throw new Error(`wasm download failed: HTTP ${response.status}`);
-            }
-            const encoded = !!response.headers.get('content-encoding');
-            const total = encoded ? 0 : Number(response.headers.get('content-length') || 0);
-            const reader = response.body.getReader();
-            const chunks = [];
-            let received = 0;
-            for (;;) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                chunks.push(value);
-                received += value.length;
-                const mb = (received / 1048576).toFixed(1);
-                if (total > 0) {
-                    const pct = Math.min(100, received / total * 100);
-                    $('bar-fill').style.width = pct + '%';
-                    status(`Downloading… ${mb} MB (${pct.toFixed(0)}%)`);
-                } else {
-                    $('bar-fill').style.width = '100%';
-                    status(`Downloading… ${mb} MB`);
+        // Streamed download with real progress, handed to wasm-bindgen as a
+        // Response so compile overlaps download (instantiateStreaming) and
+        // the module is never double-buffered in JS. Percent comes from the
+        // *decoded* byte count against the stamped size (see
+        // EXPECTED_WASM_BYTES); local unstamped serves may still see
+        // Content-Length on an uncompressed stream.
+        let lastProgressAt = performance.now();
+        function fetchWasmResponse() {
+            return fetch('./out/breakneck-baseball_bg.wasm').then((response) => {
+                if (!response.ok) {
+                    throw new Error(`wasm download failed: HTTP ${response.status}`);
                 }
-            }
-            const bytes = new Uint8Array(received);
-            let offset = 0;
-            for (const chunk of chunks) {
-                bytes.set(chunk, offset);
-                offset += chunk.length;
-            }
-            return bytes;
+                const encoded = !!response.headers.get('content-encoding');
+                const total = EXPECTED_WASM_BYTES
+                    || (encoded ? 0 : Number(response.headers.get('content-length') || 0));
+                let received = 0;
+                const progress = new TransformStream({
+                    transform(chunk, controller) {
+                        received += chunk.length;
+                        lastProgressAt = performance.now();
+                        const mb = (received / 1048576).toFixed(1);
+                        if (total > 0) {
+                            const pct = Math.min(100, received / total * 100);
+                            $('bar-fill').style.width = pct + '%';
+                            $('bar-track').setAttribute('aria-valuenow', pct.toFixed(0));
+                            status(`Downloading… ${mb} MB (${pct.toFixed(0)}%)`);
+                        } else {
+                            $('bar-fill').style.width = '100%';
+                            status(`Downloading… ${mb} MB`);
+                        }
+                        controller.enqueue(chunk);
+                    },
+                });
+                // instantiateStreaming insists on this MIME type; some
+                // servers send the stream without it.
+                return new Response(response.body.pipeThrough(progress), {
+                    headers: { 'Content-Type': 'application/wasm' },
+                });
+            });
         }
 
+        // A dead stream should say so instead of spinning forever: nudge at
+        // 15 s without a byte, give up (with the Reload button) at 60 s.
+        const stallWatch = setInterval(() => {
+            const stalled = (performance.now() - lastProgressAt) / 1000;
+            if (stalled > 60) {
+                clearInterval(stallWatch);
+                fatal('The download stalled. Check your connection and reload.');
+            } else if (stalled > 15) {
+                status('Still downloading — slow connection or a stalled stream…');
+            }
+        }, 5000);
+
         async function run() {
-            const bytes = await fetchWasm();
-            $('bar-fill').style.width = '100%';
-            status('Compiling…');
-            // Yield a frame so the "Compiling…" paint lands before the
-            // compile blocks the main thread.
-            await new Promise(requestAnimationFrame);
-            await init({ module_or_path: bytes });
+            const response = fetchWasmResponse();
+            await init({ module_or_path: response });
             // init() only returns on non-throwing runtimes; hide the overlay here too.
+            clearInterval(stallWatch);
             $('loading').classList.add('hidden');
             watchContextLoss();
+            focusCanvas();
         }
 
         run().catch((error) => {
@@ -227,8 +264,10 @@
             // "Using exceptions for control flow" exception to hand control to
             // the browser. Reaching it means the game started successfully.
             if (error.message && error.message.includes('Using exceptions for control flow')) {
+                clearInterval(stallWatch);
                 $('loading').classList.add('hidden');
                 watchContextLoss();
+                focusCanvas();
                 return;
             }
             console.error(error);

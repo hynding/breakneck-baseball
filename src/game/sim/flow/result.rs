@@ -116,7 +116,10 @@ pub(super) fn add_ball(
 ) -> bool {
     match rules::call_ball(score, bases, ruleset) {
         BallCall::Walk { .. } => {
-            banner.send(PlayBanner::new("WALK", BannerTone::Epic));
+            // Good, not Epic: Epic is the home-run tier (gold banner + the
+            // triumphant stinger) and a free pass was reading identical to
+            // a ball over the fence (TODO 68).
+            banner.send(PlayBanner::new("WALK", BannerTone::Good));
             true
         }
         BallCall::Ball => {

@@ -65,6 +65,9 @@ fn build_menu(commands: &mut Commands, config: &GameConfig, theme: &Theme) {
     commands
         .spawn((
             MenuUi,
+            // Overlay tier 10 — menu under settings (20), pause (30),
+            // banners (40); stacking used to be spawn-order luck (TODO 67).
+            GlobalZIndex(10),
             Node {
                 position_type: PositionType::Absolute,
                 top: Val::Px(0.0),

@@ -59,6 +59,8 @@ pub(super) fn spawn_settings_screen(mut commands: Commands, theme: Res<Theme>) {
     commands
         .spawn((
             SettingsUi,
+            // Overlay tier 20 — above the menu (10); see TODO 67.
+            GlobalZIndex(20),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),

@@ -81,6 +81,10 @@ struct SubsMenu {
     /// other board key cancels (TODO 65 — abandoning a game used to require
     /// playing it out or reloading).
     quit_armed: bool,
+    /// True when the focus-loss watcher opened this pause (not the player):
+    /// regaining focus then resumes automatically, unless the player has
+    /// meanwhile touched the board (TODO 80).
+    auto_paused: bool,
 }
 
 impl Default for SubsMenu {
@@ -90,6 +94,7 @@ impl Default for SubsMenu {
             slot: 0,
             bench: 0,
             quit_armed: false,
+            auto_paused: false,
         }
     }
 }
@@ -104,7 +109,10 @@ impl Plugin for SubsPlugin {
                 Update,
                 (open_pause, auto_pause_on_focus_loss).run_if(in_state(GameState::Playing)),
             )
-            .add_systems(Update, board_controls.run_if(in_state(GameState::Paused)))
+            .add_systems(
+                Update,
+                (board_controls, auto_resume_on_refocus).run_if(in_state(GameState::Paused)),
+            )
             .add_systems(Update, (update_board, update_controls_dialog));
     }
 }
@@ -186,9 +194,38 @@ fn auto_pause_on_focus_loss(
     *pending = false;
     *menu = SubsMenu {
         team: score.batting_team(),
+        auto_paused: true,
         ..default()
     };
     next_state.set(GameState::Paused);
+}
+
+/// The other half of the focus watcher (TODO 80): if the pause was the
+/// watcher's own doing and the player never touched the board, focus coming
+/// back resumes play — the player walked away and walked back, no input
+/// owed. A board keypress (see [`board_controls`]) claims the pause as
+/// manual and disarms this.
+fn auto_resume_on_refocus(
+    mut occluded: EventReader<WindowOccluded>,
+    mut focused: EventReader<WindowFocused>,
+    mut menu: ResMut<SubsMenu>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    let mut regained = false;
+    for ev in occluded.read() {
+        if !ev.occluded {
+            regained = true;
+        }
+    }
+    for ev in focused.read() {
+        if ev.focused {
+            regained = true;
+        }
+    }
+    if regained && menu.auto_paused && matches!(*next_state, NextState::Unchanged) {
+        menu.auto_paused = false;
+        next_state.set(GameState::Playing);
+    }
 }
 
 /// Cursor moves and swaps while paused. The board repaints via change
@@ -201,6 +238,16 @@ fn board_controls(
     mut settings: ResMut<Settings>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
+    // Any board keypress means the player is engaged with the pause —
+    // claim it as manual so a focus flicker can't yank the board away
+    // (see `auto_resume_on_refocus`, TODO 80).
+    if menu.auto_paused
+        && (keyboard.get_just_pressed().next().is_some()
+            || pads.iter().any(|p| p.get_just_pressed().next().is_some()))
+    {
+        menu.auto_paused = false;
+    }
+
     if pause_pressed(&keyboard, &pads) {
         menu.quit_armed = false;
         next_state.set(GameState::Playing);
@@ -272,6 +319,9 @@ fn spawn_board(mut commands: Commands, theme: Res<Theme>) {
         .spawn((
             SubsUi,
             GameplayEntity,
+            // Overlay tier 30 — pause above menu/settings, under banners
+            // (40); see TODO 67.
+            GlobalZIndex(30),
             Node {
                 position_type: PositionType::Absolute,
                 top: Val::Px(0.0),

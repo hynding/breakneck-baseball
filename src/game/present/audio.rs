@@ -15,6 +15,7 @@ use bevy::audio::{AudioPlayer, AudioSource, PlaybackSettings, Volume};
 use bevy::prelude::*;
 
 use crate::game::ai::hash01;
+use crate::game::ball::PitchEvent;
 use crate::game::flow::{BallInPlayEvent, ContactEvent, LiveBallEvent, PitchCaughtEvent};
 use crate::game::flow::{BannerTone, PlayBanner};
 use crate::game::rules::{ContactClass, ContactKind, ContactQuality};
@@ -46,6 +47,10 @@ struct SoundBank {
     crowd: Handle<AudioSource>,
     roar: Handle<AudioSource>,
     groan: Handle<AudioSource>,
+    /// One air-swish shape, replayed at different speeds/volumes for the
+    /// pitch release, a swing-and-miss, and the infield throw (TODO 68 —
+    /// the game's most frequent moments used to be silent).
+    whoosh: Handle<AudioSource>,
 }
 
 /// Wraps raw mono f32 samples in a minimal 16-bit PCM WAV container that
@@ -189,6 +194,12 @@ fn build_sound_bank(mut commands: Commands, mut sources: ResMut<Assets<AudioSour
         let freq = 190.0 - 70.0 * (t / 0.9).min(1.0);
         sine(freq, t) * (-2.5 * t).exp() * 0.55 + noise * (-6.0 * t).exp() * 0.15
     });
+    // Air whoosh: a fast noise swell into a decay — pitched up/down at
+    // playback for release / bat swish / throw (see `SoundBank::whoosh`).
+    let whoosh = synth(0.22, |t, noise| {
+        let envelope = (t / 0.05).min(1.0) * (-11.0 * t).exp();
+        noise * envelope * 0.55
+    });
 
     commands.insert_resource(SoundBank {
         crack_perfect: sources.add(wav_from_samples(&crack_perfect)),
@@ -200,15 +211,24 @@ fn build_sound_bank(mut commands: Commands, mut sources: ResMut<Assets<AudioSour
         crowd: sources.add(wav_from_samples(&crowd)),
         roar: sources.add(wav_from_samples(&roar)),
         groan: sources.add(wav_from_samples(&groan)),
+        whoosh: sources.add(wav_from_samples(&whoosh)),
     });
 }
 
 /// One despawn-when-done audio entity per event.
 fn play(commands: &mut Commands, handle: &Handle<AudioSource>, volume: f32) {
+    play_at(commands, handle, volume, 1.0);
+}
+
+/// [`play`], with a playback-speed multiplier — one synthesized shape can
+/// voice several moments by shifting its pitch/length at spawn time.
+fn play_at(commands: &mut Commands, handle: &Handle<AudioSource>, volume: f32, speed: f32) {
     commands.spawn((
         GameplayEntity,
         AudioPlayer::new(handle.clone()),
-        PlaybackSettings::DESPAWN.with_volume(Volume::new(volume)),
+        PlaybackSettings::DESPAWN
+            .with_volume(Volume::new(volume))
+            .with_speed(speed),
     ));
 }
 
@@ -234,10 +254,15 @@ fn play_event_sounds(
     mut bangs: EventReader<WallBangEvent>,
     mut live: EventReader<LiveBallEvent>,
     mut received: EventReader<PitchCaughtEvent>,
+    mut pitches: EventReader<PitchEvent>,
     mut banners: EventReader<PlayBanner>,
     mut commands: Commands,
 ) {
     let Some(bank) = bank else { return };
+    // The pitch leaves the hand with a small air hiss (TODO 68).
+    for _ in pitches.read() {
+        play_at(&mut commands, &bank.whoosh, 0.18, 1.6);
+    }
     let mut roar = false;
     // A home run peaks the crowd above the ordinary roar.
     let mut crowd_peak = false;
@@ -261,8 +286,12 @@ fn play_event_sounds(
             ContactQuality::FoulTip => {
                 play(&mut commands, &bank.crack_foul, 0.5);
             }
-            // No bat-ball contact on a whiff — no crack, silence is correct.
-            ContactQuality::Whiff => swinging_whiff = true,
+            // No bat-ball contact on a whiff — no crack, but the bat still
+            // cuts air (TODO 68).
+            ContactQuality::Whiff => {
+                play_at(&mut commands, &bank.whoosh, 0.5, 1.25);
+                swinging_whiff = true;
+            }
         }
     }
     // The catcher's mitt pops on every received pitch.
@@ -273,8 +302,15 @@ fn play_event_sounds(
         play(&mut commands, &bank.wall, 0.9);
     }
     for event in live.read() {
-        if matches!(event, LiveBallEvent::Caught { .. }) {
-            play(&mut commands, &bank.glove, 0.7);
+        match event {
+            LiveBallEvent::Caught { .. } => play(&mut commands, &bank.glove, 0.7),
+            // The routine infield out was completely silent (TODO 68): the
+            // throw whooshes across, the catch at the bag pops the glove.
+            LiveBallEvent::Thrown { .. } => {
+                play_at(&mut commands, &bank.whoosh, 0.3, 1.1);
+            }
+            LiveBallEvent::Settled => play(&mut commands, &bank.glove, 0.55),
+            _ => {}
         }
     }
     for event in in_play.read() {
@@ -292,8 +328,18 @@ fn play_event_sounds(
         play(&mut commands, &bank.roar, ROAR_GAIN);
     }
     for banner in banners.read() {
-        if banner.tone == BannerTone::Epic {
-            play(&mut commands, &bank.stinger, 0.6);
+        match banner.tone {
+            BannerTone::Epic => play(&mut commands, &bank.stinger, 0.6),
+            // Good news for the offense (STOLEN BASE!, OFF THE WALL!,
+            // DROPPED 3RD STRIKE!, WALK) gets a quick bright crowd pop;
+            // bad news (outs, CAUGHT STEALING, PICKED OFF!) a soft "ohh" —
+            // every announced call now has a voice (TODO 68).
+            BannerTone::Good => play_at(&mut commands, &bank.roar, 0.35, 1.35),
+            // The swinging K's full groan below subsumes the soft one.
+            BannerTone::Bad if !(swinging_whiff && banner.text == STRIKEOUT_BANNER) => {
+                play_at(&mut commands, &bank.groan, 0.3, 1.1);
+            }
+            _ => {}
         }
         if swinging_whiff && banner.text == STRIKEOUT_BANNER {
             play(&mut commands, &bank.groan, 0.65);
@@ -438,6 +484,7 @@ mod tests {
             .add_event::<WallBangEvent>()
             .add_event::<LiveBallEvent>()
             .add_event::<PitchCaughtEvent>()
+            .add_event::<PitchEvent>()
             .add_event::<PlayBanner>()
             .add_plugins(SoundPlugin);
         // `bevy_state`'s `StatesPlugin` runs `StateTransition` *before*
@@ -545,7 +592,8 @@ mod tests {
     fn swinging_strikeout_groans_but_a_whiff_alone_does_not() {
         let mut app = test_app();
 
-        // A whiff with no strikeout banner (e.g. strike one swinging): no groan.
+        // A whiff with no strikeout banner (e.g. strike one swinging): the
+        // bat cuts air (one whoosh, TODO 68) but nobody groans.
         let before = audio_players(&app).len();
         app.world_mut().send_event(ContactEvent {
             quality: ContactQuality::Whiff,
@@ -555,11 +603,13 @@ mod tests {
         app.update();
         assert_eq!(
             audio_players(&app).len(),
-            before,
-            "a bare whiff makes no bat-ball sound"
+            before + 1,
+            "a bare whiff is one bat whoosh, no groan"
         );
 
-        // The same whiff, but this time it's the frame the K is announced.
+        // The same whiff, but this time it's the frame the K is announced:
+        // the bat whoosh plus exactly one (full) groan — the Bad-tone soft
+        // reaction defers to it.
         let before = audio_players(&app).len();
         app.world_mut().send_event(ContactEvent {
             quality: ContactQuality::Whiff,
@@ -573,8 +623,62 @@ mod tests {
         app.update();
         assert_eq!(
             audio_players(&app).len(),
-            before + 1,
-            "a swinging strikeout groans exactly once"
+            before + 2,
+            "a swinging strikeout is whoosh + one groan"
         );
+    }
+
+    /// The routine out's two new voices (TODO 68): the throw whooshes, the
+    /// catch at the bag pops the glove.
+    #[test]
+    fn thrown_and_settled_voices_the_routine_out() {
+        let mut app = test_app();
+        let before = audio_players(&app).len();
+        app.world_mut().send_event(LiveBallEvent::Thrown {
+            pos: Vec3::ZERO,
+            base: 1,
+            race_time: 1.0,
+        });
+        app.update();
+        assert_eq!(audio_players(&app).len(), before + 1, "throw whoosh");
+        app.world_mut().send_event(LiveBallEvent::Settled);
+        app.update();
+        assert_eq!(audio_players(&app).len(), before + 2, "glove at the bag");
+    }
+
+    /// Good-tone banners (STOLEN BASE!, WALK, ...) get the bright crowd pop;
+    /// Bad-tone calls get the soft groan — no announced call is silent
+    /// (TODO 68).
+    #[test]
+    fn good_and_bad_banners_each_have_a_voice() {
+        let mut app = test_app();
+        let before = audio_players(&app).len();
+        app.world_mut().send_event(PlayBanner {
+            text: "STOLEN BASE!".to_string(),
+            tone: BannerTone::Good,
+        });
+        app.update();
+        assert_eq!(audio_players(&app).len(), before + 1, "good-tone pop");
+
+        let before = audio_players(&app).len();
+        app.world_mut().send_event(PlayBanner {
+            text: "CAUGHT STEALING".to_string(),
+            tone: BannerTone::Bad,
+        });
+        app.update();
+        assert_eq!(audio_players(&app).len(), before + 1, "bad-tone ohh");
+    }
+
+    /// The pitch release hisses once per pitch (TODO 68).
+    #[test]
+    fn pitch_release_hisses() {
+        let mut app = test_app();
+        let before = audio_players(&app).len();
+        app.world_mut().send_event(PitchEvent {
+            velocity: Vec3::new(0.0, 0.0, -38.0),
+            spin: Vec3::ZERO,
+        });
+        app.update();
+        assert_eq!(audio_players(&app).len(), before + 1);
     }
 }
