@@ -70,9 +70,11 @@ const TROT_DELAY: f32 = 0.9;
 
 /// The batter running out a live ball whose call hasn't come yet. If the
 /// resolution puts the batter on base, [`sync_runners`] adopts this rig's
-/// position so the runner doesn't teleport back to the plate.
+/// position so the runner doesn't teleport back to the plate. Public so
+/// `tests/e2e_batter_runs.rs` can assert the run-on-contact convention
+/// (docs/BASEBALL.md "The batter always runs on contact") directly.
 #[derive(Component)]
-pub(crate) struct BatterGhost;
+pub struct BatterGhost;
 
 /// How a runner aboard is currently breaking off contact, before the umpire's
 /// call arrives (see [`rules::runner_break`]). A runner *without* this
@@ -385,11 +387,19 @@ fn batter_runs(
                 wp.push(Vec3::new(0.0, RIG_Y, 0.0));
                 (wp, false, TROT_DELAY)
             }
-            // A live fair ball: run it out — nobody knows the call yet.
-            ContactKind::Live { fair: true } => {
+            // A live ball, predicted fair or foul: run it out — nobody
+            // knows the call yet. Per docs/BASEBALL.md ("The batter always
+            // runs on contact (fair-ball assumption); the engine resets him
+            // on a foul"): the call belongs to the actual first bounce, not
+            // the swing-time prediction, so a pulled liner down the line is
+            // run out either way — `retire_foul_ghosts` resets him if it
+            // does land foul. Only a ball headed behind the plate, where no
+            // fair outcome exists, holds the box (same forward test as
+            // `rules::is_fair`).
+            ContactKind::Live { .. } if ev.landing.z > 1.0 => {
                 (path_between(&field, None, 0), true, RUN_OUT_DELAY)
             }
-            ContactKind::Live { fair: false } => continue,
+            ContactKind::Live { .. } => continue,
         };
 
         let mats = palette.for_team(score.batting_team());
@@ -432,6 +442,7 @@ fn retire_foul_ghosts(
     mut live: EventReader<LiveBallEvent>,
     field: Res<FieldSpec>,
     ghosts: Query<Entity, With<BatterGhost>>,
+    mut batter_q: Query<&mut Visibility, With<Batter>>,
     mut commands: Commands,
 ) {
     for event in live.read() {
@@ -443,6 +454,13 @@ fn retire_foul_ghosts(
         }
         for entity in &ghosts {
             commands.entity(entity).despawn_recursive();
+        }
+        // The real batter steps straight back into the box — without this
+        // the plate sat empty from the foul call to the next PrePitch.
+        for mut visibility in &mut batter_q {
+            if *visibility != Visibility::Inherited {
+                *visibility = Visibility::Inherited;
+            }
         }
     }
 }
