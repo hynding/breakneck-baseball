@@ -51,7 +51,8 @@ struct ControlsText;
 
 /// Same control reference the bottom-of-screen bar used to show during play,
 /// now only surfaced while paused.
-const CONTROLS_TEXT: &str = "A/Space: Pitch & Swing   Fielding: aim steers, base dir + A/Space throws   \
+const CONTROLS_TEXT: &str = "P1: WASD + Space   P2: Arrows + Right-Ctrl   Pad: stick + A   \
+     Pitch & Swing: A/Space   Fielding: aim steers, base dir + A/Space throws   \
      Runners: hold Down = lead & steal (window: defense A = pickoff)   \
      Batting: Down = send, Up = hold   Esc/P: Subs   C: Camera (orbit: Shift+move/QE, Shift+R reset)   V: At-bat view";
 
@@ -396,10 +397,12 @@ fn spawn_board(mut commands: Commands, theme: Res<Theme>) {
                         ControlsText,
                         Text::new(""),
                         TextFont {
-                            font_size: 13.0,
+                            // The only in-game controls reference — sized to
+                            // be read, not squinted at (TODO 75).
+                            font_size: 15.0,
                             ..default()
                         },
-                        TextColor(ui.text_dim),
+                        TextColor(ui.text_primary),
                         TextLayout::new_with_justify(JustifyText::Center),
                     ));
                 });

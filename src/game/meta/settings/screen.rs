@@ -41,12 +41,13 @@ pub(super) struct SettingsRowText(usize);
 #[derive(Resource, Default)]
 pub(super) struct SettingsCursorRow(usize);
 
-const ROW_LABELS: [&str; 6] = [
+const ROW_LABELS: [&str; 7] = [
     "P1 BATTING STYLE",
     "P2 BATTING STYLE",
     "PITCH TRAIL",
     "TRAIL COLOR",
     "REDUCE MOTION",
+    "STRIKE ZONE",
     "VOLUME",
 ];
 
@@ -201,6 +202,9 @@ pub(super) fn paint_settings_screen(
             2 => settings.pitch_trail.label().to_string(),
             3 => settings.trail_color.label().to_string(),
             4 => (if settings.reduce_motion { "On" } else { "Off" }).to_string(),
+            // The zone overlay was persisted but reachable only via the
+            // undiscoverable Z on the pause board (TODO 79).
+            5 => (if settings.show_strike_zone { "On" } else { "Off" }).to_string(),
             _ => format!("{:.0}%", settings.volume * 100.0),
         };
     }
@@ -275,6 +279,7 @@ pub(super) fn edit_settings(
             settings.trail_color = if right { c.next() } else { c.prev() };
         }
         4 => settings.reduce_motion = !settings.reduce_motion,
+        5 => settings.show_strike_zone = !settings.show_strike_zone,
         _ => {
             let dv = if right { 0.1 } else { -0.1 };
             settings.volume = (settings.volume + dv).clamp(0.0, 1.0);

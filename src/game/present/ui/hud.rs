@@ -354,6 +354,12 @@ pub(super) fn update_meter_bar(
     theme: Res<Theme>,
     mut query: Query<(&mut Node, &mut BackgroundColor), With<MeterFill>>,
 ) {
+    // Guarded like every other HUD system: an unconditional Node write per
+    // frame forced a full-tree relayout even in Classic, where MeterLoad
+    // never changes (TODO 78).
+    if !load.is_changed() && !theme.is_changed() {
+        return;
+    }
     let frac = load.0.clamp(0.0, 1.0);
     for (mut node, mut color) in &mut query {
         node.height = Val::Percent(frac * 100.0);

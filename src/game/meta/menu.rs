@@ -170,14 +170,17 @@ fn build_menu(commands: &mut Commands, config: &GameConfig, theme: &Theme) {
                     ));
                     card.spawn((
                         Text::new(format!(
-                            "Controller: A pitch/swing, stick to aim\nKeyboard: WASD + Space (P1), Arrows + Right-Ctrl (P2)\nBatting: hold Down through the windup to send the runner\nSettings: S / gamepad Select opens batting style & volume options{}",
+                            "Controller: A = 1P, Start = 2P, X/B/Y cycle field/innings/theme, stick to aim\nKeyboard: WASD + Space (P1), Arrows + Right-Ctrl (P2)\nBatting: hold Down through the windup to send the runner\nSettings: S / gamepad Select opens batting style & volume options{}",
                             creator_hint()
                         )),
                         TextFont {
-                            font_size: 13.0,
+                            // 15 px primary, not 13 px dim: this block is
+                            // the only place the controls are documented
+                            // before play (TODO 75).
+                            font_size: 15.0,
                             ..default()
                         },
-                        TextColor(ui.text_dim),
+                        TextColor(ui.text_primary),
                         TextLayout::new_with_justify(JustifyText::Center),
                     ));
                 });

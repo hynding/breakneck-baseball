@@ -323,8 +323,19 @@ pub(super) fn orbit_camera(
 
     let transform = orbit_transform(&orbit);
     for mut cam_transform in &mut camera_query {
-        *cam_transform = transform;
+        ease_toward(&mut cam_transform, &transform, dt);
     }
+}
+
+/// Exponential ease used by both orbit writers: the broadcast rig glides
+/// between framings, but C used to hard-cut into (and out of) orbit because
+/// these systems assigned the transform directly (TODO 69). Fast enough to
+/// feel 1:1 under held keys, soft enough that the mode switch reads as a
+/// move.
+fn ease_toward(current: &mut Transform, target: &Transform, dt: f32) {
+    let s = 1.0 - (-8.0 * dt).exp();
+    current.translation = current.translation.lerp(target.translation, s);
+    current.rotation = current.rotation.slerp(target.rotation, s);
 }
 
 pub(super) fn zoom_camera(
@@ -355,7 +366,7 @@ pub(super) fn zoom_camera(
 
     let transform = orbit_transform(&orbit);
     for mut cam_transform in &mut camera_query {
-        *cam_transform = transform;
+        ease_toward(&mut cam_transform, &transform, dt);
     }
 }
 

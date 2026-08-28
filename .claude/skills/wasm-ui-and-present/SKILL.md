@@ -22,6 +22,11 @@ children are added — and **UI roots spawned mid-`Playing` don't render at all*
 - Spawn-at-game-start systems key on the `game_start()` transition schedule
   (`OnTransition { MainMenu → Playing }`), never `OnEnter(Playing)` — otherwise they re-run on
   every unpause (`Playing ⇄ Paused` leaves the scene intact; teardown is `Playing → GameOver`).
+- Do **not** put `GlobalZIndex` on a *transparent, never-repainted* keep-alive root: on wasm the
+  whole subtree stops extracting (bisected 2026-08-27 — alpha alone and z-index alone are fine;
+  the pause board survives its tier because `update_board` repaints its root). Reserve explicit
+  tiers for roots painted with real colors or repainted on show; keep announcement banners on
+  the proven two-wrapper structure in `present/ui/hud.rs` and let spawn order stack them.
 
 Verify UI changes on the web target (the `/run-web` skill), not just natively.
 
