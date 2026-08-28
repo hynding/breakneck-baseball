@@ -340,17 +340,28 @@ fn fade_trail(
 }
 
 /// Resets the ball to the pitcher's mound if it falls below the world or flies
-/// beyond the field's playable radius.
+/// beyond the field's playable radius. A ball that was still in flight gets a
+/// synthetic [`LiveBallEvent::Landed`] at its pre-reset position first: the
+/// teleport used to swallow the landing entirely, leaving a foul into the
+/// stands to dead-air until the live-play clock expired — up to 11 s of a
+/// motionless ball with no call (TODO 92).
 fn reset_ball_if_out_of_bounds(
     mut query: Query<(&mut Transform, &mut Velocity), With<Baseball>>,
     mut commands: Commands,
     entity_query: Query<Entity, (With<Baseball>, With<InFlight>)>,
     field: Res<FieldSpec>,
+    mut landed: EventWriter<crate::game::flow::LiveBallEvent>,
 ) {
     for (mut transform, mut vel) in &mut query {
         let pos = transform.translation;
         let out = pos.y < -10.0 || Vec2::new(pos.x, pos.z).length() > field.bounds;
         if out {
+            // Foul territory only: a *fair* ball out here is a home run,
+            // already classified at contact — a synthetic Landed would
+            // second-guess that call.
+            if !entity_query.is_empty() && !crate::game::rules::is_fair(pos, &field) {
+                landed.send(crate::game::flow::LiveBallEvent::Landed { pos });
+            }
             transform.translation = Vec3::new(0.0, BALL_RADIUS + 0.25, field.pitch_distance);
             vel.linvel = Vec3::ZERO;
             vel.angvel = Vec3::ZERO;

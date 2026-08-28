@@ -105,7 +105,7 @@ cycle 2+ (autoplay auto-advances past them; needs plain build + scenario staging
     reconnect never rebinds) and in 1P a plugged-but-idle pad makes the keyboard dead.
     Proposed fix: handle the connect edge + banner both edges + merge keyboard/pad intents
     last-input-wins in `meta/input.rs`.
-73. [ ] polish input-feel — keyboard aim sums per-axis (diagonal |aim| 1.41 vs stick 1.0 →
+73. [x] polish input-feel — keyboard aim sums per-axis (diagonal |aim| 1.41 vs stick 1.0 →
     wider pitch envelope, 41% faster diagonal PCI) and sticks have no explicit dead-zone
     (drift integrates into the PCI cursor). Proposed fix: `clamp_length_max(1.0)` + 0.1
     dead-zone in `meta/input.rs`.
@@ -115,9 +115,9 @@ cycle 2+ (autoplay auto-advances past them; needs plain build + scenario staging
     tag) is 12-13 px at 55-65% alpha, the smallest type in the game and the only place
     controls are documented. Proposed fix: 15-16 px `text_primary` in `meta/menu.rs`,
     `meta/subs.rs`.
-76. [ ] nice rules — a 3-inning 0-0 game ends at BOT 3 as a tie (observed; bb-state
-    game-over with no winner). Decide: extra innings, or an explicit TIE game-over screen.
-    Owner: `sim/flow/result.rs` + `meta/menu.rs` game-over text.
+76. [x] nice rules — NOT A BUG: `rules::is_game_over` already plays extra innings on a tie
+    (unit tests `tie_after_regulation_goes_to_extras` / `one_inning_tie_goes_to_extras`);
+    the cycle-1 "0-0 game over" was a mid-game sample, not the final score.
 77. [ ] nice theme — fx palette pulls from five color sources (ui.accent ring, ball.trail
     halo/sparks, hardcoded dust + firework colors, settings trail_color); theme swaps
     repaint only part. Proposed fix: Theme-owned fx colors in `core/theme.rs` +
@@ -158,25 +158,25 @@ Cycle-2 fixes shipped alongside: 66, 67, 68, 74, 80 (see TADA when checked off).
 88. [x] nice web — bundle: page metadata (description/og/theme-color), fatal() should hide
     #touch-note, guard the bb-panic message listener with event.source === window, and
     aria-live/progressbar roles on the loading UI (web/index.html).
-89. [ ] polish pace — a third out with runners on blocks the changeover up to ~11 s while
+89. [x] polish pace — a third out with runners on blocks the changeover up to ~11 s while
     retired runners jog multi-base despawn paths home (banner gone after 1.6 s). Fix:
     despawn leftovers immediately when bases.clear() came from the half flip
     (sim/runner.rs:313, gated by flow/result.rs settle).
-90. [ ] polish pace — a home run costs ~15.5 s contact→next pitch (0.9 s delay + 4 bases at
+90. [x] polish pace — a home run costs ~15.5 s contact→next pitch (0.9 s delay + 4 bases at
     runner_speed). Fix: HR-specific trot speed or ~8 s HR settle cap (sim/runner.rs).
-91. [ ] polish pace — the 1.5 s steal window and the CPU's 0.7-1.2 s pitch delay stack
+91. [x] polish pace — the 1.5 s steal window and the CPU's 0.7-1.2 s pitch delay stack
     (ai.rs resets pitch_delay every window frame): 2.7-3.2 s of held ball per pitch with
     runners on. Fix: let the delay tick during the window (sim/ai.rs:178) and/or shorten
     the window.
-92. [ ] polish pace — a foul into the stands teleports the ball to the mound without ever
+92. [x] polish pace — a foul into the stands teleports the ball to the mound without ever
     firing Landed, dead-airing up to the 11 s LIVE_PLAY_MAX. Fix: send Landed at the
     pre-reset position from reset_ball_if_out_of_bounds (sim/ball.rs:344).
-93. [ ] polish pace — every ordinary foul holds ~3.8 s while the batter ghost runs out a
+93. [x] polish pace — every ordinary foul holds ~3.8 s while the batter ghost runs out a
     dead ball (RunnersSettled gates Result). Fix: despawn BatterGhost on Outcome::Foul
     (flow/result.rs / sim/runner.rs).
-94. [ ] nice pace — a walk takes 6.4-6.9 s to the next pitch (advance is run at 3.66 s/base,
+94. [x] nice pace — a walk takes 6.4-6.9 s to the next pitch (advance is run at 3.66 s/base,
     then the steal window). Fix: boosted dead-ball advance speed (sim/runner.rs).
-95. [ ] nice pace — settle caps oversized: THROW_SETTLE_CAP 4 s (throw crosses in ~1 s),
+95. [x] nice pace — settle caps oversized: THROW_SETTLE_CAP 4 s (throw crosses in ~1 s),
     RESULT_SETTLE_CAP 20 s. Fix: ~1.5-2 s and ~8 s once 90 lands (flow/live.rs, result.rs).
 96. [ ] nice theme — Midnight Neon's field/dirt stay daylight-bright (only sky/UI/jerseys
     change), so "night" reads as a black void over a sunny field; consider dimmed/cooler

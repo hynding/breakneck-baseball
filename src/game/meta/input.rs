@@ -170,13 +170,17 @@ fn gather_intents(
 }
 
 fn gamepad_intent(pad: &Gamepad) -> TeamIntent {
-    // Prefer the analog stick; fall back to the d-pad for aim.
+    // Prefer the analog stick; fall back to the d-pad for aim. Below the
+    // dead-zone the stick reads as exactly zero — without it, resting-stick
+    // drift integrated into the PCI cursor all at-bat (TODO 73).
     let mut aim = pad.left_stick();
     if aim.length() < 0.2 {
         let dpad = pad.dpad();
-        if dpad.length() > 0.0 {
-            aim = dpad;
-        }
+        aim = if dpad.length() > 0.0 {
+            dpad
+        } else {
+            Vec2::ZERO
+        };
     }
     TeamIntent {
         aim,
@@ -218,7 +222,10 @@ fn keyboard_intent(keyboard: &ButtonInput<KeyCode>, scheme: KeyScheme) -> TeamIn
     }
 
     TeamIntent {
-        aim,
+        // Clamped to the stick's unit circle: raw per-axis sums gave a
+        // diagonal |aim| of 1.41 — a wider pitch envelope and a ~41% faster
+        // diagonal PCI cursor than any pad player could reach (TODO 73).
+        aim: aim.clamp_length_max(1.0),
         action: keyboard.just_pressed(action),
         action_held: keyboard.pressed(action),
     }

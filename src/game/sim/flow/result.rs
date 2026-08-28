@@ -16,7 +16,10 @@ use super::{BannerTone, LeadState, Phase, Play, PlayBanner};
 /// Extra seconds the result pause will wait for runner rigs to finish their
 /// paths (the home-run trot, a first-to-third sprint) before the next batter
 /// steps in — a hard cap so a stray path can never stall the game.
-const RESULT_SETTLE_CAP: f32 = 20.0;
+// 10 s comfortably clears the longest legitimate path (the brisk HR trot,
+// ~9 s including its 0.9 s look) — the old 20 s only bought stuck rigs more
+// dead air (TODO 95).
+const RESULT_SETTLE_CAP: f32 = 10.0;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn result_phase(

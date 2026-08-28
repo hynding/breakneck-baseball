@@ -90,6 +90,19 @@ enum Breaking {
     Retreat,
 }
 
+/// Per-rig multiplier on `pace.runner_speed` for [`advance_paths`]. Post-call
+/// repositioning (walk/hit advances issued by [`sync_runners`]) and the HR
+/// trot are pure choreography — no race reads these rigs — so they may move
+/// faster than the live run-out without touching any outcome (TODO 90/94).
+#[derive(Component)]
+struct PathSpeed(f32);
+
+/// Dead-ball advances (walks, post-call shuffles) hustle rather than jog.
+const DEAD_BALL_ADVANCE_SPEED: f32 = 1.5;
+/// The home-run trot: brisk enough that the lap ends near the result pause
+/// instead of 7 s after it (TODO 90 — was ~14.6 s of gated dead air).
+const TROT_SPEED: f32 = 1.8;
+
 fn base_pos(field: &FieldSpec, base: usize) -> Vec3 {
     field.base_positions[base] + Vec3::Y * RIG_Y
 }
@@ -120,18 +133,19 @@ fn advance_paths(
             &mut BasePath,
             &mut MoveIntent,
             Option<&DespawnAtPathEnd>,
+            Option<&PathSpeed>,
         ),
         Without<RunDelay>,
     >,
     mut commands: Commands,
 ) {
-    for (entity, mut path, mut intent, despawn) in &mut movers {
+    for (entity, mut path, mut intent, despawn, speed) in &mut movers {
         if intent.target.is_some() {
             continue;
         }
         if path.next < path.waypoints.len() {
             intent.target = Some(path.waypoints[path.next]);
-            intent.speed = ruleset.pace.runner_speed;
+            intent.speed = ruleset.pace.runner_speed * speed.map_or(1.0, |s| s.0);
             path.next += 1;
         } else if despawn.is_some() {
             commands.entity(entity).despawn_recursive();
@@ -246,6 +260,7 @@ pub(crate) fn sync_runners(
     mut runners: Query<(Entity, &mut Runner)>,
     ghosts: Query<(Entity, &Transform, &crate::game::roster::PlayerIdentity), With<BatterGhost>>,
     mut commands: Commands,
+    mut last_half: Local<Option<bool>>,
 ) {
     if !bases.is_changed() {
         return;
@@ -267,10 +282,14 @@ pub(crate) fn sync_runners(
         if let Some(i) = pool.iter().position(|&(_, from)| from <= target) {
             let (entity, from) = pool.remove(i);
             if from != target {
-                commands.entity(entity).insert(BasePath {
-                    waypoints: path_between(&field, Some(from), target),
-                    next: 0,
-                });
+                commands.entity(entity).insert((
+                    BasePath {
+                        waypoints: path_between(&field, Some(from), target),
+                        next: 0,
+                    },
+                    // Post-call repositioning — hustle (TODO 94).
+                    PathSpeed(DEAD_BALL_ADVANCE_SPEED),
+                ));
                 if let Ok((_, mut runner)) = runners.get_mut(entity) {
                     runner.base = target;
                 }
@@ -300,6 +319,9 @@ pub(crate) fn sync_runners(
                 waypoints: path_between(&field, None, target),
                 next: 0,
             },
+            // The call is in (walk, hit already resolved) — hustle to the
+            // bag rather than gating the next pitch on a jog (TODO 94).
+            PathSpeed(DEAD_BALL_ADVANCE_SPEED),
         ));
         if let Some(id) = inherited {
             commands.entity(entity).insert(id);
@@ -309,14 +331,25 @@ pub(crate) fn sync_runners(
         }
     }
 
-    // Leftovers scored or were cleared: run home and leave the field.
+    // Leftovers scored or were cleared. A mid-play clear (a runner scoring)
+    // jogs home and leaves; a half-inning flip strands them — despawn
+    // immediately instead of gating the changeover on a multi-base victory
+    // lap nobody earned (a man on first used to block the next half ~11 s —
+    // TODO 89).
+    let half_flipped = last_half.is_some_and(|h| h != score.top_of_inning);
+    *last_half = Some(score.top_of_inning);
     for (entity, from) in pool {
+        if half_flipped {
+            commands.entity(entity).despawn_recursive();
+            continue;
+        }
         commands.entity(entity).insert((
             BasePath {
                 waypoints: path_home(&field, from),
                 next: 0,
             },
             DespawnAtPathEnd,
+            PathSpeed(DEAD_BALL_ADVANCE_SPEED),
         ));
         commands.entity(entity).remove::<Runner>();
     }
@@ -376,12 +409,40 @@ fn batter_runs(
         ));
         if ghost {
             commands.entity(entity).insert(BatterGhost);
+        } else {
+            // The trot is pure celebration — no race reads it. Brisk, so
+            // the lap ends with the result pause instead of ~7 s after it
+            // (TODO 90).
+            commands.entity(entity).insert(PathSpeed(TROT_SPEED));
         }
         if let Ok(id) = batter_identity.get_single() {
             commands.entity(entity).insert(*id);
         }
         if let Some(assets) = &assets {
             crate::game::jersey::attach_jerseys(&mut commands, entity, assets);
+        }
+    }
+}
+
+/// A ball that lands foul kills the run-out on the spot: the ghost was
+/// sprinting out a play that just died, and [`RunnersSettled`] would gate
+/// the next pitch ~3.8 s on that dead jog (TODO 93). Mirrors the same
+/// [`rules::is_fair`] the umpire's call uses — reporting, never ruling.
+fn retire_foul_ghosts(
+    mut live: EventReader<LiveBallEvent>,
+    field: Res<FieldSpec>,
+    ghosts: Query<Entity, With<BatterGhost>>,
+    mut commands: Commands,
+) {
+    for event in live.read() {
+        let LiveBallEvent::Landed { pos } = event else {
+            continue;
+        };
+        if rules::is_fair(*pos, &field) {
+            continue;
+        }
+        for entity in &ghosts {
+            commands.entity(entity).despawn_recursive();
         }
     }
 }
@@ -627,6 +688,7 @@ impl Plugin for RunnerPlugin {
             Update,
             (
                 batter_runs,
+                retire_foul_ghosts,
                 break_runners,
                 tick_run_delays,
                 run_out_pending_call,

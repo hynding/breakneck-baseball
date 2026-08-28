@@ -16,7 +16,10 @@ use super::{BannerTone, LiveBallEvent, Phase, Play, PlayBanner};
 /// Backstop on a decided throw still in the air: if the settle report never
 /// arrives (a dropped relay edge case), the pending call is announced after
 /// this many seconds so the game can never hang on presentation.
-const THROW_SETTLE_CAP: f32 = 4.0;
+// A ~27 m/s throw crosses the diamond in about a second; 2 s covers a relay
+// with margin, where the old 4 s let a missed Settled hold a decided call in
+// silence (TODO 95).
+const THROW_SETTLE_CAP: f32 = 2.0;
 
 /// The offense's send-the-runner gesture: the same held-Down read the live
 /// runner call uses ([`rules::runner_call_from_aim`]), so leads, steals, and

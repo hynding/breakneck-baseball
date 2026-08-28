@@ -175,7 +175,11 @@ pub fn cpu_defense(
             let p = (0.3 + 0.5 * cfg.skill) * time.delta_secs();
             intent.action = hash01(time.elapsed_secs() * 3.9) < p;
         }
-        cpu.pitch_delay.reset();
+        // Re-arm only a short post-window beat instead of the full
+        // 0.7-1.2 s wait: the old full reset stacked on the 1.5 s window
+        // for 2.7-3.2 s of held ball before every pitch with runners on
+        // (TODO 91). The window itself — the steal race — is untouched.
+        cpu.pitch_delay = Timer::from_seconds(0.35, TimerMode::Once);
         return;
     }
 

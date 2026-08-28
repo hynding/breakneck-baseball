@@ -3,6 +3,12 @@
 Source of truth: `tests/balance_sim.rs` (consts `K_PCT_BAND` / `RUNS9_BAND` / `HR9_BAND`).
 If this file and the test disagree, the test wins — update this file.
 
+> 2026-08-27 (TODO 92 retune): fouls hit past `field.bounds` used to teleport to the mound
+> and expire as *fair gathered at the mound* on an ~11 s race clock — a hidden safe-call
+> subsidy the old economy was calibrated on. Fixing the call to FOUL (correct) pushed
+> K% to 29.6 and runs/9 to 2.70; `cpu_timing_spread_ms` 225 → 195 restored the bands
+> (see the balance run in the cycle-3 commit). Bands themselves unchanged.
+
 ## Asserted bands (N=40, `balance_bands_hold`)
 
 | Signal | Asserted band | Nominal target | Measured spread (N=40, cross-process) |
