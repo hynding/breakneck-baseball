@@ -223,6 +223,7 @@ fn play_one_game(game_index: u32) -> GameStats {
     *app.world_mut().resource_mut::<Controllers>() = Controllers {
         home: InputSource::Cpu,
         away: InputSource::Cpu,
+        ..Controllers::default()
     };
 
     // Stop at the end of a *single* inning: either the game is already over

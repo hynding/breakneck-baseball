@@ -72,6 +72,27 @@ pub const BALL_RADIUS_M: f32 = 0.037;
 /// is still a strike by exactly its own radius, as in real life. Public so
 /// the field can draw the zone the umpire actually calls.
 pub const ZONE_HALF_WIDTH: f32 = PLATE_HALF_WIDTH_M + BALL_RADIUS_M;
+/// Aim-space → world-x handedness: aim +x (screen/stick right, the
+/// first-base side) is world −X. The one encoding of the flip the layer
+/// docs call "`aim.x` is negated in the pitch/hit mappings" — pitch
+/// targeting, hit spray, PCI steering, throw direction, and the touch
+/// pad's absolute cursor all route through here, so the convention can
+/// never half-flip.
+pub const fn aim_to_world_x(aim_x: f32) -> f32 {
+    -aim_x
+}
+/// The stick deflection below which an aim means nothing — shared by the
+/// manual throw selector ([`aimed_base`]), the chaser steer, and the touch
+/// translator's "a drag owns the aim" guard, so an input-feel retune edits
+/// one number instead of hunting bare `0.5`s.
+pub const AIM_DEADZONE: f32 = 0.5;
+/// Aim-space → zone-plane height: aim −1..+1 spans the called zone bottom
+/// to top. [`aim_to_world_x`]'s vertical sibling — the Zone Pad's absolute
+/// cursor and the PCI resting spot both map through the zone span, and a
+/// rulebook-height change must move them together.
+pub fn aim_to_zone_y(aim_y: f32) -> f32 {
+    ZONE_LOW + (aim_y + 1.0) * 0.5 * (ZONE_HIGH - ZONE_LOW)
+}
 /// Rig landmarks measured off the authored skeleton (tools/build_player.py,
 /// 1 unit = 1 m, feet at 0): the spine bone's shoulder line (its tail, and
 /// the torso block's top edge), the top of the hip block — where the

@@ -127,6 +127,7 @@ fn cpu_inning_runs_clean_under_the_coach() {
     *app.world_mut().resource_mut::<Controllers>() = Controllers {
         home: InputSource::Cpu,
         away: InputSource::Cpu,
+        ..Controllers::default()
     };
 
     // Run to the bottom half: a complete CPU half-inning of live defense.

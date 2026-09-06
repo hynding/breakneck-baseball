@@ -11,3 +11,4 @@ pub mod menu;
 pub mod portraits;
 pub mod settings;
 pub mod subs;
+pub mod touch;

@@ -44,8 +44,8 @@ pub(super) fn batter_stance(
     batters: Query<(Entity, Option<&Playing>), With<Batter>>,
     mut commands: Commands,
 ) {
-    let dueling = matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch);
-    let past_pre_pitch = matches!(play.phase, Phase::WindUp | Phase::Pitch);
+    let dueling = play.phase.pre_contact();
+    let past_pre_pitch = play.phase.in_delivery();
     for (entity, playing) in &batters {
         let resolved = identities
             .get(entity)
@@ -197,7 +197,7 @@ pub(super) fn catcher_crouch(
     catchers: Query<(Entity, Option<&Playing>), Or<(With<CatcherRole>, With<PlateUmpire>)>>,
     mut commands: Commands,
 ) {
-    let dueling = matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch);
+    let dueling = play.phase.pre_contact();
     for (entity, playing) in &catchers {
         match playing {
             None if dueling => {
@@ -226,7 +226,7 @@ pub(super) fn trigger_swing(
     batters: Query<(Entity, Option<&Playing>), (With<Batter>, Without<BatPivot>)>,
     mut commands: Commands,
 ) {
-    if !matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch) {
+    if !play.phase.pre_contact() {
         return;
     }
     if !intents.get(score.batting_team()).action {

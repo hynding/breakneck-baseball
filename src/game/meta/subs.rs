@@ -28,7 +28,7 @@ use crate::game::roster::Rosters;
 use crate::game::rules::LINEUP_SIZE;
 use crate::game::settings::Settings;
 use crate::game::theme::Theme;
-use crate::game::ui::hidden_tint;
+use crate::game::ui::{KeepAliveUi, hidden_tint};
 use crate::game::{GameState, GameplayEntity, ScoreBoard, Team};
 
 /// Marker for the board's overlay root (full-screen dim).
@@ -54,7 +54,8 @@ struct ControlsText;
 const CONTROLS_TEXT: &str = "P1: WASD + Space   P2: Arrows + Right-Ctrl   Pad: stick + A   \
      Pitch & Swing: A/Space   Fielding: aim steers, base dir + A/Space throws   \
      Runners: hold Down = lead & steal (window: defense A = pickoff)   \
-     Batting: Down = send, Up = hold   Esc/P: Subs   C: Camera (orbit: Shift+move/QE, Shift+R reset)   V: At-bat view";
+     Batting: Down = send, Up = hold   Esc/P: Subs   C: Camera (orbit: Shift+move/QE, Shift+R reset)   V: At-bat view   \
+     Touch: drag = aim, 2nd finger = action, tap position = swing (pick a scheme with G on the menu)";
 
 /// One line of the board, painted by [`update_board`].
 #[derive(Component)]
@@ -69,8 +70,17 @@ enum SubsLineKind {
     Bench,
     /// The strike-zone overlay toggle's live state ("STRIKE ZONE: ON").
     ZoneToggle,
+    /// The tappable quit row — without it a touch-only player could pause
+    /// and resume but never leave a game (Q/East are unreachable by touch).
+    Quit,
     Hint,
 }
+
+/// Marker for the quit row's `Interaction` query ([`tap_quit_row`]). Serves
+/// the mouse too, for free. Blanked text collapses the row to zero size
+/// while the board is hidden, so it can never be an invisible tap target.
+#[derive(Component)]
+struct SubsQuitButton;
 
 /// The board's cursor state.
 #[derive(Resource)]
@@ -100,26 +110,103 @@ impl Default for SubsMenu {
     }
 }
 
+/// One-frame pause/resume request from the touchscreen's pause button (set
+/// by the `ui` touch overlay, consumed here) — routed through the same
+/// [`pause_pressed`] gate as Esc/P/Start so the dead-ball rule, the
+/// refused-press banner, and the resume path cover touch identically.
+///
+/// Staleness discipline: the setter is ordered before the consumers (see
+/// [`PauseInputSet`]) and the flag is cleared on exiting either state the
+/// setter runs in — unlike the `just_pressed` edges it rides beside, a
+/// latch does not clear itself, and a tap surviving a state transition
+/// would fire in the wrong state (e.g. instantly resuming an auto-pause).
+#[derive(Resource, Default)]
+pub struct PauseTapped(pub bool);
+
+/// Change-honest consume: reads immutably, clears only when set. One body
+/// for both consumers, so neither can forget the clear.
+fn take_pause_tap(tapped: &mut ResMut<PauseTapped>) -> bool {
+    let tap = tapped.0;
+    if tap {
+        tapped.0 = false;
+    }
+    tap
+}
+
+/// Label for the pause-consuming systems, so the overlay's `tap_pause` can
+/// order itself before them (same-frame tap → same-frame evaluation).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PauseInputSet;
+
+/// Cleared on leaving the setter states — see [`PauseTapped`].
+fn clear_pause_tap(mut tapped: ResMut<PauseTapped>) {
+    take_pause_tap(&mut tapped);
+}
+
 pub struct SubsPlugin;
 
 impl Plugin for SubsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SubsMenu>()
+            .init_resource::<PauseTapped>()
             .add_systems(crate::game::game_start(), spawn_board)
+            // The setter (`ui::touch::tap_pause`) runs only in Playing and
+            // Paused; clearing on exiting those two states covers every
+            // possible leak path without a per-state registration to forget.
+            .add_systems(OnExit(GameState::Playing), clear_pause_tap)
+            .add_systems(OnExit(GameState::Paused), clear_pause_tap)
             .add_systems(
                 Update,
-                (open_pause, auto_pause_on_focus_loss).run_if(in_state(GameState::Playing)),
+                // Chained like the Paused-side pair below, and in this
+                // order: both write `SubsMenu.auto_paused` (with opposite
+                // values) and both bail on a pending transition, so on the
+                // frame a player's pause press races an armed focus-loss
+                // pause, the EXPLICIT pause must decide first — the other
+                // order records it as automatic and the next refocus
+                // silently resumes a game the player deliberately paused.
+                (open_pause, auto_pause_on_focus_loss)
+                    .chain()
+                    .in_set(PauseInputSet)
+                    .run_if(in_state(GameState::Playing)),
             )
             .add_systems(
                 Update,
-                (board_controls, auto_resume_on_refocus).run_if(in_state(GameState::Paused)),
+                // Chained: a board keypress claims the pause as manual and
+                // cancels quit-arms BEFORE the auto-resume can yank the
+                // board away — unordered, the pair raced on `NextState`.
+                (board_controls, auto_resume_on_refocus)
+                    .chain()
+                    .in_set(PauseInputSet)
+                    .run_if(in_state(GameState::Paused)),
             )
-            .add_systems(Update, (update_board, update_controls_dialog));
+            .add_systems(
+                Update,
+                // Before the keyboard path so a same-frame tap+key resolves
+                // deterministically (both mutate SubsMenu/NextState), and
+                // after the chrome release pass — both write
+                // `TouchGestures`, and release-then-bind is the coherent
+                // order (unordered, the pair was a per-build tie-break).
+                tap_quit_row
+                    .before(PauseInputSet)
+                    .after(crate::game::touch::paused_pause_region_taps)
+                    .run_if(in_state(GameState::Paused)),
+            )
+            .add_systems(
+                Update,
+                // After every `SubsMenu` writer (the quit row is `.before`
+                // the set, the rest are in it): the painters read what the
+                // input systems decided, and unordered, whether the
+                // [ TAP QUIT AGAIN TO CONFIRM ] prompt appeared on the
+                // arming frame or one frame later was a per-build
+                // tie-break — the class this repo pins with edges.
+                (update_board, update_controls_dialog).after(PauseInputSet),
+            );
     }
 }
 
-fn pause_pressed(keyboard: &ButtonInput<KeyCode>, pads: &Query<&Gamepad>) -> bool {
-    keyboard.just_pressed(KeyCode::Escape)
+fn pause_pressed(keyboard: &ButtonInput<KeyCode>, pads: &Query<&Gamepad>, tapped: bool) -> bool {
+    tapped
+        || keyboard.just_pressed(KeyCode::Escape)
         || keyboard.just_pressed(KeyCode::KeyP)
         || pads.iter().any(|p| p.just_pressed(GamepadButton::Start))
 }
@@ -140,16 +227,22 @@ fn open_pause(
     play: Res<Play>,
     score: Res<ScoreBoard>,
     flying: Query<(), (With<Baseball>, With<InFlight>)>,
+    mut tapped: ResMut<PauseTapped>,
     mut menu: ResMut<SubsMenu>,
     mut banner: EventWriter<PlayBanner>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
-    if !pause_pressed(&keyboard, &pads) {
+    // Never clobber a transition already decided this frame (e.g. the
+    // game-ending resolution setting GameOver). Checked BEFORE taking the
+    // tap latch: the latch's whole point over a key edge is surviving to
+    // evaluation, so a tap racing a decided transition defers a frame
+    // instead of vanishing (if the transition leaves the setter states,
+    // the `OnExit` `clear_pause_tap` retires it).
+    if crate::game::transition_pending(&next_state) {
         return;
     }
-    // Never clobber a transition already decided this frame (e.g. the
-    // game-ending resolution setting GameOver).
-    if !matches!(*next_state, NextState::Unchanged) {
+    let tap = take_pause_tap(&mut tapped);
+    if !pause_pressed(&keyboard, &pads, tap) {
         return;
     }
     if !ball_is_dead(&play, &flying) {
@@ -189,7 +282,7 @@ fn auto_pause_on_focus_loss(
     if !*pending || !ball_is_dead(&play, &flying) {
         return;
     }
-    if !matches!(*next_state, NextState::Unchanged) {
+    if crate::game::transition_pending(&next_state) {
         return;
     }
     *pending = false;
@@ -223,7 +316,7 @@ fn auto_resume_on_refocus(
             regained = true;
         }
     }
-    if regained && menu.auto_paused && matches!(*next_state, NextState::Unchanged) {
+    if regained && menu.auto_paused && !crate::game::transition_pending(&next_state) {
         menu.auto_paused = false;
         next_state.set(GameState::Playing);
     }
@@ -234,11 +327,19 @@ fn auto_resume_on_refocus(
 fn board_controls(
     keyboard: Res<ButtonInput<KeyCode>>,
     pads: Query<&Gamepad>,
+    mut tapped: ResMut<PauseTapped>,
     mut menu: ResMut<SubsMenu>,
     mut rosters: ResMut<Rosters>,
     mut settings: ResMut<Settings>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
+    // A transition already decided this frame (the tappable quit row runs
+    // first) must not be clobbered: without this, a same-frame pause press
+    // turned a CONFIRMED quit back into a resume — the guard `open_pause`
+    // carries for the same reason.
+    if crate::game::transition_pending(&next_state) {
+        return;
+    }
     // Any board keypress means the player is engaged with the pause —
     // claim it as manual so a focus flicker can't yank the board away
     // (see `auto_resume_on_refocus`, TODO 80).
@@ -249,7 +350,8 @@ fn board_controls(
         menu.auto_paused = false;
     }
 
-    if pause_pressed(&keyboard, &pads) {
+    let tap = take_pause_tap(&mut tapped);
+    if pause_pressed(&keyboard, &pads, tap) {
         menu.quit_armed = false;
         next_state.set(GameState::Playing);
         return;
@@ -265,11 +367,7 @@ fn board_controls(
     // below cancels the armed state (TODO 65). The Paused → MainMenu
     // teardown lives in `game::GamePlugin`.
     if keyboard.just_pressed(KeyCode::KeyQ) || pad_pressed(GamepadButton::East) {
-        if menu.quit_armed {
-            next_state.set(GameState::MainMenu);
-        } else {
-            menu.quit_armed = true;
-        }
+        press_quit(&mut menu, &mut next_state);
         return;
     }
     if menu.quit_armed
@@ -311,6 +409,106 @@ fn board_controls(
     }
 }
 
+/// One quit press: arm on the first, confirm on the second. The ONE
+/// encoding for Q, gamepad East, and the tappable quit row — the
+/// `pause_pressed`/`take_pause_tap` precedent one screen up: a step added
+/// to quitting (a banner, a breadcrumb) can never reach one input path and
+/// miss the other.
+fn press_quit(menu: &mut SubsMenu, next_state: &mut NextState<GameState>) {
+    // Structural, not by-ordering: every `NextState` writer that can race
+    // another carries the decided-transition guard, and putting it inside
+    // the shared body means neither quit path can ever forget it.
+    if crate::game::transition_pending(next_state) {
+        return;
+    }
+    if menu.quit_armed {
+        next_state.set(GameState::MainMenu);
+    } else {
+        menu.quit_armed = true;
+    }
+}
+
+/// The touch/mouse path to quitting: taps on the board's quit row follow
+/// the same arm-then-confirm flow as Q/East in [`board_controls`], and a
+/// touchdown anywhere OFF the row cancels an armed quit exactly as any
+/// other key cancels an armed Q — without it, a touch-only player who
+/// accidentally armed had no way to back out (their next quit-row tap,
+/// however much later, confirmed).
+fn tap_quit_row(
+    interactions: Query<&Interaction, (Changed<Interaction>, With<SubsQuitButton>)>,
+    row_geometry: Query<(&ComputedNode, &GlobalTransform), With<SubsQuitButton>>,
+    touches: Res<Touches>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    mut gestures: ResMut<crate::game::touch::TouchGestures>,
+    mut menu: ResMut<SubsMenu>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    // The row accepts presses two ways: the bevy_ui `Interaction` edge
+    // (mouse, single-finger holds), PLUS a raw hit-test of this frame's
+    // touchdowns against the row's own laid-out rect — the same
+    // multi-touch workaround the pause button carries, because bevy_ui
+    // attributes multi-touch presses to the FIRST held finger (a
+    // second-finger quit tap while the pause grip rests never reaches the
+    // Button) and an instantaneous tap (down+up in one frame batch) never
+    // becomes `Pressed` at all. Without the raw path, that instantaneous
+    // confirm tap fell into the cancel branch below and DISARMED instead.
+    // O(1) early-out on the no-input frame (in-body — `Changed` ticks
+    // stay fresh), before any geometry work.
+    if interactions.is_empty() && !crate::game::input::pointer_pressed(&touches, &mouse) {
+        return;
+    }
+    // ONE scan (`touched_node_ids` — the same containment body every
+    // hit-test site shares): the accept test and the chrome binding see
+    // identical fingers, or a press could be accepted whose finger is
+    // never bound (the adoptable-stick class the binding exists to stop).
+    // Quit-row fingers are chrome fingers — bound by id so a still-held
+    // one crossing a resume can't become the stick.
+    let mut touched_row = false;
+    let mut claimed_elsewhere = false;
+    if let Ok((node, transform)) = row_geometry.get_single() {
+        for id in crate::game::input::touched_node_ids(&touches, node, transform) {
+            // A finger the pause claim already bound this frame belongs to
+            // the pause button (it runs first, and since the button draws
+            // ABOVE the board — tier 31 over 30 — it visually owns any
+            // overlap with this row on narrow viewports): a resume tap
+            // must not also arm, or worse confirm, a quit.
+            if gestures.is_chrome_finger(id) {
+                claimed_elsewhere = true;
+                continue;
+            }
+            touched_row = true;
+            gestures.bind_chrome_finger(id);
+        }
+    }
+    // The `Interaction` half serves the mouse only (see
+    // `input::mouse_pressed_on` for the attribution policy — here a
+    // misattributed edge would arm, or worse CONFIRM, a quit nobody
+    // made). Touch quits ride `touched_row` alone.
+    let row_pressed =
+        crate::game::input::mouse_pressed_on(&mouse, interactions.iter()) || touched_row;
+    if !row_pressed {
+        // Any press that is NOT a quit press cancels an armed quit — for
+        // every pointing device this Button serves (the mouse got the row
+        // "for free" and must get the cancel too, or an accidental click
+        // makes the next quit click, however much later, a confirm).
+        // EXCEPT a press the chrome above already claimed: it is not a
+        // press "elsewhere", it is the pause button's. Cancelling on it
+        // threw the arm away on the confirming tap when the two rects
+        // overlap — the player pressed QUIT twice and kept playing.
+        if menu.quit_armed
+            && !claimed_elsewhere
+            && crate::game::input::pointer_pressed(&touches, &mouse)
+        {
+            menu.quit_armed = false;
+        }
+        return;
+    }
+    // A tap is engagement — a focus flicker must not yank the board away
+    // (the same claim every board keypress makes).
+    menu.auto_paused = false;
+    press_quit(&mut menu, &mut next_state);
+}
+
 /// Builds the board once at game start, hidden: every element painted with a
 /// nonzero-alpha colour so the wasm extractor keeps it forever.
 fn spawn_board(mut commands: Commands, theme: Res<Theme>) {
@@ -319,6 +517,7 @@ fn spawn_board(mut commands: Commands, theme: Res<Theme>) {
     commands
         .spawn((
             SubsUi,
+            KeepAliveUi,
             GameplayEntity,
             // Overlay tier 30 — pause above menu/settings, under banners
             // (40); see TODO 67.
@@ -341,6 +540,7 @@ fn spawn_board(mut commands: Commands, theme: Res<Theme>) {
             screen
                 .spawn((
                     SubsCard,
+                    KeepAliveUi,
                     Node {
                         padding: UiRect::axes(Val::Px(36.0), Val::Px(24.0)),
                         flex_direction: FlexDirection::Column,
@@ -354,8 +554,11 @@ fn spawn_board(mut commands: Commands, theme: Res<Theme>) {
                     BorderRadius::all(Val::Px(16.0)),
                 ))
                 .with_children(|card| {
-                    let mut line = |kind: SubsLineKind, size: f32| {
-                        card.spawn((
+                    // The ONE board-line bundle — every row (the tappable
+                    // quit row included) spawns through it, so a styling or
+                    // shared-component change can't miss one.
+                    let line_bundle = |kind: SubsLineKind, size: f32| {
+                        (
                             SubsLine(kind),
                             Text::new(""),
                             TextFont {
@@ -363,7 +566,10 @@ fn spawn_board(mut commands: Commands, theme: Res<Theme>) {
                                 ..default()
                             },
                             TextColor(ui.text_primary),
-                        ));
+                        )
+                    };
+                    let mut line = |kind: SubsLineKind, size: f32| {
+                        card.spawn(line_bundle(kind, size));
                     };
                     line(SubsLineKind::Title, 30.0);
                     line(SubsLineKind::LineupHeader, 14.0);
@@ -374,6 +580,15 @@ fn spawn_board(mut commands: Commands, theme: Res<Theme>) {
                     line(SubsLineKind::Bench, 17.0);
                     line(SubsLineKind::ZoneToggle, 14.0);
                     line(SubsLineKind::Hint, 13.0);
+                    // The one board row that must be reachable by touch: a
+                    // Button (single-finger taps and the mouse both route
+                    // through bevy_ui `Interaction` fine — the multi-touch
+                    // first-finger caveat only bites held grips).
+                    card.spawn((
+                        line_bundle(SubsLineKind::Quit, 16.0),
+                        SubsQuitButton,
+                        Button,
+                    ));
                 });
 
             // Controls-help dialog: below the board, same painted-at-spawn /
@@ -382,6 +597,7 @@ fn spawn_board(mut commands: Commands, theme: Res<Theme>) {
             screen
                 .spawn((
                     ControlsDialog,
+                    KeepAliveUi,
                     Node {
                         max_width: Val::Px(760.0),
                         padding: UiRect::axes(Val::Px(20.0), Val::Px(12.0)),
@@ -511,10 +727,21 @@ fn update_board(
                     ui.text_dim
                 },
             ),
+            SubsLineKind::Quit => {
+                if menu.quit_armed {
+                    ("[ TAP QUIT AGAIN TO CONFIRM ]".to_string(), ui.tone_bad)
+                } else {
+                    ("[ QUIT TO MENU ]".to_string(), ui.text_dim)
+                }
+            }
             SubsLineKind::Hint => {
                 if menu.quit_armed {
                     (
-                        "QUIT TO MENU? Q/B again confirms - any other key cancels".to_string(),
+                        // Device-complete: the row is tappable now, and a
+                        // touch-only player has no "other key" — any other
+                        // tap cancels the same way.
+                        "QUIT TO MENU? Q/B or quit tap again confirms - anything else cancels"
+                            .to_string(),
                         ui.tone_bad,
                     )
                 } else {

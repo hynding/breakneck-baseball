@@ -68,6 +68,30 @@ pub enum Phase {
     Result,
 }
 
+impl Phase {
+    /// The pre-contact "duel window" — batter and pitcher squared off, the
+    /// ball not yet in play. The one home for a predicate that was spelled
+    /// inline in eight places (runner dueling, rig behavior, the zone box
+    /// and PCI reticle, banners, the touch pad's claim window) — a new
+    /// phase or a redefined window edits here, PLUS one deliberate inline
+    /// sibling: `camera::framing::duel_framing_wanted` matches every
+    /// `Phase` exhaustively (a guard arm would forfeit the compile error a
+    /// new phase must trigger there), so a window change edits its first
+    /// arm by hand.
+    pub fn pre_contact(self) -> bool {
+        matches!(self, Phase::PrePitch | Phase::WindUp | Phase::Pitch)
+    }
+
+    /// The delivery window — the pitcher has committed (wind-up under way
+    /// or the ball in flight). [`Self::pre_contact`]'s sibling, named for
+    /// the same reason: the touch translator's tap-swing claim and the
+    /// rig's stance window must stay the same window, and an inline
+    /// `WindUp | Pitch` in each file could drift.
+    pub fn in_delivery(self) -> bool {
+        matches!(self, Phase::WindUp | Phase::Pitch)
+    }
+}
+
 /// Runtime state for the play machine.
 #[derive(Resource)]
 pub struct Play {
@@ -85,6 +109,12 @@ pub struct Play {
     /// The batting side sent the lead runner as the delivery started
     /// (aim held down through the windup).
     steal_armed: bool,
+    /// Last wind-up frame's send read, for the two-frame confirm in
+    /// `wind_up`: a SEND is a *held* gesture ("hold Down through the
+    /// windup"), and latching off a single frame let a touch tap's
+    /// one-frame position aim (a low swing tap) send a runner nobody
+    /// called.
+    windup_send_prev: bool,
     /// The armed steal broke from an extended pre-pitch lead — a jump no
     /// throw beats (the pickoff was the defense's counter).
     big_jump: bool,
@@ -257,6 +287,7 @@ impl Default for Play {
             pending_pitch: None,
             live_kind: None,
             steal_armed: false,
+            windup_send_prev: false,
             big_jump: false,
             window_lead: false,
             hold: Timer::from_seconds(0.0, TimerMode::Once),

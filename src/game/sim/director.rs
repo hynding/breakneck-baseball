@@ -164,6 +164,10 @@ pub enum ScriptAction {
     /// pattern the slot's batting style needs (press for Classic/PCI, a
     /// load-and-release for Swing Meter); the adapter still grades it.
     Swing,
+    /// Absolute zone-plane cursor (world x / height, meters) — the channel a
+    /// position-aiming device (the Zone Pad touch scheme) feeds; the PCI
+    /// adapter snaps to it. Here so scripts can cover that path too.
+    Cursor { x: f32, y: f32 },
     /// Aim at a base and press — the manual defensive throw.
     ThrowTo(BaseSel),
 }
@@ -233,6 +237,13 @@ const BUILTIN_SCRIPTS: &[(&str, &str)] = &[
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/scripts/steal-artist.ron"
+        )),
+    ),
+    (
+        "zone-pad",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/scripts/zone-pad.ron"
         )),
     ),
 ];
@@ -318,10 +329,8 @@ fn eval(cond: &Condition, ctx: &Ctx) -> bool {
 /// them and `batting::style_for` applies the slot's configured style —
 /// scripted input is pseudo-human by design). `Human` slots are untouched.
 fn enforce_routing(director: Res<Director>, mut controllers: ResMut<Controllers>) {
-    for (team, scheme) in [
-        (Team::Home, KeyScheme::Primary),
-        (Team::Away, KeyScheme::Secondary),
-    ] {
+    for team in [Team::Home, Team::Away] {
+        let scheme = KeyScheme::for_team(team);
         let slot = match team {
             Team::Home => &mut controllers.home,
             Team::Away => &mut controllers.away,
@@ -389,6 +398,8 @@ fn direct(
             dt_ms,
             gathered: active.holding_since().is_some(),
         };
+        // For a scripted slot `resolve_touch_owner` reports no touch owner
+        // (`Controllers::touch_team`), so the configured style applies here.
         let style = style_for(team, &controllers, &settings);
         let game_t = now - runtime.game_started_at;
 
@@ -418,6 +429,7 @@ fn direct(
                 }
                 ScriptAction::HoldPress => intent.action_held = true,
                 ScriptAction::Swing => swing_now = true,
+                ScriptAction::Cursor { x, y } => intent.cursor = Some(Vec2::new(x, y)),
                 ScriptAction::ThrowTo(base) => {
                     let state = runtime.slot_mut(team);
                     if ctx.gathered && !state.throw_fired {

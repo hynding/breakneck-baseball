@@ -184,7 +184,7 @@ fn take_leadoffs(
         (Without<BasePath>, Without<Breaking>),
     >,
 ) {
-    let dueling = matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch);
+    let dueling = play.phase.pre_contact();
     let candidate = rules::steal_candidate(&bases);
     for (runner, tf, mut intent) in &mut runners {
         let bag = base_pos(&field, runner.base);

@@ -191,16 +191,29 @@ pub(super) fn wind_up(
     mut pitch_ev: EventWriter<PitchEvent>,
 ) {
     if play.phase != Phase::WindUp {
+        // Guarded like every reset in this diff — tick hygiene, not cost.
+        if play.windup_send_prev {
+            play.windup_send_prev = false;
+        }
         return;
     }
     // Holding the stick down through the delivery sends the lead runner (the
     // late break: a classic race against the catcher, no guaranteed jump).
-    // Nobody in a position to steal means nobody is going.
-    if wants_send(intents.get(score.batting_team()).aim) && rules::steal_candidate(&bases).is_some()
-    {
+    // Nobody in a position to steal means nobody is going. HELD is literal —
+    // evidence from more than one instant: a touch tap's position aim (a
+    // low swing tap) lands for exactly one frame, and latching off it sent
+    // runners nobody called. Either a prior wind-up frame held the send
+    // (`windup_send_prev`) or the pre-pitch lead was stretched coming in
+    // (`lead.extended` — the same held-Down, so a one-frame wind-up on a
+    // hitching tab still honors a hold that predates it). Real holds span
+    // both; a one-frame blip has neither.
+    let send_now = wants_send(intents.get(score.batting_team()).aim)
+        && rules::steal_candidate(&bases).is_some();
+    if send_now && (play.windup_send_prev || lead.extended) {
         play.steal_armed = true;
         lead.extended = true;
     }
+    play.windup_send_prev = send_now;
     if play.timer.tick(time.delta()).finished() {
         let (aim, kind) = play
             .pending_pitch

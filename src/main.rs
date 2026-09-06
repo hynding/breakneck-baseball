@@ -55,6 +55,14 @@ fn main() {
         // ── All game-specific systems ────────────────────────────────────────────
         .add_plugins(GamePlugin);
 
+    // Self-driving visual runs (attract mode + Coach reports). Added HERE,
+    // not in `GamePlugin`: the lib is also every test harness's plugin, and
+    // an inherited menu driver + Startup `Director` insert hijacks a
+    // harness's own game setup (`cargo test --features autoplay` must behave
+    // exactly like plain `cargo test`; only the real app self-drives).
+    #[cfg(feature = "autoplay")]
+    app.add_plugins(breakneck_baseball::game::autoplay::AutoplayPlugin);
+
     // The portrait harness (Phase 4, Task 4): `--portraits <dir>` boots
     // windowed, force-enters the dev Creator stage, and walks every player
     // to a PNG for AI visual QA — see `game::portraits`. Native + debug only:

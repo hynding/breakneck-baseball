@@ -1,0 +1,14 @@
+// The Zone Pad touch scheme's coverage script: plays `balanced` baseball
+// but aims batting through the absolute cursor channel (the same
+// `TeamIntent::cursor` a finger on the pad produces), then commits the
+// style-aware Swing. Pairs with a run whose `Settings::touch_scheme` is
+// ZonePad, so `style_for` grades via the PCI adapter and the cursor snap
+// path is exercised end to end.
+Script(
+    name: "zone-pad",
+    rules: [
+        (when: All([OnDefense, Phase(PrePitch), Not(InStealWindow)]), then: Press),
+        (when: All([OnOffense, Phase(Pitch)]), then: Cursor(x: 0.0, y: 0.9)),
+        (when: All([OnOffense, Phase(Pitch), PlateEta(early_ms: 0.0)]), then: Swing),
+    ],
+)

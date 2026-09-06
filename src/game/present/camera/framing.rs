@@ -339,4 +339,32 @@ mod tests {
             }
         }
     }
+
+    /// `duel_framing_wanted`'s first arm is the deliberate inline sibling
+    /// of [`Phase::pre_contact`] (kept an exhaustive match so a new phase
+    /// forces a framing decision at compile time). This pins the agreement
+    /// the hand-edit rule relies on: with the conditional InPlay/Result
+    /// arms forced false (contact long past, pitch not gloved), the
+    /// framing must want exactly the pre-contact phases — redefining the
+    /// shared window without updating the camera's copy fails here instead
+    /// of silently keeping the old framing.
+    #[test]
+    fn duel_framing_pre_contact_arm_matches_the_shared_predicate() {
+        let mut play = Play::default();
+        let long_after_contact = 1_000.0;
+        for phase in [
+            Phase::PrePitch,
+            Phase::WindUp,
+            Phase::Pitch,
+            Phase::InPlay,
+            Phase::Result,
+        ] {
+            play.phase = phase;
+            assert_eq!(
+                duel_framing_wanted(&play, long_after_contact),
+                phase.pre_contact(),
+                "camera duel arm disagrees with Phase::pre_contact for {phase:?}"
+            );
+        }
+    }
 }

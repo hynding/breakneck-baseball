@@ -224,9 +224,19 @@ pub enum MatrixMode {
 /// `Intents`/`SwingCommands` is covered by construction.
 #[allow(dead_code)]
 pub fn start_matrix_game(app: &mut App, mode: MatrixMode, style: BattingStyle, script: &str) {
-    app.world_mut()
-        .resource_mut::<breakneck_baseball::game::settings::Settings>()
-        .batting_style = [style, style];
+    {
+        let mut settings = app
+            .world_mut()
+            .resource_mut::<breakneck_baseball::game::settings::Settings>();
+        settings.batting_style = [style, style];
+        // Pinned per cell like the style above: the settings store is
+        // per-PROCESS, so a cell that persists a scheme (the zone-pad
+        // cell) would otherwise leak it into every cell that boots after
+        // it in the same test binary — masked today only because a fresh
+        // app's `seen` bit is false, and one `mark_seen()` away from an
+        // order-dependent cross-test failure.
+        settings.touch_scheme = breakneck_baseball::game::settings::TouchScheme::Off;
+    }
     let menu_key = match mode {
         MatrixMode::TwoPlayers => KeyCode::Digit2,
         _ => KeyCode::Digit1,

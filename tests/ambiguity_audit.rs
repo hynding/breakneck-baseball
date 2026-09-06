@@ -30,6 +30,25 @@ const GAMEPLAY: &[&str] = &[
     "::sim::ai",
     "::sim::director",
     "::meta::input",
+    // The touch translator feeds `Intents` like any device — its Update
+    // systems (the Paused pause-tap path) must not race the consumers.
+    "::meta::touch",
+    // The overlay's pause-button forwarder, by its FULL name: it lives in
+    // the present layer, so the layer fragments above never match it, yet
+    // it writes `PauseTapped` and reads `TouchGestures` — `tap_pause` vs
+    // `paused_pause_region_taps` once shipped exactly that per-build
+    // ambiguity. Listing it scores that pair, so dropping the `.before`
+    // edge at its registration fails here instead of shipping. (The rest
+    // of `::present::ui` stays out: pure presentation readers with the
+    // accepted one-frame lag, same rationale as `::meta::subs` below.)
+    "ui::touch::tap_pause",
+    // NOT "::meta::subs": the board is a web of deliberately order-
+    // insensitive pairs — `NextState` writes are deferred to the next
+    // StateTransition (pause-vs-flow order cannot matter), and
+    // `update_board` is a presentation reader with accepted one-frame
+    // lag. Its one REAL conflict (`tap_quit_row` vs the chrome release
+    // pass, both writing `TouchGestures`) carries an explicit `.after`
+    // edge at its registration instead.
     "animation::driver::locomote",
 ];
 

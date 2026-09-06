@@ -4,7 +4,7 @@
 use bevy::prelude::*;
 
 use crate::game::batting::{PciState, style_for};
-use crate::game::flow::{ContactEvent, Phase, Play};
+use crate::game::flow::{ContactEvent, Play};
 use crate::game::input::Controllers;
 use crate::game::rules;
 use crate::game::rules::ContactQuality;
@@ -142,9 +142,7 @@ pub(super) fn strike_zone_visibility(
     settings: Res<Settings>,
     mut overlay: Query<&mut Visibility, With<StrikeZoneOverlay>>,
 ) {
-    let visible = settings.show_strike_zone
-        && (matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch)
-            || flash.timer.is_some());
+    let visible = settings.show_strike_zone && (play.phase.pre_contact() || flash.timer.is_some());
     for mut visibility in &mut overlay {
         let desired = if visible {
             Visibility::Inherited
@@ -173,7 +171,7 @@ pub(super) fn pci_cursor_visibility(
     let batting = score.batting_team();
     let show = controllers.player_index(batting).is_some()
         && style_for(batting, &controllers, &settings) == BattingStyle::PciCursor
-        && matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch);
+        && play.phase.pre_contact();
     let cursor = pci.cursor(batting);
     for (mut visibility, mut transform) in &mut marker {
         let desired = if show {

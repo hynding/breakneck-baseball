@@ -7,7 +7,7 @@ use crate::game::ScoreBoard;
 
 use super::{
     Bases, GRAVITY, PITCH_SPEED, ZONE_HALF_WIDTH, ZONE_HIGH, ZONE_LOW, advance_walk,
-    mound_reset_pos, reset_count,
+    aim_to_world_x, mound_reset_pos, reset_count,
 };
 
 // ── Pitch & contact kinematics ────────────────────────────────────────────────
@@ -81,6 +81,14 @@ impl PitchKind {
     }
 }
 
+/// Full-deflection pitch aim in meters of lateral plate target. Named (like
+/// its spray sibling below) so an aim-authority retune edits a dial, not a
+/// bare literal — the two are coincidentally equal, NOT one convention: this
+/// is meters at the plate, [`SPRAY_AIM_FRAC`] is a sine-of-spray fraction.
+const PITCH_AIM_X_M: f32 = 0.6;
+/// Full-deflection hit-spray pull, as a fraction of the sprayable arc.
+const SPRAY_AIM_FRAC: f32 = 0.6;
+
 /// Solves the ballistic release velocity for a pitch of `kind` from
 /// `pitch_distance` aimed at plate location `(aim.x, aim.y)` (both in
 /// −1.0..=1.0, zero = middle of the zone). Deliberately gravity-only: the
@@ -99,7 +107,7 @@ pub fn pitch_velocity_kind(
     // Wide enough that a full-inside aim reaches the batter's body — painting
     // the inside corner risks a hit-by-pitch. Negated: stick-right means
     // screen-right, which the behind-home camera renders as world −X.
-    let target_x = -aim.x * 0.6;
+    let target_x = aim_to_world_x(aim.x) * PITCH_AIM_X_M;
     // Centred on the *current* zone's middle (so "zero = middle of the
     // zone" stays true whatever the rulebook heights are); ±0.45 spans the
     // zone edge to just outside it — full-up still paints above the
@@ -141,7 +149,7 @@ pub fn hit_velocity(contact_z: f32, aim: Vec2) -> Vec3 {
     // stick-right pulls toward screen-right (world −X).
     let launch_deg = (6.0 + 26.0 * (aim.y * 0.5 + 0.5) + timing * 8.0).clamp(-8.0, 72.0);
     let launch = launch_deg.to_radians();
-    let spray = (-aim.x * 0.6 + timing * 0.05).clamp(-0.95, 0.95);
+    let spray = (aim_to_world_x(aim.x) * SPRAY_AIM_FRAC + timing * 0.05).clamp(-0.95, 0.95);
 
     let horizontal = speed * launch.cos();
     Vec3::new(

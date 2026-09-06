@@ -93,9 +93,11 @@ pub struct PciState {
 
 impl PciState {
     /// The zone-center resting position: horizontally centered, vertically at
-    /// the midpoint of the called zone.
-    fn center() -> Vec2 {
-        Vec2::new(0.0, (rules::ZONE_LOW + rules::ZONE_HIGH) / 2.0)
+    /// the midpoint of the called zone. Public because the Zone Pad's
+    /// pre-touch cursor pins here — one definition, so the pad's resting
+    /// spot and the adapter's between-pitch reset can never drift apart.
+    pub fn center() -> Vec2 {
+        Vec2::new(0.0, rules::aim_to_zone_y(0.0))
     }
 
     /// `team`'s current cursor position (zone coordinates).
@@ -104,6 +106,15 @@ impl PciState {
             Team::Home => self.home,
             Team::Away => self.away,
         }
+    }
+
+    /// Clamps a zone-plane cursor into the called zone — the ONE spelling
+    /// for the in-pitch PCI path and the between-pitch absolute snap, so a
+    /// rulebook-height change can never let the windup reticle park where
+    /// a delivered-pitch cursor can't reach.
+    fn clamp_to_zone(c: &mut Vec2) {
+        c.x = c.x.clamp(-rules::ZONE_HALF_WIDTH, rules::ZONE_HALF_WIDTH);
+        c.y = c.y.clamp(rules::ZONE_LOW, rules::ZONE_HIGH);
     }
 
     fn cursor_mut(&mut self, team: Team) -> &mut Vec2 {
@@ -175,12 +186,35 @@ impl SwingCommands {
 
 /// Which batting style drives `team`'s swing this at-bat. The CPU always
 /// routes Classic (spec §3) regardless of the settings screen's per-player
-/// choices — those only apply to a human-controlled slot.
+/// choices — those only apply to a human-controlled slot. An active touch
+/// swing scheme owns P1's style outright (each scheme is graded by exactly
+/// one adapter — see `settings::TouchScheme::batting_style`), so the chosen
+/// mechanic and its grading can never disagree.
 pub fn style_for(team: Team, controllers: &Controllers, settings: &Settings) -> BattingStyle {
     match controllers.player_index(team) {
         None => BattingStyle::ClassicTiming, // CPU: always Classic (spec §3)
-        Some(i) => settings.batting_style[i],
+        Some(i) => {
+            touch_style_override(team, controllers, settings).unwrap_or(settings.batting_style[i])
+        }
     }
+}
+
+/// The touch swing scheme's style override for a slot, if it applies: the
+/// slot is the resolved touch owner (`Controllers::touch_team` — the same
+/// slot `gather_intents` merges touch into, with Director-driven slots and
+/// touch-free devices excluded by `touch::resolve_touch_owner`) AND the
+/// scheme dictates a style. The one encoding of "the touch swing owns this
+/// slot's style": [`style_for`] applies it and the settings screen
+/// displays/locks the P1 row by it, so the row can never claim an override
+/// the adapter isn't actually applying.
+pub fn touch_style_override(
+    team: Team,
+    controllers: &Controllers,
+    settings: &Settings,
+) -> Option<BattingStyle> {
+    (controllers.touch_team == Some(team))
+        .then(|| settings.touch_scheme.batting_style())
+        .flatten()
 }
 
 /// The adapter: runs after `cpu_offense` (so CPU edges are visible) and
@@ -209,12 +243,36 @@ pub fn adapt_swings(
         // Between pitches the meter is idle: forget any dangling hold so the
         // next at-bat starts from an empty bar (and presentation reads 0). The
         // PCI cursor likewise re-centers so every at-bat opens from the middle
-        // of the zone.
+        // of the zone — EXCEPT for an absolute cursor (the Zone Pad):
+        // a finger is already a position, the pad is drawn and claimable
+        // through the whole pre-contact window, and discarding its pre-aim
+        // here left the reticle parked at center all windup only to
+        // teleport to the thumb's spot at the delivery.
         *meter = MeterState::default();
         *pci = PciState::default();
+        // Style-gated like the in-pitch path, which honours `cursor` only
+        // inside its `PciCursor` arm: `ScriptAction::Cursor` is
+        // style-agnostic, so a script pairing it with Classic or the meter
+        // would park a position no adapter owns — inert until the slot
+        // later resolves to PCI (a touch scheme flipping mid-session),
+        // whereupon the first pitch graded from that stale offset instead
+        // of zone center.
+        if style_for(team, &controllers, &settings) == BattingStyle::PciCursor {
+            if let Some(abs) = intent.cursor {
+                // Clamped like the in-pitch path: `ScriptAction::Cursor` is
+                // unvalidated RON, and an out-of-zone park would draw the
+                // reticle far off the strike zone for the whole windup.
+                let c = pci.cursor_mut(team);
+                *c = abs;
+                PciState::clamp_to_zone(c);
+            }
+        }
         load.0 = 0.0;
         return;
     }
+    // (The Zone Pad's anticipatory-press-at-delivery arrives here as an
+    // ordinary `intent.action` edge — `touch::read_touch` emits it through
+    // the `Intents` seam, so this adapter needs no device knowledge.)
     match style_for(team, &controllers, &settings) {
         BattingStyle::ClassicTiming => {
             if intent.action {
@@ -273,10 +331,16 @@ pub fn adapt_swings(
             // window is small.
             const PCI_SPEED_MPS: f32 = 1.6;
             let c = pci.cursor_mut(team);
-            c.x -= intent.aim.x * PCI_SPEED_MPS * time.delta_secs();
-            c.y += intent.aim.y * PCI_SPEED_MPS * time.delta_secs();
-            c.x = c.x.clamp(-rules::ZONE_HALF_WIDTH, rules::ZONE_HALF_WIDTH);
-            c.y = c.y.clamp(rules::ZONE_LOW, rules::ZONE_HIGH);
+            if let Some(abs) = intent.cursor {
+                // A position-aiming device (the Zone Pad touch scheme) snaps
+                // the cursor absolutely — a finger is already a position, so
+                // integrating it as a velocity would only add lag and drift.
+                *c = abs;
+            } else {
+                c.x += rules::aim_to_world_x(intent.aim.x) * PCI_SPEED_MPS * time.delta_secs();
+                c.y += intent.aim.y * PCI_SPEED_MPS * time.delta_secs();
+            }
+            PciState::clamp_to_zone(c);
             if intent.action {
                 commands.set(
                     team,
@@ -350,8 +414,112 @@ mod tests {
     }
 
     #[test]
+    fn touch_scheme_owns_p1_style_and_never_touches_cpu_or_p2() {
+        use crate::game::settings::TouchScheme;
+        let settings = Settings {
+            batting_style: [BattingStyle::ClassicTiming, BattingStyle::ClassicTiming],
+            touch_scheme: TouchScheme::ZonePad,
+            ..Settings::default()
+        };
+        // 1P: the scheme decides the touch-owned P1 (Home); the CPU stays
+        // Classic.
+        let mut one = assign_controllers(GameMode::OnePlayer, &[]);
+        one.touch_team = Some(Team::Home);
+        assert_eq!(
+            style_for(Team::Home, &one, &settings),
+            BattingStyle::PciCursor
+        );
+        assert_eq!(
+            style_for(Team::Away, &one, &settings),
+            BattingStyle::ClassicTiming
+        );
+        // 2P: P2 keeps their configured style.
+        let mut two = assign_controllers(GameMode::TwoPlayers, &[]);
+        two.touch_team = Some(Team::Home);
+        assert_eq!(
+            style_for(Team::Away, &two, &settings),
+            BattingStyle::ClassicTiming
+        );
+        // No touch owner (a Director-driven slot, per `resolve_touch_owner`):
+        // the scheme never overrides — configured style holds.
+        let undirected = assign_controllers(GameMode::OnePlayer, &[]);
+        assert_eq!(
+            style_for(Team::Home, &undirected, &settings),
+            BattingStyle::ClassicTiming
+        );
+        // Off: P1's configured style applies unchanged.
+        let off = Settings::default();
+        assert_eq!(
+            style_for(Team::Home, &one, &off),
+            BattingStyle::ClassicTiming
+        );
+    }
+
+    /// Pins the Zone Pad's absolute-cursor path end to end at the adapter:
+    /// a `TeamIntent::cursor` set from the `Intents` seam (exactly what the
+    /// touch translator — or a Director `Cursor` action — produces) must
+    /// snap the PCI cursor, clamped to the zone, and a press must grade at
+    /// the snapped spot via `pci_offset`.
+    #[test]
+    fn pci_adapter_snaps_to_an_absolute_cursor_from_intents() {
+        use crate::game::flow::{Phase, Play};
+        use crate::game::input::Intents;
+        use crate::game::settings::TouchScheme;
+        use crate::game::variant::VariantId;
+        use crate::game::{GameMode, ScoreBoard};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let mut play = Play::default();
+        play.phase = Phase::Pitch;
+        // Home (the touch team) bats.
+        let score = ScoreBoard {
+            top_of_inning: false,
+            ..Default::default()
+        };
+        let mut controllers = assign_controllers(GameMode::OnePlayer, &[]);
+        controllers.touch_team = Some(Team::Home);
+        app.insert_resource(play)
+            .insert_resource(score)
+            .insert_resource(controllers)
+            .insert_resource(Settings {
+                touch_scheme: TouchScheme::ZonePad,
+                ..Settings::default()
+            })
+            .insert_resource(VariantId::Standard.rules())
+            .init_resource::<Intents>()
+            .init_resource::<SwingCommands>()
+            .init_resource::<MeterState>()
+            .init_resource::<MeterLoad>()
+            .init_resource::<PciState>()
+            .add_systems(Update, adapt_swings);
+
+        // An off-zone cursor must clamp; the press this frame swings there.
+        let cursor = Vec2::new(-10.0, 10.0);
+        {
+            let mut intents = app.world_mut().resource_mut::<Intents>();
+            intents.home.cursor = Some(cursor);
+            intents.home.action = true;
+        }
+        app.update();
+        let snapped = app.world().resource::<PciState>().cursor(Team::Home);
+        assert_eq!(
+            snapped,
+            Vec2::new(-rules::ZONE_HALF_WIDTH, rules::ZONE_HIGH),
+            "absolute cursor should snap then clamp to the zone"
+        );
+        let world = app.world_mut();
+        let cmd = world
+            .resource_mut::<SwingCommands>()
+            .take(Team::Home)
+            .expect("press with ZonePad style should fire a PCI swing");
+        assert_eq!(cmd.pci_offset, Some(snapped));
+    }
+
+    #[test]
     fn cpu_always_routes_classic() {
-        let controllers = assign_controllers(GameMode::OnePlayer, &[]);
+        let mut controllers = assign_controllers(GameMode::OnePlayer, &[]);
+        controllers.touch_team = Some(Team::Home);
         let settings = Settings {
             batting_style: [BattingStyle::PciCursor, BattingStyle::SwingMeter],
             ..Settings::default()

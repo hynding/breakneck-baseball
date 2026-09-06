@@ -3,7 +3,7 @@
 
 use bevy::prelude::*;
 
-use crate::game::flow::{BannerTone, ContactEvent, Phase, Play, PlayBanner};
+use crate::game::flow::{BannerTone, ContactEvent, Play, PlayBanner};
 use crate::game::roster::Rosters;
 use crate::game::rules::{BattingOrder, ContactQuality, LINEUP_SIZE};
 use crate::game::theme::Theme;
@@ -142,7 +142,7 @@ pub(super) fn update_duel_panels(
     mut panels: Query<(&mut BackgroundColor, &mut BorderColor, &mut Visibility), With<DuelPanel>>,
     mut lines: Query<(&DuelLine, &mut Text, &mut TextColor)>,
 ) {
-    let visible = matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch);
+    let visible = play.phase.pre_contact();
     let ui = &theme.ui;
     for (mut bg, mut border, mut visibility) in &mut panels {
         let desired = if visible {

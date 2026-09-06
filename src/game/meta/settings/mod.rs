@@ -12,6 +12,7 @@ use bevy::log::warn;
 use crate::game::GameState;
 
 mod screen;
+pub use screen::{SettingsCursorRow, open_settings};
 
 /// Which batting input front-end a player uses (spec §3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,6 +42,72 @@ impl BattingStyle {
 
     pub fn prev(self) -> Self {
         self.next().next()
+    }
+}
+
+/// Which touch swing mechanic drives P1's batting when a touchscreen is in
+/// play. Each scheme is a different precision mechanic; the grading spine is
+/// untouched because every scheme routes through an existing [`BattingStyle`]
+/// adapter (see [`TouchScheme::batting_style`]). `Off` (the default) keeps
+/// the *generic* touch mapping live (drag = aim, tap/second finger = the
+/// action button — so a touch-only device is always playable) but adds no
+/// swing mechanic and never overrides P1's configured batting style.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum TouchScheme {
+    /// No swing scheme: generic touch only (drag = aim, tap = action);
+    /// P1's configured batting style applies.
+    #[default]
+    Off,
+    /// Tap anywhere = swing at that instant; tap position vs. screen center
+    /// aims the swing. Grades via Classic timing.
+    Tap,
+    /// Rest a thumb, then flick upward through the ball; the flick moment is
+    /// the swing instant, its direction the aim. Grades via Classic timing.
+    Flick,
+    /// Hold to load, drag to aim, release to swing. Grades via the Swing
+    /// Meter (the load bar UI applies).
+    HoldRelease,
+    /// A left-side pad maps the finger absolutely onto the strike zone (the
+    /// PCI cursor snaps to it); the right-side button swings. Grades via PCI.
+    ZonePad,
+}
+
+impl TouchScheme {
+    /// Settings-row / menu-line value text.
+    pub fn label(self) -> &'static str {
+        match self {
+            TouchScheme::Off => "Off (basic taps)",
+            TouchScheme::Tap => "Tap (timing)",
+            TouchScheme::Flick => "Flick (gesture timing)",
+            TouchScheme::HoldRelease => "Hold + release (meter)",
+            TouchScheme::ZonePad => "Zone pad (aim + button)",
+        }
+    }
+
+    /// Which batting adapter grades this scheme's swings, or `None` when the
+    /// scheme is off (P1's configured [`BattingStyle`] applies unchanged).
+    pub fn batting_style(self) -> Option<BattingStyle> {
+        match self {
+            TouchScheme::Off => None,
+            TouchScheme::Tap | TouchScheme::Flick => Some(BattingStyle::ClassicTiming),
+            TouchScheme::HoldRelease => Some(BattingStyle::SwingMeter),
+            TouchScheme::ZonePad => Some(BattingStyle::PciCursor),
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            TouchScheme::Off => TouchScheme::Tap,
+            TouchScheme::Tap => TouchScheme::Flick,
+            TouchScheme::Flick => TouchScheme::HoldRelease,
+            TouchScheme::HoldRelease => TouchScheme::ZonePad,
+            TouchScheme::ZonePad => TouchScheme::Off,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        // 4 nexts = 1 prev in a 5-cycle.
+        self.next().next().next().next()
     }
 }
 
@@ -155,6 +222,12 @@ impl TrailColor {
 pub struct Settings {
     /// Batting style per player slot (index 0 = P1, 1 = P2).
     pub batting_style: [BattingStyle; 2],
+    /// P1's touch swing mechanic — when not [`TouchScheme::Off`] it decides
+    /// P1's effective batting style (`batting::style_for`), so the chosen
+    /// mechanic and its grading adapter can never disagree. Serde-defaulted
+    /// off so pre-touch stores load unchanged.
+    #[serde(default)]
+    pub touch_scheme: TouchScheme,
     /// The pitch trail's look — serde-defaulted so stores written before
     /// trails existed still load instead of resetting every option.
     #[serde(default)]
@@ -184,6 +257,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             batting_style: [BattingStyle::ClassicTiming; 2],
+            touch_scheme: TouchScheme::default(),
             pitch_trail: PitchTrailStyle::default(),
             trail_color: TrailColor::default(),
             show_strike_zone: true,
@@ -299,7 +373,7 @@ fn back_up_store(text: &str) {
 /// Whether the settings screen is currently shown (toggled with **S** on
 /// the main menu). A resource so menu systems can suppress their own
 /// hotkeys while the screen is open.
-#[derive(Resource, Default)]
+#[derive(Resource, Default, Clone, Copy, PartialEq, Eq)]
 pub struct SettingsOpen(pub bool);
 
 /// Loads persisted settings at startup, mirrors [`Settings::volume`] into
@@ -328,9 +402,14 @@ impl Plugin for SettingsPlugin {
                 (
                     screen::toggle_settings,
                     screen::edit_settings,
+                    screen::tap_settings_row,
                     screen::paint_settings_screen,
                 )
                     .chain()
+                    // After the menu's chain: with the menu reading first, a
+                    // pad East that closes this screen can never also be
+                    // consumed as the menu's innings cycle in the same frame.
+                    .after(crate::game::menu::MenuUpdateSet)
                     .run_if(in_state(GameState::MainMenu)),
             )
             // Defensive reset: `menu_select` is suppressed while the screen

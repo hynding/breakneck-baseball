@@ -43,7 +43,7 @@ The Blender pair always runs in that order — never hand-export from the GUI (s
 - `core/` — pure rules & data, no Bevy systems (`rules/`, `variant.rs`, `roster.rs`, `theme.rs`)
 - `sim/` — gameplay systems that decide what happens (`flow/`, `fielding.rs`, `runner.rs`, `ball.rs`, `batting.rs`, `ai.rs`, `scenario.rs`)
 - `present/` — everything seen/heard (`field/`, `camera/`, `player/`, `animation/`, `ui/`, `fx/`, `jersey.rs`, `audio.rs`, `juice.rs`)
-- `meta/` — shell: menus, persistence, tooling (`settings/`, `menu.rs`, `input.rs`, `subs.rs`, plus debug-gated modules)
+- `meta/` — shell: menus, persistence, tooling (`settings/`, `menu.rs`, `input.rs`, `touch.rs`, `subs.rs`, plus debug-gated modules)
 
 **The public API is the facade**: `game::<module>` is the canonical import path. A new module must be
 declared in its layer's `mod.rs` *and* re-exported from `src/game/mod.rs` (`pub use self::core::rules;`
@@ -63,7 +63,7 @@ Violating any of these breaks the build, breaks wasm, or corrupts gameplay state
 - Any writer of `Time<Virtual>` `relative_speed` must compose with `juice::BaseSpeed`, never assume 1.0 (`src/game/present/juice.rs`).
 - Keep the `bevy` `wav` feature in `Cargo.toml` — procedural audio synthesizes in-memory WAVs and needs bevy_audio's decoder.
 - Keep `getrandom_backend="wasm_js"` rustflags in `.cargo/config.toml` — getrandom ≥ 0.3 fails to compile on wasm without it.
-- `tests/e2e_*` inject input from the `DriveGame` schedule, never from the test body — the input plugin's `PreUpdate` clear wipes presses made outside it (`tests/common/mod.rs`).
+- `tests/e2e_*` inject input from the `DriveGame` schedule, never from the test body — the input plugin's `PreUpdate` clear wipes presses made outside it (`tests/common/mod.rs`). Exemption: raw *window events* (`TouchInput`) are double-buffered and survive to `InputSystem`, so `tests/e2e_touch_pipeline.rs` sends them from the test body; the rule is about `ButtonInput` presses.
 - Scripted e2e batted balls must be sprayed at a *set* fielder's spot — the steal window means the defense is back in position before every pitch (`tests/common/mod.rs` helpers).
 - Roster names are A–Z only — jersey lettering uses a built-in 5×7 bitmap font (`src/game/present/jersey.rs`).
 - Never hand-export the player model from the Blender GUI — `tools/export_glb.py` pins the settings the runtime loader and `tests/model_contract.rs` depend on; always run the build/export script pair.
@@ -73,8 +73,9 @@ Violating any of these breaks the build, breaks wasm, or corrupts gameplay state
 - After physics or rendering changes, verify **both** targets: `cargo check` and `cargo check --target wasm32-unknown-unknown`.
 - Real-world baseball facts come from `docs/BASEBALL.md` (with sources) — check it before modeling something physical, extend it when short, cite it in comments ("per docs/BASEBALL.md").
 - Tests touching `BREAKNECK_SETTINGS_PATH` serialize through `ENV_LOCK` — the settings module's `set_var`/`remove_var` calls are the crate's only `unsafe` (`src/game/meta/settings/`).
-- The Coach (`game::coach`) observes and never mutates gameplay state; the Director's `DriveGame` schedule (`game::director`) is the only synthetic-input seam — new control mechanisms must route through `Intents`/`SwingCommands` so scripts, tests, and autoplay cover them automatically.
+- The Coach (`game::coach`) observes and never mutates gameplay state; the Director's `DriveGame` schedule (`game::director`) is the only synthetic-input seam — new *gameplay* control mechanisms must route through `Intents`/`SwingCommands` so scripts, tests, and autoplay cover them automatically. Shell chrome (pause, menus, settings, quit) reads devices directly, as Esc/P/Start always have — the rule covers what plays baseball, not what drives screens.
 - Keep `Cargo.lock` committed — CI derives the wasm-bindgen version from it (`.github/workflows/pages.yml`).
+- `autoplay::AutoplayPlugin` registers in `src/main.rs`, never in `GamePlugin` — the lib is every test harness's plugin, and the self-driver's menu presses + Startup `Director` insert hijack a harness's own setup (`cargo test --features autoplay` must behave exactly like plain `cargo test`).
 
 ## Skills
 

@@ -164,9 +164,7 @@ pub(super) fn exit_creator_stage(
     stage: Query<Entity, With<CreatorStage>>,
     mut main_cameras: Query<&mut Camera, (With<Camera3d>, Without<CreatorStage>)>,
 ) {
-    for entity in &stage {
-        commands.entity(entity).despawn_recursive();
-    }
+    crate::game::despawn_all(&mut commands, &stage);
     for mut camera in &mut main_cameras {
         camera.is_active = true;
     }

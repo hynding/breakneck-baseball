@@ -6,8 +6,8 @@ use bevy::math::{Vec2, Vec3};
 use crate::game::variant::{FieldSpec, PaceTuning, Ruleset};
 
 use super::{
-    Bases, INFIELD_GATHER_RADIUS, OutKind, Outcome, POP_RADIUS, RunnerCall, TAG_UP_MIN_DIST,
-    is_fair,
+    AIM_DEADZONE, Bases, INFIELD_GATHER_RADIUS, OutKind, Outcome, POP_RADIUS, RunnerCall,
+    TAG_UP_MIN_DIST, is_fair,
 };
 
 /// Whether the runner on (0-indexed) `base` is *forced* to advance: every base
@@ -289,10 +289,10 @@ pub fn runner_call_from_aim(aim: Vec2) -> RunnerCall {
 /// up = second on a three-base diamond, left = third, down = home. `None`
 /// when the stick is too centred or points nowhere near a base.
 pub fn aimed_base(aim: Vec2, field: &FieldSpec) -> Option<usize> {
-    if aim.length() < 0.5 {
+    if aim.length() < AIM_DEADZONE {
         return None;
     }
-    let dir = Vec2::new(-aim.x, aim.y).normalize(); // screen aim → world (x, z)
+    let dir = Vec2::new(super::aim_to_world_x(aim.x), aim.y).normalize(); // aim → world (x, z)
     let mut best: Option<(usize, f32)> = None;
     let mut consider = |b: usize, world: Vec2| {
         let Some(bd) = world.try_normalize() else {

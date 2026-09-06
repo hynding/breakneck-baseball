@@ -84,6 +84,12 @@ mod drive {
         if let Some(n) = cfg.innings {
             game_config.innings = n.max(1);
         }
+        // A persisted touch scheme can't hijack the scripted slots' batting
+        // styles here: `touch::resolve_touch_owner` excludes Director-driven
+        // slots (and touch-free devices), so `Controllers::touch_team` stays
+        // `None` and `style_for` reads the configured styles. (NOT the
+        // `touch::touch_team` candidate fn — that reports `Some(Home)` for
+        // any human-sourced slot, scripted ones included.)
         commands.init_resource::<CoachEnabled>();
         let director = match cfg.script.as_deref().and_then(script) {
             Some(s) => Director {
@@ -113,7 +119,16 @@ mod drive {
             }
             GameState::GameOver => {
                 keyboard.release(KeyCode::Digit1);
-                keyboard.press(KeyCode::Enter);
+                // Alternate press/release: `press` on an already-pressed key
+                // produces no new `just_pressed` edge, and the single edge a
+                // held Enter produced landed on the first GameOver frame —
+                // inside `GameOverGrace`'s 1 s input-tail guard — hanging
+                // the attract loop on the final card forever.
+                if keyboard.pressed(KeyCode::Enter) {
+                    keyboard.release(KeyCode::Enter);
+                } else {
+                    keyboard.press(KeyCode::Enter);
+                }
             }
             _ => {
                 keyboard.release(KeyCode::Digit1);

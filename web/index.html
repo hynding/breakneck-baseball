@@ -4,10 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Breakneck Baseball</title>
-    <meta name="description" content="Breakneck Baseball — a fast arcade baseball game in the browser. Keyboard or gamepad; five pitches, steals, pickoffs, and three ways to swing." />
+    <meta name="description" content="Breakneck Baseball — a fast arcade baseball game in the browser. Keyboard, gamepad, or touch; five pitches, steals, pickoffs, and four touch swing schemes." />
     <meta name="theme-color" content="#1a1a2e" />
     <meta property="og:title" content="Breakneck Baseball" />
-    <meta property="og:description" content="A fast arcade baseball game in the browser. Keyboard or gamepad." />
+    <meta property="og:description" content="A fast arcade baseball game in the browser. Keyboard, gamepad, or touch." />
     <meta property="og:type" content="website" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚾</text></svg>" />
     <style>
@@ -21,12 +21,23 @@
             height: 100%;
             overflow: hidden;
             background: #1a1a2e;
+            overscroll-behavior: none;
         }
+
+        /* Touch gestures on the CANVAS belong to the game (no scroll,
+           pinch-zoom, or double-tap zoom mid-play) — but only there: the
+           DOM overlays (loading, errors, the touch primer) must stay
+           pinch-zoomable for low-vision players, so neither the viewport
+           meta nor body-wide touch-action may disable zoom. */
 
         canvas {
             display: block;
             width: 100vw;
             height: 100vh;
+            touch-action: none;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
         }
 
         .overlay {
@@ -137,9 +148,9 @@
 
     <div id="touch-note" class="overlay hidden">
         <h1>⚾ Breakneck Baseball</h1>
-        <p>This game needs a <strong>keyboard or gamepad</strong> — touch controls aren't supported yet.</p>
-        <p>Play it on a desktop, or connect a gamepad and continue.</p>
-        <button class="reload" onclick="document.getElementById('touch-note').classList.add('hidden'); document.querySelector('canvas')?.focus()">Continue anyway</button>
+        <p><strong>Touch controls:</strong> tap <strong>G Touch swing</strong> on the menu to pick a swing scheme, then tap a mode to play.</p>
+        <p>While batting: tap, flick, hold-and-release, or use the zone pad — whichever scheme you chose.<br/>On defense: drag to aim, second finger to pitch or throw.</p>
+        <button class="reload" onclick="document.getElementById('touch-note').classList.add('hidden'); document.querySelector('canvas')?.focus()">Play</button>
     </div>
 
     <script type="module">
@@ -176,13 +187,18 @@
             }
         });
 
-        // Touch-only devices get an honest notice instead of a silently
-        // unresponsive canvas (dismissible — a tablet with a gamepad works).
+        // Touch-only devices get a one-time controls primer (dismissible).
         const touchOnly = matchMedia('(pointer: coarse)').matches
             && !matchMedia('(any-pointer: fine)').matches;
         if (touchOnly) {
             $('touch-note').classList.remove('hidden');
         }
+
+        // A long-press on the canvas must never open the context menu
+        // mid-play (touch-action CSS doesn't cover it everywhere).
+        document.addEventListener('contextmenu', (e) => {
+            if (e.target && e.target.tagName === 'CANVAS') e.preventDefault();
+        });
 
         // Bevy can't recreate a lost WebGL2 context; an honest reload prompt
         // beats a silent freeze. The canvas appears only after init, so the
