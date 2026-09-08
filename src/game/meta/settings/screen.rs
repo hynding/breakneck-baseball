@@ -11,7 +11,10 @@ use super::BattingStyle;
 use super::{Settings, SettingsOpen};
 use crate::game::input::Controllers;
 use crate::game::theme::Theme;
-use crate::game::ui::{KeepAliveUi, hidden_tint, set_color_if_neq, set_text_if_neq};
+use crate::game::ui::{
+    KeepAliveUi, OverlayPaint, hidden_tint, overlay_card, overlay_root, set_color_if_neq,
+    set_text_if_neq, z,
+};
 use crate::game::{Team, batting};
 
 // ── Settings screen ──────────────────────────────────────────────────────────
@@ -119,35 +122,13 @@ pub(super) fn spawn_settings_screen(mut commands: Commands, theme: Res<Theme>) {
         .spawn((
             SettingsUi,
             KeepAliveUi,
-            // Overlay tier 20 — above the menu (10); see TODO 67.
-            GlobalZIndex(20),
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                top: Val::Px(0.0),
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            BackgroundColor(hidden_tint(ui.panel_bg)),
+            overlay_root(z::SETTINGS, OverlayPaint::Hidden, ui),
         ))
         .with_children(|root| {
             root.spawn((
                 SettingsCard,
                 KeepAliveUi,
-                Node {
-                    padding: UiRect::axes(Val::Px(40.0), Val::Px(28.0)),
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    row_gap: Val::Px(10.0),
-                    border: UiRect::all(Val::Px(1.5)),
-                    ..default()
-                },
-                BackgroundColor(hidden_tint(ui.panel_bg)),
-                BorderColor(hidden_tint(ui.panel_border)),
-                BorderRadius::all(Val::Px(16.0)),
+                overlay_card(OverlayPaint::Hidden, Vec2::new(40.0, 28.0), 10.0, ui),
             ))
             .with_children(|card| {
                 card.spawn((

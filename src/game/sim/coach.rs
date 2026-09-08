@@ -190,53 +190,38 @@ struct WorldRigs<'w, 's> {
         Query<'w, 's, (&'static Runner, &'static Transform, &'static MoveIntent), Without<Fielder>>,
 }
 
-/// The one observer system: per-frame fact tracking plus the ~30 Hz sample.
-#[allow(clippy::too_many_arguments)]
-fn observe(
-    time: Res<Time>,
-    mut state: ResMut<CoachState>,
-    config: Res<CoachConfig>,
-    mut report: ResMut<CoachReport>,
-    facts: WorldFacts,
-    mut reports: PlayReports,
-    rigs: WorldRigs,
-    mut findings: EventWriter<CoachFindingEvent>,
+/// Per-frame fact tracking: the events and phase edges the ~30 Hz sampler
+/// would miss between its 33 ms samples. Cheap, so it runs every frame.
+fn track_frame_facts(
+    state: &mut CoachState,
+    facts: &WorldFacts,
+    reports: &mut PlayReports,
+    rigs: &WorldRigs,
+    now: f32,
 ) {
-    let WorldFacts {
-        play,
-        score,
-        bases,
-        ruleset,
-        field,
-        active,
-        settled,
-    } = facts;
-    let (in_play_ev, live_ev) = (&mut reports.in_play, &mut reports.live);
-    let (ball_q, catcher_q, fielder_q, runner_q) =
-        (&rigs.ball, &rigs.catcher, &rigs.fielders, &rigs.runners);
-    let now = time.elapsed_secs();
-
     // ── Per-frame fact tracking (cheap; events and edges the sampler would
     // miss between its 33 ms samples) ────────────────────────────────────────
-    for ev in in_play_ev.read() {
+    for ev in reports.in_play.read() {
         state.contacted = true;
         if matches!(ev.kind, ContactKind::Live { fair: true }) {
             state.contact = Some(ContactFacts {
                 at: now,
                 class: ev.contact_class,
-                outs_at_contact: score.outs,
-                bases_at_contact: (0..bases.count()).map(|b| bases.is_occupied(b)).collect(),
-                steal_armed: play.runners_going(),
+                outs_at_contact: facts.score.outs,
+                bases_at_contact: (0..facts.bases.count())
+                    .map(|b| facts.bases.is_occupied(b))
+                    .collect(),
+                steal_armed: facts.play.runners_going(),
             });
         }
     }
-    for ev in live_ev.read() {
+    for ev in reports.live.read() {
         if matches!(ev, LiveBallEvent::Landed { .. }) {
             state.bounced = true;
         }
     }
-    let ball = ball_q.get_single().ok();
-    if play.phase == Phase::Pitch {
+    let ball = rigs.ball.get_single().ok();
+    if facts.play.phase == Phase::Pitch {
         if let Some((tf, _, _)) = ball {
             // Mirror flow's plate-crossing record (same z-gate).
             if state.crossing.is_none() && tf.translation.z <= 0.1 {
@@ -244,7 +229,7 @@ fn observe(
             }
         }
     }
-    if let (Some((tf, vel, in_flight)), Ok(catcher_tf)) = (ball, catcher_q.get_single()) {
+    if let (Some((tf, vel, in_flight)), Ok(catcher_tf)) = (ball, rigs.catcher.get_single()) {
         // First arrival at the glove line, exactly as `catcher_receives`
         // gates its catch: this is what exempts dirt balls and sailed
         // pitches from the mitt expectation.
@@ -256,14 +241,14 @@ fn observe(
             state.glove_y = Some(tf.translation.y);
         }
     }
-    if play.phase == Phase::Result && state.last_phase != Phase::Result {
+    if facts.play.phase == Phase::Result && state.last_phase != Phase::Result {
         if let Some((tf, _, Some(_))) = ball {
             state.result_y = Some(tf.translation.y);
         }
     }
-    // A fresh at-bat: clear the per-play facts. (The pure Coach resets its
-    // own play memory on the same PrePitch edge.)
-    if play.phase == Phase::PrePitch && state.last_phase != Phase::PrePitch {
+    // A fresh at-bat: clear the per-facts.play facts. (The pure Coach resets its
+    // own facts.play memory on the same PrePitch edge.)
+    if facts.play.phase == Phase::PrePitch && state.last_phase != Phase::PrePitch {
         state.contact = None;
         state.contacted = false;
         state.bounced = false;
@@ -271,14 +256,18 @@ fn observe(
         state.glove_y = None;
         state.result_y = None;
     }
-    state.last_phase = play.phase;
+    state.last_phase = facts.play.phase;
+}
 
-    // ── The ~30 Hz sample ────────────────────────────────────────────────────
-    if !state.sample.tick(time.delta()).just_finished() {
-        return;
-    }
-
-    let phase = match play.phase {
+/// Assembles the snapshot the pure [`Coach`] grades. Read-only over the world:
+/// everything it needs was either tracked above or is readable this frame.
+fn build_snapshot(
+    state: &CoachState,
+    facts: &WorldFacts,
+    rigs: &WorldRigs,
+    now: f32,
+) -> CoachSnapshot {
+    let phase = match facts.play.phase {
         Phase::PrePitch => CoachPhase::PrePitch,
         Phase::WindUp => CoachPhase::WindUp,
         Phase::Pitch => CoachPhase::Pitch,
@@ -292,7 +281,7 @@ fn observe(
     // A dropped third's untouched pitch legitimately never reaches the mitt —
     // read straight off the umpire's decision (`Play::last_strike_call`,
     // cleared at the next PrePitch), not the banner announcement.
-    let dropped_third = play.last_strike_call() == Some(rules::StrikeCall::DroppedThird);
+    let dropped_third = facts.play.last_strike_call() == Some(rules::StrikeCall::DroppedThird);
     let untouched_pitch_result = phase == CoachPhase::Result
         && state.crossing.is_some()
         && !state.contacted
@@ -302,18 +291,20 @@ fn observe(
 
     // Map the chaser / cover entities to fielder indices.
     let index_of = |entity: Entity| {
-        fielder_q
+        rigs.fielders
             .get(entity)
             .ok()
             .map(|(fielder, _, _)| fielder.index)
     };
-    let chaser = active.chaser().and_then(index_of);
-    let covers = active
+    let chaser = facts.active.chaser().and_then(index_of);
+    let covers = facts
+        .active
         .covers()
         .iter()
         .filter_map(|&(base, entity)| Some((base, index_of(entity)?)))
         .collect();
 
+    let ball = rigs.ball.get_single().ok();
     let ball_facts = ball.map(|(tf, vel, in_flight)| BallFacts {
         pos: tf.translation,
         vel: vel.linvel,
@@ -331,22 +322,23 @@ fn observe(
         ),
     });
 
-    let snapshot = CoachSnapshot {
+    CoachSnapshot {
         time: now,
         phase,
-        in_steal_window: play.in_steal_window(),
-        pending_call: play.pending_call().is_some(),
-        runners_settled: settled.0,
+        in_steal_window: facts.play.in_steal_window(),
+        pending_call: facts.play.pending_call().is_some(),
+        runners_settled: facts.settled.0,
         untouched_pitch_result,
-        result_secs: ruleset.pace.result_secs,
-        auto_throw_delay_secs: ruleset.pace.auto_throw_delay_secs,
-        catcher_pos: catcher_q.get_single().ok().map(|tf| tf.translation),
+        result_secs: facts.ruleset.pace.result_secs,
+        auto_throw_delay_secs: facts.ruleset.pace.auto_throw_delay_secs,
+        catcher_pos: rigs.catcher.get_single().ok().map(|tf| tf.translation),
         ball: ball_facts,
         contact: state.contact.clone(),
         chaser,
         covers,
-        holding_since: active.holding_since(),
-        fielders: fielder_q
+        holding_since: facts.active.holding_since(),
+        fielders: rigs
+            .fielders
             .iter()
             .map(|(fielder, tf, intent)| FielderFacts {
                 index: fielder.index,
@@ -354,9 +346,10 @@ fn observe(
                 move_target: intent.target,
             })
             .collect(),
-        fielder_spots: field.fielder_positions.clone(),
-        base_positions: field.base_positions.clone(),
-        runners: runner_q
+        fielder_spots: facts.field.fielder_positions.clone(),
+        base_positions: facts.field.base_positions.clone(),
+        runners: rigs
+            .runners
             .iter()
             .map(|(runner, tf, intent)| RunnerFacts {
                 base: runner.base,
@@ -364,15 +357,44 @@ fn observe(
                 moving: intent.target.is_some(),
             })
             .collect(),
-    };
+    }
+}
 
-    report.samples += 1;
+/// Where a finding goes: filtered by config, tallied in the report, and
+/// broadcast. Bundled like the input side above so `observe` stays inside
+/// the argument limit without an `allow`.
+#[derive(bevy::ecs::system::SystemParam)]
+struct CoachOutput<'w> {
+    config: Res<'w, CoachConfig>,
+    report: ResMut<'w, CoachReport>,
+    findings: EventWriter<'w, CoachFindingEvent>,
+}
+
+/// The one observer system: track this frame's facts, then — at the sample
+/// rate — build a snapshot and hand it to the pure Coach.
+fn observe(
+    time: Res<Time>,
+    mut state: ResMut<CoachState>,
+    facts: WorldFacts,
+    mut reports: PlayReports,
+    rigs: WorldRigs,
+    mut out: CoachOutput,
+) {
+    let now = time.elapsed_secs();
+    track_frame_facts(&mut state, &facts, &mut reports, &rigs, now);
+
+    if !state.sample.tick(time.delta()).just_finished() {
+        return;
+    }
+
+    let snapshot = build_snapshot(&state, &facts, &rigs, now);
+    out.report.samples += 1;
     for finding in state.coach.observe(&snapshot) {
-        if config.disabled.contains(&finding.check) {
+        if out.config.disabled.contains(&finding.check) {
             continue;
         }
-        report.record(finding.clone());
-        findings.send(CoachFindingEvent(finding));
+        out.report.record(finding.clone());
+        out.findings.send(CoachFindingEvent(finding));
     }
 }
 

@@ -165,15 +165,11 @@ pub(super) fn spawn_touch_overlay(mut commands: Commands, theme: Res<Theme>) {
                 TouchChrome::PauseButton,
                 TouchPauseButton,
                 Button,
-                // Above the pause board's tier 30 (`subs::spawn_board`):
-                // the button stays a live resume target while Paused (see
-                // `paused_pause_region_taps`), so it must draw over the
-                // board's full-screen dim — an invisible-but-live control
-                // is the exact class the shared visibility predicate
-                // exists to prevent. Safe under the wasm z-index rule:
+                // One rung above the pause board (`subs::spawn_board`) —
+                // see `ui::z` for why. Safe under the wasm z-index rule:
                 // this node is painted with real colors on show, not a
                 // transparent never-repainted keep-alive root.
-                GlobalZIndex(31),
+                GlobalZIndex(super::z::TOUCH_CHROME),
                 // Positioned by `paint_touch_overlay` from
                 // `touch::pause_button_rect` — the same rect the input
                 // translator excludes from gameplay hit-testing.

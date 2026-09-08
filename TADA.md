@@ -173,3 +173,106 @@
 81. [x] Review cycle 24: the loop catches two of its own regressions — eleven accepts, the biggest yield since the multi-finger class. — Run twice interrupted (API timeouts, then the Fable usage limit killed five finders mid-flight); all were resumed from their transcripts and completed, and the two resumed last found the most. Conventions empty a 13th consecutive cycle. REGRESSIONS IN THE LOOP'S OWN FIXES: (1) cycle 23's two-arm flick trigger is STRICTER than the speed test it stands in for in the band dt ∈ (0.1 s, 0.182 s) — at 0.15 s it demanded 0.2 of the smaller dimension where speed asked 0.165 — silently dropping exactly the mild-hitch flicks the hitch handling exists to save; replaced by ONE continuous expression, `bar = (FLICK_TRIGGER_HPS * dt).min(FLICK_HITCH_MIN_FRAC)`, which can only ever loosen, and pinned by a sweep asserting anything past the plain speed trigger fires at every dt; (2) cycle 20's quit-row chrome skip had a tail — a chrome-claimed tap skipped the row and then FELL INTO the cancel branch, so where the rects overlap the confirming tap threw the arm away and the player pressed QUIT twice and kept playing; the cancel now ignores presses the chrome already owns. Other accepts: `zone_pad_was` was updated BELOW `read_touch`'s early returns, so one ownerless or window-less frame left it latched true and the next at-bat's `zone_pad_started` never fired — thumbs resting on the pad and SWING button dead for that whole at-bat; hoisted with the other per-frame hygiene. The touch overlay and HUD roots share the default tier and were spawned as an unordered tuple, making SWING-button-over-scoreboard a per-schedule-build tie-break on a portrait phone; chained (chrome is interactive, so it spawns last and draws on top). Unpainted chrome parked off-screen: with `Auto` insets an absolute node falls back to its static position, so on a machine that never sees a touch (the painter is `touchscreen_seen`-gated) the pause `Button` sat at the overlay's origin at tier 31 — a tiny invisible click-blocker above every tier. `menu_tap`'s `Cycle` arm now stops like its siblings (REVERSING the TADA 77 decline: the file's own `OpenSettings` arm had already established one-activation-per-frame, so this is applying the rule, not re-litigating ambiguity — falling through applied several actions in spawn order, and cycling Field also rewrites innings). The between-pitch PCI cursor apply is style-gated like its in-pitch twin (`ScriptAction::Cursor` is style-agnostic, so a script pairing it with Classic/meter parked a position no adapter owns, live if the slot later resolved to PCI). Plus: `pause_live` decided once through the shared predicate above the ownership return (the ownerless `false` was that predicate hand-spelled); the settings cursor write guarded so a repeat tap on the current row doesn't dirty the paint tick; `try_flick` as the one flick commit; `region`/`row_part` spawn bundles (the paint side was already one body, and the spawn colors are where the wasm alpha invariant lives); the cursor-pin scan inlined so `||` short-circuits; and the workspace's only float-fallback warning fixed (a future hard error). Refuted outright: a claimed steal-arming path through `pre_pitch`'s single-frame `lead.extended` needs the Tap arm to fire during PrePitch, but `in_delivery()` is `WindUp | Pitch` — it cannot. Declines: the windup send confirm (12th and 13th re-reports), one-brush ownership (7th), the `hidden_root` bundle (unsound — `hidden_tint` also dresses actively repainted elements, so coupling it to `KeepAliveUi` would be wrong at most call sites), `transition_pending` as a type-level seam (factually right that four writers skip it, but each is the only writer live in its state or is debug tooling — no bug to fix), splitting `paint_touch_overlay` for parallelism (it would contend only with UI painters that already contend with each other and all early-return), and guarding the `TouchGestures` writes (wouldn't restore the tick anyway — `last_pos` dirties it on every held-finger frame). Verified: 281 unit tests, native 32/32 targets, autoplay 32/32, wasm check — all green.
 82. [x] Review cycle 25: the settings rows adopt the one-activation rule, and the lint surface goes clean. — A single-pass review this cycle (the fan-out's model budget had been spent), three accepts, all verified independently afterwards: (1) `tap_settings_row` now returns after activating a row — the same fall-through cycle 24 had just fixed in `menu_tap`'s `Cycle` arm, so a multi-touch frame applied several row edits in spawn order; the unconditional return also subsumes the narrower stop-on-close return that was there before; (2) `#[allow(clippy::too_many_arguments)]` on `menu_tap`, `game_over_restart`, and `tap_settings_row` — the three wide systems this work added, where every other wide system in the repo already carries the allow; (3) two `field_reassign_with_default` sites in new tests switched to struct-update syntax. The lint surface is now clean: `cargo clippy --all-targets` emits nothing from this workspace (the one remaining line is the third-party `block` crate's future-incompat notice). Two behaviours the reviewer flagged as intended-not-defects match standing declines: the final-wind-up-frame send drop (the two-frame confirm's documented one-frame trade-off) and the touchscreen-laptop style override after one incidental contact. Verified: 281 unit tests, native 32/32 targets, autoplay 32/32, wasm check, clippy — all green.
 83. [x] Review cycle 26: CLEAN — no findings, no changes. The loop ends here. — A full pass over the whole working tree (33 modified files, ~1,950 insertions, plus the four new files) produced nothing to fix. The reviewer re-derived the load-bearing invariants from scratch rather than trusting this ledger: every `aim_to_world_x`/`AIM_DEADZONE`/`aim_to_zone_y` substitution is algebraically identical at all six call sites (no half-flip); all seven `Phase::pre_contact()`/`in_delivery()` replacements expand to exactly the phase sets they replaced, with the camera's deliberate inline sibling pinned by its test; the `gather_intents` overlay fold reproduces pad-over-keyboard exactly, its one behavior change (a vanished pad falling back to keyboard) being the documented TODO-72 decision; the ROW consts, labels, paint arms and cycle arms agree with both `unreachable!` arms genuinely unreachable for all nine spawned rows; the chrome-finger lifecycle covers every state that reads touches; `pause_live`'s pre-frame `seen` keeps a revealing touch from pressing the button it reveals; the three chrome rects are pairwise disjoint (hand-checked at eight extreme aspect ratios beyond the test's four); `flick_fire`'s capped bar can only loosen as dt grows; and no new panic path exists outside tests. It also confirmed feature parity the hard way — `--features autoplay` running `balance_sim` and `e2e_matrix` green, which is what the `AutoplayPlugin` move to `main.rs` was for — and answered the one question it raised itself (the pad/SWING/pause nodes look like `KeepAliveUi` candidates but aren't: `hint_line` changes on every phase transition, so the appearance key forces a repaint several times per pitch and those nodes are never quiet). Verified: 281 unit tests, native 32/32 targets, autoplay 32/32, wasm check, clippy — all green.
+
+## Batch 7 — Clean Code refactor pass (2026-09-07)
+
+Driven by a Clean Code / Agile review of the whole tree. Default clippy was already
+clean; every finding came from the pedantic tier (`too_many_lines`,
+`cognitive_complexity`) plus a duplication and data-clump sweep.
+
+Intended as behaviour-preserving, and *nearly* was: the follow-up review caught one
+real regression this pass introduced (90), which the 344-test suite could not see
+because it changed no value — only change-detection ticks. Item 90 fixes it and adds
+the probe that now guards it.
+
+84. [x] `read_touch` decomposed into four named passes. — 271 code lines / cognitive
+    complexity 47 (the repo's worst) down to off the lint list entirely. The four
+    `── section ──` banners inside it were already the seams; the missing concept was
+    the ten per-frame locals threaded implicitly through them, now a `Frame` struct
+    whose fields *are* each pass's declared inputs. `claim_new_fingers`,
+    `steer_zone_pad`, `drive_primary`, `adopt_orphan_stick` — in the order a finger
+    moves through them. `Frame::chrome_claims` / `Frame::in_zone_region` replace three
+    hand-spelled copies of the same predicate. The `'compute:` single-exit block and
+    every ghost-input guarantee are preserved verbatim; all 21 translator tests green.
+85. [x] The overlay screens stopped hand-rolling their own chrome. — `ui::overlay_root`
+    + `ui::overlay_card` + `ui::OverlayPaint` replace three near-identical full-screen
+    scaffolds (menu, settings, pause board). This was a live inconsistency, not just
+    duplication: the menu painted `panel_bg.with_alpha(0.97)` raw while the other two
+    used `hidden_tint`, so the wasm "alpha-0 never renders again" rule was re-derived
+    per site. `OverlayPaint::{Opaque,Hidden}` now names *why* a screen gets which paint.
+86. [x] Overlay z-tiers became `ui::z` constants. — Four scattered `GlobalZIndex(10/20/
+    30/31)` literals, each re-explaining the ladder in prose. Extracting them surfaced a
+    stale doc claim: three comments said "banners (40)", but the banner pill has **no**
+    `GlobalZIndex` on purpose (a cycle-2 attempt stopped wasm extraction and was
+    reverted). `ui::z` now records that absence as a rule instead of the docs claiming a
+    tier that must not exist.
+87. [x] `flow` grew an umpire; `pitch_live` lost its god-function shape. — `(score,
+    bases, rules, banner)` travelled together through all five rule-application helpers
+    across `result.rs`/`live.rs` — a textbook data clump, and the reason `pitch_live`
+    (142 lines) resisted extraction: every candidate inherited a 12-argument signature.
+    New `flow/umpire.rs` borrows the quartet once, so each call takes only what
+    distinguishes it. `pitch_live` then split cleanly into `judge_take`, `judge_whiff`,
+    and `settle_batted_ball` (4-5 args each, nesting 5 levels deep down to 3) and is off
+    the lint list. `announce` is private, so no banner can be sent without the scoreboard
+    change that earned it.
+88. [x] `touch.rs` and `core/coach.rs` became directories. — Per the repo's own
+    same-named-subdirectory convention, and only *after* the function-level work (89):
+    splitting first would have relocated complexity rather than removing it. `touch/`
+    = the surface (resource, rects, ownership, plugin) + `translate.rs` (the per-frame
+    machine, 1829 → 675 + 1269 incl. tests). `coach/` = types and the `observe`
+    dispatcher + `checks.rs` (the nine uniform checks, 1341 → 879 + 482).
+89. [x] `Play`'s 21 fields grouped into three lifetimes. — `pitch` (the ball in flight
+    and how it was received), `duel` (the pre-pitch leadoff/pickoff), `live` (contact
+    through the announced call). Reads better at every call site (`play.duel.armed`,
+    `play.live.home_run`) and a new field now lands in exactly one cluster. All 83
+    access sites were repointed from compiler-reported locations rather than by regex;
+    `Play::default()` remains the single reset.
+90. [x] Fixed a change-detection regression introduced by 87, and grew a probe for the
+    class. — Hoisting `Umpire::new(&mut score, &mut bases, …)` above the branches in
+    `pitch_live` looked like a harmless CSE, but `&mut` on a `ResMut` goes through
+    `DerefMut`, which calls `set_changed()`. The borrow therefore marked `ScoreBoard`
+    and `Bases` dirty on **every frame of the pitch flight** (measured: 400/400),
+    defeating the `is_changed()` guards in `hud::update_{score_text,inning_text,
+    count_dots,base_ring}` (the TODO 78 relayout fix), `player::rig`'s colour/identity
+    painters, `jersey::dress_jerseys` (a `String` clone per jersey quad per frame via
+    the `Changed<PlayerIdentity>` cascade), and `runner::sync_runners` — worst on wasm.
+    The umpire is now built inside each arm that actually makes a call, as `live.rs`
+    already did. New `tests/e2e_change_detection.rs` samples the ticks on in-flight
+    frames and fails at 100% / passes at 0%; verified red-then-green against the exact
+    regression. Nothing in the correctness suite could have caught this: `set_changed()`
+    alters no value, so every play resolved identically either way. The probe was then
+    widened from the two resources involved to **all seven** that gate a repaint
+    (`ScoreBoard`, `Bases`, `BattingOrder`, `Rosters`, `Theme`, `Settings`,
+    `Controllers`) — it guards the class, not the instance. All seven measure 0.0%
+    today, so this was the only occurrence in the tree.
+91. [x] Browser-verified the overlay extraction (85, 86) on the real wasm target. — The
+    changes in 85/86 sat squarely inside the repo's most dangerous documented failure
+    mode (alpha-0 at first extract never renders again), and `cargo check --target
+    wasm32` only proves it compiles. Drove the debug wasm build in Chrome: the menu
+    (tier 10, `Opaque`), the settings screen (tier 20, `Hidden` + `KeepAliveUi`, drawing
+    correctly *over* the menu), the pause board (tier 30, including the hand-mutated
+    column `Node` that stacks the controls dialog under the card with its gap), the
+    full gameplay HUD, and the STRIKE banner pill rendering at the *default* tier —
+    the one `ui::z` explicitly documents as having no `GlobalZIndex`. Count dots
+    advanced on the judged pitch, which also confirms the 90 fix did not over-correct
+    and starve the legitimate `score.is_changed()` repaint. No console panics.
+92. [x] `sim::coach::observe` split into a tracker and a snapshot builder (TODO 99). —
+    151 lines with the same tell `read_touch` had: section banners marking distinct
+    jobs. It already had the right bundles (`WorldFacts`/`PlayReports`/`WorldRigs`) but
+    destructured them into thirteen locals at the top, so nothing downstream declared
+    what it used. Now `track_frame_facts` (per-frame events and phase edges the 30 Hz
+    sampler would miss) and `build_snapshot` (read-only assembly of what the pure Coach
+    grades) each take the bundles by reference — four parameters apiece — and `observe`
+    is just track → sample-gate → build → dispatch. Off the lint list. The split pushed
+    `observe` to 8 arguments; rather than restore the `#[allow(too_many_arguments)]` it
+    used to carry, the three output channels became a `CoachOutput` `SystemParam` — the
+    same answer the file already gives on the input side, and now no suppression at all.
+93. [x] `subs::update_board`'s wording extracted as a pure `board_line` (TODO 99). — 112
+    lines, most of it one `match` mapping a row kind to its text and colour. That match
+    is now a pure function of values the caller already holds, returning `Option` so the
+    "past the end of a short lineup" case and the "board is hidden" case share **one**
+    blanking path instead of two `continue`s and a separate branch. The painter also now
+    writes through `ui::set_text_if_neq` like every other painter in the codebase,
+    rather than hand-rolling an unconditional `**text =` (glyph re-shaping is the
+    expensive half of a `Text` write). Off the lint list.
+

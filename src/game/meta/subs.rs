@@ -24,11 +24,13 @@ use bevy::window::{WindowFocused, WindowOccluded};
 
 use crate::game::ball::{Baseball, InFlight};
 use crate::game::flow::{BannerTone, Phase, Play, PlayBanner};
-use crate::game::roster::Rosters;
+use crate::game::roster::{Rosters, TeamRoster};
 use crate::game::rules::LINEUP_SIZE;
 use crate::game::settings::Settings;
-use crate::game::theme::Theme;
-use crate::game::ui::{KeepAliveUi, hidden_tint};
+use crate::game::theme::{Theme, UiTheme};
+use crate::game::ui::{
+    KeepAliveUi, OverlayPaint, hidden_tint, overlay_card, overlay_root, set_text_if_neq, z,
+};
 use crate::game::{GameState, GameplayEntity, ScoreBoard, Team};
 
 /// Marker for the board's overlay root (full-screen dim).
@@ -515,43 +517,21 @@ fn spawn_board(mut commands: Commands, theme: Res<Theme>) {
     let ui = &theme.ui;
 
     commands
-        .spawn((
-            SubsUi,
-            KeepAliveUi,
-            GameplayEntity,
-            // Overlay tier 30 — pause above menu/settings, under banners
-            // (40); see TODO 67.
-            GlobalZIndex(30),
-            Node {
-                position_type: PositionType::Absolute,
-                top: Val::Px(0.0),
-                left: Val::Px(0.0),
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(16.0),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            BackgroundColor(hidden_tint(ui.panel_bg)),
-        ))
+        .spawn((SubsUi, KeepAliveUi, GameplayEntity, {
+            // The board stacks its card above a controls dialog, so this
+            // root is the one overlay that lays its children out in a
+            // column rather than centring a single card.
+            let (tier, mut node, bg) = overlay_root(z::PAUSE, OverlayPaint::Hidden, ui);
+            node.flex_direction = FlexDirection::Column;
+            node.row_gap = Val::Px(16.0);
+            (tier, node, bg)
+        }))
         .with_children(|screen| {
             screen
                 .spawn((
                     SubsCard,
                     KeepAliveUi,
-                    Node {
-                        padding: UiRect::axes(Val::Px(36.0), Val::Px(24.0)),
-                        flex_direction: FlexDirection::Column,
-                        align_items: AlignItems::Center,
-                        row_gap: Val::Px(6.0),
-                        border: UiRect::all(Val::Px(1.5)),
-                        ..default()
-                    },
-                    BackgroundColor(hidden_tint(ui.panel_bg)),
-                    BorderColor(hidden_tint(ui.panel_border)),
-                    BorderRadius::all(Val::Px(16.0)),
+                    overlay_card(OverlayPaint::Hidden, Vec2::new(36.0, 24.0), 6.0, ui),
                 ))
                 .with_children(|card| {
                     // The ONE board-line bundle — every row (the tappable
@@ -669,93 +649,111 @@ fn update_board(
 
     let roster = rosters.team(menu.team);
     for (line, mut text, mut color) in &mut lines {
-        if !visible {
-            **text = String::new();
+        // One blanking path: hidden board, or a row with nothing to show.
+        let Some((value, tint)) = visible
+            .then(|| board_line(line.0, &menu, roster, &settings, ui))
+            .flatten()
+        else {
+            set_text_if_neq(&mut text, "");
             continue;
-        }
-        let (value, tint) = match line.0 {
-            SubsLineKind::Title => ("PAUSED".to_string(), ui.accent),
-            SubsLineKind::LineupHeader => (
-                format!("SUBSTITUTIONS - {} LINEUP", menu.team.label()),
-                ui.text_dim,
-            ),
-            SubsLineKind::Row(i) => {
-                let Some(player) = roster.lineup.get(i) else {
-                    **text = String::new();
-                    continue;
-                };
-                let selected = i == menu.slot;
-                let marker = if selected { ">" } else { " " };
-                (
-                    format!("{marker} {}. {} #{}", i + 1, player.name, player.number),
-                    if selected { ui.accent } else { ui.text_primary },
-                )
-            }
-            SubsLineKind::BenchHeader => ("BENCH".to_string(), ui.text_dim),
-            SubsLineKind::Bench => {
-                let value = if roster.bench.is_empty() {
-                    "(empty)".to_string()
-                } else {
-                    roster
-                        .bench
-                        .iter()
-                        .enumerate()
-                        .map(|(i, p)| {
-                            if i == menu.bench {
-                                format!("[{} #{}]", p.name, p.number)
-                            } else {
-                                format!(" {} #{} ", p.name, p.number)
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                        .join("  ")
-                };
-                (value, ui.text_primary)
-            }
-            SubsLineKind::ZoneToggle => (
-                format!(
-                    "STRIKE ZONE: {}",
-                    if settings.show_strike_zone {
-                        "ON"
-                    } else {
-                        "OFF"
-                    }
-                ),
-                if settings.show_strike_zone {
-                    ui.text_primary
-                } else {
-                    ui.text_dim
-                },
-            ),
-            SubsLineKind::Quit => {
-                if menu.quit_armed {
-                    ("[ TAP QUIT AGAIN TO CONFIRM ]".to_string(), ui.tone_bad)
-                } else {
-                    ("[ QUIT TO MENU ]".to_string(), ui.text_dim)
-                }
-            }
-            SubsLineKind::Hint => {
-                if menu.quit_armed {
-                    (
-                        // Device-complete: the row is tappable now, and a
-                        // touch-only player has no "other key" — any other
-                        // tap cancels the same way.
-                        "QUIT TO MENU? Q/B or quit tap again confirms - anything else cancels"
-                            .to_string(),
-                        ui.tone_bad,
-                    )
-                } else {
-                    (
-                        "Up/Down slot   Left/Right bench   Enter/A swap   T/Y team   Z zone   Q quit   Esc/P/Start resume"
-                            .to_string(),
-                        ui.text_dim,
-                    )
-                }
-            }
         };
-        **text = value;
+        set_text_if_neq(&mut text, &value);
         color.0 = tint;
     }
+}
+
+/// The text and colour one board row shows, or `None` when the row should be
+/// blank (past the end of a short lineup).
+///
+/// Pure: every input is a value the caller already has, so the whole board's
+/// wording lives in one `match` a reader can check against the screen — and
+/// the painter below keeps exactly one blanking path.
+fn board_line(
+    kind: SubsLineKind,
+    menu: &SubsMenu,
+    roster: &TeamRoster,
+    settings: &Settings,
+    ui: &UiTheme,
+) -> Option<(String, Color)> {
+    let (value, tint) = match kind {
+        SubsLineKind::Title => ("PAUSED".to_string(), ui.accent),
+        SubsLineKind::LineupHeader => (
+            format!("SUBSTITUTIONS - {} LINEUP", menu.team.label()),
+            ui.text_dim,
+        ),
+        SubsLineKind::Row(i) => {
+            // Past the end of a short lineup: blank, not an empty row.
+            let player = roster.lineup.get(i)?;
+            let selected = i == menu.slot;
+            let marker = if selected { ">" } else { " " };
+            (
+                format!("{marker} {}. {} #{}", i + 1, player.name, player.number),
+                if selected { ui.accent } else { ui.text_primary },
+            )
+        }
+        SubsLineKind::BenchHeader => ("BENCH".to_string(), ui.text_dim),
+        SubsLineKind::Bench => {
+            let value = if roster.bench.is_empty() {
+                "(empty)".to_string()
+            } else {
+                roster
+                    .bench
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| {
+                        if i == menu.bench {
+                            format!("[{} #{}]", p.name, p.number)
+                        } else {
+                            format!(" {} #{} ", p.name, p.number)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("  ")
+            };
+            (value, ui.text_primary)
+        }
+        SubsLineKind::ZoneToggle => (
+            format!(
+                "STRIKE ZONE: {}",
+                if settings.show_strike_zone {
+                    "ON"
+                } else {
+                    "OFF"
+                }
+            ),
+            if settings.show_strike_zone {
+                ui.text_primary
+            } else {
+                ui.text_dim
+            },
+        ),
+        SubsLineKind::Quit => {
+            if menu.quit_armed {
+                ("[ TAP QUIT AGAIN TO CONFIRM ]".to_string(), ui.tone_bad)
+            } else {
+                ("[ QUIT TO MENU ]".to_string(), ui.text_dim)
+            }
+        }
+        SubsLineKind::Hint => {
+            if menu.quit_armed {
+                (
+                    // Device-complete: the row is tappable now, and a
+                    // touch-only player has no "other key" — any other
+                    // tap cancels the same way.
+                    "QUIT TO MENU? Q/B or quit tap again confirms - anything else cancels"
+                        .to_string(),
+                    ui.tone_bad,
+                )
+            } else {
+                (
+                "Up/Down slot   Left/Right bench   Enter/A swap   T/Y team   Z zone   Q quit   Esc/P/Start resume"
+                    .to_string(),
+                ui.text_dim,
+            )
+            }
+        }
+    };
+    Some((value, tint))
 }
 
 /// Paints the controls-help dialog while paused and blanks it (alpha kept

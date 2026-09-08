@@ -5,13 +5,13 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
 use crate::game::ball::{Baseball, InFlight};
-use crate::game::rules::{self, BallCall, Bases, StealResult, StrikeCall};
+use crate::game::rules::{self, Bases};
 use crate::game::runner::RunnersSettled;
 use crate::game::variant::{FieldSpec, Ruleset};
 use crate::game::{GameState, ScoreBoard};
 
 use super::pitch::steal_window_for;
-use super::{BannerTone, LeadState, Phase, Play, PlayBanner};
+use super::{LeadState, Phase, Play};
 
 /// Extra seconds the result pause will wait for runner rigs to finish their
 /// paths (the home-run trot, a first-to-third sprint) before the next batter
@@ -70,113 +70,24 @@ pub(super) fn result_phase(
         *vis = Visibility::Inherited;
     }
     play.phase = Phase::PrePitch;
-    play.crossing = None;
+    play.pitch.crossing = None;
     play.resolved = false;
-    play.presentational_catch = false;
-    play.pitch_gloved = false;
-    play.pending_pitch = None;
-    play.live_kind = None;
-    play.steal_armed = false;
-    play.big_jump = false;
-    play.window_lead = false;
-    play.pitch_taken = false;
-    play.pending_call = None;
-    play.wall_called = false;
-    play.home_run = false;
-    play.last_contact_quality = None;
-    play.last_strike_call = None;
+    play.pitch.presentational_catch = false;
+    play.pitch.gloved = false;
+    play.pitch.pending = None;
+    play.pitch.kind = None;
+    play.duel.armed = false;
+    play.duel.big_jump = false;
+    play.duel.window_lead = false;
+    play.pitch.taken = false;
+    play.live.pending_call = None;
+    play.live.wall_called = false;
+    play.live.home_run = false;
+    play.live.last_contact_quality = None;
+    play.pitch.last_strike_call = None;
     // A runner in stealing position opens the duel window for the next at-bat.
-    play.hold = steal_window_for(&bases, &rules_res);
+    play.duel.hold = steal_window_for(&bases, &rules_res);
     lead.extended = false;
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(super) fn hit(
-    score: &mut ScoreBoard,
-    bases: &mut Bases,
-    banner: &mut EventWriter<PlayBanner>,
-    hit_bases: u32,
-    label: &str,
-    tone: BannerTone,
-    jump: bool,
-) {
-    let runs = rules::apply_hit(score, bases, hit_bases, jump);
-    let text = if runs > 0 {
-        format!("{label}  +{runs}")
-    } else {
-        label.to_string()
-    };
-    banner.send(PlayBanner::new(text, tone));
-}
-
-/// Records a taken ball. Returns whether it was ball four (a dead-ball walk,
-/// which pre-empts any steal attempt).
-pub(super) fn add_ball(
-    score: &mut ScoreBoard,
-    bases: &mut Bases,
-    ruleset: &Ruleset,
-    banner: &mut EventWriter<PlayBanner>,
-) -> bool {
-    match rules::call_ball(score, bases, ruleset) {
-        BallCall::Walk { .. } => {
-            // Good, not Epic: Epic is the home-run tier (gold banner + the
-            // triumphant stinger) and a free pass was reading identical to
-            // a ball over the fence (TODO 68).
-            banner.send(PlayBanner::new("WALK", BannerTone::Good));
-            true
-        }
-        BallCall::Ball => {
-            banner.send(PlayBanner::new("BALL", BannerTone::Info));
-            false
-        }
-    }
-}
-
-/// Resolves a sent runner once the catcher has the ball: the jump beats the
-/// throw on off-speed pitches, a fastball cuts the runner down.
-pub(super) fn resolve_steal(
-    play: &Play,
-    score: &mut ScoreBoard,
-    bases: &mut Bases,
-    ruleset: &Ruleset,
-    banner: &mut EventWriter<PlayBanner>,
-) {
-    let off_speed = play.live_kind != Some(rules::PitchKind::Fastball);
-    match rules::attempt_steal(score, bases, ruleset, off_speed, play.big_jump) {
-        StealResult::Stolen { .. } => {
-            banner.send(PlayBanner::new("STOLEN BASE!", BannerTone::Good));
-        }
-        StealResult::Caught => {
-            banner.send(PlayBanner::new("CAUGHT STEALING", BannerTone::Bad));
-        }
-        StealResult::NoRunner => {}
-    }
-}
-
-pub(super) fn add_strike(
-    score: &mut ScoreBoard,
-    bases: &mut Bases,
-    ruleset: &Ruleset,
-    banner: &mut EventWriter<PlayBanner>,
-    swinging: bool,
-    dropped_third: bool,
-) -> StrikeCall {
-    let call = rules::call_strike(score, bases, ruleset, dropped_third);
-    match call {
-        StrikeCall::DroppedThird => {
-            banner.send(PlayBanner::new("DROPPED 3RD STRIKE!", BannerTone::Good));
-        }
-        StrikeCall::Strikeout => {
-            banner.send(PlayBanner::new("STRIKEOUT!", BannerTone::Bad));
-        }
-        StrikeCall::Strike if swinging => {
-            banner.send(PlayBanner::new("SWING & MISS", BannerTone::Info));
-        }
-        StrikeCall::Strike => {
-            banner.send(PlayBanner::new("STRIKE", BannerTone::Info));
-        }
-    }
-    call
 }
 
 pub(super) fn end_pitch(play: &mut Play, result_secs: f32) {

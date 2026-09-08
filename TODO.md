@@ -187,3 +187,32 @@ Cycle-2 fixes shipped alongside: 66, 67, 68, 74, 80 (see TADA when checked off).
     hidden_tint's alpha to theme darkness or keying the pill's hidden state off Visibility
     on 0.17+ (present/ui/hud.rs).
     Screenshot: docs/agent/playtest/2026-08-27/10-neon-call.jpeg.
+    *Deliberately NOT fixed in the 2026-09-07 refactor pass — take the second option, not
+    the first.* Item 29's `upgrade/bevy-0.16` branch has **already** moved banner show/hide
+    off the 0.15 `hidden_tint` alpha trick to `Visibility` toggling with a painted debut,
+    and its own note says to keep that either way. So this is solved there. Doing the
+    theme-dependent-alpha variant on `main` now would (a) add a way to get `hidden_tint`
+    wrong on the single most dangerous wasm invariant we have — alpha 0 at first extract
+    culls the subtree permanently — for a cosmetic nit on one theme, and (b) be discarded
+    by that branch on merge. Close this together with 29.
+
+## Refactor follow-ups (from the 2026-09-07 Clean Code pass)
+
+98. [ ] nice refactor — **Deliberate non-actions; do not "fix" these.** The pedantic
+    line-count lint still flags four functions that are correct as they stand, and a
+    future pass should not churn them: `ui::hud::spawn_hud` (185), `menu::build_menu`
+    (140), and `gear::dress_rigs` (137) are linear declarative trees with near-zero
+    branching — splitting scatters a layout that reads top-to-bottom; and
+    `variant::Ruleset::diff_literal` (cognitive complexity 30) is ~40 invocations of the
+    `diff!` macro that already collapsed its duplication, i.e. data, not logic. If any
+    of them ever grows real *branching*, that is the moment to revisit — not the line
+    count. Recorded because two of these were considered and rejected in TADA 84-89.
+99. [x] nice refactor — `sim::coach::observe` (151 lines) and `subs::update_board` (112)
+    are the two remaining over-length functions with genuine branching. `observe`
+    already uses `SystemParam` bundles (`WorldFacts`/`PlayReports`/`WorldRigs`), so the
+    win there is splitting the per-check snapshot assembly from the dispatch, mirroring
+    what `core::coach` now does across `mod.rs`/`checks.rs`. `update_board` is a paint
+    loop that could take the same treatment as the overlay helpers in TADA 85. Neither
+    is urgent; both are well covered by tests if picked up.
+    *Done 2026-09-08 — see TADA 92, 93.* The pedantic line-count list now contains only
+    the four deliberate non-actions recorded in 98.
