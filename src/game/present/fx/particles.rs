@@ -35,33 +35,29 @@ pub(super) fn build_fx_assets(
     settings: Res<Settings>,
 ) {
     build_trail_assets(&mut commands, &mut meshes, &mut materials, &settings);
-    let firework = [
-        Color::srgb(1.0, 0.85, 0.30),
-        Color::srgb(1.0, 0.35, 0.35),
-        Color::srgb(0.45, 0.70, 1.0),
-        Color::srgb(0.60, 1.0, 0.55),
-        Color::srgb(1.0, 0.55, 0.90),
-    ]
-    .into_iter()
-    .map(|base_color| {
-        materials.add(StandardMaterial {
-            base_color,
-            unlit: true,
-            ..default()
+    let firework = theme
+        .fx
+        .fireworks
+        .into_iter()
+        .map(|base_color| {
+            materials.add(StandardMaterial {
+                base_color,
+                unlit: true,
+                ..default()
+            })
         })
-    })
-    .collect();
+        .collect();
     commands.insert_resource(FxAssets {
         spark_mesh: meshes.add(Sphere::new(0.07)),
         dust_mesh: meshes.add(Sphere::new(0.14)),
         firework_mesh: meshes.add(Sphere::new(0.18)),
         spark: materials.add(StandardMaterial {
-            base_color: theme.ball.trail,
+            base_color: theme.fx.spark,
             unlit: true,
             ..default()
         }),
         dust: materials.add(StandardMaterial {
-            base_color: Color::srgba(0.75, 0.7, 0.6, 1.0),
+            base_color: theme.fx.dust,
             unlit: true,
             ..default()
         }),
@@ -103,7 +99,7 @@ pub(super) fn spawn_landing_ring(
             major_radius: 1.0,
         })),
         MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: theme.ui.accent.with_alpha(0.85),
+            base_color: theme.fx.ring.with_alpha(0.85),
             unlit: true,
             alpha_mode: AlphaMode::Blend,
             ..default()
@@ -184,7 +180,7 @@ pub(super) fn spawn_ball_halo(
         GameplayEntity,
         Mesh3d(meshes.add(Sphere::new(1.0))),
         MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: theme.ball.trail.with_alpha(0.45),
+            base_color: theme.fx.spark.with_alpha(0.45),
             unlit: true,
             alpha_mode: AlphaMode::Blend,
             ..default()

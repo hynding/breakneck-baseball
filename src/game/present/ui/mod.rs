@@ -7,6 +7,7 @@
 use bevy::prelude::*;
 
 use crate::game::GameState;
+use crate::game::theme::UiTheme;
 
 mod banner;
 mod hud;
@@ -98,6 +99,134 @@ enum DuelLineKind {
 pub(crate) fn hidden_tint(color: Color) -> Color {
     color.with_alpha(0.004)
 }
+
+// ── Overlay screens ───────────────────────────────────────────────────────────
+
+/// [`GlobalZIndex`] tiers for the full-screen overlays, ordered bottom-up.
+///
+/// Stacking used to be spawn-order luck (TODO 67). Every overlay root reads
+/// its tier from here so the ladder is one list instead of four literals with
+/// four copies of the ladder in prose — a new screen picks its rung by
+/// reading this module, and no site can disagree with another about where a
+/// neighbour sits.
+///
+/// **There is deliberately no banner tier.** The play banner and contact
+/// stamp sit at the *default* tier (see `hud::spawn_hud`): a cycle-2 attempt
+/// to merge them under a `GlobalZIndex` stopped extracting on wasm and was
+/// reverted. They render above gameplay by spawn order alone, and the
+/// comments that once claimed "banners (40)" were describing a tier that was
+/// tried and abandoned. Anything added here must survive the wasm UI rule.
+pub(crate) mod z {
+    /// Main menu — the bottom overlay; every other screen opens over it.
+    pub const MENU: i32 = 10;
+    /// Settings screen, opened from the menu with **S**.
+    pub const SETTINGS: i32 = 20;
+    /// Pause / substitutions board.
+    pub const PAUSE: i32 = 30;
+    /// The touch pause button, one rung above the pause board: it stays a
+    /// live resume target while Paused, so it must draw over that board's
+    /// full-screen dim. An invisible-but-live control is exactly the class
+    /// the shared visibility predicate exists to prevent.
+    pub const TOUCH_CHROME: i32 = PAUSE + 1;
+}
+
+/// How an overlay is made to appear and disappear — the choice that decides
+/// whether its chrome may be painted with real colours at spawn.
+///
+/// This is the wasm UI rule in enum form. Spelling the two answers out once,
+/// here, is what stops a screen from picking the paint that happens to look
+/// right natively and silently never rendering in the browser.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OverlayPaint {
+    /// The screen exists only while it is visible — it is spawned on open and
+    /// despawned on close (or rebuilt per press, like the menu), so its chrome
+    /// is painted with real colours straight away.
+    Opaque,
+    /// The screen's entities outlive its visibility: it is shown and hidden by
+    /// mutating children of a root painted at spawn, so that root must be
+    /// spawned near-invisible rather than transparent (see [`hidden_tint`]).
+    /// Such roots generally also want [`KeepAliveUi`].
+    Hidden,
+}
+
+/// The scrim behind an [`OverlayPaint::Opaque`] screen. Not fully opaque: the
+/// field stays faintly readable behind the menu.
+const OVERLAY_SCRIM_ALPHA: f32 = 0.97;
+
+impl OverlayPaint {
+    /// The full-screen backdrop colour behind the card.
+    fn scrim(self, color: Color) -> Color {
+        match self {
+            Self::Opaque => color.with_alpha(OVERLAY_SCRIM_ALPHA),
+            Self::Hidden => hidden_tint(color),
+        }
+    }
+
+    /// A colour on the card itself (background or border).
+    fn panel(self, color: Color) -> Color {
+        match self {
+            Self::Opaque => color,
+            Self::Hidden => hidden_tint(color),
+        }
+    }
+}
+
+/// The full-screen, centred root every overlay screen spawns: tier, layout,
+/// and the backdrop paint its [`OverlayPaint`] implies.
+///
+/// Returned as loose components rather than spawned here so a caller can add
+/// its own marker (and `KeepAliveUi`/`GameplayEntity` where those apply), and
+/// can tweak the [`Node`] before spawning — the pause board stacks its
+/// children in a column. Same "build it, adjust it, spawn it" shape the duel
+/// cards in `banner.rs` already use.
+pub(crate) fn overlay_root(
+    tier: i32,
+    paint: OverlayPaint,
+    ui: &UiTheme,
+) -> (GlobalZIndex, Node, BackgroundColor) {
+    (
+        GlobalZIndex(tier),
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(0.0),
+            left: Val::Px(0.0),
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+        BackgroundColor(paint.scrim(ui.panel_bg)),
+    )
+}
+
+/// The centred card an overlay's contents sit in: a bordered, rounded column
+/// whose padding and row spacing are the only things screens vary.
+pub(crate) fn overlay_card(
+    paint: OverlayPaint,
+    padding: Vec2,
+    row_gap: f32,
+    ui: &UiTheme,
+) -> (Node, BackgroundColor, BorderColor, BorderRadius) {
+    (
+        Node {
+            padding: UiRect::axes(Val::Px(padding.x), Val::Px(padding.y)),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            row_gap: Val::Px(row_gap),
+            border: UiRect::all(Val::Px(CARD_BORDER_PX)),
+            ..default()
+        },
+        BackgroundColor(paint.panel(ui.panel_bg)),
+        BorderColor(paint.panel(ui.panel_border)),
+        BorderRadius::all(Val::Px(CARD_RADIUS_PX)),
+    )
+}
+
+/// Hairline border on every overlay card.
+const CARD_BORDER_PX: f32 = 1.5;
+/// Corner rounding on every overlay card.
+const CARD_RADIUS_PX: f32 = 16.0;
 
 /// Marker for near-transparent UI roots that must stay extraction-alive on
 /// wasm: [`keep_ui_roots_alive`] re-touches their background change tick

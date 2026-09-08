@@ -392,11 +392,5 @@ pub(crate) fn transition_pending(next: &NextState<GameState>) -> bool {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_config_innings_follow_the_default_variant() {
-        assert_eq!(GameConfig::default().innings, 9);
-    }
-}
+#[path = "mod.test.rs"]
+mod tests;

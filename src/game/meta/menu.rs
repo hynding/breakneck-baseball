@@ -11,6 +11,7 @@ use bevy::prelude::*;
 use crate::game::input::{Controllers, assign_controllers};
 use crate::game::settings::{Settings, SettingsOpen};
 use crate::game::theme::Theme;
+use crate::game::ui::{OverlayPaint, overlay_card, overlay_root, z};
 use crate::game::variant::{self, FieldSpec, Ruleset};
 use crate::game::{GameConfig, GameMode, GameState, ScoreBoard};
 
@@ -122,35 +123,17 @@ fn build_menu(commands: &mut Commands, config: &GameConfig, theme: &Theme, setti
     commands
         .spawn((
             MenuUi,
-            // Overlay tier 10 — menu under settings (20), pause (30),
-            // banners (40); stacking used to be spawn-order luck (TODO 67).
-            GlobalZIndex(10),
-            Node {
-                position_type: PositionType::Absolute,
-                top: Val::Px(0.0),
-                left: Val::Px(0.0),
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            BackgroundColor(ui.panel_bg.with_alpha(0.97)),
+            // Rebuilt on every press, so it exists only while visible —
+            // `Opaque` chrome (see `ui::OverlayPaint`).
+            overlay_root(z::MENU, OverlayPaint::Opaque, ui),
         ))
         .with_children(|screen| {
             screen
-                .spawn((
-                    Node {
-                        padding: UiRect::axes(Val::Px(44.0), Val::Px(30.0)),
-                        flex_direction: FlexDirection::Column,
-                        align_items: AlignItems::Center,
-                        row_gap: Val::Px(13.0),
-                        border: UiRect::all(Val::Px(1.5)),
-                        ..default()
-                    },
-                    BackgroundColor(ui.panel_bg),
-                    BorderColor(ui.panel_border),
-                    BorderRadius::all(Val::Px(16.0)),
+                .spawn(overlay_card(
+                    OverlayPaint::Opaque,
+                    Vec2::new(44.0, 30.0),
+                    13.0,
+                    ui,
                 ))
                 .with_children(|card| {
                     card.spawn((
