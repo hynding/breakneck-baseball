@@ -118,10 +118,16 @@ cycle 2+ (autoplay auto-advances past them; needs plain build + scenario staging
 76. [x] nice rules — NOT A BUG: `rules::is_game_over` already plays extra innings on a tie
     (unit tests `tie_after_regulation_goes_to_extras` / `one_inning_tie_goes_to_extras`);
     the cycle-1 "0-0 game over" was a mid-game sample, not the final score.
-77. [ ] nice theme — fx palette pulls from five color sources (ui.accent ring, ball.trail
+77. [x] nice theme — fx palette pulls from five color sources (ui.accent ring, ball.trail
     halo/sparks, hardcoded dust + firework colors, settings trail_color); theme swaps
     repaint only part. Proposed fix: Theme-owned fx colors in `core/theme.rs` +
     `present/fx/particles.rs`.
+    *Done 2026-09-08 — see TADA 94.* Four of the five sources are now one `FxTheme` on
+    `Theme`; `present/fx/` holds zero hardcoded colours. The fifth, `settings.trail_color`,
+    stays a player setting **by design** — a theme swap must not silently overwrite the
+    player's own choice — and `FxTheme`'s docs say so. Not yet eyeballed on screen: the
+    night dust and neon shells need a home run under Midnight Neon, which the 1P
+    human-pitching setup makes fiddly; fold it into item 33's hands-on capture list.
 78. [x] nice perf/robustness (meter is_changed guard shipped; the pause-board height cap for <530 px viewports remains open — rare, revisit with a real mobile pass) — pause board has no max-height/scroll (clips below ~530 px
     viewports); `update_meter_bar` dirties Node every frame forcing full-tree relayout in
     Classic. Proposed fix: height cap in `meta/subs.rs`; `is_changed` guard in

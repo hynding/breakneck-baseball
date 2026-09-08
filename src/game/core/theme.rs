@@ -47,10 +47,42 @@ pub struct Theme {
     pub home: PlayerTemplate,
     pub away: PlayerTemplate,
     pub ball: BallTheme,
+    pub fx: FxTheme,
     /// World clear colour — the sky above the park (bright day or night).
     pub sky: Color,
     /// Which player-model construction dresses the rigs.
     pub player_model: PlayerModelId,
+}
+
+/// How many shell colours a fireworks show cycles through.
+pub const FIREWORK_COLORS: usize = 5;
+
+/// Effect colours — the landing ring, contact sparks, infield dust, and the
+/// home-run firework palette.
+///
+/// These live here rather than at each spawn site so a theme swap repaints
+/// the *whole* show. The dust and firework colours used to be hardcoded in
+/// `present/fx/particles.rs`, so a night game kicked up warm daylight dust
+/// and burst warm daylight shells; the ring and spark meanwhile re-derived
+/// themselves from `ui.accent` and `ball.trail` at their own sites, which
+/// meant the effect palette had no single place to read (TODO 77).
+///
+/// Only *hue* belongs here. Per-effect opacity stays at the spawn site,
+/// where it expresses how that effect reads (the home-run halo is fainter
+/// than the sparks it surrounds) rather than anything about the theme.
+///
+/// The pitch trail is deliberately NOT here: `Settings::trail_color` is the
+/// player's own choice, and a theme swap must not silently overwrite it.
+#[derive(Clone, Debug)]
+pub struct FxTheme {
+    /// The touchdown indicator ring under a live fly ball.
+    pub ring: Color,
+    /// Contact sparks, and (faded) the home-run halo.
+    pub spark: Color,
+    /// Infield dust kicked up on a hard grounder or a slide.
+    pub dust: Color,
+    /// Home-run firework shells, one material per entry.
+    pub fireworks: [Color; FIREWORK_COLORS],
 }
 
 /// Palette for every HUD/menu element.
@@ -173,6 +205,22 @@ impl ThemeId {
                     visual_scale: 2.7,
                     trail: Color::srgba(1.0, 1.0, 0.9, 0.35),
                 },
+                fx: FxTheme {
+                    // Ring and spark match this theme's `ui.accent` and
+                    // `ball.trail` — the values they used to re-derive from
+                    // those fields at their spawn sites.
+                    ring: Color::srgb(1.0, 0.84, 0.25),
+                    spark: Color::srgba(1.0, 1.0, 0.9, 0.35),
+                    // Warm infield tan, lit by daylight.
+                    dust: Color::srgba(0.75, 0.7, 0.6, 1.0),
+                    fireworks: [
+                        Color::srgb(1.0, 0.85, 0.30),
+                        Color::srgb(1.0, 0.35, 0.35),
+                        Color::srgb(0.45, 0.70, 1.0),
+                        Color::srgb(0.60, 1.0, 0.55),
+                        Color::srgb(1.0, 0.55, 0.90),
+                    ],
+                },
                 sky: Color::srgb(0.48, 0.67, 0.88),
                 player_model: PlayerModelId::Gltf(ModelId::Player),
             },
@@ -215,6 +263,24 @@ impl ThemeId {
                     visual_scale: 2.7,
                     trail: Color::srgba(1.0, 0.95, 0.4, 0.4),
                 },
+                fx: FxTheme {
+                    // Same relationship as Daylight's: the ring takes this
+                    // theme's cyan accent, the spark its neon ball trail.
+                    ring: Color::srgb(0.25, 0.95, 1.0),
+                    spark: Color::srgba(1.0, 0.95, 0.4, 0.4),
+                    // Cool and dim: warm tan dust under the lights read as
+                    // daylight puffs on a night field (TODO 77).
+                    dust: Color::srgba(0.42, 0.48, 0.60, 1.0),
+                    // Neon shells, tuned to this theme's accents rather than
+                    // the broadcast palette.
+                    fireworks: [
+                        Color::srgb(0.25, 0.95, 1.0),
+                        Color::srgb(1.0, 0.25, 0.75),
+                        Color::srgb(0.55, 0.35, 1.0),
+                        Color::srgb(0.30, 1.0, 0.70),
+                        Color::srgb(1.0, 0.95, 0.35),
+                    ],
+                },
                 sky: Color::srgb(0.02, 0.03, 0.08),
                 player_model: PlayerModelId::Gltf(ModelId::Player),
             },
@@ -249,6 +315,33 @@ mod tests {
         assert_ne!(day.ball.color, night.ball.color);
         // The ball must actually be enlarged for visibility in every theme.
         assert!(day.ball.visual_scale > 1.5 && night.ball.visual_scale > 1.5);
+    }
+
+    /// A theme swap must repaint the *whole* effect show, not half of it.
+    ///
+    /// Before [`FxTheme`] the dust and firework colours were hardcoded in
+    /// `present/fx/particles.rs`, so switching to the night theme left warm
+    /// daylight puffs and warm daylight shells on the field (TODO 77). Every
+    /// channel is compared, so re-hardcoding any one of them fails here.
+    #[test]
+    fn every_fx_channel_is_repainted_by_a_theme_swap() {
+        let (day, night) = (
+            ThemeId::DaylightClassic.build(),
+            ThemeId::MidnightNeon.build(),
+        );
+        assert_ne!(day.fx.ring, night.fx.ring, "landing ring");
+        assert_ne!(day.fx.spark, night.fx.spark, "contact sparks / HR halo");
+        assert_ne!(day.fx.dust, night.fx.dust, "infield dust");
+        assert_ne!(day.fx.fireworks, night.fx.fireworks, "firework shells");
+        // Every shell in a show should be a different colour, or the burst
+        // reads as one flat blob.
+        for theme in [&day, &night] {
+            for (i, a) in theme.fx.fireworks.iter().enumerate() {
+                for b in &theme.fx.fireworks[i + 1..] {
+                    assert_ne!(a, b, "duplicate firework shell colour");
+                }
+            }
+        }
     }
 
     /// The strike-zone ghost must stay a ghost (nearly transparent, never

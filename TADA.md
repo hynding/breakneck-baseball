@@ -275,4 +275,18 @@ the probe that now guards it.
     writes through `ui::set_text_if_neq` like every other painter in the codebase,
     rather than hand-rolling an unconditional `**text =` (glyph re-shaping is the
     expensive half of a `Text` write). Off the lint list.
+94. [x] The effect palette became theme-owned (TODO 77). — A theme swap used to repaint
+    only half the show: the landing ring and contact sparks re-derived themselves from
+    `ui.accent` and `ball.trail` at their own spawn sites, while the infield dust and the
+    five firework shells were hardcoded in `present/fx/particles.rs` — so a night game
+    kicked up warm daylight puffs and burst warm daylight shells. All four now come from
+    one `FxTheme` on `Theme`, and `present/fx/` contains no colour literals at all.
+    Midnight Neon finally gets its own: cool blue-grey dust and neon cyan/magenta/violet
+    shells. Daylight Classic's values are byte-identical to before, so its look is
+    unchanged. Only *hue* moved — per-effect opacity stays at the spawn site, where it
+    says how that effect reads (the HR halo is fainter than the sparks it surrounds)
+    rather than anything about the theme. `settings.trail_color` deliberately stayed out:
+    it is the player's choice, not the theme's. New unit test asserts every fx channel
+    differs between themes and that no show repeats a shell colour, so re-hardcoding any
+    one of them fails.
 
