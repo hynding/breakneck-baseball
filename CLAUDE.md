@@ -63,6 +63,13 @@ Violating any of these breaks the build, breaks wasm, or corrupts gameplay state
 - Any writer of `Time<Virtual>` `relative_speed` must compose with `juice::BaseSpeed`, never assume 1.0 (`src/game/present/juice.rs`).
 - Keep the `bevy` `wav` feature in `Cargo.toml` — procedural audio synthesizes in-memory WAVs and needs bevy_audio's decoder.
 - Keep `getrandom_backend="wasm_js"` rustflags in `.cargo/config.toml` — getrandom ≥ 0.3 fails to compile on wasm without it.
+- Unit tests live in a sibling `<name>.test.rs`, pulled in by the source file's last item:
+  `#[cfg(test)]` + `#[path = "<name>.test.rs"]` + `mod tests;` (for a `mod.rs`, the sibling is
+  `mod.test.rs`). It is still a *child module*, so `use super::*;` reaches private items exactly
+  as an inline `mod tests` did — do not move unit tests to `tests/`, whose files are separate
+  crates that see only the public API and would force `pub` on internals. A `<name>/` directory
+  in this repo means "split into production submodules", which is why tests get a sibling file
+  rather than `<name>/tests.rs`.
 - `tests/e2e_*` inject input from the `DriveGame` schedule, never from the test body — the input plugin's `PreUpdate` clear wipes presses made outside it (`tests/common/mod.rs`). Exemption: raw *window events* (`TouchInput`) are double-buffered and survive to `InputSystem`, so `tests/e2e_touch_pipeline.rs` sends them from the test body; the rule is about `ButtonInput` presses.
 - Scripted e2e batted balls must be sprayed at a *set* fielder's spot — the steal window means the defense is back in position before every pitch (`tests/common/mod.rs` helpers).
 - Roster names are A–Z only — jersey lettering uses a built-in 5×7 bitmap font (`src/game/present/jersey.rs`).

@@ -289,4 +289,20 @@ the probe that now guards it.
     it is the player's choice, not the theme's. New unit test asserts every fx channel
     differs between themes and that no show repeats a shell colour, so re-hardcoding any
     one of them fails.
+95. [x] Unit tests moved to sibling `<name>.test.rs` files. — 293 tests across 38 modules
+    left their inline `#[cfg(test)] mod tests` blocks for a file beside their subject,
+    pulled back in by `#[cfg(test)] #[path = "<name>.test.rs"] mod tests;`. Source files
+    are now production-only: `count.rs` 665 -> 241, `resolve.rs` 774 -> 317,
+    `coach/mod.rs` 879 -> 395, `contact.rs` 559 -> 261, `framing.rs` 370 -> 129,
+    `translate.rs` 1269 -> 770. src/ production code drops from 29,741 to 24,255 lines
+    with 5,559 in 39 sibling test files.
+    Deliberately NOT moved to `tests/`: those are separate crates that see only the
+    public API, so it would have forced `pub` on internals purely to serve file length —
+    `touch/mod.rs`'s tests drive the private `stick_aim`/`flick_fire`/`tap_aim`/
+    `pad_zone_cursor`, and every `TouchGestures` field is private. A `#[path]` module is
+    still a *child* module, so `use super::*` reaches all of it unchanged; it also adds
+    no new crates to link (`tests/` already has 31). Sibling file rather than
+    `<name>/tests.rs` because a `<name>/` directory in this repo already means "split
+    into production submodules". rustfmt follows `#[path]`, so formatting is unaffected.
+    Convention recorded in CLAUDE.md. Test count unchanged at 346.
 

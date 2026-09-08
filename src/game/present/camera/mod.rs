@@ -238,19 +238,5 @@ fn toggle_camera_mode(
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn duel_view_cycles_through_all_four_and_wraps() {
-        let v = DuelView::CatcherPov;
-        let v = v.next();
-        assert_eq!(v, DuelView::BehindPitcher);
-        let v = v.next();
-        assert_eq!(v, DuelView::BattingZoom);
-        let v = v.next();
-        assert_eq!(v, DuelView::BroadcastPlate);
-        let v = v.next();
-        assert_eq!(v, DuelView::CatcherPov);
-    }
-}
+#[path = "mod.test.rs"]
+mod tests;
