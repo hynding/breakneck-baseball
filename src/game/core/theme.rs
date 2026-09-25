@@ -48,6 +48,9 @@ pub struct Theme {
     pub away: PlayerTemplate,
     pub ball: BallTheme,
     pub fx: FxTheme,
+    /// How the park itself is dressed — the ground textures' tints and the
+    /// lights over them.
+    pub field: FieldTheme,
     /// World clear colour — the sky above the park (bright day or night).
     pub sky: Color,
     /// Which player-model construction dresses the rigs.
@@ -83,6 +86,31 @@ pub struct FxTheme {
     pub dust: Color,
     /// Home-run firework shells, one material per entry.
     pub fireworks: [Color; FIREWORK_COLORS],
+}
+
+/// How the park is dressed: the tint over each procedural ground texture
+/// and the key/fill lights.
+///
+/// The grass and dirt textures (`present/field/textures.rs`) are painted
+/// once, in daylight; a theme multiplies them rather than repainting them,
+/// so `Color::WHITE` is "as painted". Before this the night theme only
+/// swapped the sky, UI, and jerseys, and "night" read as a black void over
+/// a sunny field (TODO 96) — the ground and the sun are what actually sell
+/// the hour.
+#[derive(Clone, Debug)]
+pub struct FieldTheme {
+    /// Multiplied over the mow-striped grass.
+    pub grass_tint: Color,
+    /// Multiplied over the infield dirt (basepaths, cutouts, the mound).
+    pub dirt_tint: Color,
+    /// The key light's colour — daylight white, or floodlight cool.
+    pub sun: Color,
+    /// Fraction of the daylight sun the key light carries (linear; 1.0 is
+    /// full noon, the stadium lights are well under it).
+    pub sun_scale: f32,
+    /// The ambient fill's colour; its brightness stays the scenery's
+    /// fraction of the daylight sun (`stadium::spawn_lighting`).
+    pub ambient: Color,
 }
 
 /// Palette for every HUD/menu element.
@@ -221,6 +249,14 @@ impl ThemeId {
                         Color::srgb(1.0, 0.55, 0.90),
                     ],
                 },
+                // Daylight: the ground as painted, a white noon sun.
+                field: FieldTheme {
+                    grass_tint: Color::WHITE,
+                    dirt_tint: Color::WHITE,
+                    sun: Color::WHITE,
+                    sun_scale: 1.0,
+                    ambient: Color::WHITE,
+                },
                 sky: Color::srgb(0.48, 0.67, 0.88),
                 player_model: PlayerModelId::Gltf(ModelId::Player),
             },
@@ -280,6 +316,16 @@ impl ThemeId {
                         Color::srgb(0.30, 1.0, 0.70),
                         Color::srgb(1.0, 0.95, 0.35),
                     ],
+                },
+                // Under the lights: the grass and clay cooled and dimmed
+                // toward the sky, a floodlight-white sun at half strength,
+                // and a blue fill in the shadows.
+                field: FieldTheme {
+                    grass_tint: Color::srgb(0.50, 0.62, 0.78),
+                    dirt_tint: Color::srgb(0.48, 0.52, 0.68),
+                    sun: Color::srgb(0.82, 0.90, 1.0),
+                    sun_scale: 0.55,
+                    ambient: Color::srgb(0.45, 0.60, 0.90),
                 },
                 sky: Color::srgb(0.02, 0.03, 0.08),
                 player_model: PlayerModelId::Gltf(ModelId::Player),

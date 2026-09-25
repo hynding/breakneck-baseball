@@ -6,6 +6,7 @@ use bevy_rapier3d::prelude::*;
 
 use crate::game::GameplayEntity;
 use crate::game::rules;
+use crate::game::theme::FieldTheme;
 use crate::game::variant::FieldSpec;
 
 use super::{FieldSurfaces, HALF_DIAGONAL};
@@ -31,7 +32,7 @@ fn spawn_ground_slab(
             half_size * 2.0,
         ))),
         // ~48 tiles across 300 m puts the mow stripes at ~0.8 m each.
-        MeshMaterial3d(FieldSurfaces::tiled(materials, &surfaces.grass, 48.0)),
+        MeshMaterial3d(surfaces.grass(materials, 48.0)),
         Transform::from_xyz(0.0, -GROUND_HALF_DEPTH, 0.0),
         RigidBody::Fixed,
         Collider::cuboid(half_size, GROUND_HALF_DEPTH, half_size),
@@ -50,7 +51,7 @@ pub(super) fn spawn_stadium_ground(
 ) {
     spawn_ground_slab(commands, meshes, materials, surfaces);
 
-    let dirt = FieldSurfaces::tiled(materials, &surfaces.dirt, 8.0);
+    let dirt = surfaces.dirt(materials, 8.0);
     commands.spawn((
         GameplayEntity,
         Mesh3d(meshes.add(Cuboid::new(
@@ -94,7 +95,7 @@ pub(super) fn spawn_stadium_ground(
             STADIUM_LAYER_HEIGHT,
             inner_half * 2.0,
         ))),
-        MeshMaterial3d(FieldSurfaces::tiled(materials, &surfaces.grass, 5.0)),
+        MeshMaterial3d(surfaces.grass(materials, 5.0)),
         Transform {
             translation: Vec3::new(0.0, STADIUM_GRASS_INTERIOR_Y, HALF_DIAGONAL),
             rotation: Quat::from_rotation_y(std::f32::consts::FRAC_PI_4),
@@ -403,7 +404,19 @@ const SUN_ILLUMINANCE: f32 = 50_000.0;
 /// leftover pre-migration value (~0.25) is indistinguishable from "no
 /// ambient at all" at this scale — invisible from a distance, but glaring
 /// once the duel camera sits close enough to see a shadowed cube face.
-pub(super) fn spawn_lighting(commands: &mut Commands, yaw: f32, ambient_fraction: f32) {
+///
+/// `lights` is the theme's say: the sun's colour and its fraction of
+/// [`SUN_ILLUMINANCE`] (a night game plays under floodlights at about half
+/// of noon), and the fill's colour. The fill's *brightness* stays the
+/// scenery's fraction of the daylight sun rather than following `sun_scale`,
+/// so a dimmer key light reads as a flatter, floodlit park rather than a
+/// darker one with the same contrast.
+pub(super) fn spawn_lighting(
+    commands: &mut Commands,
+    yaw: f32,
+    ambient_fraction: f32,
+    lights: &FieldTheme,
+) {
     // Explicit shadow-map budget for the one shadow-casting light (was the
     // implicit 2048 default everywhere): keep 2048 texels on native, halve
     // to 1024 on wasm/WebGL2 where the shadow pass fill rate is the
@@ -416,7 +429,8 @@ pub(super) fn spawn_lighting(commands: &mut Commands, yaw: f32, ambient_fraction
     commands.spawn((
         GameplayEntity,
         DirectionalLight {
-            illuminance: SUN_ILLUMINANCE,
+            illuminance: SUN_ILLUMINANCE * lights.sun_scale,
+            color: lights.sun,
             shadows_enabled: true,
             ..default()
         },
@@ -429,7 +443,7 @@ pub(super) fn spawn_lighting(commands: &mut Commands, yaw: f32, ambient_fraction
     ));
 
     commands.insert_resource(AmbientLight {
-        color: Color::WHITE,
+        color: lights.ambient,
         brightness: ambient_fraction * SUN_ILLUMINANCE,
     });
 }

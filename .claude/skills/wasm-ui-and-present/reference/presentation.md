@@ -28,7 +28,9 @@ jerseys/HUD follow.
 ## Theme & tones
 
 `src/game/core/theme.rs` defines `Theme` (UI palette, per-team `PlayerTemplate`s, ball styling,
-sky/`ClearColor`, and the `PlayerModelId` that picks the rig construction) with built-ins behind
+the effect palette (`FxTheme`), the field dressing (`FieldTheme`: grass/dirt tints, sun colour and
+strength, ambient fill — what makes a night game read as night), sky/`ClearColor`, and the
+`PlayerModelId` that picks the rig construction) with built-ins behind
 `ThemeId`, cycled on the menu with T. UI reads `Res<Theme>`; `src/game/sim/flow/` emits
 `BannerTone`s and never colours.
 

@@ -397,3 +397,13 @@ the probe that now guards it.
     base cam's bag (else the plate) signals the out or the hit, read from flow's new
     `Play::last_outcome`. Runs after `catcher_crouch` so its insert wins the same-frame race.
     `e2e_walkup` pins the ring-up; `e2e_base_cam` pins a signal at the bag.
+104. [x] TODO 96 — a night game darkens the park, not just the sky. — `Theme` gains a
+    `FieldTheme` (`core/theme.rs`): a tint multiplied over each procedural ground texture
+    (`FieldSurfaces::grass`/`dirt` in `present/field/mod.rs`; `Color::WHITE` is "as painted",
+    so Daylight Classic is pixel-identical), plus the key light's colour and its fraction of
+    the daylight sun and the ambient fill's colour (`stadium::spawn_lighting`). Midnight Neon
+    cools the grass and clay toward its sky, runs a floodlight-white sun at 0.55 of noon, and
+    fills shadows blue; the fill's brightness stays the scenery's fraction of the *daylight*
+    sun so the park reads floodlit-flat rather than merely darker.
+    `theme.test.rs::night_dresses_the_field_darker_and_cooler_than_day` pins day-as-painted,
+    night darker and cooler on every channel, and the sun above 0.4 (lit, not a void).

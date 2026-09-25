@@ -36,6 +36,7 @@ Verify UI changes on the web target (the `/run-web` skill), not just natively.
 ## Theme: data-driven colour
 
 `src/game/core/theme.rs` `Theme` owns the UI palette, per-team `PlayerTemplate`s, ball styling,
+the effect palette (`FxTheme`), the field dressing (`FieldTheme`: ground tints + lights),
 sky/`ClearColor`, and `PlayerModelId`; cycled on the menu with T. UI reads `Res<Theme>`;
 `src/game/sim/flow/` emits `BannerTone`s and **never colours** — presentation maps tone → colour.
 

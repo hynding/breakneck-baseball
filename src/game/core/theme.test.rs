@@ -82,3 +82,42 @@ fn zone_ghost_reads_against_every_sky() {
         );
     }
 }
+
+/// A night game must darken the *ground and the light*, not just the sky —
+/// with only the sky, UI, and jerseys swapped, Midnight Neon read as a black
+/// void over a sunny field (TODO 96). Daylight stays the textures as
+/// painted (a white multiplier), so the day look is untouched by the
+/// dressing's existence.
+#[test]
+fn night_dresses_the_field_darker_and_cooler_than_day() {
+    let luminance = |c: Color| {
+        let s = c.to_srgba();
+        0.2126 * s.red + 0.7152 * s.green + 0.0722 * s.blue
+    };
+    let (day, night) = (
+        ThemeId::DaylightClassic.build(),
+        ThemeId::MidnightNeon.build(),
+    );
+    assert_eq!(day.field.grass_tint, Color::WHITE, "daylight grass as painted");
+    assert_eq!(day.field.dirt_tint, Color::WHITE, "daylight dirt as painted");
+    assert_eq!(day.field.sun, Color::WHITE);
+    assert_eq!(day.field.sun_scale, 1.0);
+    for (name, d, n) in [
+        ("grass", day.field.grass_tint, night.field.grass_tint),
+        ("dirt", day.field.dirt_tint, night.field.dirt_tint),
+        ("ambient", day.field.ambient, night.field.ambient),
+    ] {
+        assert!(
+            luminance(n) < luminance(d),
+            "{name}: night should be darker than day"
+        );
+        let s = n.to_srgba();
+        assert!(s.blue >= s.red, "{name}: night should be cooler (blue >= red)");
+        assert!(luminance(n) > 0.3, "{name}: still a lit park, not a void");
+    }
+    assert!(
+        night.field.sun_scale < day.field.sun_scale && night.field.sun_scale >= 0.4,
+        "under the lights, not in the dark: got {}",
+        night.field.sun_scale
+    );
+}

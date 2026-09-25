@@ -184,10 +184,11 @@ Cycle-2 fixes shipped alongside: 66, 67, 68, 74, 80 (see TADA when checked off).
     then the steal window). Fix: boosted dead-ball advance speed (sim/runner.rs).
 95. [x] nice pace — settle caps oversized: THROW_SETTLE_CAP 4 s (throw crosses in ~1 s),
     RESULT_SETTLE_CAP 20 s. Fix: ~1.5-2 s and ~8 s once 90 lands (flow/live.rs, result.rs).
-96. [ ] nice theme — Midnight Neon's field/dirt stay daylight-bright (only sky/UI/jerseys
+96. [x] nice theme — Midnight Neon's field/dirt stay daylight-bright (only sky/UI/jerseys
     change), so "night" reads as a black void over a sunny field; consider dimmed/cooler
     field materials per theme (core/theme.rs + present/field/).
     Screenshot: docs/agent/playtest/2026-08-27/09-neon-zone-before.jpeg.
+    *Done 2026-09-25 — see TADA 104.*
 97. [ ] nice ui — the hidden banner pill's near-zero-alpha keep-alive tint reads as a faint
     ghost rectangle against Midnight Neon's pure-black sky (top-center). Consider matching
     hidden_tint's alpha to theme darkness or keying the pill's hidden state off Visibility

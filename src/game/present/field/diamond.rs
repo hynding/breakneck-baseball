@@ -25,7 +25,7 @@ pub(super) fn spawn_field(
     // game. Matters most from the catcher's-eye duel camera, which looks up
     // past the wall into nothing but clear colour.
     commands.insert_resource(ClearColor(theme.sky));
-    let surfaces = FieldSurfaces::build(&mut images);
+    let surfaces = FieldSurfaces::build(&mut images, &theme.field);
     match field.scenery {
         Scenery::Stadium => {
             super::stadium::spawn_stadium_ground(
@@ -71,11 +71,13 @@ pub(super) fn spawn_field(
             &mut commands,
             std::f32::consts::PI - std::f32::consts::FRAC_PI_6,
             0.15,
+            &theme.field,
         ),
         Scenery::FrontYard => super::stadium::spawn_lighting(
             &mut commands,
             std::f32::consts::PI + std::f32::consts::FRAC_PI_6,
             0.20,
+            &theme.field,
         ),
     }
 }
@@ -405,7 +407,7 @@ fn spawn_stadium_mound(
     surfaces: &FieldSurfaces,
     field: &FieldSpec,
 ) {
-    let dirt = FieldSurfaces::tiled(materials, &surfaces.dirt, 3.0);
+    let dirt = surfaces.dirt(materials, 3.0);
     // The sloped skirt: a broad, shallow ring under the mound proper.
     commands.spawn((
         GameplayEntity,

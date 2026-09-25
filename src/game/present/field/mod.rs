@@ -18,6 +18,7 @@ use bevy::math::Affine2;
 use bevy::prelude::*;
 
 use crate::game::GameState;
+use crate::game::theme::FieldTheme;
 
 mod diamond;
 mod stadium;
@@ -87,27 +88,55 @@ struct ZoneFlash {
     timer: Option<Timer>,
 }
 
-/// The pair of tiled surface materials every park is dressed with.
+/// The pair of tiled surface textures every park is dressed with, plus the
+/// theme's tint over each — the one place a night game darkens the ground
+/// (the textures themselves are painted once, in daylight; see
+/// [`FieldTheme`]).
 struct FieldSurfaces {
     grass: Handle<Image>,
     dirt: Handle<Image>,
+    grass_tint: Color,
+    dirt_tint: Color,
 }
 
 impl FieldSurfaces {
-    fn build(images: &mut Assets<Image>) -> Self {
+    fn build(images: &mut Assets<Image>, dressing: &FieldTheme) -> Self {
         Self {
             grass: images.add(textures::grass_image()),
             dirt: images.add(textures::dirt_image()),
+            grass_tint: dressing.grass_tint,
+            dirt_tint: dressing.dirt_tint,
         }
     }
 
-    /// A material tiling `texture` `repeats` times across a unit UV face.
+    /// The grass material, tiled `repeats` times across a unit UV face.
+    fn grass(
+        &self,
+        materials: &mut Assets<StandardMaterial>,
+        repeats: f32,
+    ) -> Handle<StandardMaterial> {
+        Self::tiled(materials, &self.grass, self.grass_tint, repeats)
+    }
+
+    /// The infield-dirt material, tiled `repeats` times across a unit UV face.
+    fn dirt(
+        &self,
+        materials: &mut Assets<StandardMaterial>,
+        repeats: f32,
+    ) -> Handle<StandardMaterial> {
+        Self::tiled(materials, &self.dirt, self.dirt_tint, repeats)
+    }
+
+    /// A material tiling `texture` `repeats` times across a unit UV face,
+    /// multiplied by `tint` (`Color::WHITE` leaves the texture as painted).
     fn tiled(
         materials: &mut Assets<StandardMaterial>,
         texture: &Handle<Image>,
+        tint: Color,
         repeats: f32,
     ) -> Handle<StandardMaterial> {
         materials.add(StandardMaterial {
+            base_color: tint,
             base_color_texture: Some(texture.clone()),
             uv_transform: Affine2::from_scale(Vec2::splat(repeats)),
             perceptual_roughness: 0.95,
