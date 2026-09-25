@@ -20,6 +20,7 @@ fn catcher_visibility(app: &mut App) -> Visibility {
     *app.world_mut()
         .query_filtered::<&Visibility, With<CatcherRole>>()
         .single(app.world())
+        .unwrap()
 }
 
 #[test]

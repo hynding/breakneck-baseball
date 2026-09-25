@@ -151,7 +151,7 @@ fn advance_paths(
             intent.speed = ruleset.pace.runner_speed * speed.map_or(1.0, |s| s.0);
             path.next += 1;
         } else if despawn.is_some() {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         } else {
             // Path exhausted and arrived: the rig has settled on its base.
             commands.entity(entity).remove::<BasePath>();
@@ -309,9 +309,9 @@ pub(crate) fn sync_runners(
             .iter()
             .next()
             .map(|(_, _, id)| *id)
-            .or_else(|| batter_identity.get_single().ok().copied());
+            .or_else(|| batter_identity.single().ok().copied());
         let start = ghosts.iter().next().map_or(PLATE_START, |(ghost, tf, _)| {
-            commands.entity(ghost).despawn_recursive();
+            commands.entity(ghost).despawn();
             tf.translation
         });
         let mats = palette.for_team(score.batting_team());
@@ -343,7 +343,7 @@ pub(crate) fn sync_runners(
     *last_half = Some(score.top_of_inning);
     for (entity, from) in pool {
         if half_flipped {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
             continue;
         }
         commands.entity(entity).insert((
@@ -365,7 +365,7 @@ pub(crate) fn sync_runners(
 /// is seen finishing the swing before the swap; fouls leave him in the box.
 #[allow(clippy::too_many_arguments)]
 fn batter_runs(
-    mut events: EventReader<BallInPlayEvent>,
+    mut events: MessageReader<BallInPlayEvent>,
     field: Res<FieldSpec>,
     score: Res<ScoreBoard>,
     rig_model: Option<Res<RigModel>>,
@@ -426,7 +426,7 @@ fn batter_runs(
             // (TODO 90).
             commands.entity(entity).insert(PathSpeed(TROT_SPEED));
         }
-        if let Ok(id) = batter_identity.get_single() {
+        if let Ok(id) = batter_identity.single() {
             commands.entity(entity).insert(*id);
         }
         if let Some(assets) = &assets {
@@ -440,7 +440,7 @@ fn batter_runs(
 /// the next pitch ~3.8 s on that dead jog (TODO 93). Mirrors the same
 /// [`rules::is_fair`] the umpire's call uses — reporting, never ruling.
 fn retire_foul_ghosts(
-    mut live: EventReader<LiveBallEvent>,
+    mut live: MessageReader<LiveBallEvent>,
     field: Res<FieldSpec>,
     ghosts: Query<Entity, With<BatterGhost>>,
     mut batter_q: Query<&mut Visibility, With<Batter>>,
@@ -454,7 +454,7 @@ fn retire_foul_ghosts(
             continue;
         }
         for entity in &ghosts {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         }
         // The real batter steps straight back into the box — without this
         // the plate sat empty from the foul call to the next PrePitch.
@@ -477,7 +477,7 @@ fn tick_run_delays(
     mut commands: Commands,
 ) {
     for (entity, mut delay, mut visibility) in &mut delayed {
-        if delay.0.tick(time.delta()).finished() {
+        if delay.0.tick(time.delta()).is_finished() {
             commands.entity(entity).remove::<RunDelay>();
             *visibility = Visibility::Inherited;
             for mut batter_visibility in &mut batter_q {
@@ -575,7 +575,7 @@ fn next_bag_pos(field: &FieldSpec, base: usize) -> Vec3 {
 /// comes from the live-play races and is reconciled at resolution. Home runs
 /// (already resolved) and fouls are left to the trot / reset paths.
 fn break_runners(
-    mut events: EventReader<BallInPlayEvent>,
+    mut events: MessageReader<BallInPlayEvent>,
     score: Res<ScoreBoard>,
     bases: Res<Bases>,
     mut runners: Query<(Entity, &Runner)>,
@@ -610,7 +610,7 @@ fn break_runners(
 /// it" read as a catch, so it also sends the runner back (`Retreat`). Only
 /// active while the ball is live and uncalled.
 fn read_break_reads(
-    mut events: EventReader<LiveBallEvent>,
+    mut events: MessageReader<LiveBallEvent>,
     play: Res<Play>,
     field: Res<FieldSpec>,
     mut breaking: Query<&mut Breaking>,

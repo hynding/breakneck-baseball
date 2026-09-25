@@ -60,7 +60,7 @@ pub(super) fn sample_clips(
             }
         }
 
-        if playing.timer.finished() && !playing.clip.looping() {
+        if playing.timer.is_finished() && !playing.clip.looping() {
             if let Some(next) = playing.next.take() {
                 playing.clip = next;
                 // Mode-aware re-arm, mirroring `Playing::new`: a chained clip
@@ -221,7 +221,7 @@ pub(super) fn drive_graph_rigs(
             start_clip(&anims, &mut players, &mut rig, playing.clip);
         }
         playing.timer.tick(time.delta());
-        if playing.timer.finished() && !playing.clip.looping() {
+        if playing.timer.is_finished() && !playing.clip.looping() {
             if let Some(next) = playing.next.take() {
                 playing.clip = next;
                 // Mode-aware re-arm (mirrors the `sample_clips` site above

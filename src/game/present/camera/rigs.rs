@@ -236,7 +236,7 @@ pub(super) struct CameraKick(Vec3);
 type BallQuery<'w, 's> =
     Query<'w, 's, (&'static Transform, &'static Velocity), (With<Baseball>, Without<Camera3d>)>;
 
-pub(super) fn kick_on_hit(mut hits: EventReader<HitEvent>, mut kick: ResMut<CameraKick>) {
+pub(super) fn kick_on_hit(mut hits: MessageReader<HitEvent>, mut kick: ResMut<CameraKick>) {
     for _ in hits.read() {
         kick.0 += Vec3::new(0.0, 0.18, -0.35);
     }
@@ -244,7 +244,7 @@ pub(super) fn kick_on_hit(mut hits: EventReader<HitEvent>, mut kick: ResMut<Came
 
 /// A smaller thump when the ball bangs off the outfield wall.
 pub(super) fn kick_on_wall_bang(
-    mut bangs: EventReader<WallBangEvent>,
+    mut bangs: MessageReader<WallBangEvent>,
     mut kick: ResMut<CameraKick>,
 ) {
     for _ in bangs.read() {
@@ -332,7 +332,7 @@ pub(super) fn broadcast_camera(
     view: Res<DuelView>,
     kick: Res<CameraKick>,
     active: Res<ActivePlay>,
-    mut live: EventReader<LiveBallEvent>,
+    mut live: MessageReader<LiveBallEvent>,
     ball_q: BallQuery,
     rigs: Query<&Transform, (Without<Baseball>, Without<Camera3d>)>,
     mut rig: ResMut<BroadcastRig>,
@@ -343,7 +343,7 @@ pub(super) fn broadcast_camera(
     // framing decision so the duel FOV can correct for it — see
     // `aspect_safe_duel_vfov`. Falls back to the reference aspect (a no-op
     // correction) before the camera exists.
-    let aspect = match cam_q.get_single() {
+    let aspect = match cam_q.single() {
         Ok((_, Projection::Perspective(persp))) => persp.aspect_ratio,
         _ => DUEL_REFERENCE_ASPECT,
     };
@@ -358,7 +358,7 @@ pub(super) fn broadcast_camera(
     }
 
     let now = time.elapsed_secs();
-    let ball = ball_q.get_single().ok();
+    let ball = ball_q.single().ok();
     let descending_to = ball.and_then(|(tf, vel)| {
         let coming_down = tf.translation.y > FIELDER_CAM_MIN_HEIGHT && vel.linvel.y < 0.0;
         active
@@ -484,7 +484,7 @@ pub(super) fn broadcast_camera(
         rig.fov += (desired_fov - rig.fov) * follow;
     }
 
-    if let Ok((mut cam, mut projection)) = cam_q.get_single_mut() {
+    if let Ok((mut cam, mut projection)) = cam_q.single_mut() {
         *cam = Transform::from_translation(rig.eye + kick.0).looking_at(rig.target, Vec3::Y);
         if let Projection::Perspective(persp) = projection.as_mut() {
             persp.fov = rig.fov;
@@ -556,7 +556,7 @@ fn ease_toward(current: &mut Transform, target: &Transform, dt: f32) {
 }
 
 pub(super) fn zoom_camera(
-    mut scroll: EventReader<MouseWheel>,
+    mut scroll: MessageReader<MouseWheel>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mut orbit: ResMut<OrbitState>,
     mut camera_query: Query<&mut Transform, With<Camera3d>>,

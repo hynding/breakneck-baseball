@@ -14,7 +14,7 @@ fn test_app() -> App {
         .add_plugins(bevy::state::app::StatesPlugin)
         .init_state::<GameState>()
         .init_resource::<Play>()
-        .add_event::<ContactEvent>()
+        .add_message::<ContactEvent>()
         .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             Duration::from_secs_f64(1.0 / 60.0),
         ))
@@ -27,7 +27,7 @@ fn test_app() -> App {
 }
 
 fn send_perfect(app: &mut App) {
-    app.world_mut().send_event(ContactEvent {
+    app.world_mut().write_message(ContactEvent {
         quality: ContactQuality::Perfect,
         batting_team: Team::Home,
         dt_ms: 0.0,

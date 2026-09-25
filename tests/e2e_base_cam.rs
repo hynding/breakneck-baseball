@@ -48,7 +48,7 @@ fn drive(
             intent.action = true;
         }
         Phase::Pitch => {
-            if let Ok(t) = ball.get_single() {
+            if let Ok(t) = ball.single() {
                 if (-0.1..=0.05).contains(&t.translation.z) {
                     let intent = intents.get_mut(batting);
                     intent.aim = Vec2::new(0.0, -1.0);
@@ -183,7 +183,7 @@ fn drive_fly(
             intents.get_mut(score.fielding_team()).action = true;
         }
         Phase::Pitch => {
-            if let Ok(t) = ball.get_single() {
+            if let Ok(t) = ball.single() {
                 if (-0.3..=0.3).contains(&t.translation.z) {
                     intents.get_mut(score.batting_team()).action = true;
                 }
@@ -221,7 +221,7 @@ fn a_fly_ball_takes_the_fielder_cam_on_the_way_down() {
         if let Ok(t) = app
             .world_mut()
             .query_filtered::<&Transform, With<Baseball>>()
-            .get_single(app.world())
+            .single(app.world())
         {
             peak_y = peak_y.max(t.translation.y);
         }

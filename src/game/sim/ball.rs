@@ -74,7 +74,7 @@ type FlyingBallMut<'w, 's> =
 // ── Events ────────────────────────────────────────────────────────────────────
 /// Fired when a pitch is thrown. Carries the initial world-space velocity and
 /// the spin that will Magnus-bend the flight.
-#[derive(Event)]
+#[derive(Message)]
 pub struct PitchEvent {
     /// Velocity vector in world space (m/s).
     pub velocity: Vec3,
@@ -83,7 +83,7 @@ pub struct PitchEvent {
 }
 
 /// Fired when the ball is hit by the batter.
-#[derive(Event)]
+#[derive(Message)]
 pub struct HitEvent {
     /// Velocity imparted to the ball (m/s).
     pub velocity: Vec3,
@@ -91,7 +91,7 @@ pub struct HitEvent {
 
 /// Fired when a live ball caroms off the outfield wall — consumed by flow
 /// (the "OFF THE WALL!" call), the camera (impact kick), and fx (sparks).
-#[derive(Event, Clone, Copy)]
+#[derive(Message, Clone, Copy)]
 pub struct WallBangEvent {
     pub pos: Vec3,
 }
@@ -101,12 +101,12 @@ const WALL_BANG_MIN_SPEED: f32 = 8.0;
 
 /// Reports ball ↔ outfield-wall contacts as [`WallBangEvent`]s.
 fn detect_wall_bang(
-    mut collisions: EventReader<CollisionEvent>,
+    mut collisions: MessageReader<CollisionEvent>,
     ball_q: Query<(Entity, &Transform, &Velocity), With<Baseball>>,
     walls: Query<(), With<crate::game::field::OutfieldWall>>,
-    mut bangs: EventWriter<WallBangEvent>,
+    mut bangs: MessageWriter<WallBangEvent>,
 ) {
-    let Ok((ball_entity, ball_tf, vel)) = ball_q.get_single() else {
+    let Ok((ball_entity, ball_tf, vel)) = ball_q.single() else {
         return;
     };
     for event in collisions.read() {
@@ -121,7 +121,7 @@ fn detect_wall_bang(
             continue;
         };
         if walls.get(other).is_ok() && vel.linvel.length() >= WALL_BANG_MIN_SPEED {
-            bangs.send(WallBangEvent {
+            bangs.write(WallBangEvent {
                 pos: ball_tf.translation,
             });
         }
@@ -133,9 +133,9 @@ pub struct BallPlugin;
 
 impl Plugin for BallPlugin {
     fn build(&self, app: &mut App) {
-        app.add_event::<PitchEvent>()
-            .add_event::<HitEvent>()
-            .add_event::<WallBangEvent>()
+        app.add_message::<PitchEvent>()
+            .add_message::<HitEvent>()
+            .add_message::<WallBangEvent>()
             .add_systems(crate::game::game_start(), spawn_ball)
             .add_systems(
                 Update,
@@ -226,7 +226,7 @@ fn spawn_ball(
 /// Responds to a [`PitchEvent`] by giving the ball the specified velocity and
 /// marking it as in-flight.
 fn apply_pitch(
-    mut events: EventReader<PitchEvent>,
+    mut events: MessageReader<PitchEvent>,
     mut query: Query<(Entity, &mut Velocity), With<Baseball>>,
     mut commands: Commands,
 ) {
@@ -242,7 +242,7 @@ fn apply_pitch(
 /// Responds to a [`HitEvent`] by setting the ball's velocity and keeping the
 /// in-flight marker active.
 fn apply_hit(
-    mut events: EventReader<HitEvent>,
+    mut events: MessageReader<HitEvent>,
     mut query: Query<(Entity, &mut Velocity), With<Baseball>>,
     mut commands: Commands,
 ) {
@@ -302,7 +302,7 @@ fn spawn_trail(
     let Some(assets) = assets else {
         return;
     };
-    let Ok((transform, vel)) = ball_q.get_single() else {
+    let Ok((transform, vel)) = ball_q.single() else {
         return;
     };
     if vel.linvel.length() < TRAIL_MIN_SPEED {
@@ -331,7 +331,7 @@ fn fade_trail(
     mut commands: Commands,
 ) {
     for (entity, mut ghost, mut transform) in &mut ghosts {
-        if ghost.0.tick(time.delta()).finished() {
+        if ghost.0.tick(time.delta()).is_finished() {
             commands.entity(entity).despawn();
         } else {
             transform.scale = Vec3::splat(1.0 - ghost.0.fraction());
@@ -350,7 +350,7 @@ fn reset_ball_if_out_of_bounds(
     mut commands: Commands,
     entity_query: Query<Entity, (With<Baseball>, With<InFlight>)>,
     field: Res<FieldSpec>,
-    mut landed: EventWriter<crate::game::flow::LiveBallEvent>,
+    mut landed: MessageWriter<crate::game::flow::LiveBallEvent>,
 ) {
     for (mut transform, mut vel) in &mut query {
         let pos = transform.translation;
@@ -360,7 +360,7 @@ fn reset_ball_if_out_of_bounds(
             // already classified at contact — a synthetic Landed would
             // second-guess that call.
             if !entity_query.is_empty() && !crate::game::rules::is_fair(pos, &field) {
-                landed.send(crate::game::flow::LiveBallEvent::Landed { pos });
+                landed.write(crate::game::flow::LiveBallEvent::Landed { pos });
             }
             transform.translation = Vec3::new(0.0, BALL_RADIUS + 0.25, field.pitch_distance);
             vel.linvel = Vec3::ZERO;

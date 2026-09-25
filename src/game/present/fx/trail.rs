@@ -118,7 +118,7 @@ pub(super) fn pitch_trail(
         *last_drop = None;
         return;
     }
-    let Ok((ball, vel)) = ball_q.get_single() else {
+    let Ok((ball, vel)) = ball_q.single() else {
         return;
     };
     let pos = ball.translation;
@@ -168,7 +168,7 @@ pub(super) fn tick_trail(
         // Bubbles pop before their fade completes; everything else rides
         // the ladder to the end.
         let done =
-            mote.timer.finished() || (mote.style == PitchTrailStyle::Bubbles && frac >= 0.85);
+            mote.timer.is_finished() || (mote.style == PitchTrailStyle::Bubbles && frac >= 0.85);
         if done {
             commands.entity(entity).despawn();
             continue;

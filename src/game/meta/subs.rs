@@ -231,7 +231,7 @@ fn open_pause(
     flying: Query<(), (With<Baseball>, With<InFlight>)>,
     mut tapped: ResMut<PauseTapped>,
     mut menu: ResMut<SubsMenu>,
-    mut banner: EventWriter<PlayBanner>,
+    mut banner: MessageWriter<PlayBanner>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     // Never clobber a transition already decided this frame (e.g. the
@@ -248,7 +248,7 @@ fn open_pause(
         return;
     }
     if !ball_is_dead(&play, &flying) {
-        banner.send(PlayBanner::new("PLAY IN PROGRESS", BannerTone::Info));
+        banner.write(PlayBanner::new("PLAY IN PROGRESS", BannerTone::Info));
         return;
     }
     *menu = SubsMenu {
@@ -266,8 +266,8 @@ fn open_pause(
 /// moment disarms it: the player is back and watching.
 #[allow(clippy::too_many_arguments)]
 fn auto_pause_on_focus_loss(
-    mut occluded: EventReader<WindowOccluded>,
-    mut focused: EventReader<WindowFocused>,
+    mut occluded: MessageReader<WindowOccluded>,
+    mut focused: MessageReader<WindowFocused>,
     play: Res<Play>,
     score: Res<ScoreBoard>,
     flying: Query<(), (With<Baseball>, With<InFlight>)>,
@@ -302,8 +302,8 @@ fn auto_pause_on_focus_loss(
 /// owed. A board keypress (see [`board_controls`]) claims the pause as
 /// manual and disarms this.
 fn auto_resume_on_refocus(
-    mut occluded: EventReader<WindowOccluded>,
-    mut focused: EventReader<WindowFocused>,
+    mut occluded: MessageReader<WindowOccluded>,
+    mut focused: MessageReader<WindowFocused>,
     mut menu: ResMut<SubsMenu>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
@@ -467,7 +467,7 @@ fn tap_quit_row(
     // one crossing a resume can't become the stick.
     let mut touched_row = false;
     let mut claimed_elsewhere = false;
-    if let Ok((node, transform)) = row_geometry.get_single() {
+    if let Ok((node, transform)) = row_geometry.single() {
         for id in crate::game::input::touched_node_ids(&touches, node, transform) {
             // A finger the pause claim already bound this frame belongs to
             // the pause button (it runs first, and since the button draws
@@ -585,7 +585,7 @@ fn spawn_board(mut commands: Commands, theme: Res<Theme>) {
                         ..default()
                     },
                     BackgroundColor(hidden_tint(ui.panel_bg)),
-                    BorderColor(hidden_tint(ui.panel_border)),
+                    BorderColor::all(hidden_tint(ui.panel_border)),
                     BorderRadius::all(Val::Px(12.0)),
                 ))
                 .with_children(|card| {
@@ -599,7 +599,7 @@ fn spawn_board(mut commands: Commands, theme: Res<Theme>) {
                             ..default()
                         },
                         TextColor(ui.text_primary),
-                        TextLayout::new_with_justify(JustifyText::Center),
+                        TextLayout::new_with_justify(Justify::Center),
                     ));
                 });
         });
@@ -640,10 +640,10 @@ fn update_board(
     for (mut bg, mut border) in &mut cards {
         if visible {
             bg.0 = ui.panel_bg;
-            border.0 = ui.panel_border;
+            *border = BorderColor::all(ui.panel_border);
         } else {
             bg.0 = hidden_tint(ui.panel_bg);
-            border.0 = hidden_tint(ui.panel_border);
+            *border = BorderColor::all(hidden_tint(ui.panel_border));
         }
     }
 
@@ -773,10 +773,10 @@ fn update_controls_dialog(
     for (mut bg, mut border) in &mut cards {
         if visible {
             bg.0 = ui.panel_bg;
-            border.0 = ui.panel_border;
+            *border = BorderColor::all(ui.panel_border);
         } else {
             bg.0 = hidden_tint(ui.panel_bg);
-            border.0 = hidden_tint(ui.panel_border);
+            *border = BorderColor::all(hidden_tint(ui.panel_border));
         }
     }
     for mut text in &mut text {

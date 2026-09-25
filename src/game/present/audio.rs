@@ -227,7 +227,7 @@ fn play_at(commands: &mut Commands, handle: &Handle<AudioSource>, volume: f32, s
         GameplayEntity,
         AudioPlayer::new(handle.clone()),
         PlaybackSettings::DESPAWN
-            .with_volume(Volume::new(volume))
+            .with_volume(Volume::Linear(volume))
             .with_speed(speed),
     ));
 }
@@ -241,7 +241,7 @@ fn start_crowd_loop(bank: Option<Res<SoundBank>>, mut commands: Commands) {
     commands.spawn((
         GameplayEntity,
         AudioPlayer::new(bank.crowd.clone()),
-        PlaybackSettings::LOOP.with_volume(Volume::new(0.12)),
+        PlaybackSettings::LOOP.with_volume(Volume::Linear(0.12)),
     ));
 }
 
@@ -249,13 +249,13 @@ fn start_crowd_loop(bank: Option<Res<SoundBank>>, mut commands: Commands) {
 #[allow(clippy::too_many_arguments)]
 fn play_event_sounds(
     bank: Option<Res<SoundBank>>,
-    mut contacts: EventReader<ContactEvent>,
-    mut in_play: EventReader<BallInPlayEvent>,
-    mut bangs: EventReader<WallBangEvent>,
-    mut live: EventReader<LiveBallEvent>,
-    mut received: EventReader<PitchCaughtEvent>,
-    mut pitches: EventReader<PitchEvent>,
-    mut banners: EventReader<PlayBanner>,
+    mut contacts: MessageReader<ContactEvent>,
+    mut in_play: MessageReader<BallInPlayEvent>,
+    mut bangs: MessageReader<WallBangEvent>,
+    mut live: MessageReader<LiveBallEvent>,
+    mut received: MessageReader<PitchCaughtEvent>,
+    mut pitches: MessageReader<PitchEvent>,
+    mut banners: MessageReader<PlayBanner>,
     mut commands: Commands,
 ) {
     let Some(bank) = bank else { return };

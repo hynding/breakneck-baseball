@@ -270,7 +270,7 @@ pub fn attach_jerseys(commands: &mut Commands, rig: Entity, assets: &JerseyAsset
                 Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(yaw)),
             ))
             .id();
-        commands.entity(quad).set_parent(rig);
+        commands.entity(quad).insert(bevy::prelude::ChildOf(rig));
     }
 }
 
@@ -320,9 +320,13 @@ fn mount_jerseys_on_bones(
                 JerseyFace::ShoulderL => (bones.upper_arm_l, Vec3::new(0.0, -0.04, 0.09), half),
                 JerseyFace::ShoulderR => (bones.upper_arm_r, Vec3::new(0.0, -0.04, -0.09), half),
             };
-            commands.entity(child).set_parent(bone).insert(
-                Transform::from_translation(translation).with_rotation(Quat::from_rotation_y(yaw)),
-            );
+            commands
+                .entity(child)
+                .insert(bevy::prelude::ChildOf(bone))
+                .insert(
+                    Transform::from_translation(translation)
+                        .with_rotation(Quat::from_rotation_y(yaw)),
+                );
         }
     }
 }

@@ -105,7 +105,7 @@ pub(super) fn spawn_touch_overlay(mut commands: Commands, theme: Res<Theme>) {
                 ..default()
             },
             BackgroundColor(hidden_tint(ui.panel_bg)),
-            BorderColor(hidden_tint(ui.accent)),
+            BorderColor::all(hidden_tint(ui.accent)),
             BorderRadius::all(radius),
         )
     };
@@ -269,7 +269,7 @@ fn paint_region(
     // guard could not spare a tick — unlike the settings painter, which
     // calls `set_if_neq` on the un-dereferenced `Mut` itself.
     bg.0 = fill;
-    border.0 = stroke;
+    *border = BorderColor::all(stroke);
 }
 
 /// Repaints the chrome from the selected scheme and whose turn it is —
@@ -296,7 +296,7 @@ pub(super) fn paint_touch_overlay(
     )>,
     mut labels: Query<(&TouchLabel, &mut Text)>,
 ) {
-    let Ok(window) = windows.get_single() else {
+    let Ok(window) = windows.single() else {
         return;
     };
     let size = window.size();
@@ -331,7 +331,7 @@ pub(super) fn paint_touch_overlay(
         play.phase,
         seen,
     );
-    let Ok(mut last) = last.get_single_mut() else {
+    let Ok(mut last) = last.single_mut() else {
         return;
     };
     // A freshly spawned tree's default key (`shown: None`) can never match

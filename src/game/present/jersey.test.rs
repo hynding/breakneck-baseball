@@ -18,7 +18,7 @@ fn back_texture_draws_name_and_number_pixels() {
         appearance: Default::default(),
     };
     let image = build_texture(&card, JerseyFace::Back, [255, 255, 255, 255]);
-    let data = image.data;
+    let data = image.data.expect("cpu image data");
     let lit = data.chunks(4).filter(|px| px[3] == 255).count();
     // A six-letter name plus two big digits lights up plenty of pixels.
     assert!(lit > 200, "only {lit} opaque pixels drawn");
@@ -35,7 +35,12 @@ fn number_texture_scales_single_digits_up() {
         appearance: Default::default(),
     };
     let one = build_texture(&card, JerseyFace::Number, [255, 255, 255, 255]);
-    let lit = one.data.chunks(4).filter(|px| px[3] == 255).count();
+    let lit = one
+        .data
+        .expect("cpu image data")
+        .chunks(4)
+        .filter(|px| px[3] == 255)
+        .count();
     assert!(lit > 100, "a lone digit should be drawn large ({lit} px)");
 }
 

@@ -251,7 +251,7 @@ fn build_menu(commands: &mut Commands, config: &GameConfig, theme: &Theme, setti
                             ..default()
                         },
                         TextColor(ui.text_primary),
-                        TextLayout::new_with_justify(JustifyText::Center),
+                        TextLayout::new_with_justify(Justify::Center),
                     ));
                 });
 
@@ -590,7 +590,7 @@ fn spawn_game_over(
                         ..default()
                     },
                     BackgroundColor(ui.panel_bg),
-                    BorderColor(ui.panel_border),
+                    BorderColor::all(ui.panel_border),
                     BorderRadius::all(Val::Px(16.0)),
                 ))
                 .with_children(|card| {
@@ -659,11 +659,11 @@ fn game_over_restart(
     // click, so a separate `pointer_pressed` pre-check would be a second
     // spelling of the same press condition — two encodings that can drift.
     let pointer_on_card = || {
-        card.get_single().is_ok_and(|(node, transform)| {
+        card.single().is_ok_and(|(node, transform)| {
             crate::game::input::pointer_on_node(
                 &touches,
                 &mouse,
-                windows.get_single().ok(),
+                windows.single().ok(),
                 node,
                 transform,
             )

@@ -217,7 +217,7 @@ fn dress_rigs(
         // 2. Despawn this rig's old props before rebuilding.
         if let Some(mut rig_gear) = rig_gear {
             for e in take(&mut rig_gear.0) {
-                commands.entity(e).despawn_recursive();
+                commands.entity(e).despawn();
             }
         }
 

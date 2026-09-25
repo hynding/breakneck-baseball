@@ -18,7 +18,7 @@ fn translator_app(scheme: TouchScheme, home_bats: bool) -> (App, Entity) {
         .world_mut()
         .spawn((
             Window {
-                resolution: (SIZE.x, SIZE.y).into(),
+                resolution: bevy::window::WindowResolution::new(SIZE.x as u32, SIZE.y as u32),
                 ..Default::default()
             },
             PrimaryWindow,
@@ -44,7 +44,7 @@ fn translator_app(scheme: TouchScheme, home_bats: bool) -> (App, Entity) {
         .init_resource::<TouchGestures>()
         .init_resource::<TouchIntent>()
         .init_resource::<crate::game::subs::PauseTapped>()
-        .add_systems(PreUpdate, read_touch.after(bevy::input::InputSystem));
+        .add_systems(PreUpdate, read_touch.after(bevy::input::InputSystems));
     (app, window)
 }
 
@@ -55,13 +55,14 @@ fn send_touch(
     id: u64,
     pos: Vec2,
 ) {
-    app.world_mut().send_event(bevy::input::touch::TouchInput {
-        phase,
-        position: pos,
-        window,
-        force: None,
-        id,
-    });
+    app.world_mut()
+        .write_message(bevy::input::touch::TouchInput {
+            phase,
+            position: pos,
+            window,
+            force: None,
+            id,
+        });
 }
 
 #[test]
@@ -377,14 +378,14 @@ fn resolver_requires_a_seen_touchscreen() {
     world.insert_resource(Controllers::default());
     let mut system = bevy::ecs::system::IntoSystem::into_system(resolve_touch_owner);
     system.initialize(&mut world);
-    system.run((), &mut world);
+    system.run((), &mut world).expect("system ran");
     assert_eq!(
         world.resource::<Controllers>().touch_team,
         None,
         "no touch seen: no owner"
     );
     world.resource_mut::<TouchGestures>().seen = true;
-    system.run((), &mut world);
+    system.run((), &mut world).expect("system ran");
     assert_eq!(
         world.resource::<Controllers>().touch_team,
         Some(Team::Home),

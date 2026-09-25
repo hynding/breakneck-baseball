@@ -112,7 +112,7 @@ fn in_play_cuts_plate_then_ball_then_fielder_then_base() {
     assert_eq!(pick_shot(&c, None), Shot::Duel(DuelView::BattingZoom));
     c.since_contact = BALL_FOLLOW_DELAY + 0.01;
     assert_eq!(pick_shot(&c, None), Shot::BallFollow);
-    let fielder = Entity::from_raw(7);
+    let fielder = Entity::from_raw_u32(7).unwrap();
     c.descending_to = Some(fielder);
     assert_eq!(pick_shot(&c, None), Shot::FielderCam(fielder));
     c.thrown_base = Some(1);
@@ -125,7 +125,7 @@ fn in_play_cuts_plate_then_ball_then_fielder_then_base() {
 fn a_home_run_is_followed_then_orbited() {
     let mut c = cues(Phase::InPlay);
     c.home_run = true;
-    c.descending_to = Some(Entity::from_raw(3));
+    c.descending_to = Some(Entity::from_raw_u32(3).unwrap());
     c.thrown_base = Some(0);
     assert_eq!(pick_shot(&c, None), Shot::BallFollow);
     c.phase = Phase::Result;
@@ -138,7 +138,7 @@ fn a_home_run_is_followed_then_orbited() {
 fn a_result_keeps_the_shot_it_ended_on() {
     let c = cues(Phase::Result);
     assert_eq!(pick_shot(&c, Some(Shot::BaseCam(0))), Shot::BaseCam(0));
-    let f = Entity::from_raw(9);
+    let f = Entity::from_raw_u32(9).unwrap();
     assert_eq!(
         pick_shot(&c, Some(Shot::FielderCam(f))),
         Shot::FielderCam(f)

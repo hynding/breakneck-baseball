@@ -33,7 +33,11 @@ fn apply_rewrites_the_world_and_fires_the_event() {
     assert_eq!((score.balls, score.strikes, score.outs), (3, 2, 2));
     let bases = world.resource::<Bases>();
     assert!(bases.is_occupied(0) && bases.is_occupied(1) && bases.is_occupied(2));
-    assert!(!world.resource::<Events<ScenarioAppliedEvent>>().is_empty());
+    assert!(
+        !world
+            .resource::<Messages<ScenarioAppliedEvent>>()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -59,6 +63,6 @@ fn test_world() -> World {
     world.insert_resource(VariantId::Standard.rules());
     world.insert_resource(VariantId::Standard.field());
     world.init_resource::<PitchOverride>();
-    world.init_resource::<Events<ScenarioAppliedEvent>>();
+    world.init_resource::<Messages<ScenarioAppliedEvent>>();
     world
 }

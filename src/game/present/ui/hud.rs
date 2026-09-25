@@ -59,7 +59,7 @@ pub(super) fn spawn_hud(
                         ..default()
                     },
                     BackgroundColor(hidden_tint(ui.panel_bg)),
-                    BorderColor(hidden_tint(ui.panel_border)),
+                    BorderColor::all(hidden_tint(ui.panel_border)),
                     BorderRadius::all(Val::Px(6.0)),
                 ))
                 .with_children(|track| {
@@ -86,7 +86,7 @@ pub(super) fn spawn_hud(
                         ..default()
                     },
                     BackgroundColor(ui.panel_bg),
-                    BorderColor(ui.panel_border),
+                    BorderColor::all(ui.panel_border),
                     BorderRadius::all(Val::Px(12.0)),
                 ))
                 .with_children(|card| {
@@ -197,7 +197,7 @@ pub(super) fn spawn_hud(
                     ..default()
                 },
                 BackgroundColor(hidden_tint(ui.panel_bg)),
-                BorderColor(hidden_tint(ui.panel_border)),
+                BorderColor::all(hidden_tint(ui.panel_border)),
                 BorderRadius::all(Val::Px(26.0)),
             ))
             .with_children(|pill| {
@@ -295,7 +295,7 @@ fn spawn_base_ring(commands: &mut Commands, base_count: usize, theme: &Theme) {
                 ..default()
             },
             BackgroundColor(theme.ui.panel_bg),
-            BorderColor(theme.ui.panel_border),
+            BorderColor::all(theme.ui.panel_border),
             BorderRadius::all(Val::Px(12.0)),
         ))
         .with_children(|ring| {

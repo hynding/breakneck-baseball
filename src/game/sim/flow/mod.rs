@@ -333,7 +333,7 @@ impl Play {
     /// Whether the pre-pitch steal window is still open: the pitch is held,
     /// leads may stretch, and a defensive action is a pickoff throw.
     pub fn in_steal_window(&self) -> bool {
-        !self.duel.hold.finished()
+        !self.duel.hold.is_finished()
     }
 
     /// The hit the umpire has already decided but not yet announced (the
@@ -552,7 +552,7 @@ pub enum BannerTone {
 /// Fired once per contact put in play: what physics alone settled (home run
 /// or live ball) plus the predicted landing point. Fielder and runner
 /// choreography key off this — the *call* comes later, from the live play.
-#[derive(Event, Clone, Copy)]
+#[derive(Message, Clone, Copy)]
 pub struct BallInPlayEvent {
     pub kind: rules::ContactKind,
     pub landing: Vec3,
@@ -565,7 +565,7 @@ pub struct BallInPlayEvent {
 /// Physical reports from the fielding simulation. Fielding never touches the
 /// score or bases — it says what happened on the grass, and the rules decide
 /// what it means.
-#[derive(Event, Clone, Copy)]
+#[derive(Message, Clone, Copy)]
 pub enum LiveBallEvent {
     /// Gloved on the fly at `pos` (before the first bounce).
     Caught { pos: Vec3 },
@@ -588,7 +588,7 @@ pub enum LiveBallEvent {
 
 /// The pitch ended untouched and the catcher gloved it — cosmetic (the call
 /// was already made from the crossing), fired for the glove-pop sound.
-#[derive(Event, Clone, Copy)]
+#[derive(Message, Clone, Copy)]
 pub struct PitchCaughtEvent;
 
 /// A judged swing: fired on *every* swing the batter offers at a pitch,
@@ -597,7 +597,7 @@ pub struct PitchCaughtEvent;
 /// presentation systems (fx/audio/camera, later tasks) can react without
 /// re-deriving the timing. The rules/physics consequence is applied at the
 /// swing site in [`pitch::pitch_live`]; this event is a read-only report.
-#[derive(Event, Clone, Copy)]
+#[derive(Message, Clone, Copy)]
 pub struct ContactEvent {
     pub quality: rules::ContactQuality,
     pub batting_team: Team,
@@ -605,7 +605,7 @@ pub struct ContactEvent {
 }
 
 /// A transient on-screen message (e.g. "STRIKE!", "BALL", "HOME RUN!").
-#[derive(Event, Clone)]
+#[derive(Message, Clone)]
 pub struct PlayBanner {
     pub text: String,
     pub tone: BannerTone,
@@ -658,11 +658,11 @@ impl Plugin for FlowPlugin {
             .init_resource::<LeadState>()
             .init_resource::<CpuConfig>()
             .init_resource::<CpuState>()
-            .add_event::<BallInPlayEvent>()
-            .add_event::<LiveBallEvent>()
-            .add_event::<PitchCaughtEvent>()
-            .add_event::<ContactEvent>()
-            .add_event::<PlayBanner>()
+            .add_message::<BallInPlayEvent>()
+            .add_message::<LiveBallEvent>()
+            .add_message::<PitchCaughtEvent>()
+            .add_message::<ContactEvent>()
+            .add_message::<PlayBanner>()
             .add_systems(
                 crate::game::game_start(),
                 (pitch::reset_flow, reset_cpu_clock),

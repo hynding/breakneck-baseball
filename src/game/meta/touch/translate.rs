@@ -115,7 +115,7 @@ fn release_lifted_chrome_fingers(touches: &Touches, gestures: &mut ResMut<TouchG
 
 /// Turns this frame's [`Touches`] into [`TouchIntent`] under the selected
 /// scheme. Runs in `PreUpdate` after Bevy's touch-event processing
-/// (`InputSystem` — without that ordering, gestures would read last frame's
+/// (`InputSystems` — without that ordering, gestures would read last frame's
 /// `Touches` on some builds, a build-dependent ~1-frame swing-timing skew)
 /// and before `gather_intents` (which merges the result), only while
 /// `Playing` — in every scheme including `Off`, whose generic mapping keeps
@@ -183,7 +183,7 @@ pub fn read_touch(
         let Some(team) = controllers.touch_team else {
             break 'compute next;
         };
-        let Ok(window) = windows.get_single() else {
+        let Ok(window) = windows.single() else {
             break 'compute next;
         };
         let size = window.size();
@@ -751,7 +751,7 @@ pub fn paused_pause_region_taps(
     mut tapped: ResMut<crate::game::subs::PauseTapped>,
 ) {
     release_lifted_chrome_fingers(&touches, &mut gestures);
-    let Ok(window) = windows.get_single() else {
+    let Ok(window) = windows.single() else {
         return;
     };
     let live_before = gestures.pause_chrome_live();

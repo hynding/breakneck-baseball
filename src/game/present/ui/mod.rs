@@ -19,9 +19,9 @@ pub use curtain::{CurtainRoot, WipeLabel};
 pub use walkup::{WalkUpLine, WalkUpText};
 
 use banner::{
-    BannerFollowUp, BannerTimer, ContactStampTimer, PitchSpeedTimer,
-    clear_read_outs_on_result_exit, fade_banner, fade_contact_stamp, fade_pitch_speed, show_banner,
-    show_contact_stamp, show_pitch_speed, swap_banner_follow_up, update_duel_panels,
+    BannerFadeAt, BannerFollowUp, SpeedFadeAt, StampFadeAt, clear_read_outs_on_result_exit,
+    fade_banner, fade_contact_stamp, fade_pitch_speed, show_banner, show_contact_stamp,
+    show_pitch_speed, swap_banner_follow_up, update_duel_panels,
 };
 use curtain::{Curtain, drive_curtain, spawn_curtain};
 use hud::{
@@ -233,7 +233,7 @@ pub(crate) fn overlay_card(
             ..default()
         },
         BackgroundColor(paint.panel(ui.panel_bg)),
-        BorderColor(paint.panel(ui.panel_border)),
+        BorderColor::all(paint.panel(ui.panel_border)),
         BorderRadius::all(Val::Px(CARD_RADIUS_PX)),
     )
 }
@@ -300,10 +300,10 @@ pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<BannerTimer>()
+        app.init_resource::<BannerFadeAt>()
             .init_resource::<BannerFollowUp>()
-            .init_resource::<ContactStampTimer>()
-            .init_resource::<PitchSpeedTimer>()
+            .init_resource::<StampFadeAt>()
+            .init_resource::<SpeedFadeAt>()
             .init_resource::<Curtain>();
         #[cfg(target_arch = "wasm32")]
         app.add_systems(Update, keep_ui_roots_alive);

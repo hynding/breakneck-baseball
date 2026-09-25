@@ -93,7 +93,7 @@ fn drive(
     }
 }
 
-fn capture(mut ev: EventReader<ContactEvent>, mut qualities: ResMut<Qualities>) {
+fn capture(mut ev: MessageReader<ContactEvent>, mut qualities: ResMut<Qualities>) {
     for e in ev.read() {
         qualities.0.push(e.quality);
     }

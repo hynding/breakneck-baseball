@@ -86,7 +86,7 @@ fn batter_runs_on_organic_cpu_contacts() {
         "balanced",
     );
 
-    let mut cursor = bevy::ecs::event::EventCursor::<BallInPlayEvent>::default();
+    let mut cursor = bevy::ecs::message::MessageCursor::<BallInPlayEvent>::default();
     let mut fair = 0u32;
     let mut failures: Vec<String> = Vec::new();
     let mut pending: Option<(f64, String)> = None;
@@ -96,7 +96,7 @@ fn batter_runs_on_organic_cpu_contacts() {
         let ghost = ghost_present(app);
 
         let contacts: Vec<(ContactKind, Vec3)> = {
-            let events = app.world().resource::<Events<BallInPlayEvent>>();
+            let events = app.world().resource::<Messages<BallInPlayEvent>>();
             cursor
                 .read(events)
                 .map(|ev| (ev.kind, ev.landing))
@@ -157,7 +157,7 @@ fn predicted_foul_forward_ball_is_run_out() {
     let landing = Vec3::new(-30.0, 0.0, 20.0); // forward, well outside the wedge
     assert!(!rules::is_fair(landing, &field) && landing.z > 1.0);
     let contact_class = rules::contact_class(landing, 1.6, &field);
-    app.world_mut().send_event(BallInPlayEvent {
+    app.world_mut().write_message(BallInPlayEvent {
         kind: ContactKind::Live { fair: false },
         landing,
         contact_class,
@@ -172,7 +172,7 @@ fn predicted_foul_forward_ball_is_run_out() {
 
     // It lands foul: the engine resets him — ghost retired, batter back.
     app.world_mut()
-        .send_event(LiveBallEvent::Landed { pos: landing });
+        .write_message(LiveBallEvent::Landed { pos: landing });
     let retired = run_until(&mut app, 300, |app| !ghost_present(app));
     assert!(
         retired.is_some(),

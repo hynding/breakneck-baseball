@@ -196,7 +196,7 @@ pub(super) fn pci_cursor_visibility(
 /// accent — `FoulTip`/`Whiff` leave it alone (a whiff already has its own
 /// strike banner; `Weak` is bucketed with `Solid`, see [`ZoneFlash`]'s doc).
 pub(super) fn trigger_zone_flash(
-    mut contact_ev: EventReader<ContactEvent>,
+    mut contact_ev: MessageReader<ContactEvent>,
     mut flash: ResMut<ZoneFlash>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -221,7 +221,7 @@ pub(super) fn restore_zone_flash(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let done = match flash.timer.as_mut() {
-        Some(timer) => timer.tick(time.delta()).finished(),
+        Some(timer) => timer.tick(time.delta()).is_finished(),
         None => false,
     };
     if !done {

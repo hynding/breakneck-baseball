@@ -19,7 +19,7 @@
 //! = `aim.y` +1. The Zone Pad's absolute cursor is emitted in zone-plane
 //! coordinates (world x / height), the same space as `batting::PciState`.
 
-use bevy::input::InputSystem;
+use bevy::input::InputSystems;
 use bevy::input::touch::Touch;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -491,7 +491,7 @@ impl Plugin for TouchPlugin {
                     // tap's frame reads stale `Touches` or resolves
                     // ownership nondeterministically (this writes the bit
                     // the resolver reads).
-                    .after(InputSystem)
+                    .after(InputSystems)
                     .before(resolve_touch_owner)
                     // (Skips forever once the one-way bit sets.)
                     .run_if(not(in_state(GameState::Playing)).and(not(touchscreen_seen))),
@@ -506,7 +506,7 @@ impl Plugin for TouchPlugin {
                     // After touch ingestion: the same-frame grant reads
                     // this frame's `Touches` (caught by the pipeline e2e —
                     // without the edge the grant was schedule-ambiguous).
-                    .after(InputSystem)
+                    .after(InputSystems)
                     .before(crate::game::input::gather_intents)
                     // The menu too: the settings screen displays whether
                     // the touch scheme owns P1's style, and it must agree
@@ -539,7 +539,7 @@ impl Plugin for TouchPlugin {
             .add_systems(
                 PreUpdate,
                 read_touch
-                    .after(InputSystem)
+                    .after(InputSystems)
                     .after(resolve_touch_owner)
                     .before(crate::game::input::gather_intents)
                     .run_if(in_state(GameState::Playing).and(touch_relevant)),

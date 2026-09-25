@@ -69,7 +69,7 @@ fn drive(
         // ideal contact point (contact_z ≈ 0.4) with full uppercut aim —
         // a deterministic home run.
         Phase::Pitch if score.batting_team() == Team::Home => {
-            if let Ok(t) = ball.get_single() {
+            if let Ok(t) = ball.single() {
                 intents.home.aim = Vec2::new(0.0, 1.0);
                 if t.translation.z <= 0.45 && t.translation.z >= 0.0 {
                     intents.home.action = true;

@@ -28,66 +28,85 @@ const FREE_BANNER_SECS: f32 = 1.6;
 const FOLLOW_UP_SECS: f32 = 1.0;
 
 /// The banner's pending follow-up line (a scoring play's new score) and
-/// the time until it takes over the pill.
+/// when (in `Time::elapsed_secs_f64` terms) it takes over the pill. A
+/// deadline, not a timer — see [`BannerFadeAt`].
 #[derive(Resource, Default)]
-pub(super) struct BannerFollowUp(Option<(String, Timer)>);
+pub(super) struct BannerFollowUp(Option<(String, f64)>);
 
 /// Swaps the pill's text to the follow-up line once its time comes; the
-/// pill's own timer still decides when the whole thing clears.
+/// pill's own deadline still decides when the whole thing clears.
 pub(super) fn swap_banner_follow_up(
     time: Res<Time>,
     mut follow_up: ResMut<BannerFollowUp>,
     mut text_q: Query<&mut Text, With<BannerText>>,
 ) {
-    let Some((line, timer)) = follow_up.0.as_mut() else {
-        return;
-    };
-    if !timer.tick(time.delta()).just_finished() {
+    let now = time.elapsed_secs_f64();
+    if !follow_up.0.as_ref().is_some_and(|(_, at)| now >= *at) {
         return;
     }
+    let Some((line, _)) = follow_up.0.take() else {
+        return;
+    };
     for mut text in &mut text_q {
         **text = line.clone();
     }
-    follow_up.0 = None;
 }
 
-/// How long the current banner stays visible before clearing.
-#[derive(Resource)]
-pub(super) struct BannerTimer(Timer);
+/// When (in `Time::elapsed_secs_f64` terms) the banner pill should clear;
+/// `None` while nothing is showing.
+///
+/// A deadline, deliberately not a ticking `Timer`: on wasm/WebGL2 (Bevy
+/// 0.16/0.17) a system that ticks a `ResMut` timer every frame while also
+/// holding the pill's queries kept the pill from ever rendering — ECS said
+/// visible, the screen stayed empty (bisected build-by-build 2026-08-25,
+/// TODO 29; the same system with an untouched body was harmless). The fade
+/// systems therefore only *read* until the deadline passes, and take their
+/// one mutable step when it does. [`BannerFollowUp`], [`StampFadeAt`] and
+/// [`SpeedFadeAt`] follow the same rule.
+#[derive(Resource, Default)]
+pub(super) struct BannerFadeAt(Option<f64>);
 
-impl Default for BannerTimer {
-    fn default() -> Self {
-        Self(Timer::from_seconds(FREE_BANNER_SECS, TimerMode::Once))
-    }
+/// When the contact stamp should clear; `None` while nothing is showing.
+#[derive(Resource, Default)]
+pub(super) struct StampFadeAt(Option<f64>);
+
+/// When the pitch-speed read-out should clear; `None` while nothing is
+/// showing.
+#[derive(Resource, Default)]
+pub(super) struct SpeedFadeAt(Option<f64>);
+
+/// Whether a deadline has come — `false` while nothing is showing.
+fn due(fade_at: Option<f64>, now: f64) -> bool {
+    fade_at.is_some_and(|at| now >= at)
 }
 
-/// The display time a read-out shown right now should get: for the length
-/// of the result pause when one is in progress — however long it runs,
-/// runners settling included; [`clear_read_outs_on_result_exit`] blanks it
-/// the frame the pause ends, so the text vanishes with the beat (under the
-/// curtain, for beats that dip), never before, never after — else `free`
-/// seconds.
-fn beat_secs(play: &Play, free: f32) -> f32 {
+/// The deadline a read-out shown right now should get: for the length of
+/// the result pause when one is in progress — however long it runs, runners
+/// settling included; [`clear_read_outs_on_result_exit`] blanks it the frame
+/// the pause ends, so the text vanishes with the beat (under the curtain,
+/// for beats that dip), never before, never after — else `free` seconds
+/// from `now`.
+fn fade_deadline(play: &Play, now: f64, free: f32) -> f64 {
     if play.phase == Phase::Result {
         HELD_FOR_THE_BEAT
     } else {
-        free
+        now + f64::from(free)
     }
 }
 
-/// "Until the beat ends": a timer length no beat reaches, cut short by
+/// "Until the beat ends": a deadline no clock reaches, cut short by
 /// [`clear_read_outs_on_result_exit`].
-const HELD_FOR_THE_BEAT: f32 = 1.0e6;
+const HELD_FOR_THE_BEAT: f64 = f64::INFINITY;
 
 /// Blanks every read-out raised for a result pause — banner, timing stamp,
-/// speed — the frame the pause ends, and finishes their timers.
+/// speed — the frame the pause ends, and drops their deadlines.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub(super) fn clear_read_outs_on_result_exit(
     play: Res<Play>,
     mut prev_phase: Local<Option<Phase>>,
-    mut banner_timer: ResMut<BannerTimer>,
-    mut stamp_timer: ResMut<ContactStampTimer>,
-    mut speed_timer: ResMut<PitchSpeedTimer>,
+    mut banner_fade: ResMut<BannerFadeAt>,
+    mut stamp_fade: ResMut<StampFadeAt>,
+    mut speed_fade: ResMut<SpeedFadeAt>,
     mut follow_up: ResMut<BannerFollowUp>,
     mut pill_q: Query<(&mut BackgroundColor, &mut BorderColor), With<BannerPill>>,
     mut banner_q: Query<&mut Text, (With<BannerText>, Without<ContactStampText>)>,
@@ -106,14 +125,13 @@ pub(super) fn clear_read_outs_on_result_exit(
     if !left_result {
         return;
     }
-    for timer in [&mut banner_timer.0, &mut stamp_timer.0, &mut speed_timer.0] {
-        let whole = timer.duration();
-        timer.set_elapsed(whole);
-    }
+    banner_fade.0 = None;
+    stamp_fade.0 = None;
+    speed_fade.0 = None;
     follow_up.0 = None;
     for (mut bg, mut border) in &mut pill_q {
         bg.0 = hidden_tint(bg.0);
-        border.0 = hidden_tint(border.0);
+        *border = BorderColor::all(hidden_tint(border.top));
     }
     for mut text in banner_q
         .iter_mut()
@@ -127,16 +145,6 @@ pub(super) fn clear_read_outs_on_result_exit(
 /// How long the contact stamp (Task B4) stays up before clearing — quick
 /// enough to read as a reaction to *this* swing, gone well before the next.
 const CONTACT_STAMP_SECS: f32 = 0.8;
-
-/// How long the current contact stamp stays visible before clearing.
-#[derive(Resource)]
-pub(super) struct ContactStampTimer(Timer);
-
-impl Default for ContactStampTimer {
-    fn default() -> Self {
-        Self(Timer::from_seconds(CONTACT_STAMP_SECS, TimerMode::Once))
-    }
-}
 
 /// The two cards anchored to the bottom-left (batter/"AT BAT") and top-right
 /// (pitcher/"PITCHING", with the pitch-selection legend) corners — visible
@@ -200,7 +208,7 @@ pub(super) fn spawn_duel_panels(commands: &mut Commands, theme: &Theme) {
                 GameplayEntity,
                 node,
                 BackgroundColor(ui.panel_bg),
-                BorderColor(ui.panel_border),
+                BorderColor::all(ui.panel_border),
                 BorderRadius::all(Val::Px(12.0)),
             ))
             .with_children(|card| {
@@ -257,10 +265,10 @@ pub(super) fn update_duel_panels(
         }
         if visible {
             bg.0 = ui.panel_bg;
-            border.0 = ui.panel_border;
+            *border = BorderColor::all(ui.panel_border);
         } else {
             bg.0 = hidden_tint(ui.panel_bg);
-            border.0 = hidden_tint(ui.panel_border);
+            *border = BorderColor::all(hidden_tint(ui.panel_border));
         }
     }
 
@@ -311,11 +319,13 @@ pub(super) fn update_duel_panels(
 }
 
 /// Paints the pill and its text for the latest banner event.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn show_banner(
-    mut events: EventReader<PlayBanner>,
+    mut events: MessageReader<PlayBanner>,
     theme: Res<Theme>,
     play: Res<Play>,
-    mut timer: ResMut<BannerTimer>,
+    time: Res<Time>,
+    mut fade_at: ResMut<BannerFadeAt>,
     mut follow_up: ResMut<BannerFollowUp>,
     mut pill_q: Query<(&mut BackgroundColor, &mut BorderColor), With<BannerPill>>,
     mut text_q: Query<(&mut Text, &mut TextColor), With<BannerText>>,
@@ -324,10 +334,11 @@ pub(super) fn show_banner(
     let Some(banner) = events.read().last() else {
         return;
     };
+    let now = time.elapsed_secs_f64();
     follow_up.0 = banner
         .follow_up
         .clone()
-        .map(|line| (line, Timer::from_seconds(FOLLOW_UP_SECS, TimerMode::Once)));
+        .map(|line| (line, now + f64::from(FOLLOW_UP_SECS)));
     let ui = &theme.ui;
     let tone_color = match banner.tone {
         BannerTone::Good => ui.tone_good,
@@ -341,29 +352,29 @@ pub(super) fn show_banner(
     }
     for (mut bg, mut border) in &mut pill_q {
         bg.0 = ui.panel_bg;
-        border.0 = ui.panel_border;
+        *border = BorderColor::all(ui.panel_border);
     }
-    timer.0 = Timer::from_seconds(beat_secs(&play, FREE_BANNER_SECS), TimerMode::Once);
+    fade_at.0 = Some(fade_deadline(&play, now, FREE_BANNER_SECS));
 }
 
-/// Clears the pill once its display time is up.
+/// Clears the pill once its deadline passes. Reads only until then (see
+/// [`BannerFadeAt`] for why this must not tick).
 pub(super) fn fade_banner(
     time: Res<Time>,
-    mut timer: ResMut<BannerTimer>,
+    mut fade_at: ResMut<BannerFadeAt>,
     mut pill_q: Query<(&mut BackgroundColor, &mut BorderColor), With<BannerPill>>,
     mut text_q: Query<(&mut Text, &mut TextColor), With<BannerText>>,
 ) {
-    if timer.0.finished() {
+    if !due(fade_at.0, time.elapsed_secs_f64()) {
         return;
     }
-    if timer.0.tick(time.delta()).just_finished() {
-        for (mut bg, mut border) in &mut pill_q {
-            bg.0 = hidden_tint(bg.0);
-            border.0 = hidden_tint(border.0);
-        }
-        for (mut text, _color) in &mut text_q {
-            **text = String::new();
-        }
+    fade_at.0 = None;
+    for (mut bg, mut border) in &mut pill_q {
+        bg.0 = hidden_tint(bg.0);
+        *border = BorderColor::all(hidden_tint(border.top));
+    }
+    for (mut text, _color) in &mut text_q {
+        **text = String::new();
     }
 }
 
@@ -375,10 +386,11 @@ pub(super) fn fade_banner(
 /// for a foul. A stamp raised during a result pause lives as long as the
 /// beat, one raised at contact for its own short window.
 pub(super) fn show_contact_stamp(
-    mut events: EventReader<ContactEvent>,
+    mut events: MessageReader<ContactEvent>,
     theme: Res<Theme>,
     play: Res<Play>,
-    mut timer: ResMut<ContactStampTimer>,
+    time: Res<Time>,
+    mut fade_at: ResMut<StampFadeAt>,
     mut text_q: Query<(&mut Text, &mut TextColor), With<ContactStampText>>,
 ) {
     let Some(ev) = events.read().last() else {
@@ -399,23 +411,17 @@ pub(super) fn show_contact_stamp(
         **text = label.to_string();
         text_color.0 = color;
     }
-    timer.0 = Timer::from_seconds(beat_secs(&play, CONTACT_STAMP_SECS), TimerMode::Once);
+    fade_at.0 = Some(fade_deadline(
+        &play,
+        time.elapsed_secs_f64(),
+        CONTACT_STAMP_SECS,
+    ));
 }
 
 /// How long the pitch-speed read-out stays up when raised outside a result
-/// pause (it never is today — every pitch beat is a pause — but the timer
-/// needs a bootstrap length).
+/// pause (it never is today — every pitch beat is a pause — but the
+/// deadline needs a length for the free case).
 const PITCH_SPEED_SECS: f32 = 1.0;
-
-/// How long the pitch-speed read-out stays visible before clearing.
-#[derive(Resource)]
-pub(super) struct PitchSpeedTimer(Timer);
-
-impl Default for PitchSpeedTimer {
-    fn default() -> Self {
-        Self(Timer::from_seconds(PITCH_SPEED_SECS, TimerMode::Once))
-    }
-}
 
 /// Shows the just-judged pitch's release speed ("97 MPH") by the plate for
 /// the length of its beat — the read-out the reference pins under every
@@ -427,8 +433,9 @@ pub(super) fn show_pitch_speed(
     play: Res<Play>,
     rules: Res<Ruleset>,
     theme: Res<Theme>,
+    time: Res<Time>,
     mut prev_phase: Local<Option<Phase>>,
-    mut timer: ResMut<PitchSpeedTimer>,
+    mut fade_at: ResMut<SpeedFadeAt>,
     mut text_q: Query<(&mut Text, &mut TextColor), With<PitchSpeedText>>,
 ) {
     let entered_result = play.phase == Phase::Result && *prev_phase != Some(Phase::Result);
@@ -454,37 +461,41 @@ pub(super) fn show_pitch_speed(
         **text = format!("{} MPH", mph.round() as i32);
         color.0 = theme.ui.text_primary;
     }
-    timer.0 = Timer::from_seconds(beat_secs(&play, PITCH_SPEED_SECS), TimerMode::Once);
+    fade_at.0 = Some(fade_deadline(
+        &play,
+        time.elapsed_secs_f64(),
+        PITCH_SPEED_SECS,
+    ));
 }
 
-/// Blanks the pitch-speed read-out once its display time is up.
+/// Blanks the pitch-speed read-out once its deadline passes (deadline-
+/// driven, never ticking — see [`BannerFadeAt`]).
 pub(super) fn fade_pitch_speed(
     time: Res<Time>,
-    mut timer: ResMut<PitchSpeedTimer>,
+    mut fade_at: ResMut<SpeedFadeAt>,
     mut text_q: Query<&mut Text, With<PitchSpeedText>>,
 ) {
-    if timer.0.finished() {
+    if !due(fade_at.0, time.elapsed_secs_f64()) {
         return;
     }
-    if timer.0.tick(time.delta()).just_finished() {
-        for mut text in &mut text_q {
-            **text = String::new();
-        }
+    fade_at.0 = None;
+    for mut text in &mut text_q {
+        **text = String::new();
     }
 }
 
-/// Blanks the contact stamp once its display time is up.
+/// Blanks the contact stamp once its deadline passes (deadline-driven,
+/// never ticking — see [`BannerFadeAt`]).
 pub(super) fn fade_contact_stamp(
     time: Res<Time>,
-    mut timer: ResMut<ContactStampTimer>,
+    mut fade_at: ResMut<StampFadeAt>,
     mut text_q: Query<&mut Text, With<ContactStampText>>,
 ) {
-    if timer.0.finished() {
+    if !due(fade_at.0, time.elapsed_secs_f64()) {
         return;
     }
-    if timer.0.tick(time.delta()).just_finished() {
-        for mut text in &mut text_q {
-            **text = String::new();
-        }
+    fade_at.0 = None;
+    for mut text in &mut text_q {
+        **text = String::new();
     }
 }

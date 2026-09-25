@@ -52,7 +52,7 @@ pub struct CoachConfig {
 
 /// One finding, as a Bevy event, for anything that wants to react live
 /// (the debug tab feed, the autoplay JSON logger).
-#[derive(Event, Clone, Debug)]
+#[derive(Message, Clone, Debug)]
 pub struct CoachFindingEvent(pub CoachFinding);
 
 /// Accumulated findings: counts by check/severity plus a ring buffer of the
@@ -162,8 +162,8 @@ struct WorldFacts<'w> {
 /// The play-by-play reports the per-frame tracker consumes.
 #[derive(bevy::ecs::system::SystemParam)]
 struct PlayReports<'w, 's> {
-    in_play: EventReader<'w, 's, BallInPlayEvent>,
-    live: EventReader<'w, 's, LiveBallEvent>,
+    in_play: MessageReader<'w, 's, BallInPlayEvent>,
+    live: MessageReader<'w, 's, LiveBallEvent>,
 }
 
 /// The rigs and the ball, as the sampler sees them.
@@ -220,7 +220,7 @@ fn track_frame_facts(
             state.bounced = true;
         }
     }
-    let ball = rigs.ball.get_single().ok();
+    let ball = rigs.ball.single().ok();
     if facts.play.phase == Phase::Pitch {
         if let Some((tf, _, _)) = ball {
             // Mirror flow's plate-crossing record (same z-gate).
@@ -229,7 +229,7 @@ fn track_frame_facts(
             }
         }
     }
-    if let (Some((tf, vel, in_flight)), Ok(catcher_tf)) = (ball, rigs.catcher.get_single()) {
+    if let (Some((tf, vel, in_flight)), Ok(catcher_tf)) = (ball, rigs.catcher.single()) {
         // First arrival at the glove line, exactly as `catcher_receives`
         // gates its catch: this is what exempts dirt balls and sailed
         // pitches from the mitt expectation.
@@ -304,7 +304,7 @@ fn build_snapshot(
         .filter_map(|&(base, entity)| Some((base, index_of(entity)?)))
         .collect();
 
-    let ball = rigs.ball.get_single().ok();
+    let ball = rigs.ball.single().ok();
     let ball_facts = ball.map(|(tf, vel, in_flight)| BallFacts {
         pos: tf.translation,
         vel: vel.linvel,
@@ -333,7 +333,7 @@ fn build_snapshot(
         // TODO 101), not the one dial that used to be every pause.
         result_secs: facts.play.result_pause_secs(),
         auto_throw_delay_secs: facts.ruleset.pace.auto_throw_delay_secs,
-        catcher_pos: rigs.catcher.get_single().ok().map(|tf| tf.translation),
+        catcher_pos: rigs.catcher.single().ok().map(|tf| tf.translation),
         ball: ball_facts,
         contact: state.contact.clone(),
         chaser,
@@ -369,7 +369,7 @@ fn build_snapshot(
 struct CoachOutput<'w> {
     config: Res<'w, CoachConfig>,
     report: ResMut<'w, CoachReport>,
-    findings: EventWriter<'w, CoachFindingEvent>,
+    findings: MessageWriter<'w, CoachFindingEvent>,
 }
 
 /// The one observer system: track this frame's facts, then — at the sample
@@ -396,7 +396,7 @@ fn observe(
             continue;
         }
         out.report.record(finding.clone());
-        out.findings.send(CoachFindingEvent(finding));
+        out.findings.write(CoachFindingEvent(finding));
     }
 }
 
@@ -407,7 +407,7 @@ impl Plugin for CoachPlugin {
         app.init_resource::<CoachConfig>()
             .init_resource::<CoachReport>()
             .init_resource::<CoachState>()
-            .add_event::<CoachFindingEvent>()
+            .add_message::<CoachFindingEvent>()
             .add_systems(crate::game::game_start(), reset_coach)
             .add_systems(
                 Update,

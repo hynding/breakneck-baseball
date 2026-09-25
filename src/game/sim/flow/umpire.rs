@@ -30,7 +30,7 @@ pub(super) struct Umpire<'a, 'w> {
     score: &'a mut ScoreBoard,
     bases: &'a mut Bases,
     rules: &'a Ruleset,
-    banner: &'a mut EventWriter<'w, PlayBanner>,
+    banner: &'a mut MessageWriter<'w, PlayBanner>,
 }
 
 impl<'a, 'w> Umpire<'a, 'w> {
@@ -38,7 +38,7 @@ impl<'a, 'w> Umpire<'a, 'w> {
         score: &'a mut ScoreBoard,
         bases: &'a mut Bases,
         rules: &'a Ruleset,
-        banner: &'a mut EventWriter<'w, PlayBanner>,
+        banner: &'a mut MessageWriter<'w, PlayBanner>,
     ) -> Self {
         Self {
             score,
@@ -52,7 +52,7 @@ impl<'a, 'w> Umpire<'a, 'w> {
     /// the rule results below — a call is never announced without the
     /// scoreboard change that earned it.
     fn announce(&mut self, text: impl Into<String>, tone: BannerTone) {
-        self.banner.send(PlayBanner::new(text, tone));
+        self.banner.write(PlayBanner::new(text, tone));
     }
 
     /// The out count to show once an out has been applied over `before`
@@ -72,7 +72,7 @@ impl<'a, 'w> Umpire<'a, 'w> {
     fn announce_out(&mut self, text: impl Into<String>, tone: BannerTone, before: u32) {
         let line = format!("OUT {}", self.outs_after(before));
         self.banner
-            .send(PlayBanner::new(text, tone).with_follow_up(line));
+            .write(PlayBanner::new(text, tone).with_follow_up(line));
     }
 
     /// Announce a call that scored: the banner swaps to the new score
@@ -86,7 +86,7 @@ impl<'a, 'w> Umpire<'a, 'w> {
             self.score.home_runs
         );
         self.banner
-            .send(PlayBanner::new(text, tone).with_follow_up(line));
+            .write(PlayBanner::new(text, tone).with_follow_up(line));
     }
 
     /// Whether `base` is occupied. The umpire holds the only borrow of

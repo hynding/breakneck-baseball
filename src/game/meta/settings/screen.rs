@@ -205,7 +205,7 @@ pub(super) fn paint_settings_screen(
         ),
     >,
 ) {
-    let Ok((mut title_text, mut title_color)) = title.get_single_mut() else {
+    let Ok((mut title_text, mut title_color)) = title.single_mut() else {
         return;
     };
     // Everything this system writes derives from exactly these five
@@ -229,7 +229,7 @@ pub(super) fn paint_settings_screen(
         }
         for (mut bg, mut border) in &mut cards {
             bg.set_if_neq(BackgroundColor(hidden_tint(ui.panel_bg)));
-            border.set_if_neq(BorderColor(hidden_tint(ui.panel_border)));
+            border.set_if_neq(BorderColor::all(hidden_tint(ui.panel_border)));
         }
         // Compare-before-write: an unconditional write would dirty every
         // Text each frame (MainMenu is the boot state), re-shaping ~20
@@ -251,7 +251,7 @@ pub(super) fn paint_settings_screen(
         // layering over the 3D field; here the menu sits directly behind, so
         // the card must be fully opaque or its text collides with the menu's.
         bg.set_if_neq(BackgroundColor(ui.panel_bg.with_alpha(1.0)));
-        border.set_if_neq(BorderColor(ui.panel_border));
+        border.set_if_neq(BorderColor::all(ui.panel_border));
     }
     set_text_if_neq(&mut title_text, "SETTINGS");
     set_color_if_neq(&mut title_color, ui.accent);

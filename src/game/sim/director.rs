@@ -20,8 +20,8 @@
 use bevy::app::MainScheduleOrder;
 // Anonymous: our script `Condition` enum shadows the bevy trait's name,
 // but the trait must stay in scope for `.and(...)` on run conditions.
-use bevy::ecs::schedule::Condition as _;
 use bevy::ecs::schedule::ScheduleLabel;
+use bevy::ecs::schedule::SystemCondition as _;
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::Velocity;
 use serde::{Deserialize, Serialize};
@@ -380,7 +380,7 @@ fn direct(
     let dt_ms = (play.phase == Phase::Pitch)
         .then(|| {
             ball_q
-                .get_single()
+                .single()
                 .ok()
                 .map(|(tf, vel)| swing_dt_ms(tf.translation.z, vel.linvel.z))
         })

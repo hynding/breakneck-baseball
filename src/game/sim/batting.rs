@@ -292,7 +292,7 @@ pub fn adapt_swings(
         // catches it) — the spec's "held past the FoulTip window = a swinging
         // whiff", with no new flow logic.
         BattingStyle::SwingMeter => {
-            let ball_past = ball_q.get_single().is_ok_and(|(tf, vel)| {
+            let ball_past = ball_q.single().is_ok_and(|(tf, vel)| {
                 tf.translation.z
                     < crate::game::flow::late_swing_z(vel.linvel.z, rules.batting.foul_ms)
             });

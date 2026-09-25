@@ -279,7 +279,7 @@ impl Plugin for GamePlugin {
             })
             .init_resource::<Rosters>()
             .init_resource::<scenario::PitchOverride>()
-            .add_event::<scenario::ScenarioAppliedEvent>()
+            .add_message::<scenario::ScenarioAppliedEvent>()
             // Sub-plugins (input/menu first so their resources exist for the
             // rest); split across two tuples — `add_plugins` tops out at 15.
             .add_plugins((
@@ -375,7 +375,7 @@ fn cleanup_gameplay(mut commands: Commands, query: Query<Entity, With<GameplayEn
 /// change to teardown semantics has a single home.
 pub(crate) fn despawn_all<T: Component>(commands: &mut Commands, query: &Query<Entity, With<T>>) {
     for entity in query {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 }
 

@@ -156,7 +156,7 @@ mod drive {
     }
 
     /// Streams every finding as one JSON line the moment it fires.
-    fn log_findings(mut events: EventReader<CoachFindingEvent>) {
+    fn log_findings(mut events: MessageReader<CoachFindingEvent>) {
         for CoachFindingEvent(f) in events.read() {
             emit(&format!("COACH_FINDING {}", finding_json(f)));
         }
@@ -215,13 +215,13 @@ mod drive {
 
     /// The game ended: dump the final report, announce it on the console,
     /// and exit if this is a one-shot run.
-    fn write_report(report: Res<CoachReport>, mut exit: EventWriter<AppExit>) {
+    fn write_report(report: Res<CoachReport>, mut exit: MessageWriter<AppExit>) {
         let cfg = config();
         let doc = report_doc(&report);
         emit(&format!("COACH_REPORT {doc}"));
         persist(&doc, &cfg);
         if cfg.once {
-            exit.send(AppExit::Success);
+            exit.write(AppExit::Success);
         }
     }
 

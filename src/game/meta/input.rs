@@ -427,9 +427,9 @@ fn keyboard_intent(keyboard: &ButtonInput<KeyCode>, scheme: KeyScheme) -> TeamIn
 /// stuck on keyboard — with a banner on each edge so the player knows what
 /// their team is listening to. CPU slots are never touched.
 fn handle_gamepad_hotplug(
-    mut events: EventReader<GamepadConnectionEvent>,
+    mut events: MessageReader<GamepadConnectionEvent>,
     mut controllers: ResMut<Controllers>,
-    mut banner: EventWriter<crate::game::flow::PlayBanner>,
+    mut banner: MessageWriter<crate::game::flow::PlayBanner>,
 ) {
     for event in events.read() {
         if event.disconnected() {
@@ -441,7 +441,7 @@ fn handle_gamepad_hotplug(
                         Team::Away => &mut controllers.away,
                     };
                     *slot = InputSource::Keyboard(scheme);
-                    banner.send(crate::game::flow::PlayBanner::new(
+                    banner.write(crate::game::flow::PlayBanner::new(
                         format!("PAD LOST - {label} ON KEYBOARD"),
                         crate::game::flow::BannerTone::Info,
                     ));
@@ -455,7 +455,7 @@ fn handle_gamepad_hotplug(
                         Team::Away => &mut controllers.away,
                     };
                     *slot = InputSource::Gamepad(event.gamepad);
-                    banner.send(crate::game::flow::PlayBanner::new(
+                    banner.write(crate::game::flow::PlayBanner::new(
                         format!("PAD CONNECTED - {label}"),
                         crate::game::flow::BannerTone::Info,
                     ));

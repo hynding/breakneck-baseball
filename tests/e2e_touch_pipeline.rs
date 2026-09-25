@@ -1,5 +1,5 @@
 //! The full touch input pipeline, end to end in the REAL schedule: raw
-//! `TouchInput` window events → Bevy's `InputSystem` → `detect`/`resolve`
+//! `TouchInput` window events → Bevy's `InputSystems` → `detect`/`resolve`
 //! ownership → `read_touch` → `gather_intents` → `Intents`.
 //!
 //! The translator's unit tests hand-wire a minimal app (their own ordering,
@@ -7,7 +7,7 @@
 //! that a Director-driven slot is NOT touch-owned — so neither would catch
 //! a schedule-level regression (a reordered PreUpdate set, a broken
 //! `resolve_touch_owner`-before-`gather_intents` edge). This test would:
-//! raw window events survive to `InputSystem`, so the DriveGame injection
+//! raw window events survive to `InputSystems`, so the DriveGame injection
 //! rule (which exists because the input plugin's PreUpdate clear wipes
 //! *presses* made outside it) doesn't apply to them.
 
@@ -31,10 +31,7 @@ fn touch_drag_reaches_intents_through_the_real_schedule() {
         .world_mut()
         .spawn((
             Window {
-                // Typed: bare float literals here fall back to f32 through
-                // a bound that is being phased out (rust-lang#154024) — the
-                // workspace's only warning, and a future hard error.
-                resolution: (1280.0_f32, 720.0_f32).into(),
+                resolution: bevy::window::WindowResolution::new(1280, 720),
                 ..Default::default()
             },
             PrimaryWindow,
@@ -43,7 +40,7 @@ fn touch_drag_reaches_intents_through_the_real_schedule() {
     start_game(&mut app, KeyCode::Digit1);
 
     let send = |app: &mut App, phase: TouchPhase, pos: Vec2| {
-        app.world_mut().send_event(TouchInput {
+        app.world_mut().write_message(TouchInput {
             phase,
             position: pos,
             window,

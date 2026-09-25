@@ -55,7 +55,7 @@ fn drive(
             }
         }
         Phase::Pitch => {
-            if let Ok(t) = ball.get_single() {
+            if let Ok(t) = ball.single() {
                 if (5.0..=6.0).contains(&t.translation.z) {
                     intents.get_mut(batting).action = true;
                 }
@@ -100,6 +100,7 @@ fn strike_out(app: &mut App) {
         app.world_mut()
             .query_filtered::<&Playing, With<PlateUmpire>>()
             .single(app.world())
+            .unwrap()
             .clip
             == AnimClip::UmpPunchOut
     });
@@ -114,6 +115,7 @@ fn strike_out(app: &mut App) {
         app.world_mut()
             .query_filtered::<&Text, With<BannerText>>()
             .single(app.world())
+            .unwrap()
             .0
             .clone()
     };
@@ -122,6 +124,7 @@ fn strike_out(app: &mut App) {
         app.world_mut()
             .query_filtered::<&Text, With<BannerText>>()
             .single(app.world())
+            .unwrap()
             .0
             .starts_with("OUT ")
     });
@@ -135,6 +138,7 @@ fn strike_out(app: &mut App) {
         app.world_mut()
             .query_filtered::<&Transform, With<Batter>>()
             .single(app.world())
+            .unwrap()
             .translation
             .x
     };
@@ -154,6 +158,7 @@ fn strike_out(app: &mut App) {
         .world_mut()
         .query_filtered::<&Node, With<CurtainRoot>>()
         .single(app.world())
+        .unwrap()
         .left
     {
         Val::Percent(p) => p,
@@ -168,6 +173,7 @@ fn strike_out(app: &mut App) {
             .world_mut()
             .query_filtered::<&Text, With<WipeLabel>>()
             .single(app.world())
+            .unwrap()
             .0
             .clone();
         if !label.is_empty() {

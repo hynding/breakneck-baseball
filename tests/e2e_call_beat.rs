@@ -49,7 +49,7 @@ fn drive(
             intents.get_mut(fielding).action = true;
         }
         Phase::Pitch => {
-            if let Ok(t) = ball.get_single() {
+            if let Ok(t) = ball.single() {
                 if (5.0..=6.0).contains(&t.translation.z) {
                     intents.get_mut(batting).action = true;
                 }
@@ -63,6 +63,7 @@ fn text_of<M: Component>(app: &mut App) -> String {
     app.world_mut()
         .query_filtered::<&Text, With<M>>()
         .single(app.world())
+        .unwrap()
         .0
         .clone()
 }
@@ -71,6 +72,7 @@ fn curtain_alpha(app: &mut App) -> f32 {
     app.world_mut()
         .query_filtered::<&BackgroundColor, With<CurtainRoot>>()
         .single(app.world())
+        .unwrap()
         .0
         .alpha()
 }

@@ -115,13 +115,13 @@ fn test_app() -> App {
         .add_plugins(StatesPlugin)
         .init_state::<GameState>()
         .init_resource::<Assets<AudioSource>>()
-        .add_event::<ContactEvent>()
-        .add_event::<BallInPlayEvent>()
-        .add_event::<WallBangEvent>()
-        .add_event::<LiveBallEvent>()
-        .add_event::<PitchCaughtEvent>()
-        .add_event::<PitchEvent>()
-        .add_event::<PlayBanner>()
+        .add_message::<ContactEvent>()
+        .add_message::<BallInPlayEvent>()
+        .add_message::<WallBangEvent>()
+        .add_message::<LiveBallEvent>()
+        .add_message::<PitchCaughtEvent>()
+        .add_message::<PitchEvent>()
+        .add_message::<PlayBanner>()
         .add_plugins(SoundPlugin);
     // `bevy_state`'s `StatesPlugin` runs `StateTransition` *before*
     // `Startup` on the very first `update()` (it's spliced into both
@@ -139,20 +139,18 @@ fn test_app() -> App {
     app
 }
 
-fn audio_players(app: &App) -> Vec<&AudioPlayer> {
-    app.world()
-        .iter_entities()
-        .filter_map(|e| e.get::<AudioPlayer>())
-        .collect()
+fn audio_players(app: &mut App) -> Vec<&AudioPlayer> {
+    let world = app.world_mut();
+    world.query::<&AudioPlayer>().iter(world).collect()
 }
 
 #[test]
 fn game_start_spawns_the_looping_crowd_bed() {
-    let app = test_app();
-    let loops: Vec<_> = app
-        .world()
-        .iter_entities()
-        .filter_map(|e| e.get::<PlaybackSettings>())
+    let mut app = test_app();
+    let world = app.world_mut();
+    let loops: Vec<_> = world
+        .query::<&PlaybackSettings>()
+        .iter(world)
         .filter(|s| matches!(s.mode, bevy::audio::PlaybackMode::Loop))
         .collect();
     assert_eq!(
@@ -160,34 +158,38 @@ fn game_start_spawns_the_looping_crowd_bed() {
         1,
         "exactly one looping crowd bed at game start"
     );
-    assert!(!audio_players(&app).is_empty());
+    assert!(!audio_players(&mut app).is_empty());
 }
 
 #[test]
 fn perfect_contact_plays_crack_and_roar() {
     let mut app = test_app();
-    let before = audio_players(&app).len();
-    app.world_mut().send_event(ContactEvent {
+    let before = audio_players(&mut app).len();
+    app.world_mut().write_message(ContactEvent {
         quality: ContactQuality::Perfect,
         batting_team: Team::Home,
         dt_ms: 0.0,
     });
     app.update();
     // The looping bed plus two new one-shots (crack + roar).
-    assert_eq!(audio_players(&app).len(), before + 2);
+    assert_eq!(audio_players(&mut app).len(), before + 2);
 }
 
 #[test]
 fn deep_fly_plays_the_roar_without_contact_event() {
     let mut app = test_app();
-    let before = audio_players(&app).len();
-    app.world_mut().send_event(BallInPlayEvent {
+    let before = audio_players(&mut app).len();
+    app.world_mut().write_message(BallInPlayEvent {
         kind: ContactKind::Live { fair: true },
         landing: Vec3::new(0.0, 0.0, 90.0),
         contact_class: ContactClass::DeepFly,
     });
     app.update();
-    assert_eq!(audio_players(&app).len(), before + 1, "roar only, no crack");
+    assert_eq!(
+        audio_players(&mut app).len(),
+        before + 1,
+        "roar only, no crack"
+    );
 }
 
 /// A ball over the fence peaks the crowd: exactly one roar (the peak
@@ -197,15 +199,15 @@ fn deep_fly_plays_the_roar_without_contact_event() {
 #[test]
 fn home_run_plays_a_single_crowd_peak_roar() {
     let mut app = test_app();
-    let before = audio_players(&app).len();
-    app.world_mut().send_event(BallInPlayEvent {
+    let before = audio_players(&mut app).len();
+    app.world_mut().write_message(BallInPlayEvent {
         kind: ContactKind::HomeRun,
         landing: Vec3::new(0.0, 0.0, 120.0),
         contact_class: ContactClass::DeepFly,
     });
     app.update();
     assert_eq!(
-        audio_players(&app).len(),
+        audio_players(&mut app).len(),
         before + 1,
         "a home run plays exactly one (peak) roar"
     );
@@ -214,14 +216,18 @@ fn home_run_plays_a_single_crowd_peak_roar() {
 #[test]
 fn foul_tip_plays_the_dull_crack_only() {
     let mut app = test_app();
-    let before = audio_players(&app).len();
-    app.world_mut().send_event(ContactEvent {
+    let before = audio_players(&mut app).len();
+    app.world_mut().write_message(ContactEvent {
         quality: ContactQuality::FoulTip,
         batting_team: Team::Home,
         dt_ms: 95.0,
     });
     app.update();
-    assert_eq!(audio_players(&app).len(), before + 1, "crack only, no roar");
+    assert_eq!(
+        audio_players(&mut app).len(),
+        before + 1,
+        "crack only, no roar"
+    );
 }
 
 #[test]
@@ -230,15 +236,15 @@ fn swinging_strikeout_groans_but_a_whiff_alone_does_not() {
 
     // A whiff with no strikeout banner (e.g. strike one swinging): the
     // bat cuts air (one whoosh, TODO 68) but nobody groans.
-    let before = audio_players(&app).len();
-    app.world_mut().send_event(ContactEvent {
+    let before = audio_players(&mut app).len();
+    app.world_mut().write_message(ContactEvent {
         quality: ContactQuality::Whiff,
         batting_team: Team::Home,
         dt_ms: 400.0,
     });
     app.update();
     assert_eq!(
-        audio_players(&app).len(),
+        audio_players(&mut app).len(),
         before + 1,
         "a bare whiff is one bat whoosh, no groan"
     );
@@ -246,17 +252,17 @@ fn swinging_strikeout_groans_but_a_whiff_alone_does_not() {
     // The same whiff, but this time it's the frame the K is announced:
     // the bat whoosh plus exactly one (full) groan — the Bad-tone soft
     // reaction defers to it.
-    let before = audio_players(&app).len();
-    app.world_mut().send_event(ContactEvent {
+    let before = audio_players(&mut app).len();
+    app.world_mut().write_message(ContactEvent {
         quality: ContactQuality::Whiff,
         batting_team: Team::Home,
         dt_ms: 400.0,
     });
     app.world_mut()
-        .send_event(PlayBanner::new(STRIKEOUT_BANNER, BannerTone::Bad));
+        .write_message(PlayBanner::new(STRIKEOUT_BANNER, BannerTone::Bad));
     app.update();
     assert_eq!(
-        audio_players(&app).len(),
+        audio_players(&mut app).len(),
         before + 2,
         "a swinging strikeout is whoosh + one groan"
     );
@@ -267,17 +273,21 @@ fn swinging_strikeout_groans_but_a_whiff_alone_does_not() {
 #[test]
 fn thrown_and_settled_voices_the_routine_out() {
     let mut app = test_app();
-    let before = audio_players(&app).len();
-    app.world_mut().send_event(LiveBallEvent::Thrown {
+    let before = audio_players(&mut app).len();
+    app.world_mut().write_message(LiveBallEvent::Thrown {
         pos: Vec3::ZERO,
         base: 1,
         race_time: 1.0,
     });
     app.update();
-    assert_eq!(audio_players(&app).len(), before + 1, "throw whoosh");
-    app.world_mut().send_event(LiveBallEvent::Settled);
+    assert_eq!(audio_players(&mut app).len(), before + 1, "throw whoosh");
+    app.world_mut().write_message(LiveBallEvent::Settled);
     app.update();
-    assert_eq!(audio_players(&app).len(), before + 2, "glove at the bag");
+    assert_eq!(
+        audio_players(&mut app).len(),
+        before + 2,
+        "glove at the bag"
+    );
 }
 
 /// Good-tone banners (STOLEN BASE!, WALK, ...) get the bright crowd pop;
@@ -286,28 +296,28 @@ fn thrown_and_settled_voices_the_routine_out() {
 #[test]
 fn good_and_bad_banners_each_have_a_voice() {
     let mut app = test_app();
-    let before = audio_players(&app).len();
+    let before = audio_players(&mut app).len();
     app.world_mut()
-        .send_event(PlayBanner::new("STOLEN BASE!", BannerTone::Good));
+        .write_message(PlayBanner::new("STOLEN BASE!", BannerTone::Good));
     app.update();
-    assert_eq!(audio_players(&app).len(), before + 1, "good-tone pop");
+    assert_eq!(audio_players(&mut app).len(), before + 1, "good-tone pop");
 
-    let before = audio_players(&app).len();
+    let before = audio_players(&mut app).len();
     app.world_mut()
-        .send_event(PlayBanner::new("CAUGHT STEALING", BannerTone::Bad));
+        .write_message(PlayBanner::new("CAUGHT STEALING", BannerTone::Bad));
     app.update();
-    assert_eq!(audio_players(&app).len(), before + 1, "bad-tone ohh");
+    assert_eq!(audio_players(&mut app).len(), before + 1, "bad-tone ohh");
 }
 
 /// The pitch release hisses once per pitch (TODO 68).
 #[test]
 fn pitch_release_hisses() {
     let mut app = test_app();
-    let before = audio_players(&app).len();
-    app.world_mut().send_event(PitchEvent {
+    let before = audio_players(&mut app).len();
+    app.world_mut().write_message(PitchEvent {
         velocity: Vec3::new(0.0, 0.0, -38.0),
         spin: Vec3::ZERO,
     });
     app.update();
-    assert_eq!(audio_players(&app).len(), before + 1);
+    assert_eq!(audio_players(&mut app).len(), before + 1);
 }

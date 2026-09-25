@@ -56,7 +56,7 @@ pub struct PitchOverride(pub Option<PitchKind>);
 /// future consumer that wants to react to a scenario jump specifically
 /// (e.g. a debug-panel toast, or an e2e test asserting a jump happened)
 /// rather than to the resource changes it causes.
-#[derive(Event)]
+#[derive(Message)]
 pub struct ScenarioAppliedEvent {
     pub name: &'static str,
 }
@@ -137,7 +137,7 @@ pub fn apply_to_world(world: &mut World, s: &Scenario) -> Result<(), &'static st
         play.reset_for_scenario(world.resource::<Bases>(), world.resource::<Ruleset>());
     });
     world.resource_mut::<PitchOverride>().0 = s.next_cpu_pitch;
-    world.send_event(ScenarioAppliedEvent { name: s.name });
+    world.write_message(ScenarioAppliedEvent { name: s.name });
     Ok(())
 }
 

@@ -4,7 +4,7 @@ use super::*;
 use crate::game::GameMode;
 
 fn pad(index: u32) -> Entity {
-    Entity::from_raw(index)
+    Entity::from_raw_u32(index).unwrap()
 }
 
 #[test]

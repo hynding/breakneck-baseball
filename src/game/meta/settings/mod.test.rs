@@ -138,13 +138,13 @@ fn plugin_loads_applies_and_persists() {
     app.update();
     // Loaded default volume applied to GlobalVolume.
     let gv = app.world().resource::<bevy::audio::GlobalVolume>();
-    assert!((gv.volume.get() - 0.7).abs() < 1e-5);
+    assert!((gv.volume.to_linear() - 0.7).abs() < 1e-5);
 
     // Mutate → persisted + volume follows.
     app.world_mut().resource_mut::<Settings>().volume = 0.25;
     app.update();
     let gv = app.world().resource::<bevy::audio::GlobalVolume>();
-    assert!((gv.volume.get() - 0.25).abs() < 1e-5);
+    assert!((gv.volume.to_linear() - 0.25).abs() < 1e-5);
     let on_disk: Settings = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert!((on_disk.volume - 0.25).abs() < 1e-5);
 

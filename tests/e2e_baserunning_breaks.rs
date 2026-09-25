@@ -102,7 +102,7 @@ fn top_a_grounder(
             intent.action = true;
         }
         Phase::Pitch => {
-            if let Ok(t) = ball.get_single() {
+            if let Ok(t) = ball.single() {
                 let z = t.translation.z;
                 if (-0.1..=0.05).contains(&z) {
                     // A low ball up the middle that gets down and stays live

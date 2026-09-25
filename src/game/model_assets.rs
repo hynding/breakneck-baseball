@@ -403,7 +403,7 @@ fn wire_rigs(
                 }
             }
             if let Ok(children) = children_q.get(e) {
-                stack.extend(children.iter().copied());
+                stack.extend(children.iter());
             }
         }
         let (

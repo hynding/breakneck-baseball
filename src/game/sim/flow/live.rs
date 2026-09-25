@@ -39,7 +39,7 @@ pub(super) fn in_play(mut play: ResMut<Play>, time: Res<Time>, rules: Res<Rulese
         return;
     }
     play.timer.tick(time.delta());
-    if play.resolved && play.live.pending_call.is_none() && play.timer.finished() {
+    if play.resolved && play.live.pending_call.is_none() && play.timer.is_finished() {
         end_pitch(&mut play, &rules.pace, ResultBeat::InPlay);
     }
 }
@@ -50,7 +50,7 @@ pub(super) fn in_play(mut play: ResMut<Play>, time: Res<Time>, rules: Res<Rulese
 #[allow(clippy::too_many_arguments)]
 pub(super) fn resolve_live_play(
     time: Res<Time>,
-    mut events: EventReader<LiveBallEvent>,
+    mut events: MessageReader<LiveBallEvent>,
     mut play: ResMut<Play>,
     rules_res: Res<Ruleset>,
     field: Res<FieldSpec>,
@@ -58,7 +58,7 @@ pub(super) fn resolve_live_play(
     mut score: ResMut<ScoreBoard>,
     mut bases: ResMut<Bases>,
     mut order: ResMut<BattingOrder>,
-    mut banner: EventWriter<PlayBanner>,
+    mut banner: MessageWriter<PlayBanner>,
     ball_q: Query<&Transform, With<Baseball>>,
 ) {
     if play.phase != Phase::InPlay {
@@ -70,7 +70,7 @@ pub(super) fn resolve_live_play(
     // with the flight cap as a backstop — bang-bang plays look bang-bang.
     if play.resolved {
         let arrived = events.read().any(|ev| matches!(ev, LiveBallEvent::Settled));
-        if play.live.pending_call.is_some() && (arrived || play.timer.finished()) {
+        if play.live.pending_call.is_some() && (arrived || play.timer.is_finished()) {
             let outcome = play.live.pending_call.take().unwrap();
             let batter = score.batting_team();
             Umpire::new(&mut score, &mut bases, &rules_res, &mut banner)
@@ -125,11 +125,8 @@ pub(super) fn resolve_live_play(
     }
     // Play clock expired with the ball still loose: call it from where the
     // ball is right now.
-    if resolution.is_none() && play.timer.finished() {
-        let pos = ball_q
-            .get_single()
-            .map(|t| t.translation)
-            .unwrap_or(Vec3::ZERO);
+    if resolution.is_none() && play.timer.is_finished() {
+        let pos = ball_q.single().map(|t| t.translation).unwrap_or(Vec3::ZERO);
         let t = time.elapsed_secs() - play.live.contact_at;
         resolution = Some(if rules::is_fair(pos, &field) {
             Some(rules::resolve_gathered(pos, t, &field, &rules_res))
@@ -165,13 +162,13 @@ fn beat_for(outcome: Outcome) -> ResultBeat {
 /// plays (a rare home run clipping the top of the wall) stay silent — the
 /// call was already made.
 pub(super) fn announce_wall_bang(
-    mut bangs: EventReader<WallBangEvent>,
+    mut bangs: MessageReader<WallBangEvent>,
     mut play: ResMut<Play>,
-    mut banner: EventWriter<PlayBanner>,
+    mut banner: MessageWriter<PlayBanner>,
 ) {
     let banged = bangs.read().next().is_some();
     if banged && play.phase == Phase::InPlay && !play.resolved && !play.live.wall_called {
         play.live.wall_called = true;
-        banner.send(PlayBanner::new("OFF THE WALL!", BannerTone::Good));
+        banner.write(PlayBanner::new("OFF THE WALL!", BannerTone::Good));
     }
 }

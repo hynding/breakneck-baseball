@@ -48,7 +48,7 @@ pub(super) fn spawn_walkup_card(mut commands: Commands, theme: Res<Theme>) {
                 ..default()
             },
             BackgroundColor(hidden_tint(ui.panel_bg)),
-            BorderColor(hidden_tint(ui.panel_border)),
+            BorderColor::all(hidden_tint(ui.panel_border)),
             BorderRadius::all(Val::Px(14.0)),
         ))
         .with_children(|card| {
@@ -92,8 +92,9 @@ pub(super) fn paint_walkup_card(
         if bg.0 != want_bg {
             bg.0 = want_bg;
         }
-        if border.0 != want_border {
-            border.0 = want_border;
+        let want_border = BorderColor::all(want_border);
+        if *border != want_border {
+            *border = want_border;
         }
     }
     let batting = score.batting_team();

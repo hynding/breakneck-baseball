@@ -118,12 +118,12 @@ pub(super) fn update_landing_ring(
     ball_q: Query<(&Transform, &Velocity), (With<Baseball>, With<InFlight>, Without<LandingRing>)>,
     mut ring_q: Query<(&mut Transform, &mut Visibility), With<LandingRing>>,
 ) {
-    let Ok((mut ring_tf, mut visibility)) = ring_q.get_single_mut() else {
+    let Ok((mut ring_tf, mut visibility)) = ring_q.single_mut() else {
         return;
     };
     let live = play.phase == Phase::InPlay && !play.is_resolved();
     let flying = ball_q
-        .get_single()
+        .single()
         .ok()
         .filter(|(ball, _)| ball.translation.y > RING_OFF_HEIGHT);
     let Some((ball, vel)) = (if live { flying } else { None }) else {
@@ -200,11 +200,11 @@ pub(super) fn update_ball_halo(
     camera_q: Query<&GlobalTransform, (With<Camera3d>, Without<BallHalo>)>,
     mut halo_q: Query<(&mut Transform, &mut Visibility), With<BallHalo>>,
 ) {
-    let Ok((mut halo_tf, mut visibility)) = halo_q.get_single_mut() else {
+    let Ok((mut halo_tf, mut visibility)) = halo_q.single_mut() else {
         return;
     };
     let ball = if play.phase == Phase::InPlay {
-        ball_q.get_single().ok()
+        ball_q.single().ok()
     } else {
         None
     };
@@ -215,7 +215,7 @@ pub(super) fn update_ball_halo(
         return;
     };
     let dist = camera_q
-        .get_single()
+        .single()
         .map(|cam| cam.translation().distance(ball.translation))
         .unwrap_or(0.0);
     halo_tf.translation = ball.translation;
@@ -227,7 +227,7 @@ pub(super) fn update_ball_halo(
 
 /// Sparks fly off the bat at contact.
 pub(super) fn contact_burst(
-    mut hits: EventReader<HitEvent>,
+    mut hits: MessageReader<HitEvent>,
     ball_q: Query<&Transform, With<Baseball>>,
     assets: Option<Res<FxAssets>>,
     time: Res<Time>,
@@ -235,7 +235,7 @@ pub(super) fn contact_burst(
 ) {
     let Some(assets) = assets else { return };
     for _ in hits.read() {
-        let Ok(ball) = ball_q.get_single() else {
+        let Ok(ball) = ball_q.single() else {
             continue;
         };
         for i in 0..10 {
@@ -264,7 +264,7 @@ pub(super) fn contact_burst(
 
 /// Sparks spray back off the padding when the ball bangs the wall.
 pub(super) fn wall_bang_burst(
-    mut bangs: EventReader<WallBangEvent>,
+    mut bangs: MessageReader<WallBangEvent>,
     assets: Option<Res<FxAssets>>,
     time: Res<Time>,
     mut commands: Commands,
@@ -330,7 +330,7 @@ pub(super) struct Fireworks {
 /// trot. Scales up the same spark burst the wall bang uses; like every fx
 /// system it only spawns cosmetic motes and never touches the score.
 pub(super) fn home_run_fireworks(
-    mut in_play: EventReader<BallInPlayEvent>,
+    mut in_play: MessageReader<BallInPlayEvent>,
     play: Res<Play>,
     assets: Option<Res<FxAssets>>,
     time: Res<Time>,
@@ -349,11 +349,11 @@ pub(super) fn home_run_fireworks(
     if !show.active {
         return;
     }
-    if show.remaining.tick(time.delta()).finished() {
+    if show.remaining.tick(time.delta()).is_finished() {
         show.active = false;
         return;
     }
-    if !show.next.tick(time.delta()).finished() {
+    if !show.next.tick(time.delta()).is_finished() {
         return;
     }
     let interval = if show.perfect {
@@ -402,14 +402,14 @@ const DUST_MIN_SPEED: f32 = 4.0;
 
 /// A puff of dirt wherever the ball thumps the ground.
 pub(super) fn bounce_dust(
-    mut collisions: EventReader<CollisionEvent>,
+    mut collisions: MessageReader<CollisionEvent>,
     ball_q: Query<(Entity, &Transform, &Velocity), With<Baseball>>,
     assets: Option<Res<FxAssets>>,
     time: Res<Time>,
     mut commands: Commands,
 ) {
     let Some(assets) = assets else { return };
-    let Ok((ball_entity, ball_tf, vel)) = ball_q.get_single() else {
+    let Ok((ball_entity, ball_tf, vel)) = ball_q.single() else {
         return;
     };
     for event in collisions.read() {
@@ -466,7 +466,7 @@ pub(super) fn tick_particles(
         } else {
             (1.0 - f).max(0.01)
         });
-        if particle.timer.finished() {
+        if particle.timer.is_finished() {
             commands.entity(entity).despawn();
         }
     }

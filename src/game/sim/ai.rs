@@ -248,7 +248,7 @@ pub fn cpu_defense(
         return;
     }
 
-    if cpu.pitch_delay.tick(time.delta()).finished() {
+    if cpu.pitch_delay.tick(time.delta()).is_finished() {
         // Better skill → tighter aim around the strike zone. The aim then
         // gets a pitch-selection bias: held-aim direction is what picks the
         // kind (see `PitchKind::from_aim`), so shifting the aim is how the
@@ -376,7 +376,7 @@ pub fn cpu_offense(
         intents.get_mut(team).action = false;
         return;
     }
-    let Ok((ball, ball_vel)) = ball_q.get_single() else {
+    let Ok((ball, ball_vel)) = ball_q.single() else {
         return;
     };
     let pos = ball.translation;

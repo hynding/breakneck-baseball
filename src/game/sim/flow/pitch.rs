@@ -110,7 +110,7 @@ pub(super) fn pre_pitch(
     mut bases: ResMut<Bases>,
     rules_res: Res<Ruleset>,
     mut lead: ResMut<LeadState>,
-    mut banner: EventWriter<PlayBanner>,
+    mut banner: MessageWriter<PlayBanner>,
     pitcher_q: Query<Entity, With<Pitcher>>,
     mut commands: Commands,
 ) {
@@ -137,7 +137,7 @@ pub(super) fn pre_pitch(
         // The duel window: the ball is held. A defensive action here is a
         // pickoff throw at the leading runner, not a pitch — one throw per
         // reload, so a held button can't spam the bag.
-        if intent.action && play.duel.pickoff_cooldown.finished() {
+        if intent.action && play.duel.pickoff_cooldown.is_finished() {
             play.duel.pickoff_cooldown =
                 Timer::from_seconds(rules_res.pace.pickoff_cooldown_secs, TimerMode::Once);
             let outs_before = score.outs;
@@ -150,7 +150,7 @@ pub(super) fn pre_pitch(
                     } else {
                         rules_res.counts.outs_per_half
                     };
-                    banner.send(
+                    banner.write(
                         PlayBanner::new("PICKED OFF!", BannerTone::Bad)
                             .with_follow_up(format!("OUT {outs}")),
                     );
@@ -160,7 +160,7 @@ pub(super) fn pre_pitch(
                     end_pitch(&mut play, &rules_res.pace, ResultBeat::Pickoff);
                 }
                 rules::PickoffResult::SafeBack => {
-                    banner.send(PlayBanner::new("BACK IN TIME", BannerTone::Info));
+                    banner.write(PlayBanner::new("BACK IN TIME", BannerTone::Info));
                 }
                 rules::PickoffResult::NoRunner => {}
             }
@@ -208,11 +208,11 @@ fn walk_up(
     };
     walkup.tick(dt);
     let dismissed = intents.get(score.batting_team()).action;
-    if play.curtain.is_some() || walkup.finished() || dismissed {
+    if play.curtain.is_some() || walkup.is_finished() || dismissed {
         let curtain = play
             .curtain
             .get_or_insert_with(|| Timer::from_seconds(CURTAIN_SECS, TimerMode::Once));
-        if curtain.tick(dt).finished() {
+        if curtain.tick(dt).is_finished() {
             play.walkup = None;
             play.curtain = None;
         }
@@ -232,7 +232,7 @@ pub(super) fn wind_up(
     score: Res<ScoreBoard>,
     bases: Res<Bases>,
     mut lead: ResMut<LeadState>,
-    mut pitch_ev: EventWriter<PitchEvent>,
+    mut pitch_ev: MessageWriter<PitchEvent>,
 ) {
     if play.phase != Phase::WindUp {
         // Guarded like every reset in this diff — tick hygiene, not cost.
@@ -258,13 +258,13 @@ pub(super) fn wind_up(
         lead.extended = true;
     }
     play.duel.send_prev = send_now;
-    if play.timer.tick(time.delta()).finished() {
+    if play.timer.tick(time.delta()).is_finished() {
         let (aim, kind) = play
             .pitch
             .pending
             .take()
             .unwrap_or((Vec2::ZERO, rules::PitchKind::Changeup));
-        pitch_ev.send(PitchEvent {
+        pitch_ev.write(PitchEvent {
             velocity: rules::pitch_velocity_kind(
                 kind,
                 aim,
@@ -290,17 +290,17 @@ pub(super) fn pitch_live(
     mut score: ResMut<ScoreBoard>,
     mut bases: ResMut<Bases>,
     ball_q: Query<(&Transform, &Velocity), With<Baseball>>,
-    mut hit_ev: EventWriter<HitEvent>,
-    mut in_play_ev: EventWriter<BallInPlayEvent>,
-    mut contact_ev: EventWriter<ContactEvent>,
-    mut banner: EventWriter<PlayBanner>,
+    mut hit_ev: MessageWriter<HitEvent>,
+    mut in_play_ev: MessageWriter<BallInPlayEvent>,
+    mut contact_ev: MessageWriter<ContactEvent>,
+    mut banner: MessageWriter<PlayBanner>,
     mut order: ResMut<BattingOrder>,
     #[cfg(feature = "debug")] forced: Res<crate::game::debug::ForcedContact>,
 ) {
     if play.phase != Phase::Pitch || play.resolved {
         return;
     }
-    let Ok((ball, ball_vel)) = ball_q.get_single() else {
+    let Ok((ball, ball_vel)) = ball_q.single() else {
         return;
     };
     let pos = ball.translation;
@@ -358,7 +358,7 @@ pub(super) fn pitch_live(
         };
         // Fired on every judged swing (whiffs included) for later presentation
         // systems; the rules/physics consequence follows below.
-        contact_ev.send(ContactEvent {
+        contact_ev.write(ContactEvent {
             quality,
             batting_team: batter,
             dt_ms,
@@ -376,7 +376,7 @@ pub(super) fn pitch_live(
             | rules::ContactQuality::Weak => {
                 let base = rules::hit_velocity(pos.z, aim);
                 let velocity = rules::apply_contact_quality(base, quality, dt_ms, &rules);
-                hit_ev.send(HitEvent { velocity });
+                hit_ev.write(HitEvent { velocity });
                 let (landing, hang_time) = rules::predict_landing(
                     velocity,
                     rules::hit_spin(velocity),
@@ -385,7 +385,7 @@ pub(super) fn pitch_live(
                 );
                 let kind = rules::classify_contact(landing, &field);
                 let contact_class = rules::contact_class(landing, hang_time, &field);
-                in_play_ev.send(BallInPlayEvent {
+                in_play_ev.write(BallInPlayEvent {
                     kind,
                     landing,
                     contact_class,
@@ -561,13 +561,13 @@ pub(super) fn catcher_receives(
         (Entity, &mut Transform, &mut Velocity, &mut Visibility),
         (With<Baseball>, With<InFlight>),
     >,
-    mut caught: EventWriter<PitchCaughtEvent>,
+    mut caught: MessageWriter<PitchCaughtEvent>,
     mut commands: Commands,
 ) {
     let Some((catcher, catcher_tf)) = catchers.iter().next() else {
         return;
     };
-    let Ok((ball, mut ball_tf, mut vel, mut vis)) = ball_q.get_single_mut() else {
+    let Ok((ball, mut ball_tf, mut vel, mut vis)) = ball_q.single_mut() else {
         return;
     };
     let pos = ball_tf.translation;
@@ -597,7 +597,7 @@ pub(super) fn catcher_receives(
             commands
                 .entity(catcher)
                 .insert(Playing::new(AnimClip::GloveUp));
-            caught.send(PitchCaughtEvent);
+            caught.write(PitchCaughtEvent);
         }
         play.pitch.presentational_catch = false;
         return;
@@ -623,7 +623,7 @@ pub(super) fn catcher_receives(
         commands
             .entity(catcher)
             .insert(Playing::new(AnimClip::GloveUp));
-        caught.send(PitchCaughtEvent);
+        caught.write(PitchCaughtEvent);
         return;
     }
 

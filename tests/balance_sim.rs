@@ -116,7 +116,7 @@ struct SimTally {
 
 fn tally(
     order: Res<BattingOrder>,
-    mut banners: EventReader<PlayBanner>,
+    mut banners: MessageReader<PlayBanner>,
     mut sim: ResMut<SimTally>,
 ) {
     let cur = (order.current(Team::Home), order.current(Team::Away));

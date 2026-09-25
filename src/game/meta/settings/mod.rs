@@ -423,7 +423,9 @@ impl Plugin for SettingsPlugin {
 /// on insertion, so the loaded value applies on the first frame too.
 fn apply_volume(settings: Res<Settings>, mut volume: ResMut<bevy::audio::GlobalVolume>) {
     if settings.is_changed() {
-        *volume = bevy::audio::GlobalVolume::new(settings.volume.clamp(0.0, 1.0));
+        *volume = bevy::audio::GlobalVolume::new(bevy::audio::Volume::Linear(
+            settings.volume.clamp(0.0, 1.0),
+        ));
     }
 }
 

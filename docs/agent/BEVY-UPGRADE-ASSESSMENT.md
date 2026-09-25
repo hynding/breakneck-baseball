@@ -1,7 +1,7 @@
 # Bevy Upgrade Assessment — 2026-08-20
 
-Research only; no upgrade started. Sources: bevy.org news/migration guides, dimforge
-bevy_rapier CHANGELOG (fetched 2026-08-20).
+Research only at time of writing; progress log at the bottom. Sources: bevy.org
+news/migration guides, dimforge bevy_rapier CHANGELOG (fetched 2026-08-20).
 
 ## Current vs latest
 
@@ -77,3 +77,36 @@ Do the upgrade as the first majors-long effort *after* the browser release is pr
 new feature waves make the diff bigger. One caveat that could flip the order: if a
 production-readiness fix needs an upstream Bevy fix that only exists post-0.15 (none identified
 so far), upgrade that far first.
+
+## Progress log
+
+- **Step 1, 0.15.3 → 0.16.1** (2026-08-24, commit `a9800e3` on `upgrade/bevy-0.17`):
+  hierarchy/`ChildOf`, `Query::single` Results, event renames, rapier 0.30,
+  inspector-egui 0.31. All native gates green; wasm blocked on the banner bug below.
+  Headless sim ~72% slower than 0.15 (balance run 199 s vs 115 s) — carried forward.
+- **Step 2, 0.16.1 → 0.17.3** (2026-08-25, this commit): Messages API crate-wide,
+  `BorderColor::all`, `Justify`, `SystemCondition`, `bevy::light`, `WindowResolution(u32)`,
+  rapier 0.32, inspector-egui 0.34. Clippy `-D warnings` green on default/dev+debug/autoplay;
+  full suite + both-target checks green; browser wasm verified (menu → game → banners → outs).
+- **The wasm banner bug, root-caused** (blocked both 0.16 and 0.17 browser gates for a week of
+  probe builds): a system that ticks a `ResMut<Timer>` **every frame** while also holding
+  `&mut` queries on a UI entity prevents that entity from ever being extracted on
+  wasm/WebGL2 — ECS-side `Visibility`/`InheritedVisibility` stay correct, native renders
+  fine, and the identical system with an empty body (same params, registered) is harmless.
+  Bisected via a 2×2 (show/fade on/off) plus an empty-body ghost. Every earlier data-shaped
+  theory (alpha, markers, position, spawn order, fonts, borders) was a phantom correlation.
+  Fix: `BannerFadeAt`/`StampFadeAt` deadline resources (`Option<f64>` against
+  `Time::elapsed_secs_f64`) — the show systems stamp a deadline once, the fade systems only
+  read until it passes, then take their single mutable step. Rule going forward: **never tick
+  a per-frame `ResMut` inside a system that also writes wasm-rendered UI**; hold deadlines.
+  Worth a minimal upstream repro against bevy 0.17/0.18 before the 0.18 step (its UI
+  extraction rework may fix or mask it).
+- Open lead: three `B0004` warnings at boot (menu-tree children with `GlobalTransform` under
+  a parent without, entities 48–51) — cosmetic so far, filed to clean up during the 0.18 step.
+- **Catch-up merge with `main`** (2026-09-25): 13 commits of main (playtest cycles, the
+  Clean Code pass, touch, the SMB3 presentation pass) merged in; 24 conflicts, all resolved to
+  main's side, then the 0.17 API re-applied and the three new banner timers + the follow-up
+  line ported to deadlines. Gates: clippy `-D warnings` on default / dev+debug / autoplay,
+  both-target checks, full suite, browser run — recorded in TODO 29. Lock moved to
+  wasm-bindgen 0.2.127 (pulled by web-sys 0.3.104; 0.2.126 no longer resolves), so the CLI
+  bump lands with the merge.

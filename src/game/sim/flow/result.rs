@@ -39,7 +39,7 @@ pub(super) fn result_phase(
     if play.phase != Phase::Result {
         return;
     }
-    if !play.timer.tick(time.delta()).finished() {
+    if !play.timer.tick(time.delta()).is_finished() {
         return;
     }
     // The play isn't over while runner rigs are still moving (the home-run
@@ -57,7 +57,7 @@ pub(super) fn result_phase(
         let curtain = play
             .curtain
             .get_or_insert_with(|| Timer::from_seconds(beat.curtain_secs(), TimerMode::Once));
-        if !curtain.tick(time.delta()).finished() {
+        if !curtain.tick(time.delta()).is_finished() {
             return;
         }
     }
@@ -70,7 +70,7 @@ pub(super) fn result_phase(
         next_state.set(GameState::GameOver);
         return;
     }
-    if let Ok((entity, mut transform, mut vel, mut vis)) = ball_q.get_single_mut() {
+    if let Ok((entity, mut transform, mut vel, mut vis)) = ball_q.single_mut() {
         transform.translation = rules::mound_reset_pos(field.pitch_distance);
         vel.linvel = Vec3::ZERO;
         vel.angvel = Vec3::ZERO;
