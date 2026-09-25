@@ -90,6 +90,43 @@ pub(super) fn limb_pose(clip: AnimClip, kind: LimbKind, f: f32) -> Quat {
                 ArmR => Quat::from_rotation_x(-0.55 - sway),
             }
         }
+        UmpStrike => {
+            // Out of the crouch a little, right arm punched up and out.
+            let s = ease_out(f);
+            match kind {
+                LegL | LegR => Quat::from_rotation_x(1.35 - 0.75 * s),
+                ArmL => Quat::from_rotation_x(-1.15 + 0.85 * s),
+                ArmR => Quat::from_rotation_z(-0.9 * s) * Quat::from_rotation_x(-0.55 - 1.65 * s),
+            }
+        }
+        UmpPunchOut => {
+            // Wind back through the first third, then the big punch.
+            let wind = (f / 0.3).clamp(0.0, 1.0);
+            let punch = ((f - 0.3) / 0.3).clamp(0.0, 1.0);
+            match kind {
+                ArmR => {
+                    Quat::from_rotation_z(-0.5 * punch)
+                        * Quat::from_rotation_x(0.6 * wind - 3.2 * ease_out(punch))
+                }
+                ArmL => Quat::from_rotation_x(-0.6 * ease_out(punch)),
+                LegL | LegR => Quat::IDENTITY,
+            }
+        }
+        UmpSafe => {
+            // Both arms out to the sides, a small dip and back up.
+            let out = ease_out((f / 0.35).clamp(0.0, 1.0));
+            let dip = if f > 0.35 {
+                ((f - 0.35) / 0.35).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let spread = 1.5 * out - 0.2 * (dip * std::f32::consts::PI).sin();
+            match kind {
+                ArmL => Quat::from_rotation_z(spread) * Quat::from_rotation_x(-0.2 * out),
+                ArmR => Quat::from_rotation_z(-spread) * Quat::from_rotation_x(-0.2 * out),
+                LegL | LegR => Quat::IDENTITY,
+            }
+        }
         Dive => {
             // Arms reach out ahead, legs trail behind the layout.
             let s = ease_out(f);
@@ -131,6 +168,7 @@ pub(super) fn limb_pose(clip: AnimClip, kind: LimbKind, f: f32) -> Quat {
 pub(super) fn root_drop(clip: AnimClip, f: f32) -> f32 {
     match clip {
         AnimClip::CatcherCrouch => 0.22,
+        AnimClip::UmpStrike => 0.22 - 0.14 * ease_out(f),
         AnimClip::ScoopBall => 0.26 * (f * std::f32::consts::PI).sin(),
         AnimClip::Dive => 0.38 * ease_out(f),
         AnimClip::Slide => 0.30 * ease_out(f),

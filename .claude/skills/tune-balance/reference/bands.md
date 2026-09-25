@@ -9,6 +9,13 @@ If this file and the test disagree, the test wins — update this file.
 > K% to 29.6 and runs/9 to 2.70; `cpu_timing_spread_ms` 225 → 195 restored the bands
 > (see the balance run in the cycle-3 commit). Bands themselves unchanged.
 
+> 2026-09-17 (TODO 105): the CPU's draws were clock-seeded, so *pacing* changes (result
+> holds, the walk-up, the curtain) reshuffled outcomes — a 0.4 s longer strikeout hold
+> tripped the HR/9 ceiling. `sim/ai.rs` now seeds from a game salt + the pitch sequence
+> (`CpuState::seed`); N=40 is bit-identical across hold lengths. The reseeded draw model
+> measures K% 15.8 / runs/9 3.71 / HR/9 2.14 (one process, N=40) — inside every band,
+> with the spread row below still the pre-reseed figures until re-measured.
+
 ## Asserted bands (N=40, `balance_bands_hold`)
 
 | Signal | Asserted band | Nominal target | Measured spread (N=40, cross-process) |

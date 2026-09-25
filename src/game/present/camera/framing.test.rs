@@ -89,33 +89,6 @@ fn catcher_pov_frames_the_full_batter_at_80_to_90_percent() {
     }
 }
 
-/// The result pause holds the duel framing only for a pitch the catcher
-/// gloved (called strikes/balls, strikeouts into the mitt end tight on
-/// the plate); everything the mitt missed — hits, dirt balls, dropped
-/// thirds, HBP — releases the camera to the wide shot. The duel phases
-/// always want the tight framing; the post-contact plate hold expires
-/// with `BALL_FOLLOW_DELAY`.
-#[test]
-fn duel_framing_holds_result_only_for_gloved_pitches() {
-    use crate::game::flow::Play;
-    assert!(duel_framing_wanted(
-        &Play::test_play(Phase::Result, true),
-        10.0
-    ));
-    assert!(!duel_framing_wanted(
-        &Play::test_play(Phase::Result, false),
-        10.0
-    ));
-    assert!(duel_framing_wanted(
-        &Play::test_play(Phase::PrePitch, false),
-        10.0
-    ));
-    assert!(duel_framing_wanted(
-        &Play::test_play(Phase::Pitch, false),
-        10.0
-    ));
-}
-
 #[test]
 fn subject_behind_the_eye_never_occludes() {
     // Same axis as in front, but placed behind the eye (negative along).
@@ -169,10 +142,12 @@ fn degenerate_axis_never_occludes() {
 
 /// The catcher/umpire spawn spots (`FieldSpec::fielder_positions` /
 /// `umpire_positions`, offset by the same `Vec3::Y * 0.6` `game::player`
-/// adds at spawn) really do sit inside the occlusion cone for
-/// `BattingZoom` and really do sit outside it for `BehindPitcher`, for
-/// every variant — the concrete regression the e2e test also drives
-/// through the real ECS.
+/// adds at spawn) really are cleared out of the default batting view —
+/// the catcher by the look-ahead cone, the plate umpire either by the
+/// cone, by the lens-brush rule (front yard: he stands at the eye), or
+/// by standing behind the lens (Standard: a metre behind it) — and really
+/// do sit outside the cone for `BehindPitcher`, for every variant. The
+/// concrete regression the e2e test also drives through the real ECS.
 #[test]
 fn per_variant_occlusion_matches_the_reference_shots() {
     for id in [VariantId::Standard, VariantId::FrontYard] {
@@ -188,13 +163,16 @@ fn per_variant_occlusion_matches_the_reference_shots() {
         if let Some(catcher) = catcher {
             assert!(
                 occludes(bz_eye, bz_target, catcher, OCCLUSION_NEAR, OCCLUSION_RADIUS),
-                "{id:?}: batting zoom should be blocked by the catcher"
+                "{id:?}: the batting view should be blocked by the catcher"
             );
         }
         if let Some(umpire) = umpire {
+            let hidden = occludes(bz_eye, bz_target, umpire, OCCLUSION_NEAR, OCCLUSION_RADIUS)
+                || brushes_lens(bz_eye, umpire, LENS_BRUSH_RADIUS);
+            let behind_lens = (umpire - bz_eye).dot(bz_target - bz_eye) < 0.0;
             assert!(
-                occludes(bz_eye, bz_target, umpire, OCCLUSION_NEAR, OCCLUSION_RADIUS),
-                "{id:?}: batting zoom should be blocked by the plate umpire"
+                hidden || behind_lens,
+                "{id:?}: the plate umpire must be hidden or behind the batting view's lens"
             );
         }
 
@@ -214,30 +192,78 @@ fn per_variant_occlusion_matches_the_reference_shots() {
     }
 }
 
-/// `duel_framing_wanted`'s first arm is the deliberate inline sibling
-/// of [`Phase::pre_contact`] (kept an exhaustive match so a new phase
-/// forces a framing decision at compile time). This pins the agreement
-/// the hand-edit rule relies on: with the conditional InPlay/Result
-/// arms forced false (contact long past, pitch not gloved), the
-/// framing must want exactly the pre-contact phases — redefining the
-/// shared window without updating the camera's copy fails here instead
-/// of silently keeping the old framing.
+/// The default batting view (TODO 100) must reproduce the reference
+/// composition (docs/agent/SMB3-REFERENCE-NOTES.md §2.1) in both parks at
+/// the 16:9 reference aspect: the whole batter in frame filling 75–90% of
+/// the screen height on the screen-left side (his +x box renders left of
+/// centre), the zone box centred horizontally and sitting in the lower-middle
+/// of the frame, and the pitcher's release point above the zone — so the
+/// ball grows toward the lens with the full bat arc visible beside it.
 #[test]
-fn duel_framing_pre_contact_arm_matches_the_shared_predicate() {
-    let mut play = Play::default();
-    let long_after_contact = 1_000.0;
-    for phase in [
-        Phase::PrePitch,
-        Phase::WindUp,
-        Phase::Pitch,
-        Phase::InPlay,
-        Phase::Result,
-    ] {
-        play.phase = phase;
-        assert_eq!(
-            duel_framing_wanted(&play, long_after_contact),
-            phase.pre_contact(),
-            "camera duel arm disagrees with Phase::pre_contact for {phase:?}"
+fn batting_zoom_frames_the_batter_and_centres_the_zone() {
+    use crate::game::player::{BATTER_STAND_X, RIG_HEIGHT_M};
+    use crate::game::rules::{ZONE_HIGH, ZONE_LOW};
+    for id in [VariantId::Standard, VariantId::FrontYard] {
+        let f = id.field();
+        let (eye, target, vfov) = DuelView::BattingZoom.framing(&f, DUEL_REFERENCE_ASPECT);
+        let feet = Vec3::new(BATTER_STAND_X, 0.0, 0.0);
+        let head = feet + Vec3::Y * RIG_HEIGHT_M;
+        let frac = framed_height_fraction(eye, target, vfov, feet, head);
+        assert!(
+            (0.75..=0.90).contains(&frac),
+            "{id:?}: batter fills {frac:.3} of screen height, want 0.75..=0.90"
+        );
+        for p in [feet, head] {
+            let y = framed_ndc_y(eye, target, vfov, p);
+            assert!(
+                y.abs() <= 0.97,
+                "{id:?}: batter point {p} clipped at ndc y {y:.3}"
+            );
+        }
+        // The batter's box (+x) must render off-centre so the zone is clear.
+        let head_x = framed_ndc_x(eye, target, vfov, DUEL_REFERENCE_ASPECT, head);
+        assert!(
+            head_x < -0.15,
+            "{id:?}: batter's head at ndc x {head_x:.3}, want screen-left"
+        );
+
+        let zone = Vec3::new(0.0, (ZONE_HIGH + ZONE_LOW) / 2.0, 0.0);
+        let zx = framed_ndc_x(eye, target, vfov, DUEL_REFERENCE_ASPECT, zone);
+        let zy = framed_ndc_y(eye, target, vfov, zone);
+        assert!(
+            zx.abs() <= 0.2,
+            "{id:?}: zone centre at ndc x {zx:.3}, want centred"
+        );
+        assert!(
+            (-0.4..=0.05).contains(&zy),
+            "{id:?}: zone centre at ndc y {zy:.3}, want the lower-middle of the frame"
+        );
+
+        let release = Vec3::new(0.0, 1.8, f.pitch_distance);
+        let ry = framed_ndc_y(eye, target, vfov, release);
+        assert!(
+            ry > zy + 0.2,
+            "{id:?}: release point (ndc y {ry:.3}) must sit above the zone ({zy:.3})"
         );
     }
+}
+
+/// The lens-brush rule hides a body the eye is parked against even when it
+/// stands beside or behind the eye (invisible to the look-ahead cone), and
+/// leaves alone anyone a stride further off — the front-yard plate umpire
+/// (z=-2.2) under the default batting eye (z=-2.0) versus Standard's umpire
+/// a metre behind it (z=-3.0).
+#[test]
+fn lens_brush_hides_only_a_body_at_the_eye() {
+    let eye = Vec3::new(0.2, 1.25, -2.0);
+    let front_yard_ump = Vec3::new(0.0, 0.0, -2.2);
+    let standard_ump = Vec3::new(0.0, 0.0, -3.0);
+    assert!(brushes_lens(eye, front_yard_ump, LENS_BRUSH_RADIUS));
+    assert!(!brushes_lens(eye, standard_ump, LENS_BRUSH_RADIUS));
+    // Height never matters: the roots sit at the feet.
+    assert!(brushes_lens(
+        eye,
+        front_yard_ump + Vec3::Y * 5.0,
+        LENS_BRUSH_RADIUS
+    ));
 }

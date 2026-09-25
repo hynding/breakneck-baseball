@@ -63,6 +63,12 @@ impl Ruleset {
         diff!(pace.stretch_grace_secs);
         diff!(pace.runner_margin_secs);
         diff!(pace.result_secs);
+        diff!(pace.ball_result_secs);
+        diff!(pace.strike_result_secs);
+        diff!(pace.foul_result_secs);
+        diff!(pace.strikeout_result_secs);
+        diff!(pace.walk_result_secs);
+        diff!(pace.walkup_secs);
         diff!(pace.pickoff_cooldown_secs);
         diff!(pace.auto_throw_delay_secs);
         if out.is_empty() {
@@ -160,9 +166,24 @@ pub struct PaceTuning {
     /// Bang-bang margin: ties and near-ties go to the runner — was
     /// `rules::RUNNER_MARGIN`.
     pub runner_margin_secs: f32,
-    /// Seconds the result banner lingers before the next pitch — was
-    /// `flow::RESULT_SECS`.
+    /// Seconds the result banner lingers after a batted ball's call (and a
+    /// pickoff) before the next pitch — was `flow::RESULT_SECS`. The pitch
+    /// results have their own holds below (TODO 101); [`Self::result_secs_for`]
+    /// picks the one a beat wants.
     pub result_secs: f32,
+    /// Hold after a taken ball — the quietest beat, no dip.
+    pub ball_result_secs: f32,
+    /// Hold after a called or swinging strike, before the curtain.
+    pub strike_result_secs: f32,
+    /// Hold after a foul ball or tip, before the curtain.
+    pub foul_result_secs: f32,
+    /// Hold after strike three, before the curtain.
+    pub strikeout_result_secs: f32,
+    /// Hold after a walk, a plunking, or a run-out dropped third.
+    pub walk_result_secs: f32,
+    /// The walk-up hold between plate appearances before it dismisses
+    /// itself (a batting-side action ends it sooner) — was `flow::WALKUP_SECS`.
+    pub walkup_secs: f32,
     /// Minimum seconds between pickoff throws — was
     /// `flow::PICKOFF_COOLDOWN_SECS`.
     pub pickoff_cooldown_secs: f32,
@@ -189,8 +210,31 @@ impl Default for PaceTuning {
             stretch_grace_secs: rules::STRETCH_GRACE,
             runner_margin_secs: rules::RUNNER_MARGIN,
             result_secs: flow::RESULT_SECS,
+            ball_result_secs: flow::BALL_RESULT_SECS,
+            strike_result_secs: flow::STRIKE_RESULT_SECS,
+            foul_result_secs: flow::FOUL_RESULT_SECS,
+            strikeout_result_secs: flow::STRIKEOUT_RESULT_SECS,
+            walk_result_secs: flow::WALK_RESULT_SECS,
+            walkup_secs: flow::WALKUP_SECS,
             pickoff_cooldown_secs: flow::PICKOFF_COOLDOWN_SECS,
             auto_throw_delay_secs: fielding::AUTO_THROW_DELAY,
+        }
+    }
+}
+
+impl PaceTuning {
+    /// The hold a result pause shows for `beat`, before any curtain — the
+    /// per-outcome table the reference footage calls for
+    /// (docs/agent/SMB3-REFERENCE-NOTES.md §5 Plan B).
+    pub fn result_secs_for(&self, beat: crate::game::flow::ResultBeat) -> f32 {
+        use crate::game::flow::ResultBeat;
+        match beat {
+            ResultBeat::Ball => self.ball_result_secs,
+            ResultBeat::Strike => self.strike_result_secs,
+            ResultBeat::Foul => self.foul_result_secs,
+            ResultBeat::Strikeout => self.strikeout_result_secs,
+            ResultBeat::Walk => self.walk_result_secs,
+            ResultBeat::Pickoff | ResultBeat::InPlay => self.result_secs,
         }
     }
 }
@@ -426,13 +470,22 @@ impl VariantId {
                 // exactly what the reference shot wants.
                 behind_pitcher_eye: Vec3::new(0.0, 2.2, PITCH_DISTANCE + 3.0),
                 behind_pitcher_target: Vec3::new(0.3, 1.0, 0.0),
-                // Behind and beside the batter's box, elevated a touch above
-                // and behind the plate umpire — a tight "zone cam" close
-                // enough that the catcher (and the umpire behind him) sit
-                // right in the sightline down the pipe, so they're the ones
-                // auto-hidden here (see `camera::hide_occluders`).
-                batting_zoom_eye: Vec3::new(0.8, 1.7, -3.2),
-                batting_zoom_target: Vec3::new(0.1, 1.0, 12.0),
+                // The default duel view (TODO 100): the reference batting
+                // shot — 2 m behind the plate at the batter's chest height,
+                // a small step toward his box, looking down the pipe with
+                // a slight downward tilt. Composition contract, pinned by
+                // `camera::batting_zoom_frames_the_batter_and_centres_the_zone`:
+                // the batter fills 75–90% of the screen height on the
+                // screen-left third (his back to the lens, so the swing's
+                // whole arc is visible beside the ball's path), the zone
+                // box sits at screen centre, the pitcher's release point
+                // above it, and the ball *grows* toward the lens instead of
+                // streaking across it. The catcher (z=-1.5, half a metre
+                // ahead of the eye) sits in the sightline and is auto-hidden
+                // (see `camera::hide_occluders`); the plate umpire (z=-3.0)
+                // is behind the eye. Per docs/agent/SMB3-REFERENCE-NOTES.md §2.1.
+                batting_zoom_eye: Vec3::new(0.2, 1.25, -2.0),
+                batting_zoom_target: Vec3::new(-0.15, 0.6, 6.0),
                 scenery: Scenery::Stadium,
             },
             // A front lawn: four bases across the lawn corners, the defense
@@ -481,12 +534,14 @@ impl VariantId {
                 // (z=-2.2) well outside the near-eye occlusion cone.
                 behind_pitcher_eye: Vec3::new(0.0, 2.0, 10.0 + 3.0),
                 behind_pitcher_target: Vec3::new(0.3, 0.9, 0.0),
-                // Same reasoning as Standard's `batting_zoom_eye`: behind and
-                // beside the batter's box, close enough behind the plate
-                // that the lone plate umpire (no catcher on the lawn) sits
-                // in the sightline and gets auto-hidden.
-                batting_zoom_eye: Vec3::new(0.8, 1.6, -2.6),
-                batting_zoom_target: Vec3::new(0.1, 0.9, 8.0),
+                // Same composition contract as Standard's `batting_zoom_eye`
+                // (the camera test is the arbiter) and the same eye: the
+                // batter's geometry is identical in both parks. The lone
+                // plate umpire (z=-2.2, no catcher on the lawn) sits right
+                // at this lens, so the lens-brush rule in
+                // `camera::hide_occluders` hides him for the duel.
+                batting_zoom_eye: Vec3::new(0.2, 1.25, -2.0),
+                batting_zoom_target: Vec3::new(-0.15, 0.6, 6.0),
                 scenery: Scenery::FrontYard,
             },
         }

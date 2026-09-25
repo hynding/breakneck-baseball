@@ -211,3 +211,30 @@ fn batting_zoom_framing_sits_behind_home_looking_toward_the_pitcher() {
         assert!(f.batting_zoom_eye.x.abs() > 0.1);
     }
 }
+
+/// The per-outcome result table (TODO 101): every beat gets a positive hold,
+/// a taken ball is the shortest (the quietest event in the game), strike
+/// three holds longer than a strike, and batted balls / pickoffs keep the
+/// classic `result_secs` dial.
+#[test]
+fn result_pause_table_orders_the_beats() {
+    use crate::game::flow::ResultBeat;
+    let pace = PaceTuning::default();
+    let secs = |b| pace.result_secs_for(b);
+    for beat in [
+        ResultBeat::Ball,
+        ResultBeat::Strike,
+        ResultBeat::Foul,
+        ResultBeat::Strikeout,
+        ResultBeat::Walk,
+        ResultBeat::Pickoff,
+        ResultBeat::InPlay,
+    ] {
+        assert!(secs(beat) > 0.0, "{beat:?} must hold for a positive time");
+    }
+    assert!(secs(ResultBeat::Ball) <= secs(ResultBeat::Strike));
+    assert!(secs(ResultBeat::Strike) < secs(ResultBeat::Strikeout));
+    assert!(secs(ResultBeat::Strike) < secs(ResultBeat::Foul));
+    assert_eq!(secs(ResultBeat::InPlay), pace.result_secs);
+    assert_eq!(secs(ResultBeat::Pickoff), pace.result_secs);
+}

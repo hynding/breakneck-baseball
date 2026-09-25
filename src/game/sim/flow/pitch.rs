@@ -16,7 +16,8 @@ use super::live::wants_send;
 use super::result::end_pitch;
 use super::umpire::Umpire;
 use super::{
-    BallInPlayEvent, BannerTone, ContactEvent, LeadState, Phase, PitchCaughtEvent, Play, PlayBanner,
+    BallInPlayEvent, BannerTone, CURTAIN_SECS, ContactEvent, LeadState, Phase, PitchCaughtEvent,
+    Play, PlayBanner, ResultBeat,
 };
 
 // ── Tuning constants ──────────────────────────────────────────────────────────
@@ -116,6 +117,9 @@ pub(super) fn pre_pitch(
     if play.phase != Phase::PrePitch {
         return;
     }
+    if walk_up(&mut play, &intents, &score, time.delta()) {
+        return;
+    }
     play.duel.hold.tick(time.delta());
     play.duel.pickoff_cooldown.tick(time.delta());
 
@@ -136,13 +140,24 @@ pub(super) fn pre_pitch(
         if intent.action && play.duel.pickoff_cooldown.finished() {
             play.duel.pickoff_cooldown =
                 Timer::from_seconds(rules_res.pace.pickoff_cooldown_secs, TimerMode::Once);
+            let outs_before = score.outs;
             match rules::attempt_pickoff(&mut score, &mut bases, &rules_res, lead.extended) {
                 rules::PickoffResult::PickedOff { .. } => {
-                    banner.send(PlayBanner::new("PICKED OFF!", BannerTone::Bad));
+                    // The out count follows the call (the rules zero it as
+                    // they change sides, so a third out reads as the side).
+                    let outs = if score.outs > outs_before {
+                        score.outs
+                    } else {
+                        rules_res.counts.outs_per_half
+                    };
+                    banner.send(
+                        PlayBanner::new("PICKED OFF!", BannerTone::Bad)
+                            .with_follow_up(format!("OUT {outs}")),
+                    );
                     // A pickoff out is a play: it takes the same result
                     // pause as any other out (banner linger + runners
                     // settling) before the next window can open.
-                    end_pitch(&mut play, rules_res.pace.result_secs);
+                    end_pitch(&mut play, &rules_res.pace, ResultBeat::Pickoff);
                 }
                 rules::PickoffResult::SafeBack => {
                     banner.send(PlayBanner::new("BACK IN TIME", BannerTone::Info));
@@ -175,6 +190,34 @@ pub(super) fn pre_pitch(
                 .insert(Playing::then(AnimClip::WindUp, AnimClip::ThrowRelease));
         }
     }
+}
+
+/// The walk-up hold (TODO 103): while the incoming batter is introduced the
+/// ball is held — no steal window ticks, no pitch is accepted. The batting
+/// side's action press ends it, or it expires on its own; either way it
+/// leaves through the curtain, so the cut to the duel framing lands on a
+/// black screen. Returns whether the pitch is still held.
+fn walk_up(
+    play: &mut Play,
+    intents: &Intents,
+    score: &ScoreBoard,
+    dt: std::time::Duration,
+) -> bool {
+    let Some(walkup) = play.walkup.as_mut() else {
+        return false;
+    };
+    walkup.tick(dt);
+    let dismissed = intents.get(score.batting_team()).action;
+    if play.curtain.is_some() || walkup.finished() || dismissed {
+        let curtain = play
+            .curtain
+            .get_or_insert_with(|| Timer::from_seconds(CURTAIN_SECS, TimerMode::Once));
+        if curtain.tick(dt).finished() {
+            play.walkup = None;
+            play.curtain = None;
+        }
+    }
+    true
 }
 
 // ── WindUp: the delivery plays out, then the ball leaves the hand ─────────────
@@ -359,7 +402,7 @@ pub(super) fn pitch_live(
             rules::ContactQuality::FoulTip => {
                 Umpire::new(&mut score, &mut bases, &rules, &mut banner).foul_tip();
                 play.pitch.taken = true; // the catcher gloves the tipped ball
-                end_pitch(&mut play, rules.pace.result_secs);
+                end_pitch(&mut play, &rules.pace, ResultBeat::Foul);
             }
             // A swing and miss — exactly today's whiff path.
             rules::ContactQuality::Whiff => {
@@ -367,8 +410,8 @@ pub(super) fn pitch_live(
                 // open: the catcher can't hold strike three and the batter
                 // runs.
                 let mut ump = Umpire::new(&mut score, &mut bases, &rules, &mut banner);
-                judge_whiff(&mut play, &mut ump, &mut order, batter);
-                end_pitch(&mut play, rules.pace.result_secs);
+                let beat = judge_whiff(&mut play, &mut ump, &mut order, batter);
+                end_pitch(&mut play, &rules.pace, beat);
             }
         }
         return;
@@ -379,8 +422,8 @@ pub(super) fn pitch_live(
     if pos.z < late_exit_z {
         let cross = play.pitch.crossing.unwrap_or(Vec2::new(pos.x, pos.y));
         let mut ump = Umpire::new(&mut score, &mut bases, &rules, &mut banner);
-        judge_take(cross, &mut play, &mut ump, &mut order, batter);
-        end_pitch(&mut play, rules.pace.result_secs);
+        let beat = judge_take(cross, &mut play, &mut ump, &mut order, batter);
+        end_pitch(&mut play, &rules.pace, beat);
     }
 }
 
@@ -395,21 +438,30 @@ fn judge_take(
     ump: &mut Umpire,
     order: &mut BattingOrder,
     batter: crate::game::Team,
-) {
+) -> ResultBeat {
     if rules::hits_batter(cross) {
         // Dead ball: the batter takes first, forced runners move.
         ump.hit_by_pitch();
         order.advance(batter);
-        return;
+        return ResultBeat::Walk;
     }
     play.pitch.taken = true;
-    let (pa_over, walked) = if rules::is_in_zone(cross) {
+    let (pa_over, walked, beat) = if rules::is_in_zone(cross) {
         let call = ump.add_strike(false, false);
         play.pitch.last_strike_call = Some(call);
-        (call != StrikeCall::Strike, false)
+        (
+            call != StrikeCall::Strike,
+            false,
+            ResultBeat::for_strike(call),
+        )
     } else {
         let walked = ump.add_ball();
-        (walked, walked)
+        let beat = if walked {
+            ResultBeat::Walk
+        } else {
+            ResultBeat::Ball
+        };
+        (walked, walked, beat)
     };
     if pa_over {
         order.advance(batter);
@@ -419,6 +471,7 @@ fn judge_take(
     if play.duel.armed && !walked {
         ump.resolve_steal(play);
     }
+    beat
 }
 
 /// A swing and miss. The at-bat may end here (a strikeout, or a dropped third
@@ -428,7 +481,7 @@ fn judge_whiff(
     ump: &mut Umpire,
     order: &mut BattingOrder,
     batter: crate::game::Team,
-) {
+) -> ResultBeat {
     // Swinging through a curveball in the dirt with first base open: the
     // catcher can't hold strike three and the batter runs.
     let dropped = play.pitch.kind == Some(rules::PitchKind::Curveball) && !ump.bases_occupied(0);
@@ -444,6 +497,7 @@ fn judge_whiff(
     if play.duel.armed {
         ump.resolve_steal(play);
     }
+    ResultBeat::for_strike(call)
 }
 
 /// Where a ball that left the bat goes next: only a ball over the fence is

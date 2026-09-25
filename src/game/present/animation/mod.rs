@@ -49,6 +49,14 @@ pub enum AnimClip {
     /// Catcher's receiving stance: knees bent, glove presented. Loops
     /// through the whole pitch duel.
     CatcherCrouch,
+    /// Umpire: a called/swinging strike — rises a little out of the crouch
+    /// and punches the right arm up and out (TODO 104).
+    UmpStrike,
+    /// Umpire: strike three, or an out at a bag — stands, winds, and rings
+    /// him up.
+    UmpPunchOut,
+    /// Umpire: safe — both arms sweep out to the sides.
+    UmpSafe,
     /// Full-extension dive: body pitches forward and drops, arms out.
     Dive,
     /// Feet-first slide into a bag: body leans back and drops low.
@@ -97,6 +105,9 @@ impl AnimClip {
             AnimClip::SwingBat => 0.16,
             AnimClip::RecoverSwing => 0.25,
             AnimClip::CatcherCrouch => 1.2,
+            AnimClip::UmpStrike => 0.5,
+            AnimClip::UmpPunchOut => 0.9,
+            AnimClip::UmpSafe => 0.7,
             AnimClip::Dive => 0.5,
             AnimClip::Slide => 0.6,
             AnimClip::BatterSwing => 0.42,

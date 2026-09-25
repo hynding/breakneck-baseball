@@ -10,17 +10,25 @@ use crate::game::GameState;
 use crate::game::theme::UiTheme;
 
 mod banner;
+mod curtain;
 mod hud;
 mod touch;
+mod walkup;
+
+pub use curtain::{CurtainRoot, WipeLabel};
+pub use walkup::{WalkUpLine, WalkUpText};
 
 use banner::{
-    BannerTimer, ContactStampTimer, fade_banner, fade_contact_stamp, show_banner,
-    show_contact_stamp, update_duel_panels,
+    BannerFollowUp, BannerTimer, ContactStampTimer, PitchSpeedTimer,
+    clear_read_outs_on_result_exit, fade_banner, fade_contact_stamp, fade_pitch_speed, show_banner,
+    show_contact_stamp, show_pitch_speed, swap_banner_follow_up, update_duel_panels,
 };
+use curtain::{Curtain, drive_curtain, spawn_curtain};
 use hud::{
     spawn_hud, update_base_ring, update_count_dots, update_inning_text, update_meter_bar,
     update_score_text,
 };
+use walkup::{paint_walkup_card, spawn_walkup_card};
 
 // ── Markers ───────────────────────────────────────────────────────────────────
 
@@ -59,9 +67,10 @@ struct BannerPill;
 #[derive(Component)]
 struct MeterFill;
 
-/// The banner text inside the pill.
+/// The banner text inside the pill. Public so e2e tests can read the call
+/// (and the follow-up line it swaps to).
 #[derive(Component)]
-struct BannerText;
+pub struct BannerText;
 
 /// The contact-quality stamp (PERFECT! / EARLY / LATE / FOUL TIP), painted at
 /// spawn near the zone-box screen area and shown by text mutation only — see
@@ -70,6 +79,12 @@ struct BannerText;
 /// `e2e_camera_views`'s `Visibility` check).
 #[derive(Component)]
 pub struct ContactStampText;
+
+/// The pitch-speed read-out ("97 MPH") by the plate, painted at spawn and
+/// shown by text mutation only, like [`ContactStampText`]. Public so e2e
+/// tests can read its `Text`.
+#[derive(Component)]
+pub struct PitchSpeedText;
 
 /// Root of one of the two duel cards flanking the catcher's-eye pitch view.
 #[derive(Component)]
@@ -286,7 +301,10 @@ pub struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BannerTimer>()
-            .init_resource::<ContactStampTimer>();
+            .init_resource::<BannerFollowUp>()
+            .init_resource::<ContactStampTimer>()
+            .init_resource::<PitchSpeedTimer>()
+            .init_resource::<Curtain>();
         #[cfg(target_arch = "wasm32")]
         app.add_systems(Update, keep_ui_roots_alive);
         app.add_systems(
@@ -296,8 +314,16 @@ impl Plugin for UiPlugin {
             // unordered, whether the SWING button drew over the HUD's
             // bottom-right cluster (they overlap on a portrait phone) or
             // under it was a per-schedule-build tie-break. Touch chrome is
-            // interactive; it goes on top, so it spawns last.
-            (spawn_hud, touch::spawn_touch_overlay).chain(),
+            // interactive; it goes on top, so it spawns last. The curtain
+            // covers the field and the HUD (it dips them to black between
+            // beats) but not the touch chrome above it.
+            (
+                spawn_hud,
+                spawn_walkup_card,
+                spawn_curtain,
+                touch::spawn_touch_overlay,
+            )
+                .chain(),
         )
         .add_systems(
             Update,
@@ -309,9 +335,15 @@ impl Plugin for UiPlugin {
                 update_base_ring,
                 update_duel_panels,
                 show_banner,
+                swap_banner_follow_up,
                 fade_banner,
                 show_contact_stamp,
                 fade_contact_stamp,
+                show_pitch_speed,
+                fade_pitch_speed,
+                paint_walkup_card,
+                clear_read_outs_on_result_exit,
+                drive_curtain,
             )
                 .run_if(in_state(GameState::Playing)),
         )

@@ -3,8 +3,6 @@
 
 use bevy::prelude::*;
 
-use crate::game::flow::{Phase, Play};
-
 use super::DUEL_REFERENCE_ASPECT;
 
 // ── Framing math ──────────────────────────────────────────────────────────────
@@ -41,6 +39,19 @@ pub fn framed_ndc_y(eye: Vec3, target: Vec3, vfov: f32, p: Vec3) -> f32 {
     let v = p - eye;
     let depth = v.dot(fwd).max(f32::EPSILON);
     (v.dot(up) / depth) / (vfov / 2.0).tan()
+}
+
+/// Signed horizontal NDC coordinate (−1 = left edge, +1 = right edge) of
+/// world point `p` through the same camera, for a viewport of the given
+/// `aspect` (width / height). Same pure math as [`framed_ndc_y`], used by
+/// the batting-view composition test to prove the batter's box renders off
+/// to the side and the zone at centre.
+pub fn framed_ndc_x(eye: Vec3, target: Vec3, vfov: f32, aspect: f32, p: Vec3) -> f32 {
+    let fwd = (target - eye).normalize();
+    let right = fwd.cross(Vec3::Y).normalize();
+    let v = p - eye;
+    let depth = v.dot(fwd).max(f32::EPSILON);
+    (v.dot(right) / depth) / ((vfov / 2.0).tan() * aspect)
 }
 
 /// Fraction of the viewport height the segment `bottom`→`top` spans through
@@ -85,6 +96,21 @@ pub(super) const OCCLUSION_NEAR: f32 = 4.0;
 /// count as blocking the shot.
 pub(super) const OCCLUSION_RADIUS: f32 = 1.6;
 
+/// How close (metres, horizontally) a subject's root may stand to the eye
+/// before it counts as *brushing the lens* — the body the camera is parked
+/// inside or against, which the look-ahead cone can never flag because it
+/// sits beside or behind the eye. Generalises the catcher-POV special case
+/// (the eye inside the catcher's silhouette) to any tight duel view: the
+/// front-yard plate umpire stands at z=-2.2, exactly where the default
+/// batting view's eye (z=-2.0) sits.
+pub(super) const LENS_BRUSH_RADIUS: f32 = 0.7;
+
+/// Pure predicate: is `subject` standing within [`LENS_BRUSH_RADIUS`] of
+/// the eye in the ground plane (height ignored — roots sit at the feet)?
+pub fn brushes_lens(eye: Vec3, subject: Vec3, radius: f32) -> bool {
+    Vec2::new(subject.x - eye.x, subject.z - eye.z).length() < radius
+}
+
 /// Pure predicate: does `subject` sit close enough to `eye`, and close
 /// enough to the `eye`→`target` sightline, to block the shot? `near` caps
 /// how far down the axis (from the eye) counts as "in the way"; `radius`
@@ -104,22 +130,6 @@ pub fn occludes(eye: Vec3, target: Vec3, subject: Vec3, near: f32, radius: f32) 
     }
     let perp = to_subject - axis_dir * along;
     perp.length() <= radius
-}
-
-/// The phases during which the broadcast rig wants (or is still holding)
-/// the tight duel framing: the duel itself, the post-contact plate hold,
-/// and the result pause of a pitch the catcher gloved — a called strike or
-/// ball doesn't deserve a zoom-out; only balls the mitt missed (hits, dirt
-/// balls, dropped thirds, HBP) release the camera. Shared between
-/// [`super::rigs::broadcast_camera`]'s framing choice and
-/// [`super::rigs::hide_occluders`]'s catcher-POV arm so the catcher can
-/// never pop into a lens that is still parked inside his silhouette.
-pub(super) fn duel_framing_wanted(play: &Play, now: f32) -> bool {
-    match play.phase {
-        Phase::PrePitch | Phase::WindUp | Phase::Pitch => true,
-        Phase::InPlay => play.since_contact(now) < super::BALL_FOLLOW_DELAY,
-        Phase::Result => play.pitch_gloved() && !play.is_home_run(),
-    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

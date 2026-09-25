@@ -3,15 +3,53 @@
 
 use bevy::prelude::*;
 
-use crate::game::flow::{BannerTone, ContactEvent, Play, PlayBanner};
+use crate::game::flow::{BannerTone, ContactEvent, Phase, Play, PlayBanner, ResultBeat};
 use crate::game::roster::Rosters;
 use crate::game::rules::{BattingOrder, ContactQuality, LINEUP_SIZE};
 use crate::game::theme::Theme;
+use crate::game::variant::Ruleset;
 use crate::game::{GameplayEntity, ScoreBoard, Team};
 
 use super::{
-    BannerPill, BannerText, ContactStampText, DuelLine, DuelLineKind, DuelPanel, hidden_tint,
+    BannerPill, BannerText, ContactStampText, DuelLine, DuelLineKind, DuelPanel, PitchSpeedText,
+    hidden_tint,
 };
+
+/// Metres per second → miles per hour, for the pitch-speed read-out.
+const MPH_PER_MPS: f32 = 2.236_94;
+
+/// How long a banner that is *not* a result pause's announcement (a wall
+/// bang mid-play, "BACK IN TIME" on a pickoff) stays up. A result pause's
+/// banner lives exactly as long as its beat instead (see [`beat_secs`]).
+const FREE_BANNER_SECS: f32 = 1.6;
+
+/// Seconds into a scoring play's beat before the banner swaps to the score
+/// line (the reference holds SAFE! about a second, then the score).
+const FOLLOW_UP_SECS: f32 = 1.0;
+
+/// The banner's pending follow-up line (a scoring play's new score) and
+/// the time until it takes over the pill.
+#[derive(Resource, Default)]
+pub(super) struct BannerFollowUp(Option<(String, Timer)>);
+
+/// Swaps the pill's text to the follow-up line once its time comes; the
+/// pill's own timer still decides when the whole thing clears.
+pub(super) fn swap_banner_follow_up(
+    time: Res<Time>,
+    mut follow_up: ResMut<BannerFollowUp>,
+    mut text_q: Query<&mut Text, With<BannerText>>,
+) {
+    let Some((line, timer)) = follow_up.0.as_mut() else {
+        return;
+    };
+    if !timer.tick(time.delta()).just_finished() {
+        return;
+    }
+    for mut text in &mut text_q {
+        **text = line.clone();
+    }
+    follow_up.0 = None;
+}
 
 /// How long the current banner stays visible before clearing.
 #[derive(Resource)]
@@ -19,7 +57,70 @@ pub(super) struct BannerTimer(Timer);
 
 impl Default for BannerTimer {
     fn default() -> Self {
-        Self(Timer::from_seconds(1.6, TimerMode::Once))
+        Self(Timer::from_seconds(FREE_BANNER_SECS, TimerMode::Once))
+    }
+}
+
+/// The display time a read-out shown right now should get: for the length
+/// of the result pause when one is in progress — however long it runs,
+/// runners settling included; [`clear_read_outs_on_result_exit`] blanks it
+/// the frame the pause ends, so the text vanishes with the beat (under the
+/// curtain, for beats that dip), never before, never after — else `free`
+/// seconds.
+fn beat_secs(play: &Play, free: f32) -> f32 {
+    if play.phase == Phase::Result {
+        HELD_FOR_THE_BEAT
+    } else {
+        free
+    }
+}
+
+/// "Until the beat ends": a timer length no beat reaches, cut short by
+/// [`clear_read_outs_on_result_exit`].
+const HELD_FOR_THE_BEAT: f32 = 1.0e6;
+
+/// Blanks every read-out raised for a result pause — banner, timing stamp,
+/// speed — the frame the pause ends, and finishes their timers.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub(super) fn clear_read_outs_on_result_exit(
+    play: Res<Play>,
+    mut prev_phase: Local<Option<Phase>>,
+    mut banner_timer: ResMut<BannerTimer>,
+    mut stamp_timer: ResMut<ContactStampTimer>,
+    mut speed_timer: ResMut<PitchSpeedTimer>,
+    mut follow_up: ResMut<BannerFollowUp>,
+    mut pill_q: Query<(&mut BackgroundColor, &mut BorderColor), With<BannerPill>>,
+    mut banner_q: Query<&mut Text, (With<BannerText>, Without<ContactStampText>)>,
+    mut stamp_q: Query<&mut Text, (With<ContactStampText>, Without<BannerText>)>,
+    mut speed_q: Query<
+        &mut Text,
+        (
+            With<PitchSpeedText>,
+            Without<BannerText>,
+            Without<ContactStampText>,
+        ),
+    >,
+) {
+    let left_result = *prev_phase == Some(Phase::Result) && play.phase != Phase::Result;
+    *prev_phase = Some(play.phase);
+    if !left_result {
+        return;
+    }
+    for timer in [&mut banner_timer.0, &mut stamp_timer.0, &mut speed_timer.0] {
+        let whole = timer.duration();
+        timer.set_elapsed(whole);
+    }
+    follow_up.0 = None;
+    for (mut bg, mut border) in &mut pill_q {
+        bg.0 = hidden_tint(bg.0);
+        border.0 = hidden_tint(border.0);
+    }
+    for mut text in banner_q
+        .iter_mut()
+        .chain(stamp_q.iter_mut())
+        .chain(speed_q.iter_mut())
+    {
+        **text = String::new();
     }
 }
 
@@ -142,7 +243,8 @@ pub(super) fn update_duel_panels(
     mut panels: Query<(&mut BackgroundColor, &mut BorderColor, &mut Visibility), With<DuelPanel>>,
     mut lines: Query<(&DuelLine, &mut Text, &mut TextColor)>,
 ) {
-    let visible = play.phase.pre_contact();
+    // Hidden through the walk-up too: its card is the only chrome then.
+    let visible = play.phase.pre_contact() && !play.walkup_active();
     let ui = &theme.ui;
     for (mut bg, mut border, mut visibility) in &mut panels {
         let desired = if visible {
@@ -212,7 +314,9 @@ pub(super) fn update_duel_panels(
 pub(super) fn show_banner(
     mut events: EventReader<PlayBanner>,
     theme: Res<Theme>,
+    play: Res<Play>,
     mut timer: ResMut<BannerTimer>,
+    mut follow_up: ResMut<BannerFollowUp>,
     mut pill_q: Query<(&mut BackgroundColor, &mut BorderColor), With<BannerPill>>,
     mut text_q: Query<(&mut Text, &mut TextColor), With<BannerText>>,
 ) {
@@ -220,6 +324,10 @@ pub(super) fn show_banner(
     let Some(banner) = events.read().last() else {
         return;
     };
+    follow_up.0 = banner
+        .follow_up
+        .clone()
+        .map(|line| (line, Timer::from_seconds(FOLLOW_UP_SECS, TimerMode::Once)));
     let ui = &theme.ui;
     let tone_color = match banner.tone {
         BannerTone::Good => ui.tone_good,
@@ -235,7 +343,7 @@ pub(super) fn show_banner(
         bg.0 = ui.panel_bg;
         border.0 = ui.panel_border;
     }
-    timer.0 = Timer::from_seconds(1.6, TimerMode::Once);
+    timer.0 = Timer::from_seconds(beat_secs(&play, FREE_BANNER_SECS), TimerMode::Once);
 }
 
 /// Clears the pill once its display time is up.
@@ -260,13 +368,16 @@ pub(super) fn fade_banner(
 }
 
 /// Stamps the graded swing timing over the zone-box area: `PERFECT!` for
-/// dead-on contact; `EARLY`/`LATE` for `Solid` (and the as-yet-unreachable
-/// `Weak`, per its doc comment in `game::rules`) by `dt_ms`'s sign; `FOUL TIP`
-/// for a foul; nothing for `Whiff` — the classic strike/ball banner already
-/// covers a swing-and-miss.
+/// dead-on contact; `EARLY`/`LATE` by `dt_ms`'s sign for `Solid` (and the
+/// as-yet-unreachable `Weak`, per its doc comment in `game::rules`) **and
+/// for a `Whiff`** — the swing the batter most needs timing feedback on
+/// (TODO 101; the reference shows LATE under STRIKE on a miss); `FOUL TIP`
+/// for a foul. A stamp raised during a result pause lives as long as the
+/// beat, one raised at contact for its own short window.
 pub(super) fn show_contact_stamp(
     mut events: EventReader<ContactEvent>,
     theme: Res<Theme>,
+    play: Res<Play>,
     mut timer: ResMut<ContactStampTimer>,
     mut text_q: Query<(&mut Text, &mut TextColor), With<ContactStampText>>,
 ) {
@@ -274,23 +385,92 @@ pub(super) fn show_contact_stamp(
         return;
     };
     let ui = &theme.ui;
-    let stamp = match ev.quality {
-        ContactQuality::Perfect => Some(("PERFECT!", ui.tone_epic)),
-        ContactQuality::Solid | ContactQuality::Weak => {
-            let label = if ev.dt_ms < 0.0 { "EARLY" } else { "LATE" };
-            Some((label, ui.tone_info))
-        }
-        ContactQuality::FoulTip => Some(("FOUL TIP", ui.tone_info)),
-        ContactQuality::Whiff => None,
+    let early_late = |tone| {
+        let label = if ev.dt_ms < 0.0 { "EARLY" } else { "LATE" };
+        (label, tone)
     };
-    let Some((label, color)) = stamp else {
-        return;
+    let (label, color) = match ev.quality {
+        ContactQuality::Perfect => ("PERFECT!", ui.tone_epic),
+        ContactQuality::Solid | ContactQuality::Weak => early_late(ui.tone_info),
+        ContactQuality::Whiff => early_late(ui.tone_bad),
+        ContactQuality::FoulTip => ("FOUL TIP", ui.tone_info),
     };
     for (mut text, mut text_color) in &mut text_q {
         **text = label.to_string();
         text_color.0 = color;
     }
-    timer.0 = Timer::from_seconds(CONTACT_STAMP_SECS, TimerMode::Once);
+    timer.0 = Timer::from_seconds(beat_secs(&play, CONTACT_STAMP_SECS), TimerMode::Once);
+}
+
+/// How long the pitch-speed read-out stays up when raised outside a result
+/// pause (it never is today — every pitch beat is a pause — but the timer
+/// needs a bootstrap length).
+const PITCH_SPEED_SECS: f32 = 1.0;
+
+/// How long the pitch-speed read-out stays visible before clearing.
+#[derive(Resource)]
+pub(super) struct PitchSpeedTimer(Timer);
+
+impl Default for PitchSpeedTimer {
+    fn default() -> Self {
+        Self(Timer::from_seconds(PITCH_SPEED_SECS, TimerMode::Once))
+    }
+}
+
+/// Shows the just-judged pitch's release speed ("97 MPH") by the plate for
+/// the length of its beat — the read-out the reference pins under every
+/// strike and strikeout (TODO 101). Raised on the frame a result pause
+/// begins for any pitch beat (not a batted ball's pause: the camera has
+/// left the plate by then); the speed is the kind's release speed under the
+/// pace dial, the same number the pitch was thrown at.
+pub(super) fn show_pitch_speed(
+    play: Res<Play>,
+    rules: Res<Ruleset>,
+    theme: Res<Theme>,
+    mut prev_phase: Local<Option<Phase>>,
+    mut timer: ResMut<PitchSpeedTimer>,
+    mut text_q: Query<(&mut Text, &mut TextColor), With<PitchSpeedText>>,
+) {
+    let entered_result = play.phase == Phase::Result && *prev_phase != Some(Phase::Result);
+    *prev_phase = Some(play.phase);
+    if !entered_result {
+        return;
+    }
+    let pitch_beat = matches!(
+        play.result_beat(),
+        Some(
+            ResultBeat::Ball
+                | ResultBeat::Strike
+                | ResultBeat::Foul
+                | ResultBeat::Strikeout
+                | ResultBeat::Walk
+        )
+    );
+    let Some(kind) = play.pitch_kind().filter(|_| pitch_beat) else {
+        return;
+    };
+    let mph = kind.speed() * rules.pace.pitch_speed_scale * MPH_PER_MPS;
+    for (mut text, mut color) in &mut text_q {
+        **text = format!("{} MPH", mph.round() as i32);
+        color.0 = theme.ui.text_primary;
+    }
+    timer.0 = Timer::from_seconds(beat_secs(&play, PITCH_SPEED_SECS), TimerMode::Once);
+}
+
+/// Blanks the pitch-speed read-out once its display time is up.
+pub(super) fn fade_pitch_speed(
+    time: Res<Time>,
+    mut timer: ResMut<PitchSpeedTimer>,
+    mut text_q: Query<&mut Text, With<PitchSpeedText>>,
+) {
+    if timer.0.finished() {
+        return;
+    }
+    if timer.0.tick(time.delta()).just_finished() {
+        for mut text in &mut text_q {
+            **text = String::new();
+        }
+    }
 }
 
 /// Blanks the contact stamp once its display time is up.

@@ -2,14 +2,16 @@
 //!
 //! Two modes, toggled with **C** (or the controller's Select/Back button):
 //!
-//! - **Broadcast** (default): a high angle behind home plate that frames the
-//!   whole diamond for the pitch, then gently follows the ball while it is live.
+//! - **Broadcast** (default): the duel framing for the pitch, then a shot
+//!   list that *cuts* between one-subject shots while the ball is live —
+//!   ball-follow, fielder cam, base cam ([`Shot`]).
 //! - **Orbit**: the free stadium camera (WASD / arrows to orbit, Q/E or wheel to
 //!   zoom, R to reset) for looking around.
 //!
 //! While broadcast holds the duel (pitch/swing) framing, **V** cycles through
-//! four [`DuelView`]s (catcher POV, behind-the-pitcher, a tight batting zoom,
-//! and the elevated broadcast plate shot). Whichever of the catcher/plate
+//! four [`DuelView`]s (the default batting view from behind the box, the
+//! catcher POV, behind-the-pitcher, and the elevated broadcast plate shot).
+//! Whichever of the catcher/plate
 //! umpire sits right in front of the lens for the active view is hidden for
 //! the duration ([`rigs::hide_occluders`]) — a body brushing the glass, not a
 //! full occlusion raycast, so the far-off behind-pitcher and broadcast-plate
@@ -24,12 +26,15 @@ use crate::game::variant::FieldSpec;
 mod framing;
 mod rigs;
 
-pub use framing::{aspect_safe_duel_vfov, framed_height_fraction, framed_ndc_y, occludes};
-pub use rigs::OrbitState;
+pub use framing::{
+    aspect_safe_duel_vfov, brushes_lens, framed_height_fraction, framed_ndc_x, framed_ndc_y,
+    occludes,
+};
+pub use rigs::{BroadcastRig, OrbitState, Shot};
 
 use rigs::{
-    BroadcastRig, CameraKick, broadcast_camera, decay_kick, hide_occluders, kick_on_hit,
-    kick_on_wall_bang, orbit_camera, zoom_camera,
+    CameraKick, broadcast_camera, decay_kick, hide_occluders, kick_on_hit, kick_on_wall_bang,
+    orbit_camera, zoom_camera,
 };
 
 // ── Mode ──────────────────────────────────────────────────────────────────────
@@ -58,16 +63,22 @@ fn is_orbit(mode: Res<CameraMode>) -> bool {
 pub enum DuelView {
     /// The catcher's own point of view (Task 12): the lens sits just past
     /// his crouched head, so he — and the plate umpire behind him — never
-    /// render, no occlusion check needed.
-    #[default]
+    /// render, no occlusion check needed. Was the default until TODO 100:
+    /// under a metre from the batter the swing crosses the frame in a few
+    /// frames and the ball flies *into* the lens, which made a hit or miss
+    /// unreadable.
     CatcherPov,
     /// Behind and above the mound, looking out at the batter — the
     /// reference "pitcher cam": the catcher and plate umpire are meant to
     /// stay in frame here.
     BehindPitcher,
-    /// A tight zoom from behind and beside the batter's box, looking across
-    /// the zone toward the pitcher — close enough behind the plate that the
-    /// catcher (and the umpire behind him) sit right in the sightline.
+    /// The default (TODO 100): the reference batting shot from 2 m behind
+    /// the plate at the batter's chest height — his whole body on the
+    /// screen-left third, the zone at centre, the pitcher above it — so the
+    /// ball grows toward the lens and the full bat arc is visible beside
+    /// its path. The catcher sits in the sightline and is auto-hidden; the
+    /// umpire is behind the eye. Framing in `FieldSpec::batting_zoom_eye`.
+    #[default]
     BattingZoom,
     /// The elevated behind-home broadcast shot (reuses the wide framing).
     BroadcastPlate,
@@ -77,10 +88,10 @@ impl DuelView {
     /// The next view in the cycle (wraps).
     fn next(self) -> DuelView {
         match self {
+            DuelView::BattingZoom => DuelView::CatcherPov,
             DuelView::CatcherPov => DuelView::BehindPitcher,
-            DuelView::BehindPitcher => DuelView::BattingZoom,
-            DuelView::BattingZoom => DuelView::BroadcastPlate,
-            DuelView::BroadcastPlate => DuelView::CatcherPov,
+            DuelView::BehindPitcher => DuelView::BroadcastPlate,
+            DuelView::BroadcastPlate => DuelView::BattingZoom,
         }
     }
 
@@ -98,10 +109,13 @@ impl DuelView {
                 field.behind_pitcher_target,
                 BEHIND_PITCHER_FOV,
             ),
+            // The same aspect correction as the catcher POV: this is the
+            // tight default shot now, and a narrow viewport must widen
+            // rather than crop the batter off the left edge.
             DuelView::BattingZoom => (
                 field.batting_zoom_eye,
                 field.batting_zoom_target,
-                BATTING_ZOOM_FOV,
+                aspect_safe_duel_vfov(BATTING_ZOOM_FOV, aspect),
             ),
             DuelView::BroadcastPlate => {
                 (field.broadcast_eye, field.broadcast_target, BROADCAST_FOV)
@@ -121,9 +135,12 @@ fn toggle_duel_view(keyboard: Res<ButtonInput<KeyCode>>, mut view: ResMut<DuelVi
 const BROADCAST_HOME_TARGET: Vec3 = Vec3::new(0.0, 1.2, 9.0);
 const BROADCAST_EYE: Vec3 = Vec3::new(0.0, 13.0, -21.0);
 
-/// Seconds after contact before the camera leaves the plate to chase the
-/// ball — long enough to watch the swing land and the batter break.
-const BALL_FOLLOW_DELAY: f32 = 1.0;
+/// Seconds after contact before the camera cuts from the plate to the ball
+/// — just the crack and the bat coming through, per the reference footage
+/// (a cut within a quarter second; docs/agent/SMB3-REFERENCE-NOTES.md
+/// §2.5). `runner::RUN_OUT_DELAY` matches it so the batter is never seen
+/// swapped for his run-out stand-in in this frame.
+const BALL_FOLLOW_DELAY: f32 = 0.25;
 
 /// Vertical FOV used everywhere except the duel (unchanged from the single
 /// FOV this camera used to run at everywhere).
@@ -150,10 +167,11 @@ const DUEL_REFERENCE_ASPECT: f32 = 16.0 / 9.0;
 /// framing keeps the batter readable at that distance.
 const BEHIND_PITCHER_FOV: f32 = 40.0_f32.to_radians();
 
-/// Vertical FOV for the batting zoom: closer to the subjects than the
-/// broadcast framing but not as tight as the catcher POV, which sits right
-/// at the batter's shoulder.
-const BATTING_ZOOM_FOV: f32 = 65.0_f32.to_radians();
+/// Vertical FOV for the default batting view: 2 m behind the plate a 60°
+/// lens puts the whole batter in frame at ~80% of the screen height while
+/// the zone box at centre stays large (the composition the framing test
+/// pins). Aspect-corrected like `DUEL_FOV` (see `DuelView::framing`).
+const BATTING_ZOOM_FOV: f32 = 60.0_f32.to_radians();
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 

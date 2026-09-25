@@ -4,8 +4,8 @@
 use bevy::prelude::*;
 
 use crate::game::animation::{AnimClip, MoveIntent, Playing};
-use crate::game::flow::{BallInPlayEvent, LeadState, LiveBallEvent, Phase, Play};
-use crate::game::player::{Batter, RigModel, RigUnit, TeamPalette, spawn_rig};
+use crate::game::flow::{BallInPlayEvent, LeadState, LiveBallEvent, Phase, Play, ResultBeat};
+use crate::game::player::{BATTER_STAND_X, Batter, RigModel, RigUnit, TeamPalette, spawn_rig};
 use crate::game::rules::{self, Bases, ContactKind, RunnerBreak};
 use crate::game::variant::{FieldSpec, Ruleset};
 use crate::game::{GameState, ScoreBoard};
@@ -60,11 +60,12 @@ struct DespawnAtPathEnd;
 struct RunDelay(Timer);
 
 /// Seconds the batter holds the box after fair contact before the run-out rig
-/// breaks for first. Kept small (≤ 0.2 s) so the batter is running almost the
-/// instant he makes contact — just long enough to see the swing follow-through
-/// and bat drop before the seamless swap to the run-out rig. Purely visual: it
-/// does not feed the race math (the umpire charges its own reaction delay).
-const RUN_OUT_DELAY: f32 = 0.15;
+/// breaks for first. Matches the camera's post-contact plate hold
+/// (`camera::BALL_FOLLOW_DELAY`, 0.25 s): the swap to the run-out rig lands
+/// on the cut away from the plate, so it is never seen (TODO 102). Purely
+/// visual: it does not feed the race math (the umpire charges its own
+/// reaction delay).
+const RUN_OUT_DELAY: f32 = 0.25;
 /// A home run earns a longer look before the trot starts.
 const TROT_DELAY: f32 = 0.9;
 
@@ -686,14 +687,58 @@ fn clear_breaks(
     }
 }
 
-/// The next at-bat begins: the batter steps back into the box.
-fn batter_returns(play: Res<Play>, mut batter_q: Query<&mut Visibility, With<Batter>>) {
+/// Seconds into a strikeout's result pause before the batter turns and
+/// walks off — the follow-through and the call land first.
+const WALK_OFF_DELAY: f32 = 0.7;
+/// A walk, not a run (m/s).
+const WALK_OFF_SPEED: f32 = 1.6;
+/// Where the struck-out batter heads: off the third-base side of the plate,
+/// away from the reaction cam on the first-base side.
+const WALK_OFF_SPOT: Vec3 = Vec3::new(3.5, 0.6, -3.5);
+
+/// Strike three: a beat after the call the batter turns and walks off
+/// toward the dugout for the rest of the pause (TODO 104), through the same
+/// [`MoveIntent`] seam every rig moves on. Purely visual — the plate
+/// appearance is already over.
+fn batter_walks_off(
+    play: Res<Play>,
+    mut batter_q: Query<(&Transform, &mut MoveIntent), With<Batter>>,
+) {
+    let strikeout = play.phase == Phase::Result
+        && play.result_beat() == Some(ResultBeat::Strikeout)
+        && play.result_elapsed_secs() >= WALK_OFF_DELAY;
+    if !strikeout {
+        return;
+    }
+    for (transform, mut intent) in &mut batter_q {
+        let still_in_the_box = (transform.translation.x - BATTER_STAND_X).abs() < 0.05;
+        if intent.target.is_none() && still_in_the_box {
+            intent.target = Some(WALK_OFF_SPOT);
+            intent.speed = WALK_OFF_SPEED;
+        }
+    }
+}
+
+/// The next at-bat begins: the batter steps back into the box — visible,
+/// standing in his spot facing the plate, any walk-off cut short.
+fn batter_returns(
+    play: Res<Play>,
+    mut batter_q: Query<(&mut Transform, &mut Visibility, &mut MoveIntent), With<Batter>>,
+) {
     if play.phase != Phase::PrePitch {
         return;
     }
-    for mut visibility in &mut batter_q {
+    for (mut transform, mut visibility, mut intent) in &mut batter_q {
         if *visibility != Visibility::Inherited {
             *visibility = Visibility::Inherited;
+        }
+        if intent.target.is_some() {
+            intent.target = None;
+        }
+        let spot = Vec3::new(BATTER_STAND_X, transform.translation.y, 0.0);
+        if transform.translation.distance(spot) > 0.01 {
+            transform.translation = spot;
+            transform.rotation = Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2);
         }
     }
 }
@@ -718,6 +763,7 @@ impl Plugin for RunnerPlugin {
                 take_leadoffs,
                 slide_into_base,
                 track_settled,
+                batter_walks_off,
                 batter_returns,
             )
                 .chain()

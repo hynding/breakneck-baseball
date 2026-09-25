@@ -26,7 +26,9 @@
 
 use bevy::prelude::*;
 
-use crate::game::ai::{CpuConfig, CpuState, cpu_defense, cpu_offense};
+use crate::game::ai::{
+    CpuConfig, CpuState, cpu_defense, cpu_offense, reset_cpu_clock, tick_cpu_clock,
+};
 use crate::game::rules::{self, Bases, BattingOrder, Outcome};
 use crate::game::variant::Ruleset;
 use crate::game::{GameState, Team};
@@ -45,6 +47,34 @@ pub(crate) use pitch::{late_swing_z, swing_dt_ms};
 /// const as its bootstrap value (no resource access at construction), and
 /// it's `PaceTuning::default()`'s source of truth.
 pub(crate) const RESULT_SECS: f32 = 1.2;
+/// Per-outcome result pauses (TODO 101), sized off the reference footage
+/// (docs/agent/SMB3-REFERENCE-NOTES.md §2.3–2.6): a ball is the quietest
+/// event in the game; a strike holds just long enough for the batter's
+/// follow-through and the call text; a foul and a strikeout hold longer.
+/// Each is the hold *before* the curtain — beats that dip to black
+/// ([`ResultBeat::dips`]) add [`CURTAIN_SECS`] on top. Live gameplay reads
+/// these off `Ruleset.pace` (`PaceTuning::result_secs_for`).
+pub(crate) const BALL_RESULT_SECS: f32 = 0.8;
+pub(crate) const STRIKE_RESULT_SECS: f32 = 0.8;
+pub(crate) const FOUL_RESULT_SECS: f32 = 1.4;
+pub(crate) const STRIKEOUT_RESULT_SECS: f32 = 2.2;
+/// A walk, a hit-by-pitch, or a dropped third strike: the plate appearance
+/// ends and the batter takes his base before the next one steps in.
+pub(crate) const WALK_RESULT_SECS: f32 = 1.4;
+/// How long the walk-up holds between plate appearances before it dismisses
+/// itself (TODO 103): the incoming batter's card and a close plate shot,
+/// where the reference footage spends its seconds. A batting-side action
+/// press ends it sooner; the CPU never presses, so its at-bats take the
+/// full hold. Live gameplay reads `Ruleset.pace.walkup_secs`.
+pub(crate) const WALKUP_SECS: f32 = 3.0;
+/// How long the curtain takes to close at the end of a result pause that
+/// dips to black — the beat's punctuation, and the cover under which the
+/// mound reset happens unseen. The pause's phase flip waits for it.
+pub const CURTAIN_SECS: f32 = 0.2;
+/// How long the themed wipe takes to sweep in at the end of a beat that
+/// ended the plate appearance — the reference's logo wipe before the next
+/// batter's walk-up, slower than the dip so it reads as a panel, not a cut.
+pub const WIPE_SECS: f32 = 0.5;
 /// Minimum seconds between pickoff throws — the arm has to reload, so a held
 /// button can't machine-gun the bag. Live gameplay reads this off
 /// `Ruleset.pace.pickoff_cooldown_secs`; this const only remains as
@@ -93,6 +123,67 @@ impl Phase {
     }
 }
 
+/// What kind of result the current pause is showing — the key into
+/// `PaceTuning::result_secs_for` and the answer to whether the beat ends
+/// with a dip to black. Flow sets it as it ends the pitch or play; the
+/// presentation reads it (`Play::result_beat`) and never guesses from the
+/// banner text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResultBeat {
+    /// A taken ball: no big text, no dip — straight back to the duel.
+    Ball,
+    /// A called or swinging strike (not the third).
+    Strike,
+    /// A foul ball or foul tip.
+    Foul,
+    /// Strike three into the mitt.
+    Strikeout,
+    /// The batter takes his base on a dead ball: ball four, a plunking, or
+    /// a dropped third strike he ran out.
+    Walk,
+    /// A pickoff out at the bag.
+    Pickoff,
+    /// A batted ball's call (out, hit, home run) — the live-play pause.
+    InPlay,
+}
+
+impl ResultBeat {
+    /// Whether the pause ends with the curtain closing: every beat except a
+    /// taken ball, per the reference footage.
+    pub fn dips(self) -> bool {
+        !matches!(self, ResultBeat::Ball)
+    }
+
+    /// How long this beat's curtain takes to close: the themed wipe for a
+    /// beat that ended the plate appearance, the quick dip otherwise.
+    pub fn curtain_secs(self) -> f32 {
+        if self.ends_plate_appearance() {
+            WIPE_SECS
+        } else {
+            CURTAIN_SECS
+        }
+    }
+
+    /// Whether this beat ended the plate appearance — the next batter walks
+    /// up before the next pitch. A pickoff and a foul leave the same batter
+    /// in the box; a taken ball or a strike keeps the count alive.
+    pub fn ends_plate_appearance(self) -> bool {
+        matches!(
+            self,
+            ResultBeat::Strikeout | ResultBeat::Walk | ResultBeat::InPlay
+        )
+    }
+
+    /// The beat a judged strike lands in.
+    pub(super) fn for_strike(call: rules::StrikeCall) -> Self {
+        match call {
+            rules::StrikeCall::Strike => ResultBeat::Strike,
+            rules::StrikeCall::Strikeout => ResultBeat::Strikeout,
+            rules::StrikeCall::DroppedThird => ResultBeat::Walk,
+        }
+    }
+}
+
 /// Runtime state for the play machine.
 ///
 /// The three clusters below have different lifetimes — the pitch in flight,
@@ -104,6 +195,19 @@ pub struct Play {
     pub phase: Phase,
     timer: Timer,
     resolved: bool,
+    /// Which beat the current result pause is (set as the pitch/play ends,
+    /// cleared at the PrePitch reset).
+    beat: Option<ResultBeat>,
+    /// The curtain closing at the end of a dipping result pause (or of the
+    /// walk-up): started once the pause timer and the runners are done, and
+    /// the phase flips only when it finishes, so the reset lands on a black
+    /// screen.
+    curtain: Option<Timer>,
+    /// The walk-up hold at the start of a plate appearance: while `Some`,
+    /// the ball is held (no steal window, no pitch) and the incoming batter
+    /// is introduced. Ends on the batting side's action or when it expires,
+    /// through the curtain.
+    walkup: Option<Timer>,
     /// The pitch in flight, and how the catcher received it.
     pitch: PitchState,
     /// The pre-pitch leadoff / pickoff duel.
@@ -200,6 +304,10 @@ struct LiveState {
     /// This play is a home run: set at contact, held through the trot and the
     /// result pause (so the camera can orbit the trot), cleared at reset.
     home_run: bool,
+    /// The batted ball's announced call, held through the result pause so
+    /// presentation can stage it (the umpire's signal at the bag); cleared
+    /// at reset.
+    last_outcome: Option<Outcome>,
 }
 
 impl Play {
@@ -275,6 +383,70 @@ impl Play {
         self.pitch.last_strike_call
     }
 
+    /// The batted ball's call as announced (`None` before one lands this
+    /// play; cleared at the PrePitch reset) — what the umpire at the bag
+    /// signals.
+    pub fn last_outcome(&self) -> Option<Outcome> {
+        self.live.last_outcome
+    }
+
+    /// The kind of the pitch in flight or just judged (`None` before the
+    /// release and after the PrePitch reset) — the speed read-out's source.
+    pub fn pitch_kind(&self) -> Option<rules::PitchKind> {
+        self.pitch.kind
+    }
+
+    /// Which beat the current result pause is showing (`None` outside a
+    /// result pause).
+    pub fn result_beat(&self) -> Option<ResultBeat> {
+        self.beat
+    }
+
+    /// The full length of the current result pause in seconds — the hold
+    /// plus the curtain if this beat dips — so a read-out can live exactly
+    /// as long as its beat. Outside a result pause, the timer's length is
+    /// whatever the phase last armed (the Coach reads it only in Result).
+    pub fn result_pause_secs(&self) -> f32 {
+        let curtain = match self.beat {
+            Some(beat) if beat.dips() => beat.curtain_secs(),
+            _ => 0.0,
+        };
+        self.timer.duration().as_secs_f32() + curtain
+    }
+
+    /// Whether the walk-up between plate appearances is on: the ball is
+    /// held and the incoming batter is being introduced.
+    pub fn walkup_active(&self) -> bool {
+        self.walkup.is_some()
+    }
+
+    /// Seconds into the current result pause (0 outside one) — the clock a
+    /// presentation beat inside the pause is staged on (the strikeout
+    /// walk-off starts a beat after the call).
+    pub fn result_elapsed_secs(&self) -> f32 {
+        if self.phase == Phase::Result {
+            self.timer.elapsed_secs()
+        } else {
+            0.0
+        }
+    }
+
+    /// Whether the curtain closing now is the themed wipe (the plate
+    /// appearance is over and the next batter walks up) rather than the
+    /// plain dip between pitches.
+    pub fn curtain_is_wipe(&self) -> bool {
+        self.beat.is_some_and(ResultBeat::ends_plate_appearance)
+    }
+
+    /// How far the curtain has closed at the end of a dipping result pause:
+    /// `Some(0.0..=1.0)` while it is closing (1.0 = fully black, the frame
+    /// the phase flips), `None` at every other time — the presentation's
+    /// only cue; it fades the curtain back out on its own once this is
+    /// `None` again.
+    pub fn curtain_progress(&self) -> Option<f32> {
+        self.curtain.as_ref().map(Timer::fraction)
+    }
+
     /// Test-only constructor for camera/flow unit tests that need a `Play`
     /// in a given phase without driving the whole machine there.
     #[cfg(test)]
@@ -285,6 +457,34 @@ impl Play {
                 gloved: pitch_gloved,
                 ..PitchState::default()
             },
+            ..Self::default()
+        }
+    }
+
+    /// Test-only: a `Play` parked in a result pause of the given beat with
+    /// the curtain `progress` of the way closed (`None` = not closing).
+    #[cfg(test)]
+    pub fn test_result(beat: ResultBeat, progress: Option<f32>) -> Self {
+        let curtain = progress.map(|p| {
+            let secs = beat.curtain_secs();
+            let mut t = Timer::from_seconds(secs, TimerMode::Once);
+            t.set_elapsed(std::time::Duration::from_secs_f32(secs * p));
+            t
+        });
+        Self {
+            phase: Phase::Result,
+            beat: Some(beat),
+            curtain,
+            ..Self::default()
+        }
+    }
+
+    /// Test-only: a `Play` parked in a walk-up hold.
+    #[cfg(test)]
+    pub fn test_walkup() -> Self {
+        Self {
+            phase: Phase::PrePitch,
+            walkup: Some(Timer::from_seconds(WALKUP_SECS, TimerMode::Once)),
             ..Self::default()
         }
     }
@@ -323,6 +523,9 @@ impl Default for Play {
             phase: Phase::PrePitch,
             timer: Timer::from_seconds(RESULT_SECS, TimerMode::Once),
             resolved: false,
+            beat: None,
+            curtain: None,
+            walkup: None,
             pitch: PitchState::default(),
             duel: DuelState::default(),
             live: LiveState::default(),
@@ -406,6 +609,11 @@ pub struct ContactEvent {
 pub struct PlayBanner {
     pub text: String,
     pub tone: BannerTone,
+    /// A second line the banner swaps to partway through its beat — the
+    /// score after a run-scoring play ("AWAY 2  -  HOME 0"), the way the
+    /// reference replaces SAFE! with the score (TODO 104). Flow supplies
+    /// the words; presentation owns the timing.
+    pub follow_up: Option<String>,
 }
 
 impl PlayBanner {
@@ -413,7 +621,14 @@ impl PlayBanner {
         Self {
             text: text.into(),
             tone,
+            follow_up: None,
         }
+    }
+
+    /// Attach the line the banner swaps to partway through its beat.
+    pub fn with_follow_up(mut self, text: impl Into<String>) -> Self {
+        self.follow_up = Some(text.into());
+        self
     }
 }
 
@@ -448,7 +663,10 @@ impl Plugin for FlowPlugin {
             .add_event::<PitchCaughtEvent>()
             .add_event::<ContactEvent>()
             .add_event::<PlayBanner>()
-            .add_systems(crate::game::game_start(), pitch::reset_flow)
+            .add_systems(
+                crate::game::game_start(),
+                (pitch::reset_flow, reset_cpu_clock),
+            )
             .add_systems(
                 Update,
                 // CPU intent is written first so pitching/batting see it this
@@ -461,6 +679,7 @@ impl Plugin for FlowPlugin {
                 // restores that same-frame delivery). It still reads
                 // `cpu_offense`'s intent write from earlier this frame.
                 (
+                    tick_cpu_clock,
                     cpu_defense,
                     cpu_offense,
                     pitch::pre_pitch,

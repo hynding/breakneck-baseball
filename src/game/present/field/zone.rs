@@ -142,7 +142,10 @@ pub(super) fn strike_zone_visibility(
     settings: Res<Settings>,
     mut overlay: Query<&mut Visibility, With<StrikeZoneOverlay>>,
 ) {
-    let visible = settings.show_strike_zone && (play.phase.pre_contact() || flash.timer.is_some());
+    // Hidden through the walk-up (TODO 103): the shot is the batter's
+    // introduction, not the duel.
+    let visible = settings.show_strike_zone
+        && ((play.phase.pre_contact() && !play.walkup_active()) || flash.timer.is_some());
     for mut visibility in &mut overlay {
         let desired = if visible {
             Visibility::Inherited

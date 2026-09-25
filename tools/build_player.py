@@ -145,6 +145,31 @@ CLIPS = {
         "UpperArm.R": {"rx": [(0, -0.55), (0.25, -0.59), (0.5, -0.55), (0.75, -0.51), (1, -0.55)]},
         "Hips": {"dz": [(0, -0.22), (1, -0.22)]},
     }),
+    # Umpire mechanics (TODO 104 / Plan E). UmpStrike starts from the
+    # CatcherCrouch values (the plate umpire is crouched when the call
+    # lands): he rises a little and punches the right arm up and out.
+    "UmpStrike": (0.5, False, {
+        "UpperLeg.L": {"rx": [(0, 1.35), (0.5, 0.6), (1, 0.6)]},
+        "UpperLeg.R": {"rx": [(0, 1.35), (0.5, 0.6), (1, 0.6)]},
+        "LowerLeg.L": {"rx": [(0, -1.9), (0.5, -0.8), (1, -0.8)]},
+        "LowerLeg.R": {"rx": [(0, -1.9), (0.5, -0.8), (1, -0.8)]},
+        "UpperArm.L": {"rx": [(0, -1.15), (0.5, -0.3), (1, -0.3)]},
+        "UpperArm.R": {"rx": [(0, -0.55), (0.5, -2.2), (1, -2.2)], "rz": [(0, 0), (0.5, -0.9), (1, -0.9)]},
+        "Hips": {"dz": [(0, -0.22), (0.5, -0.08), (1, -0.08)]},
+    }),
+    # Strike three: stand up, wind the right arm back, then the big punch
+    # forward and up. Starts from standing so a field umpire can use it for
+    # an out at the bag too (the plate umpire cross-fades up out of his crouch).
+    "UmpPunchOut": (0.9, False, {
+        "UpperArm.R": {"rx": [(0, 0), (0.3, 0.6), (0.6, -2.6), (1, -2.6)], "rz": [(0, 0), (0.6, -0.5), (1, -0.5)]},
+        "UpperArm.L": {"rx": [(0, 0), (0.6, -0.6), (1, -0.6)]},
+        "Spine": {"ry": [(0, 0), (0.3, 0.25), (0.6, -0.35), (1, -0.35)]},
+    }),
+    # Safe: both arms sweep straight out to the sides and hold.
+    "UmpSafe": (0.7, False, {
+        "UpperArm.L": {"rx": [(0, 0), (0.35, -0.2), (1, -0.2)], "rz": [(0, 0), (0.35, 1.5), (0.6, 1.3), (1, 1.5)]},
+        "UpperArm.R": {"rx": [(0, 0), (0.35, -0.2), (1, -0.2)], "rz": [(0, 0), (0.35, -1.5), (0.6, -1.3), (1, -1.5)]},
+    }),
     "Dive": (0.5, False, {
         "UpperArm.L": {"rx": [(0, 0), (1, -2.6)]},
         "UpperArm.R": {"rx": [(0, 0), (1, -2.6)]},

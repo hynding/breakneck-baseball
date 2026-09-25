@@ -7,11 +7,11 @@ use bevy_rapier3d::prelude::*;
 use crate::game::ball::{Baseball, InFlight};
 use crate::game::rules::{self, Bases};
 use crate::game::runner::RunnersSettled;
-use crate::game::variant::{FieldSpec, Ruleset};
+use crate::game::variant::{FieldSpec, PaceTuning, Ruleset};
 use crate::game::{GameState, ScoreBoard};
 
 use super::pitch::steal_window_for;
-use super::{LeadState, Phase, Play};
+use super::{LeadState, Phase, Play, ResultBeat};
 
 /// Extra seconds the result pause will wait for runner rigs to finish their
 /// paths (the home-run trot, a first-to-third sprint) before the next batter
@@ -50,6 +50,17 @@ pub(super) fn result_phase(
         return;
     }
     *overtime = 0.0;
+    // A dipping beat closes the curtain before anything resets: the phase
+    // flips — and the ball teleports to the mound — on a black screen, the
+    // way the reference footage hides every reset (TODO 101).
+    if let Some(beat) = play.beat.filter(|b| b.dips()) {
+        let curtain = play
+            .curtain
+            .get_or_insert_with(|| Timer::from_seconds(beat.curtain_secs(), TimerMode::Once));
+        if !curtain.tick(time.delta()).finished() {
+            return;
+        }
+    }
     // The play has fully finished on screen — banner shown, runners settled
     // (the walk-off home-run trot included). Only now, once the play looks
     // over, does a decided game actually end: a walk-off's fireworks, slow-mo,
@@ -69,7 +80,16 @@ pub(super) fn result_phase(
         // leave the ball invisible into the next pitch.
         *vis = Visibility::Inherited;
     }
+    // A beat that ended the plate appearance introduces the next batter
+    // before the ball is live again (TODO 103): the walk-up holds the
+    // pitch, and the curtain opens on it rather than on the duel.
+    play.walkup = play
+        .beat
+        .is_some_and(ResultBeat::ends_plate_appearance)
+        .then(|| Timer::from_seconds(rules_res.pace.walkup_secs, TimerMode::Once));
     play.phase = Phase::PrePitch;
+    play.beat = None;
+    play.curtain = None;
     play.pitch.crossing = None;
     play.resolved = false;
     play.pitch.presentational_catch = false;
@@ -84,14 +104,21 @@ pub(super) fn result_phase(
     play.live.wall_called = false;
     play.live.home_run = false;
     play.live.last_contact_quality = None;
+    play.live.last_outcome = None;
     play.pitch.last_strike_call = None;
     // A runner in stealing position opens the duel window for the next at-bat.
     play.duel.hold = steal_window_for(&bases, &rules_res);
     lead.extended = false;
 }
 
-pub(super) fn end_pitch(play: &mut Play, result_secs: f32) {
+/// Ends the pitch or play into its result pause: the hold `pace` gives
+/// `beat`, then (for every beat but a taken ball) the curtain, then the
+/// PrePitch reset. Every path into `Phase::Result` comes through here so
+/// the beat is never left unset.
+pub(super) fn end_pitch(play: &mut Play, pace: &PaceTuning, beat: ResultBeat) {
     play.phase = Phase::Result;
-    play.timer = Timer::from_seconds(result_secs, TimerMode::Once);
+    play.timer = Timer::from_seconds(pace.result_secs_for(beat), TimerMode::Once);
     play.resolved = true;
+    play.beat = Some(beat);
+    play.curtain = None;
 }

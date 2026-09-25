@@ -240,7 +240,8 @@ pub struct CoachSnapshot {
     /// This play ended with an untouched, catchable pitch (no contact, no
     /// HBP, not in the dirt) — the catcher must end up with the ball.
     pub untouched_pitch_result: bool,
-    /// The active result-pause length (pace.result_secs).
+    /// The active result-pause length: the beat's hold plus its curtain
+    /// (`Play::result_pause_secs`; per-beat since TODO 101).
     pub result_secs: f32,
     /// The active auto-throw deadline (pace.auto_throw_delay_secs).
     pub auto_throw_delay_secs: f32,

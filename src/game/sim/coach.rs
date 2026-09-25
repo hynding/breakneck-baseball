@@ -329,7 +329,9 @@ fn build_snapshot(
         pending_call: facts.play.pending_call().is_some(),
         runners_settled: facts.settled.0,
         untouched_pitch_result,
-        result_secs: facts.ruleset.pace.result_secs,
+        // The actual length of the pause in progress (per-beat since
+        // TODO 101), not the one dial that used to be every pause.
+        result_secs: facts.play.result_pause_secs(),
         auto_throw_delay_secs: facts.ruleset.pace.auto_throw_delay_secs,
         catcher_pos: rigs.catcher.get_single().ok().map(|tf| tf.translation),
         ball: ball_facts,

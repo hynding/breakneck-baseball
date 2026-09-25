@@ -306,3 +306,94 @@ the probe that now guards it.
     into production submodules". rustfmt follows `#[path]`, so formatting is unaffected.
     Convention recorded in CLAUDE.md. Test count unchanged at 346.
 
+96. [x] TODO 100 — the reference batting view is the default duel view. — `DuelView::BattingZoom`
+    retuned to the SMB3 composition (eye `(0.2, 1.25, -2.0)`, 60° aspect-corrected lens, both
+    parks): whole batter at ~80% of the frame height screen-left, zone box centred in the
+    lower-middle, pitcher's release above it, so the pitched ball *grows* toward the lens with
+    the full bat arc beside it. Made the default; V cycles batting view → catcher POV →
+    behind-pitcher → broadcast plate. A lens-brush rule in `hide_occluders` (any plate rig
+    standing within 0.7 m of the eye is hidden, beside or behind it) lets the front-yard
+    umpire share the eye. Pinned by `batting_zoom_frames_the_batter_and_centres_the_zone`
+    and `lens_brush_hides_only_a_body_at_the_eye`; `e2e_camera_views` re-pinned. Notes and
+    measured beats: `docs/agent/SMB3-REFERENCE-NOTES.md`.
+97. [x] TODO 101 — the take/miss beat has a shape. — `flow::ResultBeat` (ball / strike / foul /
+    strikeout / walk / pickoff / in-play) set by every path into `Phase::Result` through one
+    `end_pitch`; `PaceTuning::result_secs_for` holds each beat its own length (ball 0.8,
+    strike 0.8, foul 1.4, strikeout 1.8, walk 1.4; batted balls keep `result_secs`). Every
+    beat but a taken ball ends with the **curtain**: flow closes it over 0.2 s
+    (`Play::curtain_progress`) and flips to PrePitch only once the screen is black, so the
+    mound reset is never seen; `ui/curtain.rs` paints it (spawned opaque at game start — a free
+    fade-in on PLAY BALL, and exactly what the wasm alpha rule wants) and opens it again on its
+    own. A whiff now stamps EARLY/LATE (was nothing), a pitch-speed read-out ("87 MPH") sits by
+    the plate for the beat, and banner/stamp lifetimes equal the beat so nothing outlives it.
+    The Coach reads the actual pause (`Play::result_pause_secs`). Result read-outs are held
+    until the pause actually ends (runners settling included) and blanked on the exit frame
+    (`clear_read_outs_on_result_exit`), never on a fixed timer. `e2e_call_beat` pins the
+    order: stamp → hold → curtain black at the flip → reopen.
+98. [x] TODO 102 — the camera cuts. — `camera::Shot` (duel / ball-follow / fielder cam / base
+    cam / trot orbit): a change of shot snaps the rig, smoothing only tracks *within* a shot.
+    `pick_shot` is pure and unit-tested: plate hold 0.25 s after contact (`BALL_FOLLOW_DELAY`
+    1.0 → 0.25, `RUN_OUT_DELAY` 0.15 → 0.25 so the run-out swap lands on the cut), then the
+    ball; a chaser under a descending fly takes the fielder cam; `LiveBallEvent::Thrown` takes
+    the base cam (low, just outside the diamond, three-quarters behind the runner's approach —
+    the shot the call is announced in); a result pause keeps the shot the play ended on, a
+    gloved pitch stays at the plate, a home run orbits. `hide_occluders` keys on the rig's
+    shot (the `duel_framing_wanted` predicate is gone). The ball-follow keeps its landing-zone
+    framing through a non-home-run result (no glide out to the wide plate) and tilts toward a
+    high fly. `e2e_base_cam` drives a grounder through plate → ball → base cam → held through
+    the call → walk-up → duel, and an in-park fly through the fielder cam. A native
+    `--features autoplay` run now prints the web beacons (`bb-phase`, `bb-walkup`) on stderr.
+99. [x] TODO 103 — the walk-up between plate appearances. — A beat that ended the plate
+    appearance (`ResultBeat::ends_plate_appearance`) arms `Play::walkup` at the PrePitch flip:
+    the ball is held (no steal window ticks, no pitch is accepted — `flow::pitch::walk_up`),
+    the camera cuts to `Shot::WalkUp` (a close plate shot from the first-base side with the
+    catcher and umpire in frame, pinned by `walk_up_shot_frames_the_batter_and_the_catcher`),
+    the batter's fidgets chain back to back, and `ui/walkup.rs` paints the incoming batter's
+    card (UP TO BAT / name / #number / team · AB n/9 — a hidden-at-spawn root shown by mutating
+    children). It ends on the batting side's action intent (so scripts, the Director, and every
+    device cover it) or after `PaceTuning::walkup_secs` (3 s; the CPU never presses), and
+    leaves through the same curtain as a result beat. The curtain stands in for the reference's
+    themed logo wipe for now. `e2e_walkup` pins: strikeout → walk-up shot + card → held pitch
+    for the full hold + curtain → duel; and a press ending it after just the curtain.
+100. [x] TODO 104 — the strikeout gets its shot and a scoring play shows the score. —
+    `Shot::ReactionCam`: strike three's result pause is shot side-on at the plate from the
+    first-base side (batter, catcher, umpire in frame; pinned by
+    `reaction_cam_frames_batter_catcher_and_umpire`), ahead of the gloved-pitch arm in
+    `pick_shot`. `PlayBanner::follow_up`: the umpire attaches the new score line ("AWAY 2  -
+    HOME 0") to any call that scored (hit, sac fly, double play, HBP), and the banner swaps to
+    it a second into the beat (`swap_banner_follow_up`) — flow supplies the words, presentation
+    the timing. Every out (strikeout, batted out, double play, fielder's choice, caught
+    stealing, pickoff) swaps the same way to the out count ("OUT 2"; the third out reads as
+    the side) — the primary text is untouched, so the audio stinger and the balance harness
+    still match it. The struck-out batter walks off toward the third-base dugout 0.7 s into
+    the pause on the shared `MoveIntent` seam (`runner::batter_walks_off`) and is put back in
+    the box at the next PrePitch (`batter_returns`); the strikeout hold is 2.2 s (unblocked
+    by TADA 101). Not done: umpire gesture clips, a themed logo wipe.
+101. [x] TODO 105 — the CPU's noise no longer reads the clock. — `sim/ai.rs` drew every
+    decision (pitch aim and kind, the pre-pitch wait, swing timing, the offer/chase roll,
+    launch aim, steal and pickoff rolls) from `hash01(Time::elapsed_secs() * k)`, so any
+    change to the game's *pacing* reshuffled every later draw: the 2.2 s strikeout hold flipped
+    `balance_bands_hold` to HR/9 3.38 against the 3.2 ceiling. Now `CpuState` carries a game
+    salt (the clock at game start, captured by `reset_cpu_clock` on `game_start()`), a pitch
+    sequence (`tick_cpu_clock` counts WindUps), and a frame-within-phase counter for the
+    per-second rolls; every draw is `hash01(salt + seq·φ + k)`. The harness's per-game idle
+    still gives each game its own salt. Proof: N=40 numbers are bit-identical at a 1.8 s and
+    a 2.2 s hold (K% 15.8, runs/9 3.71, HR/9 2.14 — mid-band, no retune needed).
+    `e2e_cpu_timing` (draw variety), `e2e_passive_walks`, `e2e_matrix`, `e2e_cpu` all green.
+102. [x] The themed wipe between plate appearances. — A beat that ended the plate appearance
+    now closes with `WIPE_SECS` (0.5 s, `ResultBeat::curtain_secs`) instead of the 0.2 s dip:
+    `ui/curtain.rs` slides an opaque theme-panel across from the left (`wipe_left_percent`,
+    unit-tested) carrying the batting team's name (`WipeLabel`), then sweeps it out to the
+    right as the walk-up opens. Same root as the dip, so the wasm rule is unchanged (painted
+    opaque at spawn, mutated after). `e2e_walkup` pins: the panel starts off-screen, names the
+    team coming up, and is flush the frame the phase flips.
+103. [x] Umpire mechanics (Plan E's last piece). — Three clips authored in
+    `tools/build_player.py` and exported through the Blender pair (`player.glb` 193 KB, under
+    the 512 KB ceiling; `model_contract` green): `UmpStrike` (rises out of the crouch, right arm
+    punched up and out), `UmpPunchOut` (stands, winds, rings him up — also the out at a bag),
+    `UmpSafe` (both arms out). Blocky fallback poses in `poses.rs`. Every umpire rig carries
+    `player::Umpire`; `behavior::umpire_signals` fires on the frame a result pause begins: the
+    plate umpire signals a strike / strike three, and for a batted ball the umpire nearest the
+    base cam's bag (else the plate) signals the out or the hit, read from flow's new
+    `Play::last_outcome`. Runs after `catcher_crouch` so its insert wins the same-frame race.
+    `e2e_walkup` pins the ring-up; `e2e_base_cam` pins a signal at the bag.

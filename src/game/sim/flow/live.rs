@@ -10,8 +10,9 @@ use crate::game::input::Intents;
 use crate::game::rules::{self, Bases, BattingOrder, Outcome};
 use crate::game::variant::{FieldSpec, Ruleset};
 
+use super::result::end_pitch;
 use super::umpire::Umpire;
-use super::{BannerTone, LiveBallEvent, Phase, Play, PlayBanner};
+use super::{BannerTone, LiveBallEvent, Phase, Play, PlayBanner, ResultBeat};
 
 /// Backstop on a decided throw still in the air: if the settle report never
 /// arrives (a dropped relay edge case), the pending call is announced after
@@ -39,8 +40,7 @@ pub(super) fn in_play(mut play: ResMut<Play>, time: Res<Time>, rules: Res<Rulese
     }
     play.timer.tick(time.delta());
     if play.resolved && play.live.pending_call.is_none() && play.timer.finished() {
-        play.phase = Phase::Result;
-        play.timer = Timer::from_seconds(rules.pace.result_secs, TimerMode::Once);
+        end_pitch(&mut play, &rules.pace, ResultBeat::InPlay);
     }
 }
 
@@ -78,8 +78,8 @@ pub(super) fn resolve_live_play(
             if outcome != Outcome::Foul {
                 order.advance(batter);
             }
-            play.phase = Phase::Result;
-            play.timer = Timer::from_seconds(rules_res.pace.result_secs, TimerMode::Once);
+            play.live.last_outcome = Some(outcome);
+            end_pitch(&mut play, &rules_res.pace, beat_for(outcome));
         }
         return;
     }
@@ -148,9 +148,17 @@ pub(super) fn resolve_live_play(
     if outcome != Outcome::Foul {
         order.advance(batter);
     }
-    play.resolved = true;
-    play.phase = Phase::Result;
-    play.timer = Timer::from_seconds(rules_res.pace.result_secs, TimerMode::Once);
+    play.live.last_outcome = Some(outcome);
+    end_pitch(&mut play, &rules_res.pace, beat_for(outcome));
+}
+
+/// A batted ball's call lands in the foul beat or the live-play beat.
+fn beat_for(outcome: Outcome) -> ResultBeat {
+    if outcome == Outcome::Foul {
+        ResultBeat::Foul
+    } else {
+        ResultBeat::InPlay
+    }
 }
 
 /// A live ball caroms off the wall: one excited call per play. Resolved

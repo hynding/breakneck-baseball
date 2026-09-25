@@ -252,10 +252,8 @@ fn swinging_strikeout_groans_but_a_whiff_alone_does_not() {
         batting_team: Team::Home,
         dt_ms: 400.0,
     });
-    app.world_mut().send_event(PlayBanner {
-        text: STRIKEOUT_BANNER.to_string(),
-        tone: BannerTone::Bad,
-    });
+    app.world_mut()
+        .send_event(PlayBanner::new(STRIKEOUT_BANNER, BannerTone::Bad));
     app.update();
     assert_eq!(
         audio_players(&app).len(),
@@ -289,18 +287,14 @@ fn thrown_and_settled_voices_the_routine_out() {
 fn good_and_bad_banners_each_have_a_voice() {
     let mut app = test_app();
     let before = audio_players(&app).len();
-    app.world_mut().send_event(PlayBanner {
-        text: "STOLEN BASE!".to_string(),
-        tone: BannerTone::Good,
-    });
+    app.world_mut()
+        .send_event(PlayBanner::new("STOLEN BASE!", BannerTone::Good));
     app.update();
     assert_eq!(audio_players(&app).len(), before + 1, "good-tone pop");
 
     let before = audio_players(&app).len();
-    app.world_mut().send_event(PlayBanner {
-        text: "CAUGHT STEALING".to_string(),
-        tone: BannerTone::Bad,
-    });
+    app.world_mut()
+        .send_event(PlayBanner::new("CAUGHT STEALING", BannerTone::Bad));
     app.update();
     assert_eq!(audio_players(&app).len(), before + 1, "bad-tone ohh");
 }

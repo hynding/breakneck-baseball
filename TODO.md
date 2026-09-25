@@ -222,3 +222,57 @@ Cycle-2 fixes shipped alongside: 66, 67, 68, 74, 80 (see TADA when checked off).
     is urgent; both are well covered by tests if picked up.
     *Done 2026-09-08 — see TADA 92, 93.* The pedantic line-count list now contains only
     the four deliberate non-actions recorded in 98.
+
+## Reference-video review 2026-09-15 (SMB3 batting presentation)
+
+Frame-level watch of the user's reference (Super Mega Baseball 3, 0:10–3:00). Full notes,
+measured beat timings, and the plan detail: `docs/agent/SMB3-REFERENCE-NOTES.md`. The
+user's complaint — "no time to observe the hit or miss" — is a *readability* problem
+(camera + missing feedback + a shapeless beat), not a duration problem: SMB3's per-pitch
+beats are ≤1 s. Order: 100 → 101 → 102 → 103 → 104.
+
+100. [x] high camera — **SMB3 batting view as the default duel view** (Plan A). Retune
+    `BattingZoom` / add `DuelView::BehindBatter`: behind and beside the box, eye ≈
+    `(0.9, 1.6, -2.6)`, 55–60° vFOV, pitcher ~35% down, zone ~55%, plate ~85%, whole
+    batter in frame; catcher/umpire stay hidden (the 4 m cone already does it). Default
+    for every mode; `V` still cycles; pin the composition in `framing.test.rs`.
+    *Done 2026-09-15 — see TADA 96.*
+101. [x] high flow/ui — **Shape the take/miss beat** (Plan B): EARLY/LATE stamp on
+    `Whiff` (today `show_contact_stamp` returns `None`), a pitch-mph pill, per-outcome
+    pause table in `PaceTuning` (ball 0.8 / strike 1.0 / foul 1.6 / K 2.5), banner ≤
+    pause, and a 0.25 s dip-to-black at Result end for strikes/fouls that hides the mound
+    reset. Dip node painted opaque at game start (wasm alpha-0 invariant) — free fade-in
+    on PLAY BALL. Coach `result_stuck` must read the per-outcome value.
+    *Done 2026-09-15 — see TADA 97.*
+102. [x] high camera — **Cut-based shot list after contact** (Plan C): `Shot` enum +
+    `rig.cut()`; cut at ≤0.25 s (`BALL_FOLLOW_DELAY` 1.0 → 0.25, `RUN_OUT_DELAY` 0.15 →
+    0.25); ball-follow from behind the mound for flies / high home shot for grounders;
+    fielder cam on catchable flies; base cam on `Thrown { base }` so SAFE!/OUT lands in
+    that shot; result hold out 1.5 s / hit 2.0 s (+1 s score text). "OUT #n" banners.
+    *Done 2026-09-15 — see TADA 98 (the out/hit hold split and "OUT #n" text deferred to 104).*
+103. [x] nice flow/ui — **Wipe + walk-up card between plate appearances** (Plan D): ~1 s
+    theme wipe, close plate cam with catcher/umpire visible, batter card + fidget, dismiss
+    on confirm or 3 s auto (autoplay/Director must not stall); all resets behind the wipe.
+    *Done 2026-09-15 — see TADA 99 (the curtain stands in for a themed wipe).*
+104. [x] nice present — **Strikeout reaction cam + score text** (Plan E): side-on plate
+    cam from the 1B side, OUT #n + LATE/EARLY + mph, batter walks off ≈2.5 s; "1 - 0"
+    score text ≈1 s after SAFE! when a run scores. Umpire gesture clips demoted to nice
+    (invisible in the batting view).
+    *Done 2026-09-15 — see TADA 100 (walk-off and "OUT n" follow-up included). The umpire
+    clips and the themed wipe followed on 2026-09-17 — TADA 102, 103. Nothing left open.*
+105. [x] high balance — **`balance_sim` is pacing-sensitive; HR/9 sits at its ceiling.** The
+    CPU's decision noise is seeded from `Time::elapsed_secs` (`sim/ai.rs`: pitch aim/kind,
+    swing timing, steal rolls), so *any* change to the game's pacing reshuffles every later
+    draw. Lengthening the strikeout hold from 1.8 s to 2.2 s (2026-09-15) reshuffled the N=40
+    harness from green to HR/9 = 3.38 against the 3.2 ceiling (K% 17.8, runs/9 4.73 fine)
+    while every other change of the day passed five full runs; restoring 1.8 s restored green.
+    Two fixes, both per the harness's own comment ("if it ever trips, the fix is an HR-retune
+    ticket, NOT a wider band"): (a) seed the CPU noise from a per-pitch counter (pitch number
+    + inning + batter slot) instead of the wall clock, so presentation pacing can never
+    change outcomes — then re-run the harness across a few seeds; (b) an HR retune on the
+    CPU-side levers (`cpu_timing_spread_ms`, the `ai.rs` launch-aim distribution) so HR/9
+    lands mid-band with headroom. Do (a) first; it is what the `tune-balance` skill's
+    "outcomes, not wall time" promise assumes. Until then, do not change `PaceTuning` holds
+    or `walkup_secs` without a `balance_sim` run.
+    *Done 2026-09-17 — see TADA 101: (a) shipped; (b) not needed, the reseeded draws land
+    mid-band (K% 15.8 / runs 3.71 / HR 2.14) and are identical at a 1.8 s and a 2.2 s hold.*

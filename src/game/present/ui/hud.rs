@@ -11,7 +11,7 @@ use crate::game::{GameplayEntity, ScoreBoard};
 
 use super::{
     BannerPill, BannerText, BaseIndicator, ContactStampText, CountDot, CountKind, InningText,
-    MeterFill, ScoreText, hidden_tint,
+    MeterFill, PitchSpeedText, ScoreText, hidden_tint,
 };
 
 // ── Build the UI tree ─────────────────────────────────────────────────────────
@@ -238,6 +238,34 @@ pub(super) fn spawn_hud(
                 Text::new(""),
                 TextFont {
                     font_size: 34.0,
+                    ..default()
+                },
+                TextColor(ui.text_primary),
+            ));
+        });
+    // Pitch-speed read-out (TODO 101): a bare text element in its own
+    // wrapper, same wasm-safe idiom, low on the screen by the plate where
+    // the batting view puts the eye — a percent anchor well under the
+    // stamp's 26% + 92 px line at any viewport height.
+    commands
+        .spawn((
+            GameplayEntity,
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Percent(80.0),
+                left: Val::Px(0.0),
+                width: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.01)),
+        ))
+        .with_children(|wrap| {
+            wrap.spawn((
+                PitchSpeedText,
+                Text::new(""),
+                TextFont {
+                    font_size: 24.0,
                     ..default()
                 },
                 TextColor(ui.text_primary),

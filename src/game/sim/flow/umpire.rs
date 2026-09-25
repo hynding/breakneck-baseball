@@ -55,6 +55,40 @@ impl<'a, 'w> Umpire<'a, 'w> {
         self.banner.send(PlayBanner::new(text, tone));
     }
 
+    /// The out count to show once an out has been applied over `before`
+    /// outs: the new count, or the whole side when that out just ended the
+    /// half (the rules zero the count as they change sides).
+    fn outs_after(&self, before: u32) -> u32 {
+        if self.score.outs > before {
+            self.score.outs
+        } else {
+            self.rules.counts.outs_per_half
+        }
+    }
+
+    /// Announce an out: the banner swaps to the out count ("OUT 2") partway
+    /// through its beat — the reference's "OUT #n" (TODO 104). `before` is
+    /// the out count when the call began.
+    fn announce_out(&mut self, text: impl Into<String>, tone: BannerTone, before: u32) {
+        let line = format!("OUT {}", self.outs_after(before));
+        self.banner
+            .send(PlayBanner::new(text, tone).with_follow_up(line));
+    }
+
+    /// Announce a call that scored: the banner swaps to the new score
+    /// partway through its beat (TODO 104).
+    fn announce_scoring(&mut self, text: impl Into<String>, tone: BannerTone) {
+        let line = format!(
+            "{} {}  -  {} {}",
+            crate::game::Team::Away.label(),
+            self.score.away_runs,
+            crate::game::Team::Home.label(),
+            self.score.home_runs
+        );
+        self.banner
+            .send(PlayBanner::new(text, tone).with_follow_up(line));
+    }
+
     /// Whether `base` is occupied. The umpire holds the only borrow of
     /// [`Bases`] while it is making calls, so reads that inform a call go
     /// through here rather than forcing the caller to keep a second one.
@@ -81,10 +115,11 @@ impl<'a, 'w> Umpire<'a, 'w> {
     }
 
     pub(super) fn add_strike(&mut self, swinging: bool, dropped_third: bool) -> StrikeCall {
+        let before = self.score.outs;
         let call = rules::call_strike(self.score, self.bases, self.rules, dropped_third);
         match call {
             StrikeCall::DroppedThird => self.announce("DROPPED 3RD STRIKE!", BannerTone::Good),
-            StrikeCall::Strikeout => self.announce("STRIKEOUT!", BannerTone::Bad),
+            StrikeCall::Strikeout => self.announce_out("STRIKEOUT!", BannerTone::Bad, before),
             StrikeCall::Strike if swinging => self.announce("SWING & MISS", BannerTone::Info),
             StrikeCall::Strike => self.announce("STRIKE", BannerTone::Info),
         }
@@ -95,6 +130,7 @@ impl<'a, 'w> Umpire<'a, 'w> {
     /// the throw on off-speed pitches, a fastball cuts the runner down.
     pub(super) fn resolve_steal(&mut self, play: &Play) {
         let off_speed = play.pitch.kind != Some(rules::PitchKind::Fastball);
+        let before = self.score.outs;
         match rules::attempt_steal(
             self.score,
             self.bases,
@@ -103,7 +139,7 @@ impl<'a, 'w> Umpire<'a, 'w> {
             play.duel.big_jump,
         ) {
             StealResult::Stolen { .. } => self.announce("STOLEN BASE!", BannerTone::Good),
-            StealResult::Caught => self.announce("CAUGHT STEALING", BannerTone::Bad),
+            StealResult::Caught => self.announce_out("CAUGHT STEALING", BannerTone::Bad, before),
             StealResult::NoRunner => {}
         }
     }
@@ -112,16 +148,16 @@ impl<'a, 'w> Umpire<'a, 'w> {
     /// runners advancing (`jump` = they were already going).
     fn hit(&mut self, hit_bases: u32, label: &str, tone: BannerTone, jump: bool) {
         let runs = rules::apply_hit(self.score, self.bases, hit_bases, jump);
-        let text = if runs > 0 {
-            format!("{label}  +{runs}")
+        if runs > 0 {
+            self.announce_scoring(format!("{label}  +{runs}"), tone);
         } else {
-            label.to_string()
-        };
-        self.announce(text, tone);
+            self.announce(label, tone);
+        }
     }
 
     /// Applies a decided [`Outcome`] and announces it.
     pub(super) fn resolve_contact(&mut self, outcome: Outcome, runners_going: bool) {
+        let before = self.score.outs;
         match outcome {
             Outcome::Foul => {
                 rules::foul(self.score, self.rules);
@@ -149,25 +185,23 @@ impl<'a, 'w> Umpire<'a, 'w> {
                         OutKind::Stretching { .. } => "OUT STRETCHING!",
                     }
                 };
-                let text = if play.runs > 0 {
-                    format!("{base_text}  +{}", play.runs)
+                if play.runs > 0 {
+                    self.announce_scoring(format!("{base_text}  +{}", play.runs), BannerTone::Bad);
                 } else {
-                    base_text.to_string()
-                };
-                self.announce(text, BannerTone::Bad);
+                    self.announce_out(base_text, BannerTone::Bad, before);
+                }
             }
             Outcome::DoublePlay => {
                 let play = rules::apply_double_play(self.score, self.bases, self.rules);
-                let text = if play.runs > 0 {
-                    format!("DOUBLE PLAY!  +{}", play.runs)
+                if play.runs > 0 {
+                    self.announce_scoring(format!("DOUBLE PLAY!  +{}", play.runs), BannerTone::Bad);
                 } else {
-                    "DOUBLE PLAY!".to_string()
-                };
-                self.announce(text, BannerTone::Bad);
+                    self.announce_out("DOUBLE PLAY!", BannerTone::Bad, before);
+                }
             }
             Outcome::FieldersChoice { out_base } => {
                 rules::apply_fielders_choice(self.score, self.bases, self.rules, out_base);
-                self.announce("FIELDER'S CHOICE", BannerTone::Bad);
+                self.announce_out("FIELDER'S CHOICE", BannerTone::Bad, before);
             }
             Outcome::Hit(n) => {
                 let label = match n {
@@ -190,12 +224,11 @@ impl<'a, 'w> Umpire<'a, 'w> {
     /// whether any run scored (an Epic banner, not merely Good).
     pub(super) fn hit_by_pitch(&mut self) {
         let runs = rules::hit_by_pitch(self.score, self.bases);
-        let tone = if runs > 0 {
-            BannerTone::Epic
+        if runs > 0 {
+            self.announce_scoring("HIT BY PITCH", BannerTone::Epic);
         } else {
-            BannerTone::Good
-        };
-        self.announce("HIT BY PITCH", tone);
+            self.announce("HIT BY PITCH", BannerTone::Good);
+        }
     }
 
     /// A foul tip: a strike (never the third — see `rules::foul`). The ball is
