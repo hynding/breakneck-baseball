@@ -6,12 +6,14 @@ use bevy::prelude::*;
 use crate::game::ScoreBoard;
 use crate::game::animation;
 use crate::game::animation::{AnimClip, Playing};
-use crate::game::flow::{BallInPlayEvent, Phase, Play};
+use crate::game::camera::{BroadcastRig, Shot};
+use crate::game::flow::{BallInPlayEvent, Phase, Play, ResultBeat};
 use crate::game::input::Intents;
 use crate::game::roster::{PlayerIdentity, Rosters};
-use crate::game::rules::{BattingOrder, ContactKind};
+use crate::game::rules::{BattingOrder, ContactKind, Outcome};
+use crate::game::variant::FieldSpec;
 
-use super::{BatPivot, Batter, CatcherRole, PlateUmpire};
+use super::{BatPivot, Batter, CatcherRole, PlateUmpire, Umpire};
 
 /// Holds the plate batter (the `Batter`-marker rig) in his personal batting
 /// stance through the duel — resolved from `PlayerIdentity` via
@@ -44,8 +46,8 @@ pub(super) fn batter_stance(
     batters: Query<(Entity, Option<&Playing>), With<Batter>>,
     mut commands: Commands,
 ) {
-    let dueling = matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch);
-    let past_pre_pitch = matches!(play.phase, Phase::WindUp | Phase::Pitch);
+    let dueling = play.phase.pre_contact();
+    let past_pre_pitch = play.phase.in_delivery();
     for (entity, playing) in &batters {
         let resolved = identities
             .get(entity)
@@ -178,7 +180,14 @@ pub(super) fn batter_fidgets(
         + order.current(id.team) as f32 * 7.0
         + id.index as f32 * 13.0
         + score.outs as f32 * 17.0;
-    let interval = 4.0 + 5.0 * crate::game::ai::hash01(seed);
+    // During the walk-up the batter keeps moving: fidgets chain back to
+    // back the moment the stance returns (TODO 103); otherwise the
+    // deterministic dead-ball interval applies.
+    let interval = if play.walkup_active() {
+        0.0
+    } else {
+        4.0 + 5.0 * crate::game::ai::hash01(seed)
+    };
     if timer.since_stance >= interval {
         timer.since_stance = 0.0;
         commands.entity(entity).insert(Playing::then(
@@ -197,7 +206,7 @@ pub(super) fn catcher_crouch(
     catchers: Query<(Entity, Option<&Playing>), Or<(With<CatcherRole>, With<PlateUmpire>)>>,
     mut commands: Commands,
 ) {
-    let dueling = matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch);
+    let dueling = play.phase.pre_contact();
     for (entity, playing) in &catchers {
         match playing {
             None if dueling => {
@@ -210,6 +219,63 @@ pub(super) fn catcher_crouch(
             }
             _ => {}
         }
+    }
+}
+
+/// The crew signals the call (TODO 104 / Plan E): on the frame a result
+/// pause begins, the plate umpire punches a strike (`UmpStrike`) or rings up
+/// strike three (`UmpPunchOut`); for a batted ball the umpire nearest the
+/// bag the base cam is on (else the plate umpire) signals the out
+/// (`UmpPunchOut`) or the hit (`UmpSafe`). Runs after [`catcher_crouch`] so
+/// its insert wins the same-frame race with the crouch's removal. Purely
+/// presentational: the call was made by flow; this is the body acting it.
+#[allow(clippy::type_complexity)]
+pub(super) fn umpire_signals(
+    play: Res<Play>,
+    field: Res<FieldSpec>,
+    rig: Res<BroadcastRig>,
+    mut prev_phase: Local<Option<Phase>>,
+    umpires: Query<(Entity, &Transform, Has<PlateUmpire>), With<Umpire>>,
+    mut commands: Commands,
+) {
+    let entered = play.phase == Phase::Result && *prev_phase != Some(Phase::Result);
+    *prev_phase = Some(play.phase);
+    if !entered {
+        return;
+    }
+    let plate = umpires
+        .iter()
+        .find(|(_, _, at_plate)| *at_plate)
+        .map(|(e, _, _)| e);
+    // The umpire with the best view of the bag the call was made at.
+    let nearest_to_call = || {
+        let bag = match rig.shot() {
+            Some(Shot::BaseCam(base)) if base < field.base_count() => field.base_positions[base],
+            _ => Vec3::ZERO,
+        };
+        umpires
+            .iter()
+            .min_by(|a, b| {
+                a.1.translation
+                    .distance(bag)
+                    .total_cmp(&b.1.translation.distance(bag))
+            })
+            .map(|(e, _, _)| e)
+    };
+    let (who, clip) = match play.result_beat() {
+        Some(ResultBeat::Strike) => (plate, AnimClip::UmpStrike),
+        Some(ResultBeat::Strikeout) => (plate, AnimClip::UmpPunchOut),
+        Some(ResultBeat::InPlay) => match play.last_outcome() {
+            Some(Outcome::Out(_) | Outcome::DoublePlay | Outcome::FieldersChoice { .. }) => {
+                (nearest_to_call(), AnimClip::UmpPunchOut)
+            }
+            Some(Outcome::Hit(_)) => (nearest_to_call(), AnimClip::UmpSafe),
+            _ => return,
+        },
+        _ => return,
+    };
+    if let Some(umpire) = who {
+        commands.entity(umpire).insert(Playing::new(clip));
     }
 }
 
@@ -226,7 +292,7 @@ pub(super) fn trigger_swing(
     batters: Query<(Entity, Option<&Playing>), (With<Batter>, Without<BatPivot>)>,
     mut commands: Commands,
 ) {
-    if !matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch) {
+    if !play.phase.pre_contact() {
         return;
     }
     if !intents.get(score.batting_team()).action {

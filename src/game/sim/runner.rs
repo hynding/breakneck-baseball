@@ -4,8 +4,8 @@
 use bevy::prelude::*;
 
 use crate::game::animation::{AnimClip, MoveIntent, Playing};
-use crate::game::flow::{BallInPlayEvent, LeadState, LiveBallEvent, Phase, Play};
-use crate::game::player::{Batter, RigModel, RigUnit, TeamPalette, spawn_rig};
+use crate::game::flow::{BallInPlayEvent, LeadState, LiveBallEvent, Phase, Play, ResultBeat};
+use crate::game::player::{BATTER_STAND_X, Batter, RigModel, RigUnit, TeamPalette, spawn_rig};
 use crate::game::rules::{self, Bases, ContactKind, RunnerBreak};
 use crate::game::variant::{FieldSpec, Ruleset};
 use crate::game::{GameState, ScoreBoard};
@@ -60,19 +60,22 @@ struct DespawnAtPathEnd;
 struct RunDelay(Timer);
 
 /// Seconds the batter holds the box after fair contact before the run-out rig
-/// breaks for first. Kept small (≤ 0.2 s) so the batter is running almost the
-/// instant he makes contact — just long enough to see the swing follow-through
-/// and bat drop before the seamless swap to the run-out rig. Purely visual: it
-/// does not feed the race math (the umpire charges its own reaction delay).
-const RUN_OUT_DELAY: f32 = 0.15;
+/// breaks for first. Matches the camera's post-contact plate hold
+/// (`camera::BALL_FOLLOW_DELAY`, 0.25 s): the swap to the run-out rig lands
+/// on the cut away from the plate, so it is never seen (TODO 102). Purely
+/// visual: it does not feed the race math (the umpire charges its own
+/// reaction delay).
+const RUN_OUT_DELAY: f32 = 0.25;
 /// A home run earns a longer look before the trot starts.
 const TROT_DELAY: f32 = 0.9;
 
 /// The batter running out a live ball whose call hasn't come yet. If the
 /// resolution puts the batter on base, [`sync_runners`] adopts this rig's
-/// position so the runner doesn't teleport back to the plate.
+/// position so the runner doesn't teleport back to the plate. Public so
+/// `tests/e2e_batter_runs.rs` can assert the run-on-contact convention
+/// (docs/BASEBALL.md "The batter always runs on contact") directly.
 #[derive(Component)]
-pub(crate) struct BatterGhost;
+pub struct BatterGhost;
 
 /// How a runner aboard is currently breaking off contact, before the umpire's
 /// call arrives (see [`rules::runner_break`]). A runner *without* this
@@ -89,6 +92,19 @@ enum Breaking {
     /// Read a catch — retreating to the origin bag.
     Retreat,
 }
+
+/// Per-rig multiplier on `pace.runner_speed` for [`advance_paths`]. Post-call
+/// repositioning (walk/hit advances issued by [`sync_runners`]) and the HR
+/// trot are pure choreography — no race reads these rigs — so they may move
+/// faster than the live run-out without touching any outcome (TODO 90/94).
+#[derive(Component)]
+struct PathSpeed(f32);
+
+/// Dead-ball advances (walks, post-call shuffles) hustle rather than jog.
+const DEAD_BALL_ADVANCE_SPEED: f32 = 1.5;
+/// The home-run trot: brisk enough that the lap ends near the result pause
+/// instead of 7 s after it (TODO 90 — was ~14.6 s of gated dead air).
+const TROT_SPEED: f32 = 1.8;
 
 fn base_pos(field: &FieldSpec, base: usize) -> Vec3 {
     field.base_positions[base] + Vec3::Y * RIG_Y
@@ -120,18 +136,19 @@ fn advance_paths(
             &mut BasePath,
             &mut MoveIntent,
             Option<&DespawnAtPathEnd>,
+            Option<&PathSpeed>,
         ),
         Without<RunDelay>,
     >,
     mut commands: Commands,
 ) {
-    for (entity, mut path, mut intent, despawn) in &mut movers {
+    for (entity, mut path, mut intent, despawn, speed) in &mut movers {
         if intent.target.is_some() {
             continue;
         }
         if path.next < path.waypoints.len() {
             intent.target = Some(path.waypoints[path.next]);
-            intent.speed = ruleset.pace.runner_speed;
+            intent.speed = ruleset.pace.runner_speed * speed.map_or(1.0, |s| s.0);
             path.next += 1;
         } else if despawn.is_some() {
             commands.entity(entity).despawn();
@@ -168,7 +185,7 @@ fn take_leadoffs(
         (Without<BasePath>, Without<Breaking>),
     >,
 ) {
-    let dueling = matches!(play.phase, Phase::PrePitch | Phase::WindUp | Phase::Pitch);
+    let dueling = play.phase.pre_contact();
     let candidate = rules::steal_candidate(&bases);
     for (runner, tf, mut intent) in &mut runners {
         let bag = base_pos(&field, runner.base);
@@ -246,6 +263,7 @@ pub(crate) fn sync_runners(
     mut runners: Query<(Entity, &mut Runner)>,
     ghosts: Query<(Entity, &Transform, &crate::game::roster::PlayerIdentity), With<BatterGhost>>,
     mut commands: Commands,
+    mut last_half: Local<Option<bool>>,
 ) {
     if !bases.is_changed() {
         return;
@@ -267,10 +285,14 @@ pub(crate) fn sync_runners(
         if let Some(i) = pool.iter().position(|&(_, from)| from <= target) {
             let (entity, from) = pool.remove(i);
             if from != target {
-                commands.entity(entity).insert(BasePath {
-                    waypoints: path_between(&field, Some(from), target),
-                    next: 0,
-                });
+                commands.entity(entity).insert((
+                    BasePath {
+                        waypoints: path_between(&field, Some(from), target),
+                        next: 0,
+                    },
+                    // Post-call repositioning — hustle (TODO 94).
+                    PathSpeed(DEAD_BALL_ADVANCE_SPEED),
+                ));
                 if let Ok((_, mut runner)) = runners.get_mut(entity) {
                     runner.base = target;
                 }
@@ -300,6 +322,9 @@ pub(crate) fn sync_runners(
                 waypoints: path_between(&field, None, target),
                 next: 0,
             },
+            // The call is in (walk, hit already resolved) — hustle to the
+            // bag rather than gating the next pitch on a jog (TODO 94).
+            PathSpeed(DEAD_BALL_ADVANCE_SPEED),
         ));
         if let Some(id) = inherited {
             commands.entity(entity).insert(id);
@@ -309,14 +334,25 @@ pub(crate) fn sync_runners(
         }
     }
 
-    // Leftovers scored or were cleared: run home and leave the field.
+    // Leftovers scored or were cleared. A mid-play clear (a runner scoring)
+    // jogs home and leaves; a half-inning flip strands them — despawn
+    // immediately instead of gating the changeover on a multi-base victory
+    // lap nobody earned (a man on first used to block the next half ~11 s —
+    // TODO 89).
+    let half_flipped = last_half.is_some_and(|h| h != score.top_of_inning);
+    *last_half = Some(score.top_of_inning);
     for (entity, from) in pool {
+        if half_flipped {
+            commands.entity(entity).despawn();
+            continue;
+        }
         commands.entity(entity).insert((
             BasePath {
                 waypoints: path_home(&field, from),
                 next: 0,
             },
             DespawnAtPathEnd,
+            PathSpeed(DEAD_BALL_ADVANCE_SPEED),
         ));
         commands.entity(entity).remove::<Runner>();
     }
@@ -352,11 +388,19 @@ fn batter_runs(
                 wp.push(Vec3::new(0.0, RIG_Y, 0.0));
                 (wp, false, TROT_DELAY)
             }
-            // A live fair ball: run it out — nobody knows the call yet.
-            ContactKind::Live { fair: true } => {
+            // A live ball, predicted fair or foul: run it out — nobody
+            // knows the call yet. Per docs/BASEBALL.md ("The batter always
+            // runs on contact (fair-ball assumption); the engine resets him
+            // on a foul"): the call belongs to the actual first bounce, not
+            // the swing-time prediction, so a pulled liner down the line is
+            // run out either way — `retire_foul_ghosts` resets him if it
+            // does land foul. Only a ball headed behind the plate, where no
+            // fair outcome exists, holds the box (same forward test as
+            // `rules::is_fair`).
+            ContactKind::Live { .. } if ev.landing.z > 1.0 => {
                 (path_between(&field, None, 0), true, RUN_OUT_DELAY)
             }
-            ContactKind::Live { fair: false } => continue,
+            ContactKind::Live { .. } => continue,
         };
 
         let mats = palette.for_team(score.batting_team());
@@ -376,12 +420,48 @@ fn batter_runs(
         ));
         if ghost {
             commands.entity(entity).insert(BatterGhost);
+        } else {
+            // The trot is pure celebration — no race reads it. Brisk, so
+            // the lap ends with the result pause instead of ~7 s after it
+            // (TODO 90).
+            commands.entity(entity).insert(PathSpeed(TROT_SPEED));
         }
         if let Ok(id) = batter_identity.single() {
             commands.entity(entity).insert(*id);
         }
         if let Some(assets) = &assets {
             crate::game::jersey::attach_jerseys(&mut commands, entity, assets);
+        }
+    }
+}
+
+/// A ball that lands foul kills the run-out on the spot: the ghost was
+/// sprinting out a play that just died, and [`RunnersSettled`] would gate
+/// the next pitch ~3.8 s on that dead jog (TODO 93). Mirrors the same
+/// [`rules::is_fair`] the umpire's call uses — reporting, never ruling.
+fn retire_foul_ghosts(
+    mut live: MessageReader<LiveBallEvent>,
+    field: Res<FieldSpec>,
+    ghosts: Query<Entity, With<BatterGhost>>,
+    mut batter_q: Query<&mut Visibility, With<Batter>>,
+    mut commands: Commands,
+) {
+    for event in live.read() {
+        let LiveBallEvent::Landed { pos } = event else {
+            continue;
+        };
+        if rules::is_fair(*pos, &field) {
+            continue;
+        }
+        for entity in &ghosts {
+            commands.entity(entity).despawn();
+        }
+        // The real batter steps straight back into the box — without this
+        // the plate sat empty from the foul call to the next PrePitch.
+        for mut visibility in &mut batter_q {
+            if *visibility != Visibility::Inherited {
+                *visibility = Visibility::Inherited;
+            }
         }
     }
 }
@@ -607,14 +687,58 @@ fn clear_breaks(
     }
 }
 
-/// The next at-bat begins: the batter steps back into the box.
-fn batter_returns(play: Res<Play>, mut batter_q: Query<&mut Visibility, With<Batter>>) {
+/// Seconds into a strikeout's result pause before the batter turns and
+/// walks off — the follow-through and the call land first.
+const WALK_OFF_DELAY: f32 = 0.7;
+/// A walk, not a run (m/s).
+const WALK_OFF_SPEED: f32 = 1.6;
+/// Where the struck-out batter heads: off the third-base side of the plate,
+/// away from the reaction cam on the first-base side.
+const WALK_OFF_SPOT: Vec3 = Vec3::new(3.5, 0.6, -3.5);
+
+/// Strike three: a beat after the call the batter turns and walks off
+/// toward the dugout for the rest of the pause (TODO 104), through the same
+/// [`MoveIntent`] seam every rig moves on. Purely visual — the plate
+/// appearance is already over.
+fn batter_walks_off(
+    play: Res<Play>,
+    mut batter_q: Query<(&Transform, &mut MoveIntent), With<Batter>>,
+) {
+    let strikeout = play.phase == Phase::Result
+        && play.result_beat() == Some(ResultBeat::Strikeout)
+        && play.result_elapsed_secs() >= WALK_OFF_DELAY;
+    if !strikeout {
+        return;
+    }
+    for (transform, mut intent) in &mut batter_q {
+        let still_in_the_box = (transform.translation.x - BATTER_STAND_X).abs() < 0.05;
+        if intent.target.is_none() && still_in_the_box {
+            intent.target = Some(WALK_OFF_SPOT);
+            intent.speed = WALK_OFF_SPEED;
+        }
+    }
+}
+
+/// The next at-bat begins: the batter steps back into the box — visible,
+/// standing in his spot facing the plate, any walk-off cut short.
+fn batter_returns(
+    play: Res<Play>,
+    mut batter_q: Query<(&mut Transform, &mut Visibility, &mut MoveIntent), With<Batter>>,
+) {
     if play.phase != Phase::PrePitch {
         return;
     }
-    for mut visibility in &mut batter_q {
+    for (mut transform, mut visibility, mut intent) in &mut batter_q {
         if *visibility != Visibility::Inherited {
             *visibility = Visibility::Inherited;
+        }
+        if intent.target.is_some() {
+            intent.target = None;
+        }
+        let spot = Vec3::new(BATTER_STAND_X, transform.translation.y, 0.0);
+        if transform.translation.distance(spot) > 0.01 {
+            transform.translation = spot;
+            transform.rotation = Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2);
         }
     }
 }
@@ -627,6 +751,7 @@ impl Plugin for RunnerPlugin {
             Update,
             (
                 batter_runs,
+                retire_foul_ghosts,
                 break_runners,
                 tick_run_delays,
                 run_out_pending_call,
@@ -638,6 +763,7 @@ impl Plugin for RunnerPlugin {
                 take_leadoffs,
                 slide_into_base,
                 track_settled,
+                batter_walks_off,
                 batter_returns,
             )
                 .chain()

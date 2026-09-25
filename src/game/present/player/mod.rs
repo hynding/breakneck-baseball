@@ -41,7 +41,7 @@ pub(crate) use rig::{build_materials, build_rig_model};
 
 use behavior::{
     BatterFidgetTimer, batter_fidgets, batter_stance, catcher_crouch, celebrate_home_run,
-    reset_batter_fidget_timer, trigger_swing,
+    reset_batter_fidget_timer, trigger_swing, umpire_signals,
 };
 use rig::{recolor_gltf, recolor_teams, spawn_players};
 
@@ -71,6 +71,11 @@ pub struct CatcherRole;
 /// catcher he's peering over.
 #[derive(Component)]
 pub struct PlateUmpire;
+
+/// Any umpire rig (the plate umpire carries [`PlateUmpire`] as well) — the
+/// crew that signals the calls (TODO 104).
+#[derive(Component)]
+pub struct Umpire;
 
 /// Facing direction for the player model (world-space).
 #[allow(dead_code)]
@@ -146,6 +151,7 @@ impl Plugin for PlayerPlugin {
                     // flip.
                     celebrate_home_run.after(IdentitySet),
                     catcher_crouch,
+                    umpire_signals,
                 )
                     .chain()
                     // Same-frame phase-flip guarantee (batter_stance's

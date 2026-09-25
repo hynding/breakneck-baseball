@@ -95,6 +95,15 @@ jobs:
           echo "wasm_size=$AFTER" >> "$GITHUB_OUTPUT"
           rm -rf "binaryen-${BINARYEN}"
 
+      - name: Stamp wasm size into the loading bar
+        run: |
+          # Pages gzips the stream, so index.html can't trust Content-Length;
+          # the shell's progress bar divides decoded bytes by this stamped
+          # figure instead (web/index.html EXPECTED_WASM_BYTES).
+          SIZE=${{ steps.wasmopt.outputs.wasm_size }}
+          sed -i "s/const EXPECTED_WASM_BYTES = 0;/const EXPECTED_WASM_BYTES = ${SIZE};/" web/index.html
+          grep -q "EXPECTED_WASM_BYTES = ${SIZE}" web/index.html
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

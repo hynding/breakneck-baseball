@@ -19,7 +19,7 @@ pub mod coach {
     pub use super::core::coach::*;
     pub use super::sim::coach::*;
 }
-pub use self::meta::{appearance, autoplay, gear, input, menu, settings, subs};
+pub use self::meta::{appearance, autoplay, gear, input, menu, settings, subs, touch};
 #[cfg(feature = "debug")]
 pub use self::meta::{creator, debug, portraits};
 pub use self::present::{animation, audio, camera, field, fx, jersey, juice, player, ui};
@@ -300,6 +300,7 @@ impl Plugin for GamePlugin {
                 CameraPlugin,
             ))
             .add_plugins((
+                touch::TouchPlugin,
                 UiPlugin,
                 JerseyPlugin,
                 GearPlugin,
@@ -315,9 +316,13 @@ impl Plugin for GamePlugin {
             creator::CreatorPlugin,
             portraits::PortraitsPlugin,
         ));
-        // Self-driving visual runs (attract mode + Coach reports).
-        #[cfg(feature = "autoplay")]
-        app.add_plugins(autoplay::AutoplayPlugin);
+        // NOTE: `autoplay::AutoplayPlugin` (the self-driving attract mode)
+        // is deliberately NOT added here — the binary's `main.rs` adds it.
+        // Registered in `GamePlugin`, every test harness built from the lib
+        // under `--features autoplay` inherited the menu driver and the
+        // Startup `Director` insert, which hijacked the harness's own game
+        // setup (found via `balance_sim`: a completely different offensive
+        // economy under the feature).
         // Console breadcrumbs browser automation watches (always on for the
         // web target — the real-input smoke test needs them on a plain build).
         #[cfg(target_arch = "wasm32")]
@@ -331,6 +336,17 @@ impl Plugin for GamePlugin {
                 OnTransition {
                     exited: GameState::Playing,
                     entered: GameState::GameOver,
+                },
+                cleanup_gameplay,
+            )
+            // The pause board's quit-to-menu path (TODO 65) leaves from
+            // `Paused`, skipping the GameOver teardown above — tear down on
+            // that exit too or the abandoned game keeps rendering under the
+            // menu.
+            .add_systems(
+                OnTransition {
+                    exited: GameState::Paused,
+                    entered: GameState::MainMenu,
                 },
                 cleanup_gameplay,
             );
@@ -352,19 +368,29 @@ fn reset_scoreboard(
 /// Despawns all gameplay entities when leaving `Playing` so a restart rebuilds
 /// the scene cleanly (each sub-plugin re-spawns on the next `OnEnter`).
 fn cleanup_gameplay(mut commands: Commands, query: Query<Entity, With<GameplayEntity>>) {
-    for entity in &query {
+    despawn_all(&mut commands, &query);
+}
+
+/// The one despawn-by-marker teardown body, shared across the crate so a
+/// change to teardown semantics has a single home.
+pub(crate) fn despawn_all<T: Component>(commands: &mut Commands, query: &Query<Entity, With<T>>) {
+    for entity in query {
         commands.entity(entity).despawn();
     }
+}
+
+/// Whether a `GameState` transition was already decided this frame — the
+/// "never clobber a decided transition" guard, spelled once. Two shipped
+/// bugs came from writers that forgot it (a same-frame double launch; a
+/// pause press overriding a confirmed quit), and two hand spellings
+/// (`Pending(_)` vs `!Unchanged`) invited a mismatch — every
+/// `NextState<GameState>` writer that could race another checks this.
+pub(crate) fn transition_pending(next: &NextState<GameState>) -> bool {
+    !matches!(next, NextState::Unchanged)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_config_innings_follow_the_default_variant() {
-        assert_eq!(GameConfig::default().innings, 9);
-    }
-}
+#[path = "mod.test.rs"]
+mod tests;

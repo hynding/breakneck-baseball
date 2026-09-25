@@ -35,7 +35,8 @@ fn seated_rigs_are_identified_at_kickoff() {
     let world = app.world_mut();
     let batter_id = *world
         .query_filtered::<&PlayerIdentity, With<Batter>>()
-        .single(world).unwrap();
+        .single(world)
+        .unwrap();
     assert_eq!(
         batter_id,
         PlayerIdentity {
@@ -45,7 +46,8 @@ fn seated_rigs_are_identified_at_kickoff() {
     );
     let pitcher_id = *world
         .query_filtered::<&PlayerIdentity, With<Pitcher>>()
-        .single(world).unwrap();
+        .single(world)
+        .unwrap();
     assert_eq!(
         pitcher_id,
         PlayerIdentity {
@@ -279,7 +281,8 @@ fn fidget_accumulator_survives_a_pitch_interlude() {
     let batter_id = *app
         .world_mut()
         .query_filtered::<&PlayerIdentity, With<Batter>>()
-        .single(app.world()).unwrap();
+        .single(app.world())
+        .unwrap();
     assert_eq!(
         batter_id,
         PlayerIdentity {
@@ -333,7 +336,8 @@ fn fidget_is_cut_before_the_windup() {
     let batter = app
         .world_mut()
         .query_filtered::<Entity, With<Batter>>()
-        .single(app.world()).unwrap();
+        .single(app.world())
+        .unwrap();
     app.world_mut()
         .entity_mut(batter)
         .insert(Playing::new(AnimClip::FidgetHalfSwing));
@@ -373,7 +377,8 @@ fn home_run_queues_the_authored_celebration() {
     let batter = app
         .world_mut()
         .query_filtered::<Entity, With<Batter>>()
-        .single(app.world()).unwrap();
+        .single(app.world())
+        .unwrap();
     app.world_mut().entity_mut(batter).insert(PlayerIdentity {
         team: Team::Away,
         index: 2,

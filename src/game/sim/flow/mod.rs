@@ -26,7 +26,9 @@
 
 use bevy::prelude::*;
 
-use crate::game::ai::{CpuConfig, CpuState, cpu_defense, cpu_offense};
+use crate::game::ai::{
+    CpuConfig, CpuState, cpu_defense, cpu_offense, reset_cpu_clock, tick_cpu_clock,
+};
 use crate::game::rules::{self, Bases, BattingOrder, Outcome};
 use crate::game::variant::Ruleset;
 use crate::game::{GameState, Team};
@@ -34,6 +36,7 @@ use crate::game::{GameState, Team};
 mod live;
 mod pitch;
 mod result;
+mod umpire;
 
 pub(crate) use pitch::{late_swing_z, swing_dt_ms};
 
@@ -44,6 +47,34 @@ pub(crate) use pitch::{late_swing_z, swing_dt_ms};
 /// const as its bootstrap value (no resource access at construction), and
 /// it's `PaceTuning::default()`'s source of truth.
 pub(crate) const RESULT_SECS: f32 = 1.2;
+/// Per-outcome result pauses (TODO 101), sized off the reference footage
+/// (docs/agent/SMB3-REFERENCE-NOTES.md §2.3–2.6): a ball is the quietest
+/// event in the game; a strike holds just long enough for the batter's
+/// follow-through and the call text; a foul and a strikeout hold longer.
+/// Each is the hold *before* the curtain — beats that dip to black
+/// ([`ResultBeat::dips`]) add [`CURTAIN_SECS`] on top. Live gameplay reads
+/// these off `Ruleset.pace` (`PaceTuning::result_secs_for`).
+pub(crate) const BALL_RESULT_SECS: f32 = 0.8;
+pub(crate) const STRIKE_RESULT_SECS: f32 = 0.8;
+pub(crate) const FOUL_RESULT_SECS: f32 = 1.4;
+pub(crate) const STRIKEOUT_RESULT_SECS: f32 = 2.2;
+/// A walk, a hit-by-pitch, or a dropped third strike: the plate appearance
+/// ends and the batter takes his base before the next one steps in.
+pub(crate) const WALK_RESULT_SECS: f32 = 1.4;
+/// How long the walk-up holds between plate appearances before it dismisses
+/// itself (TODO 103): the incoming batter's card and a close plate shot,
+/// where the reference footage spends its seconds. A batting-side action
+/// press ends it sooner; the CPU never presses, so its at-bats take the
+/// full hold. Live gameplay reads `Ruleset.pace.walkup_secs`.
+pub(crate) const WALKUP_SECS: f32 = 3.0;
+/// How long the curtain takes to close at the end of a result pause that
+/// dips to black — the beat's punctuation, and the cover under which the
+/// mound reset happens unseen. The pause's phase flip waits for it.
+pub const CURTAIN_SECS: f32 = 0.2;
+/// How long the themed wipe takes to sweep in at the end of a beat that
+/// ended the plate appearance — the reference's logo wipe before the next
+/// batter's walk-up, slower than the dip so it reads as a panel, not a cut.
+pub const WIPE_SECS: f32 = 0.5;
 /// Minimum seconds between pickoff throws — the arm has to reload, so a held
 /// button can't machine-gun the bag. Live gameplay reads this off
 /// `Ruleset.pace.pickoff_cooldown_secs`; this const only remains as
@@ -68,38 +99,136 @@ pub enum Phase {
     Result,
 }
 
+impl Phase {
+    /// The pre-contact "duel window" — batter and pitcher squared off, the
+    /// ball not yet in play. The one home for a predicate that was spelled
+    /// inline in eight places (runner dueling, rig behavior, the zone box
+    /// and PCI reticle, banners, the touch pad's claim window) — a new
+    /// phase or a redefined window edits here, PLUS one deliberate inline
+    /// sibling: `camera::framing::duel_framing_wanted` matches every
+    /// `Phase` exhaustively (a guard arm would forfeit the compile error a
+    /// new phase must trigger there), so a window change edits its first
+    /// arm by hand.
+    pub fn pre_contact(self) -> bool {
+        matches!(self, Phase::PrePitch | Phase::WindUp | Phase::Pitch)
+    }
+
+    /// The delivery window — the pitcher has committed (wind-up under way
+    /// or the ball in flight). [`Self::pre_contact`]'s sibling, named for
+    /// the same reason: the touch translator's tap-swing claim and the
+    /// rig's stance window must stay the same window, and an inline
+    /// `WindUp | Pitch` in each file could drift.
+    pub fn in_delivery(self) -> bool {
+        matches!(self, Phase::WindUp | Phase::Pitch)
+    }
+}
+
+/// What kind of result the current pause is showing — the key into
+/// `PaceTuning::result_secs_for` and the answer to whether the beat ends
+/// with a dip to black. Flow sets it as it ends the pitch or play; the
+/// presentation reads it (`Play::result_beat`) and never guesses from the
+/// banner text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResultBeat {
+    /// A taken ball: no big text, no dip — straight back to the duel.
+    Ball,
+    /// A called or swinging strike (not the third).
+    Strike,
+    /// A foul ball or foul tip.
+    Foul,
+    /// Strike three into the mitt.
+    Strikeout,
+    /// The batter takes his base on a dead ball: ball four, a plunking, or
+    /// a dropped third strike he ran out.
+    Walk,
+    /// A pickoff out at the bag.
+    Pickoff,
+    /// A batted ball's call (out, hit, home run) — the live-play pause.
+    InPlay,
+}
+
+impl ResultBeat {
+    /// Whether the pause ends with the curtain closing: every beat except a
+    /// taken ball, per the reference footage.
+    pub fn dips(self) -> bool {
+        !matches!(self, ResultBeat::Ball)
+    }
+
+    /// How long this beat's curtain takes to close: the themed wipe for a
+    /// beat that ended the plate appearance, the quick dip otherwise.
+    pub fn curtain_secs(self) -> f32 {
+        if self.ends_plate_appearance() {
+            WIPE_SECS
+        } else {
+            CURTAIN_SECS
+        }
+    }
+
+    /// Whether this beat ended the plate appearance — the next batter walks
+    /// up before the next pitch. A pickoff and a foul leave the same batter
+    /// in the box; a taken ball or a strike keeps the count alive.
+    pub fn ends_plate_appearance(self) -> bool {
+        matches!(
+            self,
+            ResultBeat::Strikeout | ResultBeat::Walk | ResultBeat::InPlay
+        )
+    }
+
+    /// The beat a judged strike lands in.
+    pub(super) fn for_strike(call: rules::StrikeCall) -> Self {
+        match call {
+            rules::StrikeCall::Strike => ResultBeat::Strike,
+            rules::StrikeCall::Strikeout => ResultBeat::Strikeout,
+            rules::StrikeCall::DroppedThird => ResultBeat::Walk,
+        }
+    }
+}
+
 /// Runtime state for the play machine.
+///
+/// The three clusters below have different lifetimes — the pitch in flight,
+/// the pre-pitch duel, and the batted ball — and each is reset at a different
+/// moment. Grouping them means a new field lands in exactly one of them, and
+/// a reader can see at a glance which phase owns it.
 #[derive(Resource)]
 pub struct Play {
     pub phase: Phase,
     timer: Timer,
+    resolved: bool,
+    /// Which beat the current result pause is (set as the pitch/play ends,
+    /// cleared at the PrePitch reset).
+    beat: Option<ResultBeat>,
+    /// The curtain closing at the end of a dipping result pause (or of the
+    /// walk-up): started once the pause timer and the runners are done, and
+    /// the phase flips only when it finishes, so the reset lands on a black
+    /// screen.
+    curtain: Option<Timer>,
+    /// The walk-up hold at the start of a plate appearance: while `Some`,
+    /// the ball is held (no steal window, no pitch) and the incoming batter
+    /// is introduced. Ends on the batting side's action or when it expires,
+    /// through the curtain.
+    walkup: Option<Timer>,
+    /// The pitch in flight, and how the catcher received it.
+    pitch: PitchState,
+    /// The pre-pitch leadoff / pickoff duel.
+    duel: DuelState,
+    /// The batted ball, from contact to the announced call.
+    live: LiveState,
+}
+
+#[derive(Default)]
+struct PitchState {
     /// Plate-crossing point (x, y), recorded once as the pitch passes the plate.
     crossing: Option<Vec2>,
-    resolved: bool,
     /// Aim + selected kind stored at windup start, released as the pitch when
     /// the delivery ends.
-    pending_pitch: Option<(Vec2, rules::PitchKind)>,
+    pending: Option<(Vec2, rules::PitchKind)>,
     /// The kind of the pitch currently in flight (set at release). Drives the
     /// dropped-third-strike and steal resolutions.
-    live_kind: Option<rules::PitchKind>,
-    /// The batting side sent the lead runner as the delivery started
-    /// (aim held down through the windup).
-    steal_armed: bool,
-    /// The armed steal broke from an extended pre-pitch lead — a jump no
-    /// throw beats (the pickoff was the defense's counter).
-    big_jump: bool,
-    /// The lead was stretched *during* the steal window — the only extension
-    /// that earns the guaranteed jump, because it was the only one exposed
-    /// to the pickoff. Stretching after the window is a plain late break.
-    window_lead: bool,
-    /// The pre-pitch steal window: while running, the pitch is gated and the
-    /// leadoff/pickoff duel is live. Zero-length when nobody can steal.
-    hold: Timer,
-    /// Reload time between pickoff throws.
-    pickoff_cooldown: Timer,
+    kind: Option<rules::PitchKind>,
     /// The last pitch ended untouched (take / swing-through): the ball is on
     /// its way to the catcher's mitt, and [`catcher_receives`] may stop it.
-    pitch_taken: bool,
+    taken: bool,
     /// A pitch reached the catcher's glove before the take/swing was
     /// logically judged (the timing window can stay open well past the
     /// catcher now — see `late_swing_z`) and was hidden there for
@@ -112,7 +241,54 @@ pub struct Play {
     /// holds the tight at-bat framing through the result pause instead of
     /// zooming out. Never set by dirt balls, sailed pitches, HBP, or
     /// anything hit; cleared at the PrePitch reset.
-    pitch_gloved: bool,
+    gloved: bool,
+    /// The umpire's call on this play's last judged strike (take or swing),
+    /// held through the result pause, cleared at the PrePitch reset. The
+    /// read-only seam observers use to recognize a dropped third without
+    /// string-matching the banner (the Coach — TODO 59).
+    last_strike_call: Option<rules::StrikeCall>,
+}
+
+struct DuelState {
+    /// The batting side sent the lead runner as the delivery started
+    /// (aim held down through the windup).
+    armed: bool,
+    /// Last wind-up frame's send read, for the two-frame confirm in
+    /// `wind_up`: a SEND is a *held* gesture ("hold Down through the
+    /// windup"), and latching off a single frame let a touch tap's
+    /// one-frame position aim (a low swing tap) send a runner nobody
+    /// called.
+    send_prev: bool,
+    /// The armed steal broke from an extended pre-pitch lead — a jump no
+    /// throw beats (the pickoff was the defense's counter).
+    big_jump: bool,
+    /// The lead was stretched *during* the steal window — the only extension
+    /// that earns the guaranteed jump, because it was the only one exposed
+    /// to the pickoff. Stretching after the window is a plain late break.
+    window_lead: bool,
+    /// The pre-pitch steal window: while running, the pitch is gated and the
+    /// leadoff/pickoff duel is live. Zero-length when nobody can steal.
+    hold: Timer,
+    /// Reload time between pickoff throws.
+    pickoff_cooldown: Timer,
+}
+
+impl Default for DuelState {
+    fn default() -> Self {
+        Self {
+            armed: false,
+            send_prev: false,
+            big_jump: false,
+            window_lead: false,
+            // Zero-length until `steal_window_for` sizes it at the reset.
+            hold: Timer::from_seconds(0.0, TimerMode::Once),
+            pickoff_cooldown: Timer::from_seconds(0.0, TimerMode::Once),
+        }
+    }
+}
+
+#[derive(Default)]
+struct LiveState {
     /// A call decided by the throw race but not yet announced: the ball is
     /// still in the air, and the play stays visually alive (the throw flies,
     /// the batter rounds the bases) until fielding reports it settled.
@@ -128,11 +304,10 @@ pub struct Play {
     /// This play is a home run: set at contact, held through the trot and the
     /// result pause (so the camera can orbit the trot), cleared at reset.
     home_run: bool,
-    /// The umpire's call on this play's last judged strike (take or swing),
-    /// held through the result pause, cleared at the PrePitch reset. The
-    /// read-only seam observers use to recognize a dropped third without
-    /// string-matching the banner (the Coach — TODO 59).
-    last_strike_call: Option<rules::StrikeCall>,
+    /// The batted ball's announced call, held through the result pause so
+    /// presentation can stage it (the umpire's signal at the bag); cleared
+    /// at reset.
+    last_outcome: Option<Outcome>,
 }
 
 impl Play {
@@ -146,26 +321,26 @@ impl Play {
     /// Seconds since contact, given the current `Time::elapsed_secs` — the
     /// live-play race clock the fielding choreography and rules share.
     pub fn since_contact(&self, now: f32) -> f32 {
-        now - self.contact_at
+        now - self.live.contact_at
     }
 
     /// Whether the batting side sent the runners with the windup (the
     /// hit-and-run jump); read by the throw races.
     pub fn runners_going(&self) -> bool {
-        self.steal_armed
+        self.duel.armed
     }
 
     /// Whether the pre-pitch steal window is still open: the pitch is held,
     /// leads may stretch, and a defensive action is a pickoff throw.
     pub fn in_steal_window(&self) -> bool {
-        !self.hold.is_finished()
+        !self.duel.hold.is_finished()
     }
 
     /// The hit the umpire has already decided but not yet announced (the
     /// throw is still in the air): `Some(bases)` lets the runner rigs break
     /// for the bases they've earned while the play finishes.
     pub fn pending_hit(&self) -> Option<u32> {
-        match self.pending_call {
+        match self.live.pending_call {
             Some(Outcome::Hit(n)) => Some(n),
             _ => None,
         }
@@ -174,30 +349,30 @@ impl Play {
     /// The most recent judged swing's quality this at-bat (any swing), or
     /// `None` before the first swing. Read by the home-run fireworks.
     pub fn last_contact_quality(&self) -> Option<rules::ContactQuality> {
-        self.last_contact_quality
+        self.live.last_contact_quality
     }
 
     /// The hit/out already decided but not yet announced (the throw is still
     /// in the air), for debug readouts.
     pub fn pending_call(&self) -> Option<Outcome> {
-        self.pending_call
+        self.live.pending_call
     }
 
     /// Seconds left in the pre-pitch steal window, for debug readouts.
     pub fn steal_window_remaining(&self) -> f32 {
-        self.hold.remaining_secs()
+        self.duel.hold.remaining_secs()
     }
 
     /// Whether the live/just-finished play is a home run — held from contact
     /// through the trot and the result pause so the camera can orbit it.
     pub fn is_home_run(&self) -> bool {
-        self.home_run
+        self.live.home_run
     }
 
     /// Whether the catcher gloved this at-bat's last pitch — read by the
     /// camera to hold the at-bat framing through the result pause.
     pub fn pitch_gloved(&self) -> bool {
-        self.pitch_gloved
+        self.pitch.gloved
     }
 
     /// The call on this play's last judged strike (`None` before one lands;
@@ -205,7 +380,71 @@ impl Play {
     /// itself — notably `StrikeCall::DroppedThird`, whose untouched pitch
     /// legitimately never reaches the mitt.
     pub fn last_strike_call(&self) -> Option<rules::StrikeCall> {
-        self.last_strike_call
+        self.pitch.last_strike_call
+    }
+
+    /// The batted ball's call as announced (`None` before one lands this
+    /// play; cleared at the PrePitch reset) — what the umpire at the bag
+    /// signals.
+    pub fn last_outcome(&self) -> Option<Outcome> {
+        self.live.last_outcome
+    }
+
+    /// The kind of the pitch in flight or just judged (`None` before the
+    /// release and after the PrePitch reset) — the speed read-out's source.
+    pub fn pitch_kind(&self) -> Option<rules::PitchKind> {
+        self.pitch.kind
+    }
+
+    /// Which beat the current result pause is showing (`None` outside a
+    /// result pause).
+    pub fn result_beat(&self) -> Option<ResultBeat> {
+        self.beat
+    }
+
+    /// The full length of the current result pause in seconds — the hold
+    /// plus the curtain if this beat dips — so a read-out can live exactly
+    /// as long as its beat. Outside a result pause, the timer's length is
+    /// whatever the phase last armed (the Coach reads it only in Result).
+    pub fn result_pause_secs(&self) -> f32 {
+        let curtain = match self.beat {
+            Some(beat) if beat.dips() => beat.curtain_secs(),
+            _ => 0.0,
+        };
+        self.timer.duration().as_secs_f32() + curtain
+    }
+
+    /// Whether the walk-up between plate appearances is on: the ball is
+    /// held and the incoming batter is being introduced.
+    pub fn walkup_active(&self) -> bool {
+        self.walkup.is_some()
+    }
+
+    /// Seconds into the current result pause (0 outside one) — the clock a
+    /// presentation beat inside the pause is staged on (the strikeout
+    /// walk-off starts a beat after the call).
+    pub fn result_elapsed_secs(&self) -> f32 {
+        if self.phase == Phase::Result {
+            self.timer.elapsed_secs()
+        } else {
+            0.0
+        }
+    }
+
+    /// Whether the curtain closing now is the themed wipe (the plate
+    /// appearance is over and the next batter walks up) rather than the
+    /// plain dip between pitches.
+    pub fn curtain_is_wipe(&self) -> bool {
+        self.beat.is_some_and(ResultBeat::ends_plate_appearance)
+    }
+
+    /// How far the curtain has closed at the end of a dipping result pause:
+    /// `Some(0.0..=1.0)` while it is closing (1.0 = fully black, the frame
+    /// the phase flips), `None` at every other time — the presentation's
+    /// only cue; it fades the curtain back out on its own once this is
+    /// `None` again.
+    pub fn curtain_progress(&self) -> Option<f32> {
+        self.curtain.as_ref().map(Timer::fraction)
     }
 
     /// Test-only constructor for camera/flow unit tests that need a `Play`
@@ -214,7 +453,38 @@ impl Play {
     pub fn test_play(phase: Phase, pitch_gloved: bool) -> Self {
         Self {
             phase,
-            pitch_gloved,
+            pitch: PitchState {
+                gloved: pitch_gloved,
+                ..PitchState::default()
+            },
+            ..Self::default()
+        }
+    }
+
+    /// Test-only: a `Play` parked in a result pause of the given beat with
+    /// the curtain `progress` of the way closed (`None` = not closing).
+    #[cfg(test)]
+    pub fn test_result(beat: ResultBeat, progress: Option<f32>) -> Self {
+        let curtain = progress.map(|p| {
+            let secs = beat.curtain_secs();
+            let mut t = Timer::from_seconds(secs, TimerMode::Once);
+            t.set_elapsed(std::time::Duration::from_secs_f32(secs * p));
+            t
+        });
+        Self {
+            phase: Phase::Result,
+            beat: Some(beat),
+            curtain,
+            ..Self::default()
+        }
+    }
+
+    /// Test-only: a `Play` parked in a walk-up hold.
+    #[cfg(test)]
+    pub fn test_walkup() -> Self {
+        Self {
+            phase: Phase::PrePitch,
+            walkup: Some(Timer::from_seconds(WALKUP_SECS, TimerMode::Once)),
             ..Self::default()
         }
     }
@@ -235,7 +505,7 @@ impl Play {
     /// library's seam ([`crate::game::scenario::apply_to_world`]).
     pub fn reset_for_scenario(&mut self, bases: &Bases, rules: &Ruleset) {
         *self = Play::default();
-        self.hold = pitch::steal_window_for(bases, rules);
+        self.duel.hold = pitch::steal_window_for(bases, rules);
     }
 }
 
@@ -252,24 +522,13 @@ impl Default for Play {
         Self {
             phase: Phase::PrePitch,
             timer: Timer::from_seconds(RESULT_SECS, TimerMode::Once),
-            crossing: None,
             resolved: false,
-            pending_pitch: None,
-            live_kind: None,
-            steal_armed: false,
-            big_jump: false,
-            window_lead: false,
-            hold: Timer::from_seconds(0.0, TimerMode::Once),
-            pickoff_cooldown: Timer::from_seconds(0.0, TimerMode::Once),
-            pitch_taken: false,
-            presentational_catch: false,
-            pitch_gloved: false,
-            pending_call: None,
-            contact_at: 0.0,
-            wall_called: false,
-            last_contact_quality: None,
-            home_run: false,
-            last_strike_call: None,
+            beat: None,
+            curtain: None,
+            walkup: None,
+            pitch: PitchState::default(),
+            duel: DuelState::default(),
+            live: LiveState::default(),
         }
     }
 }
@@ -350,6 +609,11 @@ pub struct ContactEvent {
 pub struct PlayBanner {
     pub text: String,
     pub tone: BannerTone,
+    /// A second line the banner swaps to partway through its beat — the
+    /// score after a run-scoring play ("AWAY 2  -  HOME 0"), the way the
+    /// reference replaces SAFE! with the score (TODO 104). Flow supplies
+    /// the words; presentation owns the timing.
+    pub follow_up: Option<String>,
 }
 
 impl PlayBanner {
@@ -357,7 +621,14 @@ impl PlayBanner {
         Self {
             text: text.into(),
             tone,
+            follow_up: None,
         }
+    }
+
+    /// Attach the line the banner swaps to partway through its beat.
+    pub fn with_follow_up(mut self, text: impl Into<String>) -> Self {
+        self.follow_up = Some(text.into());
+        self
     }
 }
 
@@ -392,7 +663,10 @@ impl Plugin for FlowPlugin {
             .add_message::<PitchCaughtEvent>()
             .add_message::<ContactEvent>()
             .add_message::<PlayBanner>()
-            .add_systems(crate::game::game_start(), pitch::reset_flow)
+            .add_systems(
+                crate::game::game_start(),
+                (pitch::reset_flow, reset_cpu_clock),
+            )
             .add_systems(
                 Update,
                 // CPU intent is written first so pitching/batting see it this
@@ -405,6 +679,7 @@ impl Plugin for FlowPlugin {
                 // restores that same-frame delivery). It still reads
                 // `cpu_offense`'s intent write from earlier this frame.
                 (
+                    tick_cpu_clock,
                     cpu_defense,
                     cpu_offense,
                     pitch::pre_pitch,
@@ -426,24 +701,5 @@ impl Plugin for FlowPlugin {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A gloved pitch is remembered through the result pause (the camera
-    /// holds the duel framing on it — `camera::duel_framing_wanted`) and a
-    /// fresh `Play` starts unglooved.
-    #[test]
-    fn pitch_gloved_defaults_false_and_reads_back() {
-        let play = Play::default();
-        assert!(!play.pitch_gloved());
-        let play = Play::test_play(Phase::Result, true);
-        assert!(play.pitch_gloved());
-    }
-
-    /// A fresh play has no strike call on record — the observer seam only
-    /// ever reports a decision the umpire actually made this play.
-    #[test]
-    fn last_strike_call_defaults_none() {
-        assert_eq!(Play::default().last_strike_call(), None);
-    }
-}
+#[path = "mod.test.rs"]
+mod tests;

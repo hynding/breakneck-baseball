@@ -84,6 +84,12 @@ mod drive {
         if let Some(n) = cfg.innings {
             game_config.innings = n.max(1);
         }
+        // A persisted touch scheme can't hijack the scripted slots' batting
+        // styles here: `touch::resolve_touch_owner` excludes Director-driven
+        // slots (and touch-free devices), so `Controllers::touch_team` stays
+        // `None` and `style_for` reads the configured styles. (NOT the
+        // `touch::touch_team` candidate fn — that reports `Some(Home)` for
+        // any human-sourced slot, scripted ones included.)
         commands.init_resource::<CoachEnabled>();
         let director = match cfg.script.as_deref().and_then(script) {
             Some(s) => Director {
@@ -113,7 +119,16 @@ mod drive {
             }
             GameState::GameOver => {
                 keyboard.release(KeyCode::Digit1);
-                keyboard.press(KeyCode::Enter);
+                // Alternate press/release: `press` on an already-pressed key
+                // produces no new `just_pressed` edge, and the single edge a
+                // held Enter produced landed on the first GameOver frame —
+                // inside `GameOverGrace`'s 1 s input-tail guard — hanging
+                // the attract loop on the final card forever.
+                if keyboard.pressed(KeyCode::Enter) {
+                    keyboard.release(KeyCode::Enter);
+                } else {
+                    keyboard.press(KeyCode::Enter);
+                }
             }
             _ => {
                 keyboard.release(KeyCode::Digit1);
@@ -214,6 +229,10 @@ mod drive {
 
     impl Plugin for AutoplayPlugin {
         fn build(&self, app: &mut App) {
+            // The breadcrumbs the web build always carries, on stderr for a
+            // native self-driving run (the web target registers them itself).
+            #[cfg(not(target_arch = "wasm32"))]
+            app.add_plugins(super::WebBeaconPlugin);
             app.add_systems(Startup, setup)
                 .add_systems(DriveGame, navigate_menus)
                 .add_systems(
@@ -237,15 +256,33 @@ mod drive {
 #[cfg(feature = "autoplay")]
 pub use drive::AutoplayPlugin;
 
-#[cfg(target_arch = "wasm32")]
+/// The beacon lives on wasm always, and natively under `autoplay` so a
+/// self-driving native run leaves the same breadcrumbs on stderr.
+#[cfg(any(target_arch = "wasm32", feature = "autoplay"))]
 mod beacon {
     use bevy::prelude::*;
 
     use crate::game::GameState;
     use crate::game::flow::{Phase, Play};
 
+    #[cfg(target_arch = "wasm32")]
     fn log(msg: &str) {
         web_sys::console::log_1(&msg.into());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn log(msg: &str) {
+        eprintln!("{msg}");
+    }
+
+    /// Per plate appearance: the walk-up starting and ending (TODO 103) —
+    /// the breadcrumb that shows a game is *progressing*, not just started.
+    fn walk_up_beacon(play: Res<Play>, mut was_on: Local<bool>) {
+        let on = play.walkup_active();
+        if on != *was_on {
+            log(if on { "bb-walkup" } else { "bb-duel" });
+            *was_on = on;
+        }
     }
 
     fn on_playing() {
@@ -286,10 +323,13 @@ mod beacon {
                 .add_systems(OnEnter(GameState::MainMenu), on_menu)
                 .add_systems(OnEnter(GameState::GameOver), on_game_over)
                 .add_systems(crate::game::game_start(), reset_first_pitch)
-                .add_systems(Update, first_pitch.run_if(in_state(GameState::Playing)));
+                .add_systems(
+                    Update,
+                    (first_pitch, walk_up_beacon).run_if(in_state(GameState::Playing)),
+                );
         }
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", feature = "autoplay"))]
 pub use beacon::WebBeaconPlugin;

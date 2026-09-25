@@ -18,7 +18,10 @@ children are added — and **UI roots spawned mid-`Playing` don't render at all*
 - Give container roots a `BackgroundColor`.
 - Spawn UI roots at game start (painted at spawn), then show/hide by **mutating children** of
   those roots. The pause/substitution board (`src/game/meta/subs.rs`) is the reference example:
-  spawned hidden at game start, painted by mutating children.
+  spawned hidden at game start, painted by mutating children. The curtain
+  (`present/ui/curtain.rs`) is the opaque-at-spawn example: a full-screen black root painted
+  solid at game start (a fade-in on PLAY BALL) and driven by alpha afterwards, floored at
+  `hidden_tint`; the walk-up card (`present/ui/walkup.rs`) is the hidden-at-spawn example.
 - Spawn-at-game-start systems key on the `game_start()` transition schedule
   (`OnTransition { MainMenu → Playing }`), never `OnEnter(Playing)` — otherwise they re-run on
   every unpause (`Playing ⇄ Paused` leaves the scene intact; teardown is `Playing → GameOver`).
@@ -29,6 +32,11 @@ children are added — and **UI roots spawned mid-`Playing` don't render at all*
   TODO 29). Hold a deadline instead: the show system stamps `Some(elapsed + linger)` once, the
   fade system only *reads* until the deadline passes, then takes its single mutable step —
   `BannerFadeAt`/`StampFadeAt` in `src/game/present/ui/banner.rs` are the reference.
+- Do **not** put `GlobalZIndex` on a *transparent, never-repainted* keep-alive root: on wasm the
+  whole subtree stops extracting (bisected 2026-08-27 — alpha alone and z-index alone are fine;
+  the pause board survives its tier because `update_board` repaints its root). Reserve explicit
+  tiers for roots painted with real colors or repainted on show; keep announcement banners on
+  the proven two-wrapper structure in `present/ui/hud.rs` and let spawn order stack them.
 
 Verify UI changes on the web target (the `/run-web` skill), not just natively.
 
@@ -40,11 +48,15 @@ sky/`ClearColor`, and `PlayerModelId`; cycled on the menu with T. UI reads `Res<
 
 ## Cameras
 
-Default duel view is the catcher's POV (`FieldSpec::duel_eye`); **V** cycles four `DuelView`
-framings (catcher POV / behind-pitcher / batting zoom / broadcast plate). The catcher
+Default duel view is the batting view (`DuelView::BattingZoom`, `FieldSpec::batting_zoom_eye`:
+2 m behind the plate, whole batter screen-left, zone at centre — the reference composition in
+`docs/agent/SMB3-REFERENCE-NOTES.md`, pinned by a framing test); **V** cycles four `DuelView`
+framings (batting view / catcher POV / behind-pitcher / broadcast plate). The catcher
 (`CatcherRole`, any fielder spawned at z < 0) and plate umpire are auto-hidden when they'd block
 the active broadcast view. After contact the broadcast camera holds the plate framing for
-`camera::BALL_FOLLOW_DELAY` (1 s) before chasing the ball. The strike zone (`rules::ZONE_*`) is
+`camera::BALL_FOLLOW_DELAY` (0.25 s), then **cuts** through a one-subject shot list (`camera::Shot`:
+ball-follow → fielder cam on a descending fly → base cam on the throw, where the call lands;
+smoothing only within a shot). The strike zone (`rules::ZONE_*`) is
 drawn as a floating box; the batter finishes `BatterSwing` before the hidden run-out rig takes
 over after its `RunDelay`.
 

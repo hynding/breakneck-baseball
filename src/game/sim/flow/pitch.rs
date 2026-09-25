@@ -12,10 +12,12 @@ use crate::game::player::{CatcherRole, Pitcher};
 use crate::game::rules::{self, Bases, BattingOrder, Outcome, StrikeCall};
 use crate::game::variant::{FieldSpec, Ruleset};
 
-use super::live::{resolve_contact, wants_send};
-use super::result::{add_ball, add_strike, end_pitch, resolve_steal};
+use super::live::wants_send;
+use super::result::end_pitch;
+use super::umpire::Umpire;
 use super::{
-    BallInPlayEvent, BannerTone, ContactEvent, LeadState, Phase, PitchCaughtEvent, Play, PlayBanner,
+    BallInPlayEvent, BannerTone, CURTAIN_SECS, ContactEvent, LeadState, Phase, PitchCaughtEvent,
+    Play, PlayBanner, ResultBeat,
 };
 
 // ── Tuning constants ──────────────────────────────────────────────────────────
@@ -115,8 +117,11 @@ pub(super) fn pre_pitch(
     if play.phase != Phase::PrePitch {
         return;
     }
-    play.hold.tick(time.delta());
-    play.pickoff_cooldown.tick(time.delta());
+    if walk_up(&mut play, &intents, &score, time.delta()) {
+        return;
+    }
+    play.duel.hold.tick(time.delta());
+    play.duel.pickoff_cooldown.tick(time.delta());
 
     // The offense works the lead: holding Down stretches the lead runner off
     // the bag — the guaranteed steal jump, bought at pickoff risk.
@@ -128,20 +133,31 @@ pub(super) fn pre_pitch(
         // Only a stretch *held through* the window (while the pickoff threat
         // is live) earns the guaranteed jump at delivery — retreating to the
         // bag forfeits it, so a one-frame pulse can't bank a risk-free jump.
-        play.window_lead = lead.extended;
+        play.duel.window_lead = lead.extended;
         // The duel window: the ball is held. A defensive action here is a
         // pickoff throw at the leading runner, not a pitch — one throw per
         // reload, so a held button can't spam the bag.
-        if intent.action && play.pickoff_cooldown.is_finished() {
-            play.pickoff_cooldown =
+        if intent.action && play.duel.pickoff_cooldown.is_finished() {
+            play.duel.pickoff_cooldown =
                 Timer::from_seconds(rules_res.pace.pickoff_cooldown_secs, TimerMode::Once);
+            let outs_before = score.outs;
             match rules::attempt_pickoff(&mut score, &mut bases, &rules_res, lead.extended) {
                 rules::PickoffResult::PickedOff { .. } => {
-                    banner.write(PlayBanner::new("PICKED OFF!", BannerTone::Bad));
+                    // The out count follows the call (the rules zero it as
+                    // they change sides, so a third out reads as the side).
+                    let outs = if score.outs > outs_before {
+                        score.outs
+                    } else {
+                        rules_res.counts.outs_per_half
+                    };
+                    banner.write(
+                        PlayBanner::new("PICKED OFF!", BannerTone::Bad)
+                            .with_follow_up(format!("OUT {outs}")),
+                    );
                     // A pickoff out is a play: it takes the same result
                     // pause as any other out (banner linger + runners
                     // settling) before the next window can open.
-                    end_pitch(&mut play, rules_res.pace.result_secs);
+                    end_pitch(&mut play, &rules_res.pace, ResultBeat::Pickoff);
                 }
                 rules::PickoffResult::SafeBack => {
                     banner.write(PlayBanner::new("BACK IN TIME", BannerTone::Info));
@@ -153,20 +169,20 @@ pub(super) fn pre_pitch(
     }
 
     if intent.action {
-        play.pending_pitch = Some((intent.aim, rules::PitchKind::from_aim(intent.aim)));
+        play.pitch.pending = Some((intent.aim, rules::PitchKind::from_aim(intent.aim)));
         play.phase = Phase::WindUp;
         play.timer = Timer::from_seconds(AnimClip::WindUp.duration(), TimerMode::Once);
-        play.crossing = None;
+        play.pitch.crossing = None;
         play.resolved = false;
-        play.pitch_taken = false;
-        play.presentational_catch = false;
+        play.pitch.taken = false;
+        play.pitch.presentational_catch = false;
         // A lead still stretched at first movement sends the runner with the
         // delivery. It's only the no-throw-beats-it jump when the stretch
         // was made during the window — that's the extension that paid the
         // pickoff risk; stretching only after the window is a late break.
         if lead.extended {
-            play.steal_armed = true;
-            play.big_jump = play.window_lead;
+            play.duel.armed = true;
+            play.duel.big_jump = play.duel.window_lead;
         }
         for pitcher in &pitcher_q {
             commands
@@ -174,6 +190,34 @@ pub(super) fn pre_pitch(
                 .insert(Playing::then(AnimClip::WindUp, AnimClip::ThrowRelease));
         }
     }
+}
+
+/// The walk-up hold (TODO 103): while the incoming batter is introduced the
+/// ball is held — no steal window ticks, no pitch is accepted. The batting
+/// side's action press ends it, or it expires on its own; either way it
+/// leaves through the curtain, so the cut to the duel framing lands on a
+/// black screen. Returns whether the pitch is still held.
+fn walk_up(
+    play: &mut Play,
+    intents: &Intents,
+    score: &ScoreBoard,
+    dt: std::time::Duration,
+) -> bool {
+    let Some(walkup) = play.walkup.as_mut() else {
+        return false;
+    };
+    walkup.tick(dt);
+    let dismissed = intents.get(score.batting_team()).action;
+    if play.curtain.is_some() || walkup.is_finished() || dismissed {
+        let curtain = play
+            .curtain
+            .get_or_insert_with(|| Timer::from_seconds(CURTAIN_SECS, TimerMode::Once));
+        if curtain.tick(dt).is_finished() {
+            play.walkup = None;
+            play.curtain = None;
+        }
+    }
+    true
 }
 
 // ── WindUp: the delivery plays out, then the ball leaves the hand ─────────────
@@ -191,19 +235,33 @@ pub(super) fn wind_up(
     mut pitch_ev: MessageWriter<PitchEvent>,
 ) {
     if play.phase != Phase::WindUp {
+        // Guarded like every reset in this diff — tick hygiene, not cost.
+        if play.duel.send_prev {
+            play.duel.send_prev = false;
+        }
         return;
     }
     // Holding the stick down through the delivery sends the lead runner (the
     // late break: a classic race against the catcher, no guaranteed jump).
-    // Nobody in a position to steal means nobody is going.
-    if wants_send(intents.get(score.batting_team()).aim) && rules::steal_candidate(&bases).is_some()
-    {
-        play.steal_armed = true;
+    // Nobody in a position to steal means nobody is going. HELD is literal —
+    // evidence from more than one instant: a touch tap's position aim (a
+    // low swing tap) lands for exactly one frame, and latching off it sent
+    // runners nobody called. Either a prior wind-up frame held the send
+    // (`windup_send_prev`) or the pre-pitch lead was stretched coming in
+    // (`lead.extended` — the same held-Down, so a one-frame wind-up on a
+    // hitching tab still honors a hold that predates it). Real holds span
+    // both; a one-frame blip has neither.
+    let send_now = wants_send(intents.get(score.batting_team()).aim)
+        && rules::steal_candidate(&bases).is_some();
+    if send_now && (play.duel.send_prev || lead.extended) {
+        play.duel.armed = true;
         lead.extended = true;
     }
+    play.duel.send_prev = send_now;
     if play.timer.tick(time.delta()).is_finished() {
         let (aim, kind) = play
-            .pending_pitch
+            .pitch
+            .pending
             .take()
             .unwrap_or((Vec2::ZERO, rules::PitchKind::Changeup));
         pitch_ev.write(PitchEvent {
@@ -215,7 +273,7 @@ pub(super) fn wind_up(
             ),
             spin: kind.spin(),
         });
-        play.live_kind = Some(kind);
+        play.pitch.kind = Some(kind);
         play.phase = Phase::Pitch;
     }
 }
@@ -248,8 +306,8 @@ pub(super) fn pitch_live(
     let pos = ball.translation;
 
     // Record the plate-crossing location once.
-    if play.crossing.is_none() && pos.z <= PLATE_Z + 0.1 {
-        play.crossing = Some(Vec2::new(pos.x, pos.y));
+    if play.pitch.crossing.is_none() && pos.z <= PLATE_Z + 0.1 {
+        play.pitch.crossing = Some(Vec2::new(pos.x, pos.y));
     }
 
     // Captured before any resolution can flip the half-inning: the batting
@@ -261,6 +319,13 @@ pub(super) fn pitch_live(
     // window itself (see `late_swing_z`), recomputed off the ball's live
     // z-speed every frame since it isn't a fixed distance.
     let late_exit_z = late_swing_z(ball_vel.linvel.z, rules.batting.foul_ms);
+
+    // NOTE: the `Umpire` is built inside each branch that actually makes a
+    // call, never hoisted above them. `&mut` on a `ResMut` goes through
+    // `DerefMut`, which calls `set_changed()` — a borrow taken once at the top
+    // would mark `ScoreBoard` and `Bases` changed on every frame of the pitch
+    // flight, defeating the `is_changed()` guards in the HUD, the jersey and
+    // team-colour painters, and `runner::sync_runners` (TODO 78).
 
     if let Some(swing) = swing_commands.take(batter) {
         // The spatial band is the OUTER eligibility gate: a ball out of the
@@ -300,7 +365,7 @@ pub(super) fn pitch_live(
         });
         // Remember this swing's grade for presentation — the home-run
         // fireworks scale up off a dead-on Perfect (see `game::fx`).
-        play.last_contact_quality = Some(quality);
+        play.live.last_contact_quality = Some(quality);
         match quality {
             // A ball in play, shaped by the quality's exit multiplier and the
             // timing-driven pull yaw. (`Weak` never comes from the Classic
@@ -325,69 +390,28 @@ pub(super) fn pitch_live(
                     landing,
                     contact_class,
                 });
-                play.contact_at = time.elapsed_secs();
+                play.live.contact_at = time.elapsed_secs();
                 play.phase = Phase::InPlay;
-                match kind {
-                    // Only a ball over the fence is settled at contact.
-                    rules::ContactKind::HomeRun => {
-                        play.home_run = true;
-                        let going = play.steal_armed;
-                        resolve_contact(
-                            Outcome::HomeRun,
-                            &mut score,
-                            &mut bases,
-                            &rules,
-                            &mut banner,
-                            going,
-                        );
-                        order.advance(batter);
-                        play.timer = Timer::from_seconds(
-                            (hang_time + INPLAY_BUFFER).clamp(INPLAY_MIN, INPLAY_MAX),
-                            TimerMode::Once,
-                        );
-                        play.resolved = true;
-                    }
-                    // Everything else stays live: the fielders' chase and the
-                    // runner races decide the call in `resolve_live_play`.
-                    rules::ContactKind::Live { .. } => {
-                        play.timer = Timer::from_seconds(
-                            (hang_time + LIVE_PLAY_BUFFER).clamp(LIVE_PLAY_MIN, LIVE_PLAY_MAX),
-                            TimerMode::Once,
-                        );
-                        play.resolved = false;
-                    }
-                }
+                let mut ump = Umpire::new(&mut score, &mut bases, &rules, &mut banner);
+                settle_batted_ball(kind, hang_time, &mut play, &mut ump, &mut order, batter);
             }
             // A foul tip: a strike (never the third — see `rules::foul`). The
             // ball is dead, so runners hold (no steal is resolved) and the
             // at-bat continues. The pull-side sign rides along on the
             // ContactEvent for later presentation.
             rules::ContactQuality::FoulTip => {
-                rules::foul(&mut score, &rules);
-                banner.write(PlayBanner::new("FOUL", BannerTone::Info));
-                play.pitch_taken = true; // the catcher gloves the tipped ball
-                end_pitch(&mut play, rules.pace.result_secs);
+                Umpire::new(&mut score, &mut bases, &rules, &mut banner).foul_tip();
+                play.pitch.taken = true; // the catcher gloves the tipped ball
+                end_pitch(&mut play, &rules.pace, ResultBeat::Foul);
             }
             // A swing and miss — exactly today's whiff path.
             rules::ContactQuality::Whiff => {
                 // Swinging through a curveball in the dirt with first base
                 // open: the catcher can't hold strike three and the batter
                 // runs.
-                let dropped =
-                    play.live_kind == Some(rules::PitchKind::Curveball) && !bases.is_occupied(0);
-                let call = add_strike(&mut score, &mut bases, &rules, &mut banner, true, dropped);
-                play.last_strike_call = Some(call);
-                // The catcher gloves everything except the strike three that
-                // got away (that one is in the dirt by definition).
-                play.pitch_taken = call != StrikeCall::DroppedThird;
-                if call != StrikeCall::Strike {
-                    order.advance(batter);
-                }
-                // The catcher has the ball: a sent runner must survive the throw.
-                if play.steal_armed {
-                    resolve_steal(&play, &mut score, &mut bases, &rules, &mut banner);
-                }
-                end_pitch(&mut play, rules.pace.result_secs);
+                let mut ump = Umpire::new(&mut score, &mut bases, &rules, &mut banner);
+                let beat = judge_whiff(&mut play, &mut ump, &mut order, batter);
+                end_pitch(&mut play, &rules.pace, beat);
             }
         }
         return;
@@ -396,37 +420,116 @@ pub(super) fn pitch_live(
     // No swing: once the ball is past the foul window's own late edge (a
     // swing here couldn't grade as anything but a take anyway), judge it.
     if pos.z < late_exit_z {
-        let cross = play.crossing.unwrap_or(Vec2::new(pos.x, pos.y));
-        if rules::hits_batter(cross) {
-            // Dead ball: the batter takes first, forced runners move.
-            let runs = rules::hit_by_pitch(&mut score, &mut bases);
-            let tone = if runs > 0 {
-                BannerTone::Epic
-            } else {
-                BannerTone::Good
-            };
-            banner.write(PlayBanner::new("HIT BY PITCH", tone));
-            order.advance(batter);
+        let cross = play.pitch.crossing.unwrap_or(Vec2::new(pos.x, pos.y));
+        let mut ump = Umpire::new(&mut score, &mut bases, &rules, &mut banner);
+        let beat = judge_take(cross, &mut play, &mut ump, &mut order, batter);
+        end_pitch(&mut play, &rules.pace, beat);
+    }
+}
+
+/// A pitch nobody offered at: a plunking, a called strike, or a ball.
+///
+/// `cross` is the plate-crossing point the call is judged from — recorded as
+/// the ball passed the plate, not sampled here, so a late judgment still
+/// grades the pitch where the umpire saw it.
+fn judge_take(
+    cross: Vec2,
+    play: &mut Play,
+    ump: &mut Umpire,
+    order: &mut BattingOrder,
+    batter: crate::game::Team,
+) -> ResultBeat {
+    if rules::hits_batter(cross) {
+        // Dead ball: the batter takes first, forced runners move.
+        ump.hit_by_pitch();
+        order.advance(batter);
+        return ResultBeat::Walk;
+    }
+    play.pitch.taken = true;
+    let (pa_over, walked, beat) = if rules::is_in_zone(cross) {
+        let call = ump.add_strike(false, false);
+        play.pitch.last_strike_call = Some(call);
+        (
+            call != StrikeCall::Strike,
+            false,
+            ResultBeat::for_strike(call),
+        )
+    } else {
+        let walked = ump.add_ball();
+        let beat = if walked {
+            ResultBeat::Walk
         } else {
-            play.pitch_taken = true;
-            let (pa_over, walked) = if rules::is_in_zone(cross) {
-                let call = add_strike(&mut score, &mut bases, &rules, &mut banner, false, false);
-                play.last_strike_call = Some(call);
-                (call != StrikeCall::Strike, false)
-            } else {
-                let walked = add_ball(&mut score, &mut bases, &rules, &mut banner);
-                (walked, walked)
-            };
-            if pa_over {
-                order.advance(batter);
-            }
-            // A walk is a dead ball (runners advance freely); otherwise a
-            // sent runner has to beat the catcher's throw.
-            if play.steal_armed && !walked {
-                resolve_steal(&play, &mut score, &mut bases, &rules, &mut banner);
-            }
+            ResultBeat::Ball
+        };
+        (walked, walked, beat)
+    };
+    if pa_over {
+        order.advance(batter);
+    }
+    // A walk is a dead ball (runners advance freely); otherwise a sent runner
+    // has to beat the catcher's throw.
+    if play.duel.armed && !walked {
+        ump.resolve_steal(play);
+    }
+    beat
+}
+
+/// A swing and miss. The at-bat may end here (a strikeout, or a dropped third
+/// the batter runs out); the caller ends the pitch either way.
+fn judge_whiff(
+    play: &mut Play,
+    ump: &mut Umpire,
+    order: &mut BattingOrder,
+    batter: crate::game::Team,
+) -> ResultBeat {
+    // Swinging through a curveball in the dirt with first base open: the
+    // catcher can't hold strike three and the batter runs.
+    let dropped = play.pitch.kind == Some(rules::PitchKind::Curveball) && !ump.bases_occupied(0);
+    let call = ump.add_strike(true, dropped);
+    play.pitch.last_strike_call = Some(call);
+    // The catcher gloves everything except the strike three that got away
+    // (that one is in the dirt by definition).
+    play.pitch.taken = call != StrikeCall::DroppedThird;
+    if call != StrikeCall::Strike {
+        order.advance(batter);
+    }
+    // The catcher has the ball: a sent runner must survive the throw.
+    if play.duel.armed {
+        ump.resolve_steal(play);
+    }
+    ResultBeat::for_strike(call)
+}
+
+/// Where a ball that left the bat goes next: only a ball over the fence is
+/// settled at contact. Everything else stays live — the fielders' chase and
+/// the runner races decide the call in `resolve_live_play` — and the timer is
+/// the backstop, sized off the predicted hang time.
+fn settle_batted_ball(
+    kind: rules::ContactKind,
+    hang_time: f32,
+    play: &mut Play,
+    ump: &mut Umpire,
+    order: &mut BattingOrder,
+    batter: crate::game::Team,
+) {
+    match kind {
+        rules::ContactKind::HomeRun => {
+            play.live.home_run = true;
+            ump.resolve_contact(Outcome::HomeRun, play.duel.armed);
+            order.advance(batter);
+            play.timer = Timer::from_seconds(
+                (hang_time + INPLAY_BUFFER).clamp(INPLAY_MIN, INPLAY_MAX),
+                TimerMode::Once,
+            );
+            play.resolved = true;
         }
-        end_pitch(&mut play, rules.pace.result_secs);
+        rules::ContactKind::Live { .. } => {
+            play.timer = Timer::from_seconds(
+                (hang_time + LIVE_PLAY_BUFFER).clamp(LIVE_PLAY_MIN, LIVE_PLAY_MAX),
+                TimerMode::Once,
+            );
+            play.resolved = false;
+        }
     }
 }
 
@@ -471,11 +574,11 @@ pub(super) fn catcher_receives(
     let approaching_glove = pos.z <= catcher_tf.translation.z + 0.6 && vel.linvel.z < 0.0;
     let catchable_height = (0.12..=2.4).contains(&pos.y); // not in the dirt or sailing high
 
-    if play.phase == Phase::Result && play.pitch_taken {
+    if play.phase == Phase::Result && play.pitch.taken {
         // Officially judged: freeze it at the glove for real. If it was
         // hidden already this is invisible — the transform simply now
         // matches where the glove already showed it.
-        play.pitch_taken = false;
+        play.pitch.taken = false;
         if !catchable_height {
             *vis = Visibility::Inherited; // shouldn't have been hidden; make sure
             return; // in the dirt or over everything: play it off the backstop
@@ -486,9 +589,9 @@ pub(super) fn catcher_receives(
         *vis = Visibility::Inherited;
         // Officially in the mitt (whether or not the presentational pop
         // already played) — the camera holds the at-bat framing on it.
-        play.pitch_gloved = true;
+        play.pitch.gloved = true;
         commands.entity(ball).remove::<InFlight>();
-        if !play.presentational_catch {
+        if !play.pitch.presentational_catch {
             // No earlier presentational pop (the decision landed before the
             // ball reached the glove) — this is the first and only catch.
             commands
@@ -496,12 +599,12 @@ pub(super) fn catcher_receives(
                 .insert(Playing::new(AnimClip::GloveUp));
             caught.write(PitchCaughtEvent);
         }
-        play.presentational_catch = false;
+        play.pitch.presentational_catch = false;
         return;
     }
 
     if play.phase == Phase::Pitch {
-        if play.presentational_catch {
+        if play.pitch.presentational_catch {
             return; // already hidden; still waiting on the official judgment
         }
         // Not judged yet — a swing could still land (the timing dial can
@@ -510,13 +613,13 @@ pub(super) fn catcher_receives(
         if !approaching_glove || !catchable_height {
             return;
         }
-        let cross = play.crossing.unwrap_or(Vec2::new(pos.x, pos.y));
+        let cross = play.pitch.crossing.unwrap_or(Vec2::new(pos.x, pos.y));
         if rules::hits_batter(cross) {
             return; // headed for an HBP call: stays visible, plays through
         }
         *vis = Visibility::Hidden;
-        play.presentational_catch = true;
-        play.pitch_gloved = true;
+        play.pitch.presentational_catch = true;
+        play.pitch.gloved = true;
         commands
             .entity(catcher)
             .insert(Playing::new(AnimClip::GloveUp));
@@ -529,71 +632,13 @@ pub(super) fn catcher_receives(
     // never leave a presentational hide stuck on a ball that's actually
     // still live, and never leave the camera holding a "gloved" framing on
     // a ball that got away.
-    if play.presentational_catch {
+    if play.pitch.presentational_catch {
         *vis = Visibility::Inherited;
-        play.presentational_catch = false;
-        play.pitch_gloved = false;
+        play.pitch.presentational_catch = false;
+        play.pitch.gloved = false;
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn swing_dt_ms_is_signed_early_negative() {
-        // Ball travels toward the plate at −Z (vel_z < 0).
-        let vel_z = -30.0;
-        // Out in front of the plate (z > PLATE_Z): the swing is early → negative.
-        assert!(swing_dt_ms(2.0, vel_z) < 0.0);
-        // Already past the plate (z < PLATE_Z): late → positive.
-        assert!(swing_dt_ms(-1.0, vel_z) > 0.0);
-        // Dead on the plate: zero.
-        assert!(swing_dt_ms(PLATE_Z, vel_z).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn swing_dt_ms_never_divides_by_zero() {
-        // A stalled or forward-drifting ball is clamped, not a NaN/inf.
-        assert!(swing_dt_ms(1.0, 0.0).is_finite());
-        assert!(swing_dt_ms(1.0, 5.0).is_finite());
-    }
-
-    #[test]
-    fn late_swing_z_round_trips_through_swing_dt_ms() {
-        // The whole point: the Z it hands back reads back out at exactly
-        // `foul_ms` through the same swing_dt_ms the live check uses.
-        for vel_z in [-29.0_f32, -31.0, -33.0, -35.0, -38.0] {
-            for foul_ms in [90.0_f32, 140.0, 200.0] {
-                let z = late_swing_z(vel_z, foul_ms);
-                let dt = swing_dt_ms(z, vel_z);
-                assert!(
-                    (dt - foul_ms).abs() < 1e-3,
-                    "vel_z={vel_z} foul_ms={foul_ms}: late_swing_z={z} -> dt={dt}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn late_swing_z_reaches_far_past_the_old_fixed_cutoff() {
-        // The bug this replaces: a fixed −1.2 m cutoff only ever reaches
-        // ~40 ms of lateness at game pitch speeds, so no `foul_ms` (140 by
-        // default) worth of window was ever geometrically reachable. The
-        // derived Z must sit well past that fixed point for every pitch
-        // speed in the arsenal (29–38 m/s).
-        for vel_z in [-29.0_f32, -31.0, -33.0, -35.0, -38.0] {
-            let z = late_swing_z(vel_z, 140.0);
-            assert!(
-                z < -1.2,
-                "vel_z={vel_z}: late_swing_z={z} should reach past the old fixed −1.2 m cutoff"
-            );
-        }
-    }
-
-    #[test]
-    fn late_swing_z_never_divides_by_zero() {
-        assert!(late_swing_z(0.0, 140.0).is_finite());
-        assert!(late_swing_z(5.0, 140.0).is_finite());
-    }
-}
+#[path = "pitch.test.rs"]
+mod tests;

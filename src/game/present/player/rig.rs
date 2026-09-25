@@ -17,7 +17,7 @@ use crate::game::{GameplayEntity, ScoreBoard, Team};
 
 use super::{
     BatPivot, Batter, CatcherRole, FacingDirection, Fielder, GltfRig, Pitcher, PlateUmpire,
-    RigUnit, RigUnitTag,
+    RigUnit, RigUnitTag, Umpire,
 };
 
 /// Where the batter stands: the centre of his side of the right-handed
@@ -225,6 +225,7 @@ pub(super) fn spawn_players(
             *spot + Vec3::Y * 0.6,
             facing,
         );
+        commands.entity(umpire).insert(Umpire);
         if i == 0 && spot.z < 0.0 {
             commands.entity(umpire).insert(PlateUmpire);
         }

@@ -48,6 +48,7 @@ fn fielders_are_set_before_every_delivery() {
     *app.world_mut().resource_mut::<Controllers>() = Controllers {
         home: InputSource::Cpu,
         away: InputSource::Cpu,
+        ..Controllers::default()
     };
 
     let mut last_phase = Phase::PrePitch;

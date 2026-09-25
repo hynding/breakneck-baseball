@@ -63,6 +63,12 @@ impl Ruleset {
         diff!(pace.stretch_grace_secs);
         diff!(pace.runner_margin_secs);
         diff!(pace.result_secs);
+        diff!(pace.ball_result_secs);
+        diff!(pace.strike_result_secs);
+        diff!(pace.foul_result_secs);
+        diff!(pace.strikeout_result_secs);
+        diff!(pace.walk_result_secs);
+        diff!(pace.walkup_secs);
         diff!(pace.pickoff_cooldown_secs);
         diff!(pace.auto_throw_delay_secs);
         if out.is_empty() {
@@ -160,9 +166,24 @@ pub struct PaceTuning {
     /// Bang-bang margin: ties and near-ties go to the runner — was
     /// `rules::RUNNER_MARGIN`.
     pub runner_margin_secs: f32,
-    /// Seconds the result banner lingers before the next pitch — was
-    /// `flow::RESULT_SECS`.
+    /// Seconds the result banner lingers after a batted ball's call (and a
+    /// pickoff) before the next pitch — was `flow::RESULT_SECS`. The pitch
+    /// results have their own holds below (TODO 101); [`Self::result_secs_for`]
+    /// picks the one a beat wants.
     pub result_secs: f32,
+    /// Hold after a taken ball — the quietest beat, no dip.
+    pub ball_result_secs: f32,
+    /// Hold after a called or swinging strike, before the curtain.
+    pub strike_result_secs: f32,
+    /// Hold after a foul ball or tip, before the curtain.
+    pub foul_result_secs: f32,
+    /// Hold after strike three, before the curtain.
+    pub strikeout_result_secs: f32,
+    /// Hold after a walk, a plunking, or a run-out dropped third.
+    pub walk_result_secs: f32,
+    /// The walk-up hold between plate appearances before it dismisses
+    /// itself (a batting-side action ends it sooner) — was `flow::WALKUP_SECS`.
+    pub walkup_secs: f32,
     /// Minimum seconds between pickoff throws — was
     /// `flow::PICKOFF_COOLDOWN_SECS`.
     pub pickoff_cooldown_secs: f32,
@@ -189,8 +210,31 @@ impl Default for PaceTuning {
             stretch_grace_secs: rules::STRETCH_GRACE,
             runner_margin_secs: rules::RUNNER_MARGIN,
             result_secs: flow::RESULT_SECS,
+            ball_result_secs: flow::BALL_RESULT_SECS,
+            strike_result_secs: flow::STRIKE_RESULT_SECS,
+            foul_result_secs: flow::FOUL_RESULT_SECS,
+            strikeout_result_secs: flow::STRIKEOUT_RESULT_SECS,
+            walk_result_secs: flow::WALK_RESULT_SECS,
+            walkup_secs: flow::WALKUP_SECS,
             pickoff_cooldown_secs: flow::PICKOFF_COOLDOWN_SECS,
             auto_throw_delay_secs: fielding::AUTO_THROW_DELAY,
+        }
+    }
+}
+
+impl PaceTuning {
+    /// The hold a result pause shows for `beat`, before any curtain — the
+    /// per-outcome table the reference footage calls for
+    /// (docs/agent/SMB3-REFERENCE-NOTES.md §5 Plan B).
+    pub fn result_secs_for(&self, beat: crate::game::flow::ResultBeat) -> f32 {
+        use crate::game::flow::ResultBeat;
+        match beat {
+            ResultBeat::Ball => self.ball_result_secs,
+            ResultBeat::Strike => self.strike_result_secs,
+            ResultBeat::Foul => self.foul_result_secs,
+            ResultBeat::Strikeout => self.strikeout_result_secs,
+            ResultBeat::Walk => self.walk_result_secs,
+            ResultBeat::Pickoff | ResultBeat::InPlay => self.result_secs,
         }
     }
 }
@@ -319,7 +363,7 @@ impl VariantId {
                     exit_solid: 0.95,
                     exit_perfect: 1.28,
                     pull_yaw_per_ms: 0.006,
-                    cpu_timing_spread_ms: 225.0,
+                    cpu_timing_spread_ms: 195.0,
                     pci_radius_m: 0.20,
                 },
                 pace: PaceTuning::default(),
@@ -342,7 +386,7 @@ impl VariantId {
                     exit_solid: 0.95,
                     exit_perfect: 1.28,
                     pull_yaw_per_ms: 0.006,
-                    cpu_timing_spread_ms: 225.0,
+                    cpu_timing_spread_ms: 195.0,
                     pci_radius_m: 0.20,
                 },
                 pace: PaceTuning::default(),
@@ -426,13 +470,22 @@ impl VariantId {
                 // exactly what the reference shot wants.
                 behind_pitcher_eye: Vec3::new(0.0, 2.2, PITCH_DISTANCE + 3.0),
                 behind_pitcher_target: Vec3::new(0.3, 1.0, 0.0),
-                // Behind and beside the batter's box, elevated a touch above
-                // and behind the plate umpire — a tight "zone cam" close
-                // enough that the catcher (and the umpire behind him) sit
-                // right in the sightline down the pipe, so they're the ones
-                // auto-hidden here (see `camera::hide_occluders`).
-                batting_zoom_eye: Vec3::new(0.8, 1.7, -3.2),
-                batting_zoom_target: Vec3::new(0.1, 1.0, 12.0),
+                // The default duel view (TODO 100): the reference batting
+                // shot — 2 m behind the plate at the batter's chest height,
+                // a small step toward his box, looking down the pipe with
+                // a slight downward tilt. Composition contract, pinned by
+                // `camera::batting_zoom_frames_the_batter_and_centres_the_zone`:
+                // the batter fills 75–90% of the screen height on the
+                // screen-left third (his back to the lens, so the swing's
+                // whole arc is visible beside the ball's path), the zone
+                // box sits at screen centre, the pitcher's release point
+                // above it, and the ball *grows* toward the lens instead of
+                // streaking across it. The catcher (z=-1.5, half a metre
+                // ahead of the eye) sits in the sightline and is auto-hidden
+                // (see `camera::hide_occluders`); the plate umpire (z=-3.0)
+                // is behind the eye. Per docs/agent/SMB3-REFERENCE-NOTES.md §2.1.
+                batting_zoom_eye: Vec3::new(0.2, 1.25, -2.0),
+                batting_zoom_target: Vec3::new(-0.15, 0.6, 6.0),
                 scenery: Scenery::Stadium,
             },
             // A front lawn: four bases across the lawn corners, the defense
@@ -481,12 +534,14 @@ impl VariantId {
                 // (z=-2.2) well outside the near-eye occlusion cone.
                 behind_pitcher_eye: Vec3::new(0.0, 2.0, 10.0 + 3.0),
                 behind_pitcher_target: Vec3::new(0.3, 0.9, 0.0),
-                // Same reasoning as Standard's `batting_zoom_eye`: behind and
-                // beside the batter's box, close enough behind the plate
-                // that the lone plate umpire (no catcher on the lawn) sits
-                // in the sightline and gets auto-hidden.
-                batting_zoom_eye: Vec3::new(0.8, 1.6, -2.6),
-                batting_zoom_target: Vec3::new(0.1, 0.9, 8.0),
+                // Same composition contract as Standard's `batting_zoom_eye`
+                // (the camera test is the arbiter) and the same eye: the
+                // batter's geometry is identical in both parks. The lone
+                // plate umpire (z=-2.2, no catcher on the lawn) sits right
+                // at this lens, so the lens-brush rule in
+                // `camera::hide_occluders` hides him for the duel.
+                batting_zoom_eye: Vec3::new(0.2, 1.25, -2.0),
+                batting_zoom_target: Vec3::new(-0.15, 0.6, 6.0),
                 scenery: Scenery::FrontYard,
             },
         }
@@ -496,216 +551,5 @@ impl VariantId {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::game::field::BASE_DISTANCE;
-
-    #[test]
-    fn pace_defaults_match_legacy_constants() {
-        let p = PaceTuning::default();
-        assert_eq!(p.pitch_speed_scale, 1.0);
-        assert_eq!(p.runner_speed, 7.5);
-        assert_eq!(p.fielder_speed, 7.0);
-        assert_eq!(p.reaction_secs, 0.35);
-        assert_eq!(p.throw_speed, 27.0);
-        assert_eq!(p.throw_transfer_secs, 0.5);
-        assert_eq!(p.relay_transfer_secs, 0.3);
-        assert_eq!(p.hit_and_run_jump_secs, 1.6);
-        assert_eq!(p.stretch_grace_secs, 0.9);
-        assert_eq!(p.runner_margin_secs, 0.35);
-        assert_eq!(p.result_secs, 1.2);
-        assert_eq!(p.pickoff_cooldown_secs, 0.9);
-        assert_eq!(p.auto_throw_delay_secs, 0.6);
-    }
-
-    #[test]
-    fn standard_matches_regulation_baseball() {
-        let (r, f) = (VariantId::Standard.rules(), VariantId::Standard.field());
-        assert_eq!(
-            (
-                r.counts.balls_per_walk,
-                r.counts.strikes_per_out,
-                r.counts.outs_per_half,
-                r.counts.innings
-            ),
-            (4, 3, 3, 9)
-        );
-        assert!(!r.counts.peg_outs);
-        assert_eq!(f.base_count(), 3);
-        assert_eq!(f.pitch_distance, 18.44);
-        assert_eq!(f.scenery, Scenery::Stadium);
-        // First base is 90 ft (27.43 m) from home, and every base path is 90 ft.
-        assert!((f.base_positions[0].length() - BASE_DISTANCE).abs() < 0.01);
-        for pair in f.base_positions.windows(2) {
-            assert!(((pair[1] - pair[0]).length() - BASE_DISTANCE).abs() < 0.01);
-        }
-        // Second base straight out along +Z at the full diamond diagonal
-        // (127 ft 3 3/8 in ≈ 38.79 m).
-        assert!((f.base_positions[1] - Vec3::new(0.0, 0.0, 38.79)).length() < 0.01);
-        // Screen convention: the behind-home camera renders −X on screen
-        // right, so first base is at −X and third at +X.
-        assert!(f.base_positions[0].x < 0.0 && f.base_positions[2].x > 0.0);
-    }
-
-    #[test]
-    fn front_yard_is_four_bases_with_pegging() {
-        let (r, f) = (VariantId::FrontYard.rules(), VariantId::FrontYard.field());
-        assert!(r.counts.peg_outs);
-        assert_eq!(r.counts.innings, 3);
-        assert_eq!(f.base_count(), 4);
-        assert_eq!(f.fielder_positions.len(), 3); // + the pitcher = 4-player team
-        assert!(f.peg_radius > 0.0);
-        assert_eq!(f.scenery, Scenery::FrontYard);
-    }
-
-    #[test]
-    fn innings_options_cycle_and_wrap() {
-        assert_eq!(next_innings(1), 3);
-        assert_eq!(next_innings(3), 6);
-        assert_eq!(next_innings(6), 9);
-        assert_eq!(next_innings(9), 1);
-    }
-
-    #[test]
-    fn unknown_innings_value_restarts_the_cycle() {
-        assert_eq!(next_innings(2), 1);
-    }
-
-    #[test]
-    fn variant_cycle_visits_all_and_wraps() {
-        assert_eq!(VariantId::Standard.next(), VariantId::FrontYard);
-        assert_eq!(VariantId::FrontYard.next(), VariantId::Standard);
-    }
-
-    #[test]
-    fn duel_framing_sits_behind_home_looking_out() {
-        for id in [VariantId::Standard, VariantId::FrontYard] {
-            let f = id.field();
-            assert!(f.duel_eye.z < 0.0 && f.duel_target.z > 0.0);
-            assert!(
-                f.duel_eye.z > f.broadcast_eye.z,
-                "duel eye must be closer to the plate than the wide framing"
-            );
-            // Catcher's-eye height: the rig crouches to about 1.44 m (see
-            // the comment on `duel_eye` above), well below both a standing
-            // eye line and the old high broadcast-style duel camera
-            // (y=2.3/2.2) — this guards against a regression back to that.
-            assert!(
-                f.duel_eye.y > 0.9 && f.duel_eye.y < 1.6,
-                "duel eye should sit at crouched-catcher eye height, not a standing/overhead one"
-            );
-        }
-    }
-
-    #[test]
-    fn behind_pitcher_framing_looks_back_at_the_plate_from_the_mound() {
-        for id in [VariantId::Standard, VariantId::FrontYard] {
-            let f = id.field();
-            // The eye sits out past the rubber, looking back down the pipe
-            // toward home — the mirror image of the duel/batting views.
-            assert!(
-                f.behind_pitcher_eye.z > f.pitch_distance,
-                "behind-pitcher eye must stand behind the rubber, not in front of it"
-            );
-            assert!(
-                f.behind_pitcher_target.z <= 0.0,
-                "behind-pitcher target must look toward (or at) the plate"
-            );
-            assert!(f.behind_pitcher_eye.z > f.behind_pitcher_target.z);
-        }
-    }
-
-    #[test]
-    fn diff_literal_is_empty_at_defaults() {
-        assert_eq!(
-            VariantId::Standard
-                .rules()
-                .diff_literal(VariantId::Standard),
-            ""
-        );
-    }
-
-    #[test]
-    fn diff_literal_lists_only_changed_fields() {
-        let mut r = VariantId::Standard.rules();
-        r.batting.perfect_ms = 48.0;
-        r.pace.runner_speed = 8.0;
-        let s = r.diff_literal(VariantId::Standard);
-        assert!(s.contains("batting.perfect_ms: 48.0,"));
-        assert!(s.contains("pace.runner_speed: 8.0,"));
-        assert!(!s.contains("solid_ms"));
-        assert!(s.starts_with("// VariantId::Standard overrides:"));
-    }
-
-    /// `diff_literal`'s `diff!` field list is hand-maintained and can
-    /// silently miss a field added to `Ruleset` (or a sub-struct) in the
-    /// future. Guard it with reflection instead of a second hand-maintained
-    /// list: flip every leaf field `Ruleset` reflects away from its default,
-    /// and require `diff_literal` to emit exactly that many lines. A field
-    /// missing a `diff!` arm shows up as a line-count mismatch here.
-    #[test]
-    fn diff_literal_covers_every_reflected_field() {
-        use bevy::reflect::{PartialReflect, ReflectMut, ReflectRef};
-
-        fn count_leaf_fields(value: &dyn PartialReflect) -> usize {
-            match value.reflect_ref() {
-                ReflectRef::Struct(s) => (0..s.field_len())
-                    .map(|i| count_leaf_fields(s.field_at(i).unwrap()))
-                    .sum(),
-                _ => 1,
-            }
-        }
-
-        fn perturb_every_field(value: &mut dyn PartialReflect) {
-            match value.reflect_mut() {
-                ReflectMut::Struct(s) => {
-                    for i in 0..s.field_len() {
-                        perturb_every_field(s.field_at_mut(i).unwrap());
-                    }
-                }
-                _ => {
-                    if let Some(v) = value.try_downcast_mut::<f32>() {
-                        *v += 1.0;
-                    } else if let Some(v) = value.try_downcast_mut::<u32>() {
-                        *v += 1;
-                    } else if let Some(v) = value.try_downcast_mut::<bool>() {
-                        *v = !*v;
-                    } else {
-                        panic!(
-                            "diff_literal completeness test: unhandled leaf field type on \
-                             Ruleset; add a case to perturb_every_field (and a matching \
-                             diff! arm in diff_literal)"
-                        );
-                    }
-                }
-            }
-        }
-
-        let expected = count_leaf_fields(VariantId::Standard.rules().as_partial_reflect());
-
-        let mut all_changed = VariantId::Standard.rules();
-        perturb_every_field(all_changed.as_partial_reflect_mut());
-
-        let diff = all_changed.diff_literal(VariantId::Standard);
-        let emitted = diff.lines().filter(|l| !l.starts_with("//")).count();
-
-        assert_eq!(
-            emitted, expected,
-            "diff_literal emitted {emitted} line(s) but Ruleset reflects {expected} leaf \
-             field(s) — a field is missing a diff! arm in diff_literal"
-        );
-    }
-
-    #[test]
-    fn batting_zoom_framing_sits_behind_home_looking_toward_the_pitcher() {
-        for id in [VariantId::Standard, VariantId::FrontYard] {
-            let f = id.field();
-            // Same plate-corridor orientation as the duel view: eye behind
-            // home (z<0), target out toward the mound (z>0).
-            assert!(f.batting_zoom_eye.z < 0.0 && f.batting_zoom_target.z > 0.0);
-            // "Beside" the batter's box, not dead centre like the duel/pitcher
-            // views — this is what makes it a distinct framing.
-            assert!(f.batting_zoom_eye.x.abs() > 0.1);
-        }
-    }
-}
+#[path = "variant.test.rs"]
+mod tests;

@@ -103,3 +103,10 @@ so far), upgrade that far first.
   extraction rework may fix or mask it).
 - Open lead: three `B0004` warnings at boot (menu-tree children with `GlobalTransform` under
   a parent without, entities 48–51) — cosmetic so far, filed to clean up during the 0.18 step.
+- **Catch-up merge with `main`** (2026-09-25): 13 commits of main (playtest cycles, the
+  Clean Code pass, touch, the SMB3 presentation pass) merged in; 24 conflicts, all resolved to
+  main's side, then the 0.17 API re-applied and the three new banner timers + the follow-up
+  line ported to deadlines. Gates: clippy `-D warnings` on default / dev+debug / autoplay,
+  both-target checks, full suite, browser run — recorded in TODO 29. Lock moved to
+  wasm-bindgen 0.2.127 (pulled by web-sys 0.3.104; 0.2.126 no longer resolves), so the CLI
+  bump lands with the merge.

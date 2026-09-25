@@ -38,10 +38,21 @@ fn cycling_v_changes_view_and_toggles_the_catchers_visibility() {
     });
     assert!(ready.is_some(), "never reached a PrePitch dead ball");
 
-    // Default view: catcher POV. The duel eye sits fractionally *inside*
-    // the catcher's silhouette (see `FieldSpec::duel_eye`), so the
-    // dedicated catcher-POV arm of `hide_occluders` hides him outright
-    // while the duel framing holds.
+    // Default view: the batting view (TODO 100) — 2 m behind the plate,
+    // close enough that the catcher sits in the sightline and must be
+    // auto-hidden by the occlusion cone.
+    assert_eq!(*app.world().resource::<DuelView>(), DuelView::BattingZoom);
+    assert_eq!(
+        catcher_visibility(&mut app),
+        Visibility::Hidden,
+        "the batting view must hide the catcher blocking the sightline"
+    );
+
+    // V: catcher POV. The duel eye sits fractionally *inside* the
+    // catcher's silhouette (see `FieldSpec::duel_eye`), so the dedicated
+    // catcher-POV arm of `hide_occluders` hides him outright while the
+    // duel framing holds.
+    tap_key(&mut app, KeyCode::KeyV);
     assert_eq!(*app.world().resource::<DuelView>(), DuelView::CatcherPov);
     assert_eq!(
         catcher_visibility(&mut app),
@@ -58,16 +69,6 @@ fn cycling_v_changes_view_and_toggles_the_catchers_visibility() {
         "behind-pitcher must keep the catcher visible per the reference shot"
     );
 
-    // V: batting zoom — close enough behind the plate that the catcher
-    // blocks the sightline and must be auto-hidden.
-    tap_key(&mut app, KeyCode::KeyV);
-    assert_eq!(*app.world().resource::<DuelView>(), DuelView::BattingZoom);
-    assert_eq!(
-        catcher_visibility(&mut app),
-        Visibility::Hidden,
-        "batting zoom must hide the catcher blocking the sightline"
-    );
-
     // V: broadcast plate — far enough away that nothing needs hiding.
     tap_key(&mut app, KeyCode::KeyV);
     assert_eq!(
@@ -76,9 +77,9 @@ fn cycling_v_changes_view_and_toggles_the_catchers_visibility() {
     );
     assert_eq!(catcher_visibility(&mut app), Visibility::Inherited);
 
-    // V wraps back to catcher POV.
+    // V wraps back to the batting view.
     tap_key(&mut app, KeyCode::KeyV);
-    assert_eq!(*app.world().resource::<DuelView>(), DuelView::CatcherPov);
+    assert_eq!(*app.world().resource::<DuelView>(), DuelView::BattingZoom);
 }
 
 /// A rig hidden for a Broadcast-mode occluding view must not stay hidden
@@ -99,14 +100,12 @@ fn switching_to_orbit_restores_a_view_hidden_catcher() {
     });
     assert!(ready.is_some(), "never reached a PrePitch dead ball");
 
-    // Cycle to BattingZoom (CatcherPov -> BehindPitcher -> BattingZoom).
-    tap_key(&mut app, KeyCode::KeyV);
-    tap_key(&mut app, KeyCode::KeyV);
+    // The default batting view already occludes the catcher.
     assert_eq!(*app.world().resource::<DuelView>(), DuelView::BattingZoom);
     assert_eq!(
         catcher_visibility(&mut app),
         Visibility::Hidden,
-        "batting zoom should have hidden the catcher before the mode switch"
+        "the batting view should have hidden the catcher before the mode switch"
     );
 
     // C: Broadcast -> Orbit. The DuelView resource is untouched (still

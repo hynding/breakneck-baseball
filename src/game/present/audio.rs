@@ -15,6 +15,7 @@ use bevy::audio::{AudioPlayer, AudioSource, PlaybackSettings, Volume};
 use bevy::prelude::*;
 
 use crate::game::ai::hash01;
+use crate::game::ball::PitchEvent;
 use crate::game::flow::{BallInPlayEvent, ContactEvent, LiveBallEvent, PitchCaughtEvent};
 use crate::game::flow::{BannerTone, PlayBanner};
 use crate::game::rules::{ContactClass, ContactKind, ContactQuality};
@@ -46,6 +47,10 @@ struct SoundBank {
     crowd: Handle<AudioSource>,
     roar: Handle<AudioSource>,
     groan: Handle<AudioSource>,
+    /// One air-swish shape, replayed at different speeds/volumes for the
+    /// pitch release, a swing-and-miss, and the infield throw (TODO 68 —
+    /// the game's most frequent moments used to be silent).
+    whoosh: Handle<AudioSource>,
 }
 
 /// Wraps raw mono f32 samples in a minimal 16-bit PCM WAV container that
@@ -189,6 +194,12 @@ fn build_sound_bank(mut commands: Commands, mut sources: ResMut<Assets<AudioSour
         let freq = 190.0 - 70.0 * (t / 0.9).min(1.0);
         sine(freq, t) * (-2.5 * t).exp() * 0.55 + noise * (-6.0 * t).exp() * 0.15
     });
+    // Air whoosh: a fast noise swell into a decay — pitched up/down at
+    // playback for release / bat swish / throw (see `SoundBank::whoosh`).
+    let whoosh = synth(0.22, |t, noise| {
+        let envelope = (t / 0.05).min(1.0) * (-11.0 * t).exp();
+        noise * envelope * 0.55
+    });
 
     commands.insert_resource(SoundBank {
         crack_perfect: sources.add(wav_from_samples(&crack_perfect)),
@@ -200,15 +211,24 @@ fn build_sound_bank(mut commands: Commands, mut sources: ResMut<Assets<AudioSour
         crowd: sources.add(wav_from_samples(&crowd)),
         roar: sources.add(wav_from_samples(&roar)),
         groan: sources.add(wav_from_samples(&groan)),
+        whoosh: sources.add(wav_from_samples(&whoosh)),
     });
 }
 
 /// One despawn-when-done audio entity per event.
 fn play(commands: &mut Commands, handle: &Handle<AudioSource>, volume: f32) {
+    play_at(commands, handle, volume, 1.0);
+}
+
+/// [`play`], with a playback-speed multiplier — one synthesized shape can
+/// voice several moments by shifting its pitch/length at spawn time.
+fn play_at(commands: &mut Commands, handle: &Handle<AudioSource>, volume: f32, speed: f32) {
     commands.spawn((
         GameplayEntity,
         AudioPlayer::new(handle.clone()),
-        PlaybackSettings::DESPAWN.with_volume(Volume::Linear(volume)),
+        PlaybackSettings::DESPAWN
+            .with_volume(Volume::Linear(volume))
+            .with_speed(speed),
     ));
 }
 
@@ -234,10 +254,15 @@ fn play_event_sounds(
     mut bangs: MessageReader<WallBangEvent>,
     mut live: MessageReader<LiveBallEvent>,
     mut received: MessageReader<PitchCaughtEvent>,
+    mut pitches: MessageReader<PitchEvent>,
     mut banners: MessageReader<PlayBanner>,
     mut commands: Commands,
 ) {
     let Some(bank) = bank else { return };
+    // The pitch leaves the hand with a small air hiss (TODO 68).
+    for _ in pitches.read() {
+        play_at(&mut commands, &bank.whoosh, 0.18, 1.6);
+    }
     let mut roar = false;
     // A home run peaks the crowd above the ordinary roar.
     let mut crowd_peak = false;
@@ -261,8 +286,12 @@ fn play_event_sounds(
             ContactQuality::FoulTip => {
                 play(&mut commands, &bank.crack_foul, 0.5);
             }
-            // No bat-ball contact on a whiff — no crack, silence is correct.
-            ContactQuality::Whiff => swinging_whiff = true,
+            // No bat-ball contact on a whiff — no crack, but the bat still
+            // cuts air (TODO 68).
+            ContactQuality::Whiff => {
+                play_at(&mut commands, &bank.whoosh, 0.5, 1.25);
+                swinging_whiff = true;
+            }
         }
     }
     // The catcher's mitt pops on every received pitch.
@@ -273,8 +302,15 @@ fn play_event_sounds(
         play(&mut commands, &bank.wall, 0.9);
     }
     for event in live.read() {
-        if matches!(event, LiveBallEvent::Caught { .. }) {
-            play(&mut commands, &bank.glove, 0.7);
+        match event {
+            LiveBallEvent::Caught { .. } => play(&mut commands, &bank.glove, 0.7),
+            // The routine infield out was completely silent (TODO 68): the
+            // throw whooshes across, the catch at the bag pops the glove.
+            LiveBallEvent::Thrown { .. } => {
+                play_at(&mut commands, &bank.whoosh, 0.3, 1.1);
+            }
+            LiveBallEvent::Settled => play(&mut commands, &bank.glove, 0.55),
+            _ => {}
         }
     }
     for event in in_play.read() {
@@ -292,8 +328,18 @@ fn play_event_sounds(
         play(&mut commands, &bank.roar, ROAR_GAIN);
     }
     for banner in banners.read() {
-        if banner.tone == BannerTone::Epic {
-            play(&mut commands, &bank.stinger, 0.6);
+        match banner.tone {
+            BannerTone::Epic => play(&mut commands, &bank.stinger, 0.6),
+            // Good news for the offense (STOLEN BASE!, OFF THE WALL!,
+            // DROPPED 3RD STRIKE!, WALK) gets a quick bright crowd pop;
+            // bad news (outs, CAUGHT STEALING, PICKED OFF!) a soft "ohh" —
+            // every announced call now has a voice (TODO 68).
+            BannerTone::Good => play_at(&mut commands, &bank.roar, 0.35, 1.35),
+            // The swinging K's full groan below subsumes the soft one.
+            BannerTone::Bad if !(swinging_whiff && banner.text == STRIKEOUT_BANNER) => {
+                play_at(&mut commands, &bank.groan, 0.3, 1.1);
+            }
+            _ => {}
         }
         if swinging_whiff && banner.text == STRIKEOUT_BANNER {
             play(&mut commands, &bank.groan, 0.65);
@@ -317,265 +363,5 @@ impl Plugin for SoundPlugin {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::game::Team;
-    use crate::game::rules::ContactKind;
-    use bevy::state::app::StatesPlugin;
-
-    #[test]
-    fn wav_container_is_well_formed() {
-        let samples = [0.0_f32, 0.5, -0.5, 1.0];
-        let source = wav_from_samples(&samples);
-        let bytes = &source.bytes;
-        assert_eq!(&bytes[0..4], b"RIFF");
-        assert_eq!(&bytes[8..16], b"WAVEfmt ");
-        assert_eq!(&bytes[36..40], b"data");
-        // 44-byte header + 2 bytes per sample.
-        assert_eq!(bytes.len(), 44 + samples.len() * 2);
-        // Full-scale sample clamps to i16::MAX.
-        let last = i16::from_le_bytes([bytes[bytes.len() - 2], bytes[bytes.len() - 1]]);
-        assert_eq!(last, i16::MAX);
-    }
-
-    #[test]
-    fn synthesis_is_deterministic_and_bounded() {
-        let a = synth(0.1, |t, noise| sine(440.0, t) * 0.5 + noise * 0.3);
-        let b = synth(0.1, |t, noise| sine(440.0, t) * 0.5 + noise * 0.3);
-        assert_eq!(a, b);
-        assert!(a.iter().all(|s| s.abs() <= 1.0));
-    }
-
-    /// Every crack variant is non-empty, sample-count-correct for its
-    /// duration, clamped, and — the whole point of parameterizing
-    /// `synth_crack` — distinct from the others.
-    #[test]
-    fn crack_variants_are_bounded_and_distinct() {
-        let perfect = synth_crack(0.14, 38.0, 1.0, 2_100.0, 26.0, 0.5);
-        let solid = synth_crack(0.12, 45.0, 0.9, 1_700.0, 35.0, 0.35);
-        let foul = synth_crack(0.07, 75.0, 0.5, 1_050.0, 60.0, 0.18);
-
-        assert_eq!(perfect.len(), (0.14 * SAMPLE_RATE as f32) as usize);
-        assert_eq!(solid.len(), (0.12 * SAMPLE_RATE as f32) as usize);
-        assert_eq!(foul.len(), (0.07 * SAMPLE_RATE as f32) as usize);
-        assert!(!perfect.is_empty() && !solid.is_empty() && !foul.is_empty());
-
-        // The raw voice can transiently exceed unity (noise + ping stack up
-        // near t=0, same as the original single-variant crack this
-        // replaces) — `wav_from_samples` is what actually clamps for
-        // playback (see `wav_container_is_well_formed`); what matters here
-        // is that encoding every variant works without panicking.
-        for buf in [&perfect, &solid, &foul] {
-            let _ = wav_from_samples(buf);
-        }
-        // Different durations alone make them unequal, but check the
-        // overlapping prefix really differs in content too (not just length).
-        let n = foul.len().min(solid.len());
-        assert_ne!(
-            &foul[..n],
-            &solid[..n],
-            "foul and solid must sound different"
-        );
-    }
-
-    #[test]
-    fn roar_and_groan_are_bounded_with_expected_duration() {
-        let roar_secs = 1.1;
-        let groan_secs = 0.9;
-        let roar = synth(roar_secs, |t, noise| {
-            let envelope = (t / 0.28).min(1.0) * (-1.4 * t).exp();
-            noise * envelope * 0.7 + sine(95.0, t) * envelope * 0.35
-        });
-        let groan = synth(groan_secs, |t, noise| {
-            let freq = 190.0 - 70.0 * (t / 0.9).min(1.0);
-            sine(freq, t) * (-2.5 * t).exp() * 0.55 + noise * (-6.0 * t).exp() * 0.15
-        });
-        assert_eq!(roar.len(), (roar_secs * SAMPLE_RATE as f32) as usize);
-        assert_eq!(groan.len(), (groan_secs * SAMPLE_RATE as f32) as usize);
-        assert!(!roar.is_empty() && !groan.is_empty());
-        assert!(roar.iter().all(|s| s.abs() <= 1.0));
-        assert!(groan.iter().all(|s| s.abs() <= 1.0));
-    }
-
-    #[test]
-    fn crowd_loop_is_bounded_deterministic_and_seamless() {
-        let seconds = 6.0;
-        let a = synth_crowd(seconds);
-        let b = synth_crowd(seconds);
-        assert_eq!(a, b, "must be deterministic");
-        assert_eq!(a.len(), (seconds * SAMPLE_RATE as f32) as usize);
-        assert!(!a.is_empty());
-        assert!(a.iter().all(|s| s.abs() <= 1.0));
-        // The whole point of tuning every partial to an integer cycle count:
-        // the value one sample past the end (which is what looping back to
-        // the start actually sounds like) must be close to the last sample,
-        // not an arbitrary jump — i.e. no click at the loop point.
-        let wrap_delta = (a[0] - a[a.len() - 1]).abs();
-        let mut max_adjacent_delta = 0.0_f32;
-        for w in a.windows(2) {
-            max_adjacent_delta = max_adjacent_delta.max((w[1] - w[0]).abs());
-        }
-        assert!(
-            wrap_delta <= max_adjacent_delta * 4.0 + 0.01,
-            "loop wrap delta {wrap_delta} should be in line with in-buffer deltas (max {max_adjacent_delta})"
-        );
-    }
-
-    /// A minimal app: `MinimalPlugins` (for `Time`/asset storage) plus
-    /// `StatesPlugin` (for `GameState`) plus `SoundPlugin` — no rendering or
-    /// the rest of `GamePlugin`. Every event `play_event_sounds` reads is
-    /// registered directly since the plugins that normally own them
-    /// (`FlowPlugin`/`BallPlugin`) aren't present, following the same
-    /// pattern as `juice.rs`'s test harness.
-    fn test_app() -> App {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_plugins(StatesPlugin)
-            .init_state::<GameState>()
-            .init_resource::<Assets<AudioSource>>()
-            .add_message::<ContactEvent>()
-            .add_message::<BallInPlayEvent>()
-            .add_message::<WallBangEvent>()
-            .add_message::<LiveBallEvent>()
-            .add_message::<PitchCaughtEvent>()
-            .add_message::<PlayBanner>()
-            .add_plugins(SoundPlugin);
-        // `bevy_state`'s `StatesPlugin` runs `StateTransition` *before*
-        // `Startup` on the very first `update()` (it's spliced into both
-        // the startup schedule list and the per-frame one) — so queuing the
-        // `MainMenu -> Playing` transition before that first update would
-        // fire `game_start()` a frame too early, before `build_sound_bank`
-        // has inserted `SoundBank`. One update lets Startup run first
-        // (state is still `MainMenu`, nothing queued yet); only then is the
-        // transition queued and applied on the second.
-        app.update();
-        app.world_mut()
-            .resource_mut::<NextState<GameState>>()
-            .set(GameState::Playing);
-        app.update();
-        app
-    }
-
-    fn audio_players(app: &mut App) -> Vec<&AudioPlayer> {
-        let world = app.world_mut();
-        world
-            .query::<&AudioPlayer>()
-            .iter(world)
-            .collect()
-    }
-
-    #[test]
-    fn game_start_spawns_the_looping_crowd_bed() {
-        let mut app = test_app();
-        let world = app.world_mut();
-        let loops: Vec<_> = world
-            .query::<&PlaybackSettings>()
-            .iter(world)
-            .filter(|s| matches!(s.mode, bevy::audio::PlaybackMode::Loop))
-            .collect();
-        assert_eq!(
-            loops.len(),
-            1,
-            "exactly one looping crowd bed at game start"
-        );
-        assert!(!audio_players(&mut app).is_empty());
-    }
-
-    #[test]
-    fn perfect_contact_plays_crack_and_roar() {
-        let mut app = test_app();
-        let before = audio_players(&mut app).len();
-        app.world_mut().write_message(ContactEvent {
-            quality: ContactQuality::Perfect,
-            batting_team: Team::Home,
-            dt_ms: 0.0,
-        });
-        app.update();
-        // The looping bed plus two new one-shots (crack + roar).
-        assert_eq!(audio_players(&mut app).len(), before + 2);
-    }
-
-    #[test]
-    fn deep_fly_plays_the_roar_without_contact_event() {
-        let mut app = test_app();
-        let before = audio_players(&mut app).len();
-        app.world_mut().write_message(BallInPlayEvent {
-            kind: ContactKind::Live { fair: true },
-            landing: Vec3::new(0.0, 0.0, 90.0),
-            contact_class: ContactClass::DeepFly,
-        });
-        app.update();
-        assert_eq!(audio_players(&mut app).len(), before + 1, "roar only, no crack");
-    }
-
-    /// A ball over the fence peaks the crowd: exactly one roar (the peak
-    /// subsumes the ordinary deep-fly roar, so a HR whose flight also grades
-    /// a deep fly never double-roars), and no crack (the crack comes off the
-    /// separate ContactEvent, not sent here).
-    #[test]
-    fn home_run_plays_a_single_crowd_peak_roar() {
-        let mut app = test_app();
-        let before = audio_players(&mut app).len();
-        app.world_mut().write_message(BallInPlayEvent {
-            kind: ContactKind::HomeRun,
-            landing: Vec3::new(0.0, 0.0, 120.0),
-            contact_class: ContactClass::DeepFly,
-        });
-        app.update();
-        assert_eq!(
-            audio_players(&mut app).len(),
-            before + 1,
-            "a home run plays exactly one (peak) roar"
-        );
-    }
-
-    #[test]
-    fn foul_tip_plays_the_dull_crack_only() {
-        let mut app = test_app();
-        let before = audio_players(&mut app).len();
-        app.world_mut().write_message(ContactEvent {
-            quality: ContactQuality::FoulTip,
-            batting_team: Team::Home,
-            dt_ms: 95.0,
-        });
-        app.update();
-        assert_eq!(audio_players(&mut app).len(), before + 1, "crack only, no roar");
-    }
-
-    #[test]
-    fn swinging_strikeout_groans_but_a_whiff_alone_does_not() {
-        let mut app = test_app();
-
-        // A whiff with no strikeout banner (e.g. strike one swinging): no groan.
-        let before = audio_players(&mut app).len();
-        app.world_mut().write_message(ContactEvent {
-            quality: ContactQuality::Whiff,
-            batting_team: Team::Home,
-            dt_ms: 400.0,
-        });
-        app.update();
-        assert_eq!(
-            audio_players(&mut app).len(),
-            before,
-            "a bare whiff makes no bat-ball sound"
-        );
-
-        // The same whiff, but this time it's the frame the K is announced.
-        let before = audio_players(&mut app).len();
-        app.world_mut().write_message(ContactEvent {
-            quality: ContactQuality::Whiff,
-            batting_team: Team::Home,
-            dt_ms: 400.0,
-        });
-        app.world_mut().write_message(PlayBanner {
-            text: STRIKEOUT_BANNER.to_string(),
-            tone: BannerTone::Bad,
-        });
-        app.update();
-        assert_eq!(
-            audio_players(&mut app).len(),
-            before + 1,
-            "a swinging strikeout groans exactly once"
-        );
-    }
-}
+#[path = "audio.test.rs"]
+mod tests;

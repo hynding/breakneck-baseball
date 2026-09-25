@@ -51,6 +51,67 @@ pub struct CpuState {
     /// Whether the AI offense stretches the lead through the pre-pitch steal
     /// window — decided once per window (the early break, pickoff risk).
     window_steal: Option<bool>,
+    /// The game's noise salt: the clock at game start, captured once
+    /// (TODO 105). Every draw below mixes this with the pitch sequence
+    /// instead of the running clock, so the game's *pacing* — result holds,
+    /// walk-ups, the curtain — can never change which pitch gets which draw.
+    /// Different games (the harness idles a different number of frames
+    /// before each) still get different salts.
+    salt: f32,
+    /// Pitches delivered so far this game (counted at each WindUp).
+    seq: u32,
+    /// Frames since the last phase change — the per-frame rolls (a pickoff
+    /// throw during the steal window) vary on this, not on the clock.
+    phase_frames: u32,
+    /// The phase seen last frame, for the edge detection above.
+    last_phase: Option<Phase>,
+}
+
+impl CpuState {
+    /// The seed for a per-pitch draw with salt `k` — one value per (game,
+    /// pitch, k), independent of wall time.
+    fn seed(&self, k: f32) -> f32 {
+        self.salt + self.seq as f32 * 1.618_034 + k * 0.731
+    }
+
+    /// A per-pitch roll in 0..1.
+    fn roll(&self, k: f32) -> f32 {
+        hash01(self.seed(k))
+    }
+
+    /// A per-pitch draw in −1..1.
+    fn noise(&self, k: f32) -> f32 {
+        noise(self.seed(k))
+    }
+
+    /// A per-frame roll in 0..1 that changes every frame of the current
+    /// phase (for chances expressed per second of a held state).
+    fn frame_roll(&self, k: f32) -> f32 {
+        hash01(self.seed(k) + self.phase_frames as f32 * 0.013_7)
+    }
+}
+
+/// Keeps the CPU's noise clock: the phase-change edge, the pitch sequence
+/// (one per WindUp), and the frame-within-phase counter. Runs before both
+/// CPU systems every frame.
+pub fn tick_cpu_clock(play: Res<Play>, mut cpu: ResMut<CpuState>) {
+    if cpu.last_phase != Some(play.phase) {
+        cpu.last_phase = Some(play.phase);
+        cpu.phase_frames = 0;
+        if play.phase == Phase::WindUp {
+            cpu.seq += 1;
+        }
+    } else {
+        cpu.phase_frames += 1;
+    }
+}
+
+/// Game start: a fresh sequence under this game's salt.
+pub fn reset_cpu_clock(time: Res<Time>, mut cpu: ResMut<CpuState>) {
+    *cpu = CpuState {
+        salt: time.elapsed_secs(),
+        ..CpuState::default()
+    };
 }
 
 impl Default for CpuState {
@@ -62,6 +123,10 @@ impl Default for CpuState {
             swing_target_dt: None,
             steal_call: None,
             window_steal: None,
+            salt: 0.0,
+            seq: 0,
+            phase_frames: 0,
+            last_phase: None,
         }
     }
 }
@@ -173,14 +238,17 @@ pub fn cpu_defense(
         if lead.extended {
             // ~0.5 attempts per second of extended lead, deterministic noise.
             let p = (0.3 + 0.5 * cfg.skill) * time.delta_secs();
-            intent.action = hash01(time.elapsed_secs() * 3.9) < p;
+            intent.action = cpu.frame_roll(3.9) < p;
         }
-        cpu.pitch_delay.reset();
+        // Re-arm only a short post-window beat instead of the full
+        // 0.7-1.2 s wait: the old full reset stacked on the 1.5 s window
+        // for 2.7-3.2 s of held ball before every pitch with runners on
+        // (TODO 91). The window itself — the steal race — is untouched.
+        cpu.pitch_delay = Timer::from_seconds(0.35, TimerMode::Once);
         return;
     }
 
     if cpu.pitch_delay.tick(time.delta()).is_finished() {
-        let t = time.elapsed_secs();
         // Better skill → tighter aim around the strike zone. The aim then
         // gets a pitch-selection bias: held-aim direction is what picks the
         // kind (see `PitchKind::from_aim`), so shifting the aim is how the
@@ -192,8 +260,8 @@ pub fn cpu_defense(
             // get-it-over (the TODO 10 package; the batter's ahead-count
             // compensation below keeps the CPU-vs-CPU bands honest).
             let spread = (0.55 * (1.0 - cfg.skill) + 0.12) * behind_scatter_scale(score.balls);
-            let mut aim = Vec2::new(noise(t * 1.7) * spread, noise(t * 2.3) * spread * 0.5);
-            let roll = hash01(t * 4.3);
+            let mut aim = Vec2::new(cpu.noise(1.7) * spread, cpu.noise(2.3) * spread * 0.5);
+            let roll = cpu.roll(4.3);
             if wants_get_it_over(score.balls) {
                 if roll < 0.55 {
                     // A get-it-over heater aims mid-zone, not the letters:
@@ -222,7 +290,7 @@ pub fn cpu_defense(
         intent.aim = aim;
 
         // Vary the wait before the next pitch a little.
-        let wait = 0.7 + hash01(t) * 0.5;
+        let wait = 0.7 + cpu.roll(1.0) * 0.5;
         cpu.pitch_delay = Timer::from_seconds(wait, TimerMode::Once);
     } else {
         intents.get_mut(team).action = false;
@@ -234,7 +302,6 @@ pub fn cpu_defense(
 // Bevy systems take their dependencies as parameters; the count is inherent.
 #[allow(clippy::too_many_arguments)]
 pub fn cpu_offense(
-    time: Res<Time>,
     controllers: Res<Controllers>,
     cfg: Res<CpuConfig>,
     score: Res<ScoreBoard>,
@@ -263,9 +330,9 @@ pub fn cpu_offense(
         cpu.steal_call = None;
         let extend = if steal_candidate(&bases).is_some() {
             if play.in_steal_window() {
-                *cpu.window_steal.get_or_insert_with(|| {
-                    hash01(time.elapsed_secs() * 5.3) < 0.1 + 0.2 * cfg.skill
-                })
+                let roll = cpu.roll(5.3);
+                *cpu.window_steal
+                    .get_or_insert_with(|| roll < 0.1 + 0.2 * cfg.skill)
             } else {
                 cpu.window_steal == Some(true)
             }
@@ -290,13 +357,13 @@ pub fn cpu_offense(
         cpu.decided_swing = false;
         cpu.will_swing = None;
         cpu.swing_target_dt = None;
-        let elapsed = time.elapsed_secs();
         let committed = cpu.window_steal == Some(true);
+        let roll = cpu.roll(6.1);
         let send = steal_candidate(&bases).is_some()
             && (committed
                 || *cpu
                     .steal_call
-                    .get_or_insert_with(|| hash01(elapsed * 6.1) < 0.2 + 0.2 * cfg.skill));
+                    .get_or_insert_with(|| roll < 0.2 + 0.2 * cfg.skill));
         let intent = intents.get_mut(team);
         intent.action = false;
         if send {
@@ -313,17 +380,17 @@ pub fn cpu_offense(
         return;
     };
     let pos = ball.translation;
-    let t = time.elapsed_secs();
 
     // Draw the swing's timing target once per pitch, deterministic on the
     // pitch instant — the CPU's human-like timing scatter (Task B3). Same
     // signed convention as `flow::swing_dt_ms`: negative is early, positive
     // is late, drawn from ±`cpu_timing_spread_ms`.
+    let timing_seed = cpu.seed(11.9);
     let target_dt = *cpu.swing_target_dt.get_or_insert_with(|| {
         // Ahead in the count the hitter sits on the groove: a tighter
         // timing draw (the batter arm of the TODO 10 package).
         draw_target_dt(
-            t * 11.9,
+            timing_seed,
             rules.batting.cpu_timing_spread_ms * ahead_timing_scale(score.balls),
         )
     });
@@ -338,7 +405,7 @@ pub fn cpu_offense(
     // the ball is still unreachable, i.e. a genuine timing whiff. `decision_z`
     // carries a little skill-scaled jitter so the commit depth varies.
     if cpu.will_swing.is_none() {
-        let decision_z = 6.5 + noise(t * 3.1) * 1.5;
+        let decision_z = 6.5 + cpu.noise(3.1) * 1.5;
         if pos.z > decision_z {
             intents.get_mut(team).action = false;
             return;
@@ -357,7 +424,7 @@ pub fn cpu_offense(
         // tall. Tracks the rulebook zone so a zone retune doesn't silently
         // turn the CPU into a chaser or a statue.
         let in_zone = cross.x.abs() < 0.35 && (0.4..=1.45).contains(&cross.y);
-        let roll = hash01(t * 5.0);
+        let roll = cpu.roll(5.0);
         let swing = if in_zone {
             roll < 0.5 + 0.4 * cfg.skill // usually offers at strikes
         } else {
@@ -398,94 +465,9 @@ pub fn cpu_offense(
     // modest exit multiplier), so a mean well below a fly-ball angle keeps the
     // HR rate in the balance band while still putting balls in play (see
     // tests/balance_sim.rs). Horizontal spray is unchanged.
-    intent.aim = Vec2::new(noise(t * 7.0) * 0.6, -0.8 + hash01(t * 9.0) * 0.85);
+    intent.aim = Vec2::new(cpu.noise(7.0) * 0.6, -0.8 + cpu.roll(9.0) * 0.85);
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn draw_target_dt_is_deterministic_and_bounded() {
-        // Same seed always draws the same target (the CPU's decision has to
-        // be reproducible across frames via `get_or_insert_with`).
-        let a = draw_target_dt(12.34, 70.0);
-        let b = draw_target_dt(12.34, 70.0);
-        assert_eq!(a, b);
-        // noise() is in −1.0..1.0, so the draw never exceeds the spread.
-        assert!(a.abs() <= 70.0 + f32::EPSILON);
-
-        // A different seed generally draws a different target — spot-check
-        // a handful so this isn't a degenerate constant function.
-        let distinct = (0..8)
-            .map(|i| draw_target_dt(i as f32 * 11.9, 70.0))
-            .collect::<Vec<_>>();
-        assert!(
-            distinct.windows(2).any(|w| (w[0] - w[1]).abs() > 1.0),
-            "expected varying draws across seeds, got {distinct:?}"
-        );
-    }
-
-    #[test]
-    fn ready_to_press_fires_on_the_first_frame_dt_reaches_target() {
-        // A synthetic dt ramp standing in for `swing_dt_ms` sampled once per
-        // frame as a pitch approaches: monotonically increasing, early
-        // (negative) to late (positive), like the live ball's timing error.
-        let ramp: Vec<f32> = (0..50).map(|i| -100.0 + i as f32 * 4.0).collect();
-        let target = 37.0;
-
-        let fired = ramp.iter().position(|&dt| ready_to_press(dt, target));
-
-        // First dt >= 37.0 in the ramp (-100, -96, ..., step 4) is 40.0 at
-        // index 35 — pin the exact frame, not just "eventually fires".
-        assert_eq!(fired, Some(35));
-        assert!(ramp[35] >= target);
-        assert!(ramp[34] < target);
-    }
-
-    #[test]
-    fn ready_to_press_fires_immediately_for_an_already_past_target() {
-        // A target earlier than the current dt (the commit landed later
-        // than the drawn target) presses on the very same frame — a swing
-        // can't be un-pressed to wait for a target already behind it.
-        assert!(ready_to_press(-10.0, -50.0));
-        assert!(ready_to_press(0.0, 0.0));
-    }
-
-    #[test]
-    fn ready_to_press_holds_for_a_target_not_yet_reached() {
-        assert!(!ready_to_press(-20.0, 10.0));
-    }
-
-    // ── The behind-in-the-count package (TODO 10) ─────────────────────────────
-
-    #[test]
-    fn the_package_arms_engage_together_at_two_balls() {
-        // Both sides of the package key on the same count threshold — the
-        // pairing is the whole point (a pitcher-only pull converts walks
-        // into strikeouts; see the TODO 10 history).
-        for balls in 0..=1 {
-            assert_eq!(behind_scatter_scale(balls), 1.0);
-            assert!(!wants_get_it_over(balls));
-            assert_eq!(ahead_timing_scale(balls), 1.0);
-            assert_eq!(ahead_chase_scale(balls), 1.0);
-        }
-        for balls in 2..=3 {
-            assert!(behind_scatter_scale(balls) < 1.0, "balls={balls}");
-            assert!(wants_get_it_over(balls), "balls={balls}");
-            assert!(ahead_timing_scale(balls) < 1.0, "balls={balls}");
-            assert!(ahead_chase_scale(balls) < 1.0, "balls={balls}");
-        }
-    }
-
-    #[test]
-    fn ahead_count_timing_draw_is_strictly_tighter() {
-        // Same seed, scaled spread: the drawn |target| shrinks by exactly
-        // the scale, so the ahead-count hitter's misses are proportionally
-        // smaller — whiffs become contact, not the other way around.
-        let base = draw_target_dt(12.34, 70.0);
-        let ahead = draw_target_dt(12.34, 70.0 * ahead_timing_scale(2));
-        assert!(ahead.abs() < base.abs());
-        assert_eq!(ahead, base * ahead_timing_scale(2));
-    }
-}
+#[path = "ai.test.rs"]
+mod tests;

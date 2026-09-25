@@ -34,13 +34,16 @@ sky/`ClearColor`, and the `PlayerModelId` that picks the rig construction) with 
 
 ## Cameras
 
-The default duel view is the catcher's point of view — the lens just over the crouched catcher's
-helmet (`FieldSpec::duel_eye`); **V** cycles four at-bat framings (`DuelView`: catcher POV /
-behind-pitcher / batting zoom / broadcast plate), with the catcher (`CatcherRole`, any fielder
+The default duel view is the batting view — 2 m behind the plate at the batter's chest, his whole
+body screen-left and the zone at centre (`FieldSpec::batting_zoom_eye`, the reference composition
+in `docs/agent/SMB3-REFERENCE-NOTES.md`); the catcher's point of view — the lens just over the
+crouched catcher's helmet (`FieldSpec::duel_eye`) — is one V-press away. **V** cycles four
+at-bat framings (`DuelView`: batting view / catcher POV /
+behind-pitcher / broadcast plate), with the catcher (`CatcherRole`, any fielder
 spawned at z < 0) and plate umpire auto-hidden when they'd block the active broadcast view —
 drawing the exact called zone (`rules::ZONE_*` consts) as a floating box above his head and
 keeping the catcher in a crouch clip through the pitch; after contact the broadcast camera holds
-the plate framing for `camera::BALL_FOLLOW_DELAY` (1 s) before chasing the ball, while the batter
+the plate framing for `camera::BALL_FOLLOW_DELAY` (0.25 s) and then *cuts* through a one-subject shot list (`camera::Shot`: ball-follow → fielder cam under a descending fly → base cam on the throw, where the call lands and the result pause holds; smoothing only within a shot), while the batter
 (side-on in the box, facing the plate) finishes the `BatterSwing` follow-through and the hidden
 run-out rig takes over after its `RunDelay`. First base is at world −X (the behind-home camera
 renders −X on screen-right).

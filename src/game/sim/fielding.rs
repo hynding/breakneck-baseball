@@ -537,10 +537,10 @@ fn steer_chaser(
         return;
     }
     let aim = intents.get(score.fielding_team()).aim;
-    if aim.length() < 0.5 {
+    if aim.length() < rules::AIM_DEADZONE {
         return;
     }
-    let dir = Vec3::new(-aim.x, 0.0, aim.y).normalize_or_zero();
+    let dir = Vec3::new(rules::aim_to_world_x(aim.x), 0.0, aim.y).normalize_or_zero();
     if let Ok((tf, mut intent)) = fielders.get_mut(chaser) {
         intent.target = Some(cap_inside_fence(
             tf.translation + dir * 4.0,

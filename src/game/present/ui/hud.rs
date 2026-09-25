@@ -9,10 +9,9 @@ use crate::game::theme::Theme;
 use crate::game::variant::{FieldSpec, Ruleset};
 use crate::game::{GameplayEntity, ScoreBoard};
 
-use super::banner::{BANNER_SECS, BannerFadeAt};
 use super::{
     BannerPill, BannerText, BaseIndicator, ContactStampText, CountDot, CountKind, InningText,
-    MeterFill, ScoreText, hidden_tint,
+    MeterFill, PitchSpeedText, ScoreText, hidden_tint,
 };
 
 // ── Build the UI tree ─────────────────────────────────────────────────────────
@@ -22,12 +21,14 @@ pub(super) fn spawn_hud(
     field: Res<FieldSpec>,
     rules: Res<Ruleset>,
     theme: Res<Theme>,
-    time: Res<Time>,
-    mut banner_fade: ResMut<BannerFadeAt>,
 ) {
     let ui = &theme.ui;
 
-    // Scoreboard card (bottom-right).
+    // Bottom-right cluster: the Swing Meter track sits to the left of the
+    // scoreboard card inside one right-anchored row, so the card's
+    // text-driven width can never swallow the track (the old absolute
+    // `right: 210` landed the track inside the ~233 px card — TODO 62).
+    // The wrapper is painted with `hidden_tint` per the wasm container rule.
     commands
         .spawn((
             GameplayEntity,
@@ -35,147 +36,204 @@ pub(super) fn spawn_hud(
                 position_type: PositionType::Absolute,
                 bottom: Val::Px(14.0),
                 right: Val::Px(14.0),
-                padding: UiRect::axes(Val::Px(16.0), Val::Px(12.0)),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(6.0),
-                border: UiRect::all(Val::Px(1.5)),
-                ..default()
-            },
-            BackgroundColor(ui.panel_bg),
-            BorderColor::all(ui.panel_border),
-            BorderRadius::all(Val::Px(12.0)),
-        ))
-        .with_children(|card| {
-            card.spawn((
-                InningText,
-                Text::new(""),
-                TextFont {
-                    font_size: 16.0,
-                    ..default()
-                },
-                TextColor(ui.accent),
-            ));
-            card.spawn((
-                ScoreText,
-                Text::new(""),
-                TextFont {
-                    font_size: 22.0,
-                    ..default()
-                },
-                TextColor(ui.text_primary),
-            ));
-
-            // Count row: classic B / S / O indicator lights. The dot counts
-            // follow the active ruleset, so custom thresholds render right.
-            card.spawn(Node {
                 flex_direction: FlexDirection::Row,
                 column_gap: Val::Px(12.0),
-                align_items: AlignItems::Center,
-                margin: UiRect::top(Val::Px(2.0)),
-                ..default()
-            })
-            .with_children(|row| {
-                let groups = [
-                    (CountKind::Ball, "B", rules.counts.balls_per_walk - 1),
-                    (CountKind::Strike, "S", rules.counts.strikes_per_out - 1),
-                    (CountKind::Out, "O", rules.counts.outs_per_half - 1),
-                ];
-                for (kind, label, dots) in groups {
-                    row.spawn(Node {
-                        flex_direction: FlexDirection::Row,
-                        column_gap: Val::Px(4.0),
-                        align_items: AlignItems::Center,
-                        ..default()
-                    })
-                    .with_children(|group| {
-                        group.spawn((
-                            Text::new(label),
-                            TextFont {
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(ui.text_dim),
-                        ));
-                        for index in 0..dots {
-                            group.spawn((
-                                CountDot { kind, index },
-                                Node {
-                                    width: Val::Px(10.0),
-                                    height: Val::Px(10.0),
-                                    ..default()
-                                },
-                                BackgroundColor(ui.pip_off),
-                                BorderRadius::MAX,
-                            ));
-                        }
-                    });
-                }
-            });
-        });
-
-    // Swing Meter load bar: a slim vertical track to the left of the
-    // scoreboard card. Painted (dim shell, accent fill) at spawn per the wasm
-    // UI rule; the fill's height is driven each frame from `MeterLoad`, and a
-    // zero-height fill is the hidden state (never despawned).
-    commands
-        .spawn((
-            GameplayEntity,
-            Node {
-                position_type: PositionType::Absolute,
-                bottom: Val::Px(14.0),
-                right: Val::Px(210.0),
-                width: Val::Px(14.0),
-                height: Val::Px(120.0),
-                border: UiRect::all(Val::Px(1.5)),
-                flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::FlexEnd, // fill grows from the base
+                align_items: AlignItems::FlexEnd,
                 ..default()
             },
             BackgroundColor(hidden_tint(ui.panel_bg)),
-            BorderColor::all(hidden_tint(ui.panel_border)),
-            BorderRadius::all(Val::Px(6.0)),
         ))
-        .with_children(|track| {
-            track.spawn((
-                MeterFill,
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(0.0),
-                    ..default()
-                },
-                BackgroundColor(ui.accent),
-                BorderRadius::all(Val::Px(5.0)),
-            ));
+        .with_children(|cluster| {
+            // Swing Meter load bar: a slim vertical track. Painted (dim
+            // shell, accent fill) at spawn per the wasm UI rule; the fill's
+            // height is driven from `MeterLoad`, and a zero-height fill is
+            // the hidden state (never despawned).
+            cluster
+                .spawn((
+                    Node {
+                        width: Val::Px(14.0),
+                        height: Val::Px(120.0),
+                        border: UiRect::all(Val::Px(1.5)),
+                        flex_direction: FlexDirection::Column,
+                        justify_content: JustifyContent::FlexEnd, // fill grows from the base
+                        ..default()
+                    },
+                    BackgroundColor(hidden_tint(ui.panel_bg)),
+                    BorderColor::all(hidden_tint(ui.panel_border)),
+                    BorderRadius::all(Val::Px(6.0)),
+                ))
+                .with_children(|track| {
+                    track.spawn((
+                        MeterFill,
+                        Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(0.0),
+                            ..default()
+                        },
+                        BackgroundColor(ui.accent),
+                        BorderRadius::all(Val::Px(5.0)),
+                    ));
+                });
+
+            // Scoreboard card.
+            cluster
+                .spawn((
+                    Node {
+                        padding: UiRect::axes(Val::Px(16.0), Val::Px(12.0)),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(6.0),
+                        border: UiRect::all(Val::Px(1.5)),
+                        ..default()
+                    },
+                    BackgroundColor(ui.panel_bg),
+                    BorderColor::all(ui.panel_border),
+                    BorderRadius::all(Val::Px(12.0)),
+                ))
+                .with_children(|card| {
+                    card.spawn((
+                        InningText,
+                        Text::new(""),
+                        TextFont {
+                            font_size: 16.0,
+                            ..default()
+                        },
+                        TextColor(ui.accent),
+                    ));
+                    card.spawn((
+                        ScoreText,
+                        Text::new(""),
+                        TextFont {
+                            font_size: 22.0,
+                            ..default()
+                        },
+                        TextColor(ui.text_primary),
+                    ));
+
+                    // Count row: classic B / S / O indicator lights. The dot counts
+                    // follow the active ruleset, so custom thresholds render right.
+                    card.spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        column_gap: Val::Px(12.0),
+                        align_items: AlignItems::Center,
+                        margin: UiRect::top(Val::Px(2.0)),
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        let groups = [
+                            (CountKind::Ball, "B", rules.counts.balls_per_walk - 1),
+                            (CountKind::Strike, "S", rules.counts.strikes_per_out - 1),
+                            (CountKind::Out, "O", rules.counts.outs_per_half - 1),
+                        ];
+                        for (kind, label, dots) in groups {
+                            row.spawn(Node {
+                                flex_direction: FlexDirection::Row,
+                                column_gap: Val::Px(4.0),
+                                align_items: AlignItems::Center,
+                                ..default()
+                            })
+                            .with_children(|group| {
+                                group.spawn((
+                                    Text::new(label),
+                                    TextFont {
+                                        font_size: 14.0,
+                                        ..default()
+                                    },
+                                    TextColor(ui.text_dim),
+                                ));
+                                for index in 0..dots {
+                                    group.spawn((
+                                        CountDot { kind, index },
+                                        Node {
+                                            width: Val::Px(10.0),
+                                            height: Val::Px(10.0),
+                                            ..default()
+                                        },
+                                        BackgroundColor(ui.pip_off),
+                                        BorderRadius::MAX,
+                                    ));
+                                }
+                            });
+                        }
+                    });
+                });
         });
 
     spawn_base_ring(&mut commands, field.base_count(), &theme);
     super::banner::spawn_duel_panels(&mut commands, &theme);
 
-    // Contact stamp (Task B4): the graded-swing read-out on a small
-    // painted chip over the zone-box screen area — chipped rather than
-    // bare because of the same wasm Text-under-unpainted-root rule the
-    // banner documents above. Shown/hidden by Visibility; the text is
-    // still mutated per swing.
+    // Banner: persistent wrapper root + pill child + text grandchild.
+    // wasm/WebGL2 dictates the structure: an element that is fully
+    // transparent (or has no renderable at all) when first extracted is
+    // never rendered again, even after its colors change. So every banner
+    // element keeps a nonzero alpha at all times — "hidden" is a near-zero
+    // alpha and an empty string, and show/fade only mutate children of this
+    // painted root. This exact two-wrapper shape is the proven-rendering
+    // one — a cycle-2 attempt to merge banner+stamp into one column with a
+    // GlobalZIndex stopped extracting on wasm (reverted; see TODO 66/67
+    // notes in the 2026-08-27 review).
     commands
         .spawn((
-            super::StampChip,
             GameplayEntity,
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Px(300.0),
-                left: Val::Percent(50.0),
-                margin: UiRect::left(Val::Px(-140.0)),
-                width: Val::Px(280.0),
-                padding: UiRect::axes(Val::Px(14.0), Val::Px(4.0)),
+                top: Val::Percent(26.0),
+                left: Val::Px(0.0),
+                width: Val::Percent(100.0),
                 justify_content: JustifyContent::Center,
                 ..default()
             },
-            BackgroundColor(ui.panel_bg),
-            BorderRadius::all(Val::Px(14.0)),
-            Visibility::Hidden,
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.01)),
         ))
-        .with_children(|chip| {
-            chip.spawn((
+        .with_children(|wrap| {
+            wrap.spawn((
+                BannerPill,
+                Node {
+                    padding: UiRect::axes(Val::Px(30.0), Val::Px(10.0)),
+                    border: UiRect::all(Val::Px(1.5)),
+                    // The longest call ("DROPPED 3RD STRIKE!") wraps inside
+                    // this cap instead of running into the px-anchored
+                    // corner cards on narrow windows (TODO 66).
+                    max_width: Val::Percent(60.0),
+                    ..default()
+                },
+                BackgroundColor(hidden_tint(ui.panel_bg)),
+                BorderColor::all(hidden_tint(ui.panel_border)),
+                BorderRadius::all(Val::Px(26.0)),
+            ))
+            .with_children(|pill| {
+                pill.spawn((
+                    BannerText,
+                    Text::new(""),
+                    TextFont {
+                        font_size: 46.0,
+                        ..default()
+                    },
+                    TextColor(ui.text_primary),
+                ));
+            });
+        });
+
+    // Contact stamp (Task B4): a bare text element (no pill chrome) in its
+    // own wrapper — same wasm-safe idiom as the banner above. Anchored to
+    // the banner's own 26% line plus a fixed pixel drop, so however short
+    // the viewport gets the stamp can never climb into the pill (the old
+    // independent 38% anchor crossed it below ~642 px — TODO 66).
+    commands
+        .spawn((
+            GameplayEntity,
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Percent(26.0),
+                left: Val::Px(0.0),
+                width: Val::Percent(100.0),
+                padding: UiRect::top(Val::Px(92.0)),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.01)),
+        ))
+        .with_children(|wrap| {
+            wrap.spawn((
                 ContactStampText,
                 Text::new(""),
                 TextFont {
@@ -185,45 +243,36 @@ pub(super) fn spawn_hud(
                 TextColor(ui.text_primary),
             ));
         });
-    // Controls help now lives in the pause dialog (see `subs.rs`) rather
-    // than a bar pinned to the bottom of the screen during play.
-
-    // The play banner: a painted pill centered high on the screen, spawned
-    // showing "PLAY BALL!" and thereafter driven by `PlayBanner` events
-    // (`banner::show_banner`/`fade_banner`). Persistent — shown/cleared by
-    // Visibility and child-text mutation, never despawned (wasm UI rule).
+    // Pitch-speed read-out (TODO 101): a bare text element in its own
+    // wrapper, same wasm-safe idiom, low on the screen by the plate where
+    // the batting view puts the eye — a percent anchor well under the
+    // stamp's 26% + 92 px line at any viewport height.
     commands
         .spawn((
-            BannerPill,
             GameplayEntity,
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Px(200.0),
-                left: Val::Percent(50.0),
-                margin: UiRect::left(Val::Px(-260.0)),
-                width: Val::Px(520.0),
-                padding: UiRect::axes(Val::Px(30.0), Val::Px(10.0)),
-                border: UiRect::all(Val::Px(1.5)),
+                top: Val::Percent(80.0),
+                left: Val::Px(0.0),
+                width: Val::Percent(100.0),
                 justify_content: JustifyContent::Center,
                 ..default()
             },
-            BackgroundColor(ui.panel_bg),
-            BorderColor::all(ui.panel_border),
-            BorderRadius::all(Val::Px(26.0)),
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.01)),
         ))
-        .with_children(|p| {
-            p.spawn((
-                BannerText,
-                Text::new("PLAY BALL!"),
+        .with_children(|wrap| {
+            wrap.spawn((
+                PitchSpeedText,
+                Text::new(""),
                 TextFont {
-                    font_size: 46.0,
+                    font_size: 24.0,
                     ..default()
                 },
                 TextColor(ui.text_primary),
             ));
         });
-    // The debut pill fades like any event banner would.
-    banner_fade.0 = Some(time.elapsed_secs_f64() + BANNER_SECS);
+    // Controls help now lives in the pause dialog (see `subs.rs`) rather
+    // than a bar pinned to the bottom of the screen during play.
 }
 
 /// A 96×96 px ring of base pips (top-left): one pip per base, laid out like
@@ -333,6 +382,12 @@ pub(super) fn update_meter_bar(
     theme: Res<Theme>,
     mut query: Query<(&mut Node, &mut BackgroundColor), With<MeterFill>>,
 ) {
+    // Guarded like every other HUD system: an unconditional Node write per
+    // frame forced a full-tree relayout even in Classic, where MeterLoad
+    // never changes (TODO 78).
+    if !load.is_changed() && !theme.is_changed() {
+        return;
+    }
     let frac = load.0.clamp(0.0, 1.0);
     for (mut node, mut color) in &mut query {
         node.height = Val::Percent(frac * 100.0);

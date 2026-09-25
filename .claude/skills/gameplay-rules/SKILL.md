@@ -12,7 +12,8 @@ before changing behavior — most "bugs" here are deliberate design.
 ## Core principles
 
 - **Rules are pure and deterministic.** `src/game/core/rules/` has no ECS and no RNG; functions
-  take `Ruleset`/`FieldSpec` as parameters. The CPU's "randomness" is hash noise in `sim/ai.rs`.
+  take `Ruleset`/`FieldSpec` as parameters. The CPU's "randomness" is hash noise in `sim/ai.rs`, seeded from a game salt + the pitch
+  sequence (`CpuState::seed`) — never the clock, so pacing changes cannot move outcomes (TADA 101).
 - **Only `flow` applies rules.** `fx`, `fielding`, `runner` report or mirror — they never mutate
   `ScoreBoard` or `Bases`. Cross-module communication is event-driven (`PitchEvent`/`HitEvent`,
   `LiveBallEvent`, `ContactEvent`, `PitchCaughtEvent`, `WallBangEvent`).
@@ -44,8 +45,16 @@ before changing behavior — most "bugs" here are deliberate design.
    human throw choice, else auto-throw to `rules::throw_target` with the race clock backdated to
    the gather. Batting side steers via `RunnerCall` (Down = stretch, Up = hold); human defense
    steers the chaser with aim (`steer_chaser` — CPU never does).
-5. **Result** — the pause holds until every runner rig finishes its path (`runner::RunnersSettled`,
-   hard-capped). Game-ending calls fire `GameState::GameOver` only from `result_phase`.
+5. **Result** — every path into `Phase::Result` goes through `result::end_pitch` with a
+   `flow::ResultBeat` (ball / strike / foul / strikeout / walk / pickoff / in-play); the pause
+   length is per beat (`PaceTuning::result_secs_for`). The pause holds until every runner rig
+   finishes its path (`runner::RunnersSettled`, hard-capped), then — for every beat but a taken
+   ball — closes the **curtain** (`CURTAIN_SECS`, `Play::curtain_progress`) and flips to PrePitch
+   only once the screen is black, so the mound reset is never seen. A beat that ended the plate
+   appearance arms the **walk-up** (`Play::walkup_active`, `PaceTuning::walkup_secs`): PrePitch
+   holds the ball (no steal window, no pitch) while the next batter is introduced; the batting
+   side's action ends it early; it leaves through the curtain too. Game-ending calls fire
+   `GameState::GameOver` only from `result_phase`.
 
 ## Balance economy
 
