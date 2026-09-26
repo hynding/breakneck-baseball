@@ -64,8 +64,8 @@ cargo run --features "dev debug"     # + F1 in-game debug panel
 cargo test                           # unit tests + headless e2e
 ```
 
-> **Linux prerequisite:** `libasound2-dev` and `libudev-dev` for Bevy's
-> audio/input backends.
+> **Linux prerequisite:** `libasound2-dev`, `libudev-dev`, and `libwayland-dev` for Bevy's
+> audio/input/display backends (Bevy 0.17 enables Wayland by default).
 
 ### Web (WASM)
 

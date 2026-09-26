@@ -26,12 +26,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Bevy's native audio/input backends probe these at build-script time,
-      # so even `cargo check`/`clippy` need them on Linux.
+      # Bevy's native audio/input/display backends probe these at build-script time,
+      # so even `cargo check`/`clippy` need them on Linux. `libwayland-dev` became
+      # mandatory with Bevy 0.17, which enables the `wayland` feature by default
+      # (bevyengine/bevy#19232) and links `libwayland-client` at build time.
       - name: Install Bevy system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+          sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev libwayland-dev
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
