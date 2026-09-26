@@ -1,7 +1,9 @@
 //! The walk-up card (TODO 103): the incoming batter's name, number, and
 //! lineup slot, shown beside the walk-up shot while `Play::walkup_active`.
 //! Painted at spawn with the near-invisible tint and shown by mutating its
-//! children — the wasm UI rule (see [`hidden_tint`]).
+//! children — the wasm UI rule (see [`hidden_tint`]) — and, on top of that,
+//! `Visibility::Hidden` while off: the tint alone read as a ghost card over
+//! a black sky (TODO 97).
 
 use bevy::prelude::*;
 
@@ -36,6 +38,7 @@ pub(super) fn spawn_walkup_card(mut commands: Commands, theme: Res<Theme>) {
             WalkUpCard,
             GameplayEntity,
             KeepAliveUi,
+            Visibility::Hidden,
             Node {
                 position_type: PositionType::Absolute,
                 top: Val::Percent(30.0),
@@ -78,12 +81,20 @@ pub(super) fn paint_walkup_card(
     order: Res<BattingOrder>,
     rosters: Res<Rosters>,
     theme: Res<Theme>,
-    mut cards: Query<(&mut BackgroundColor, &mut BorderColor), With<WalkUpCard>>,
+    mut cards: Query<(&mut BackgroundColor, &mut BorderColor, &mut Visibility), With<WalkUpCard>>,
     mut lines: Query<(&WalkUpText, &mut Text, &mut TextColor)>,
 ) {
     let ui = &theme.ui;
     let on = play.walkup_active();
-    for (mut bg, mut border) in &mut cards {
+    for (mut bg, mut border, mut visibility) in &mut cards {
+        let want_visibility = if on {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        if *visibility != want_visibility {
+            *visibility = want_visibility;
+        }
         let (want_bg, want_border) = if on {
             (ui.panel_bg, ui.panel_border)
         } else {

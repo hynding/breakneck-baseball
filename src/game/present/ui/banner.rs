@@ -108,7 +108,7 @@ pub(super) fn clear_read_outs_on_result_exit(
     mut stamp_fade: ResMut<StampFadeAt>,
     mut speed_fade: ResMut<SpeedFadeAt>,
     mut follow_up: ResMut<BannerFollowUp>,
-    mut pill_q: Query<(&mut BackgroundColor, &mut BorderColor), With<BannerPill>>,
+    mut pill_q: Query<(&mut BackgroundColor, &mut BorderColor, &mut Visibility), With<BannerPill>>,
     mut banner_q: Query<&mut Text, (With<BannerText>, Without<ContactStampText>)>,
     mut stamp_q: Query<&mut Text, (With<ContactStampText>, Without<BannerText>)>,
     mut speed_q: Query<
@@ -129,9 +129,10 @@ pub(super) fn clear_read_outs_on_result_exit(
     stamp_fade.0 = None;
     speed_fade.0 = None;
     follow_up.0 = None;
-    for (mut bg, mut border) in &mut pill_q {
+    for (mut bg, mut border, mut visibility) in &mut pill_q {
         bg.0 = hidden_tint(bg.0);
         *border = BorderColor::all(hidden_tint(border.top));
+        *visibility = Visibility::Hidden;
     }
     for mut text in banner_q
         .iter_mut()
@@ -327,7 +328,7 @@ pub(super) fn show_banner(
     time: Res<Time>,
     mut fade_at: ResMut<BannerFadeAt>,
     mut follow_up: ResMut<BannerFollowUp>,
-    mut pill_q: Query<(&mut BackgroundColor, &mut BorderColor), With<BannerPill>>,
+    mut pill_q: Query<(&mut BackgroundColor, &mut BorderColor, &mut Visibility), With<BannerPill>>,
     mut text_q: Query<(&mut Text, &mut TextColor), With<BannerText>>,
 ) {
     // Show only the latest banner this frame.
@@ -350,28 +351,33 @@ pub(super) fn show_banner(
         **text = banner.text.clone();
         color.0 = tone_color;
     }
-    for (mut bg, mut border) in &mut pill_q {
+    for (mut bg, mut border, mut visibility) in &mut pill_q {
         bg.0 = ui.panel_bg;
         *border = BorderColor::all(ui.panel_border);
+        *visibility = Visibility::Inherited;
     }
     fade_at.0 = Some(fade_deadline(&play, now, FREE_BANNER_SECS));
 }
 
 /// Clears the pill once its deadline passes. Reads only until then (see
-/// [`BannerFadeAt`] for why this must not tick).
+/// [`BannerFadeAt`] for why this must not tick). The pill goes
+/// `Visibility::Hidden` as well as tinted: the tint alone left a faint ghost
+/// rectangle over a black sky (TODO 97), and a hidden node is skipped by
+/// extraction entirely.
 pub(super) fn fade_banner(
     time: Res<Time>,
     mut fade_at: ResMut<BannerFadeAt>,
-    mut pill_q: Query<(&mut BackgroundColor, &mut BorderColor), With<BannerPill>>,
+    mut pill_q: Query<(&mut BackgroundColor, &mut BorderColor, &mut Visibility), With<BannerPill>>,
     mut text_q: Query<(&mut Text, &mut TextColor), With<BannerText>>,
 ) {
     if !due(fade_at.0, time.elapsed_secs_f64()) {
         return;
     }
     fade_at.0 = None;
-    for (mut bg, mut border) in &mut pill_q {
+    for (mut bg, mut border, mut visibility) in &mut pill_q {
         bg.0 = hidden_tint(bg.0);
         *border = BorderColor::all(hidden_tint(border.top));
+        *visibility = Visibility::Hidden;
     }
     for (mut text, _color) in &mut text_q {
         **text = String::new();

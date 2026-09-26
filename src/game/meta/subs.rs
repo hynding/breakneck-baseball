@@ -517,7 +517,7 @@ fn spawn_board(mut commands: Commands, theme: Res<Theme>) {
     let ui = &theme.ui;
 
     commands
-        .spawn((SubsUi, KeepAliveUi, GameplayEntity, {
+        .spawn((SubsUi, KeepAliveUi, GameplayEntity, Visibility::Hidden, {
             // The board stacks its card above a controls dialog, so this
             // root is the one overlay that lays its children out in a
             // column rather than centring a single card.
@@ -615,7 +615,7 @@ fn update_board(
     settings: Res<Settings>,
     theme: Res<Theme>,
     added: Query<(), Added<SubsLine>>,
-    mut roots: Query<&mut BackgroundColor, (With<SubsUi>, Without<SubsCard>)>,
+    mut roots: Query<(&mut BackgroundColor, &mut Visibility), (With<SubsUi>, Without<SubsCard>)>,
     mut cards: Query<(&mut BackgroundColor, &mut BorderColor), With<SubsCard>>,
     mut lines: Query<(&SubsLine, &mut Text, &mut TextColor)>,
 ) {
@@ -630,11 +630,19 @@ fn update_board(
     let ui = &theme.ui;
     let visible = *state.get() == GameState::Paused;
 
-    for mut bg in &mut roots {
+    // Hidden by `Visibility` as well as by tint (TODO 97): the tinted card
+    // and its controls dialog read as nested ghost outlines wherever the
+    // hidden board overlapped a black sky. Spawned hidden, shown here.
+    for (mut bg, mut visibility) in &mut roots {
         bg.0 = if visible {
             ui.panel_bg.with_alpha(0.9)
         } else {
             hidden_tint(ui.panel_bg)
+        };
+        *visibility = if visible {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
         };
     }
     for (mut bg, mut border) in &mut cards {

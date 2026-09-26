@@ -122,6 +122,9 @@ pub(super) fn spawn_settings_screen(mut commands: Commands, theme: Res<Theme>) {
         .spawn((
             SettingsUi,
             KeepAliveUi,
+            // Hidden by `Visibility` on top of the tint (TODO 97): the
+            // tinted card ghosted wherever it overlapped a black sky.
+            Visibility::Hidden,
             overlay_root(z::SETTINGS, OverlayPaint::Hidden, ui),
         ))
         .with_children(|root| {
@@ -178,7 +181,10 @@ pub(super) fn paint_settings_screen(
     settings: Res<Settings>,
     controllers: Res<Controllers>,
     theme: Res<Theme>,
-    mut roots: Query<&mut BackgroundColor, (With<SettingsUi>, Without<SettingsCard>)>,
+    mut roots: Query<
+        (&mut BackgroundColor, &mut Visibility),
+        (With<SettingsUi>, Without<SettingsCard>),
+    >,
     mut cards: Query<(&mut BackgroundColor, &mut BorderColor), With<SettingsCard>>,
     mut title: Query<
         (&mut Text, &mut TextColor),
@@ -224,8 +230,9 @@ pub(super) fn paint_settings_screen(
     }
     let ui = &theme.ui;
     if !open.0 {
-        for mut bg in &mut roots {
+        for (mut bg, mut visibility) in &mut roots {
             bg.set_if_neq(BackgroundColor(hidden_tint(ui.panel_bg)));
+            visibility.set_if_neq(Visibility::Hidden);
         }
         for (mut bg, mut border) in &mut cards {
             bg.set_if_neq(BackgroundColor(hidden_tint(ui.panel_bg)));
@@ -243,8 +250,9 @@ pub(super) fn paint_settings_screen(
         }
         return;
     }
-    for mut bg in &mut roots {
+    for (mut bg, mut visibility) in &mut roots {
         bg.set_if_neq(BackgroundColor(ui.panel_bg.with_alpha(0.9)));
+        visibility.set_if_neq(Visibility::Inherited);
     }
     for (mut bg, mut border) in &mut cards {
         // Theme panel colours carry their own translucency (~0.85 alpha) for

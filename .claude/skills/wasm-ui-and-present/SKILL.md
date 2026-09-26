@@ -15,6 +15,10 @@ root with no renderable component) is never rendered again, even after its colou
 children are added — and **UI roots spawned mid-`Playing` don't render at all**. Therefore:
 
 - Keep every element's alpha nonzero — use `ui::hidden_tint` for "invisible but renderable".
+  The tint is the *paint* rule, not the hide mechanism: hidden chrome (banner pill, walk-up
+  card, pause board, settings screen) also flips `Visibility` — `Hidden` while off, `Inherited`
+  on show — so the 0.004-alpha panel never ghosts over a black sky (TODO 97). Spawning a root
+  `Visibility::Hidden` alongside its tint is fine on 0.17 wasm (verified 2026-09-26).
 - Give container roots a `BackgroundColor`.
 - Spawn UI roots at game start (painted at spawn), then show/hide by **mutating children** of
   those roots. The pause/substitution board (`src/game/meta/subs.rs`) is the reference example:

@@ -27,6 +27,10 @@ jerseys/HUD follow.
 
 ## Theme & tones
 
+Hidden chrome (banner pill, walk-up card, pause board, settings screen) is both hidden-tinted
+*and* `Visibility::Hidden` while off; the tint satisfies the first-extract rule, the visibility
+flip is what keeps a 0.004-alpha panel from ghosting over Midnight Neon's sky (TODO 97).
+
 `src/game/core/theme.rs` defines `Theme` (UI palette, per-team `PlayerTemplate`s, ball styling,
 the effect palette (`FxTheme`), the field dressing (`FieldTheme`: grass/dirt tints, sun colour and
 strength, ambient fill — what makes a night game read as night), sky/`ClearColor`, and the

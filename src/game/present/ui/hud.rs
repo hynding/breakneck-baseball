@@ -187,6 +187,12 @@ pub(super) fn spawn_hud(
         .with_children(|wrap| {
             wrap.spawn((
                 BannerPill,
+                // Hidden until a call raises it (`banner::show_banner`), on
+                // top of the tint: the near-zero alpha alone read as a ghost
+                // pill against Midnight Neon's black sky (TODO 97). Hidden at
+                // spawn is safe on 0.17 wasm — verified 2026-09-25 — as long
+                // as the paint underneath still follows the tint rule.
+                Visibility::Hidden,
                 Node {
                     padding: UiRect::axes(Val::Px(30.0), Val::Px(10.0)),
                     border: UiRect::all(Val::Px(1.5)),

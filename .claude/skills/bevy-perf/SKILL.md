@@ -1,9 +1,9 @@
 ---
 name: bevy-perf
-description: Use when the game is "slow", "stuttering", "dropping frames", "laggy on web", or when asked to profile or optimize runtime performance. Bevy-0.15-specific practice - ECS scheduling, change detection, asset caching, Rapier stepping, diagnostics setup, and the wasm/WebGL2 constraints. For generic Rust performance, defer to the rust-skills rules named at the bottom.
+description: Use when the game is "slow", "stuttering", "dropping frames", "laggy on web", or when asked to profile or optimize runtime performance. Bevy-specific practice (written against 0.15; the crate is on 0.17, the ECS/Rapier/wasm advice carries) - ECS scheduling, change detection, asset caching, Rapier stepping, diagnostics setup, and the wasm/WebGL2 constraints. For generic Rust performance, defer to the rust-skills rules named at the bottom.
 ---
 
-# Bevy 0.15 Performance
+# Bevy Performance (0.15-era notes, crate on 0.17)
 
 Profile before optimizing (`rust-skills/rules/perf-profile-first.md`). In Bevy that means:
 turn on diagnostics, find *which system* is slow, then apply the matching pattern below.

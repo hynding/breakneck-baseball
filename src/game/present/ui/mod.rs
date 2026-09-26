@@ -111,6 +111,12 @@ enum DuelLineKind {
 
 /// A colour reduced to near-invisibility. Never fully transparent: on the
 /// wasm target an element extracted with alpha 0 is culled for good.
+///
+/// This is the *paint* for hidden chrome, not the hiding itself: a tinted
+/// panel still draws at 0.004 alpha, which reads as a ghost outline over a
+/// black sky (TODO 97), so hidden roots also flip `Visibility::Hidden` and
+/// come back `Inherited` on show. Spawning `Hidden` alongside the tint is
+/// safe on 0.17 wasm.
 pub(crate) fn hidden_tint(color: Color) -> Color {
     color.with_alpha(0.004)
 }

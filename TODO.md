@@ -52,7 +52,9 @@ NOTE: Everything that has been completed gets moved to TADA.md
     → walk-up card → duel; the three `B0004` warnings at boot remain). Lock now wants
     wasm-bindgen 0.2.127 (web-sys 0.3.104; 0.2.126 no longer resolves), so bump the CLI
     with `cargo binstall wasm-bindgen-cli --version 0.2.127 -y` when this merges and update
-    the CLAUDE.md toolchain note. **Ready to merge into `main`.**
+    the CLAUDE.md toolchain note. **Merged into `main` 2026-09-25** (`8a79168`); CLI bumped,
+    CLAUDE.md updated. Steps 3–4 (0.18, 0.19) remain, plus the `B0004` boot warnings and the
+    headless-sim slowdown to profile.
 
 ## Coach findings 2026-08-24
 
@@ -203,7 +205,7 @@ Cycle-2 fixes shipped alongside: 66, 67, 68, 74, 80 (see TADA when checked off).
     field materials per theme (core/theme.rs + present/field/).
     Screenshot: docs/agent/playtest/2026-08-27/09-neon-zone-before.jpeg.
     *Done 2026-09-25 — see TADA 104.*
-97. [ ] nice ui — the hidden banner pill's near-zero-alpha keep-alive tint reads as a faint
+97. [x] nice ui — the hidden banner pill's near-zero-alpha keep-alive tint reads as a faint
     ghost rectangle against Midnight Neon's pure-black sky (top-center). Consider matching
     hidden_tint's alpha to theme darkness or keying the pill's hidden state off Visibility
     on 0.17+ (present/ui/hud.rs).
@@ -222,6 +224,7 @@ Cycle-2 fixes shipped alongside: 66, 67, 68, 74, 80 (see TADA when checked off).
     `hidden_tint` idiom — so the catch-up merge kept main's pill and ported only the
     deadline rule. The ghost rectangle stays open; the `Visibility` route is still the right
     fix, now as its own small change on top of the merged branch.
+    *Done 2026-09-26 — see TADA 105.*
 
 ## Refactor follow-ups (from the 2026-09-07 Clean Code pass)
 

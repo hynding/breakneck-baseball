@@ -407,3 +407,15 @@ the probe that now guards it.
     sun so the park reads floodlit-flat rather than merely darker.
     `theme.test.rs::night_dresses_the_field_darker_and_cooler_than_day` pins day-as-painted,
     night darker and cooler on every channel, and the sun above 0.4 (lit, not a void).
+105. [x] TODO 97 — the hidden chrome no longer ghosts over a black sky. — Every
+    keep-alive element that carried a hidden tint now also toggles `Visibility`: the banner
+    pill (`present/ui/hud.rs` spawns it `Hidden`; `banner::show_banner` sets `Inherited`,
+    `fade_banner` / `clear_read_outs_on_result_exit` set `Hidden`), the walk-up card
+    (`paint_walkup_card`), the pause board root (`subs::update_board`) and the settings
+    screen root (`settings::paint_settings_screen`). The tint stays underneath — the
+    alpha-0-at-first-extract rule is unchanged — but a `Hidden` node is skipped by extraction,
+    so the 0.004-alpha panel and border can't show against Midnight Neon. **Hidden at spawn
+    is safe on 0.17 wasm**: verified 2026-09-26 with a 465-frame Playwright capture of the
+    live build (SWING & MISS pill + EARLY stamp + MPH, OUT 1/2/3 follow-ups, the wipe, the
+    walk-up card all appear after spawning hidden) and by opening the pause board and the
+    settings screen. Landed on top of the Bevy 0.17 merge.

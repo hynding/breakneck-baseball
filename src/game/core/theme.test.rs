@@ -98,8 +98,16 @@ fn night_dresses_the_field_darker_and_cooler_than_day() {
         ThemeId::DaylightClassic.build(),
         ThemeId::MidnightNeon.build(),
     );
-    assert_eq!(day.field.grass_tint, Color::WHITE, "daylight grass as painted");
-    assert_eq!(day.field.dirt_tint, Color::WHITE, "daylight dirt as painted");
+    assert_eq!(
+        day.field.grass_tint,
+        Color::WHITE,
+        "daylight grass as painted"
+    );
+    assert_eq!(
+        day.field.dirt_tint,
+        Color::WHITE,
+        "daylight dirt as painted"
+    );
     assert_eq!(day.field.sun, Color::WHITE);
     assert_eq!(day.field.sun_scale, 1.0);
     for (name, d, n) in [
@@ -112,7 +120,10 @@ fn night_dresses_the_field_darker_and_cooler_than_day() {
             "{name}: night should be darker than day"
         );
         let s = n.to_srgba();
-        assert!(s.blue >= s.red, "{name}: night should be cooler (blue >= red)");
+        assert!(
+            s.blue >= s.red,
+            "{name}: night should be cooler (blue >= red)"
+        );
         assert!(luminance(n) > 0.3, "{name}: still a lit park, not a void");
     }
     assert!(

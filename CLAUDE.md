@@ -11,7 +11,7 @@ Rust is installed via Homebrew's rustup and is **not on the default PATH**. Pref
 export PATH="/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$PATH"
 ```
 
-`wasm-bindgen-cli` must exactly match the `wasm-bindgen` version in `Cargo.lock` (currently 0.2.126).
+`wasm-bindgen-cli` must exactly match the `wasm-bindgen` version in `Cargo.lock` (currently 0.2.127).
 If `cargo update` bumps it, reinstall with `cargo binstall wasm-bindgen-cli --version <new-version> -y`
 (binstall = prebuilt, seconds; avoid plain `cargo install`).
 
@@ -56,7 +56,7 @@ whose `mod.rs` re-exports the split, so item paths (`rules::resolve_thrown`) nev
 Violating any of these breaks the build, breaks wasm, or corrupts gameplay state.
 
 - Spawn-at-game-start systems key on the `game_start()` transition schedule, never `OnEnter(Playing)` — otherwise they re-run on every unpause (`src/game/mod.rs`).
-- wasm UI: an element that is alpha-0 at first extract never renders again; container roots need a `BackgroundColor`; UI roots spawned mid-`Playing` don't render — show/hide by mutating children of roots painted at spawn (`ui::hidden_tint`, `src/game/present/ui/`).
+- wasm UI: an element that is alpha-0 at first extract never renders again; container roots need a `BackgroundColor`; UI roots spawned mid-`Playing` don't render — show/hide by mutating children of roots painted at spawn (`ui::hidden_tint`, `src/game/present/ui/`). Hidden chrome also toggles `Visibility` (spawning `Hidden` is fine on 0.17 wasm) so the keep-alive tint never ghosts over a dark sky.
 - wasm UI: never tick a per-frame `ResMut` (Timer resource) in a system that also holds `&mut` queries on rendered UI — the queried entities stop being extracted on WebGL2; hold a fade *deadline* instead (`BannerFadeAt` in `src/game/present/ui/banner.rs`, wasm-ui-and-present skill).
 - `model_assets.rs` and `src/game/models/` never move from `src/game/` top level — `embedded_asset!` derives both the `include_bytes!` path and the `embedded://` asset path from the file's own location (`src/game/model_assets.rs`).
 - No RNG anywhere in `src/game/core/rules/` — advanced rules are deterministic, keyed off data the engine already computes.
@@ -96,7 +96,7 @@ Loaded on trigger from `.claude/skills/`; each SKILL.md says when.
 - `tune-balance` — the dial → `balance_sim` → bands loop; bands in its `reference/bands.md`. Load before touching any `Ruleset` window/multiplier/spread.
 - `playtest-review` — moment list + rubric producing a ranked TODO.md work queue. Load for "review the game" / "what should I work on next".
 - `production-readiness` — web-first ship audit; checklist in its `reference/checklist.md`. Load before a release.
-- `bevy-perf` — Bevy-0.15 performance practice (ECS, change detection, Rapier, wasm limits). Load for "slow"/"stutter"/"optimize".
+- `bevy-perf` — Bevy performance practice (ECS, change detection, Rapier, wasm limits; written against 0.15, the crate is on 0.17). Load for "slow"/"stutter"/"optimize".
 - `coach` — the always-on expectation checker: what it checks, tolerances, reading `CoachReport`, adding a check. Load when players misbehave or before touching `sim/fielding.rs`, `sim/runner.rs`, `sim/flow/`.
 - `auto-playtest` — the Director, `.ron` scripts, the mode matrix, and self-driving native/wasm runs. Load for "playtest", "verify 2 player", "test PCI/Meter", or when adding an input device or batting adapter.
 - `run-web` — build, serve, and verify the browser build.
