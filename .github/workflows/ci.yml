@@ -14,6 +14,11 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # CI never attaches a debugger. Line tables keep panic file:line in test
+  # output while shrinking the debug tree (rlibs + every e2e binary) several-fold,
+  # which is what keeps `target` inside the runner's disk and the 10 GB cache cap.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -25,6 +30,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # The debug test tree (every e2e binary statically links all of Bevy) plus
+      # the restored build cache outgrow the runner's ~20 GB of free disk: the
+      # 2026-09-26 run died with "No space left on device" mid-compile. Drop the
+      # preinstalled toolchains this job never touches (~25 GB) and log headroom.
+      - name: Free runner disk space
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/.ghcup /usr/share/swift /opt/hostedtoolcache/CodeQL
+          sudo docker image prune -af >/dev/null 2>&1 || true
+          df -h / | tail -1
 
       # Bevy's native audio/input/display backends probe these at build-script time,
       # so even `cargo check`/`clippy` need them on Linux. `libwayland-dev` became
@@ -41,21 +58,40 @@ jobs:
           targets: wasm32-unknown-unknown
           components: clippy, rustfmt
 
-      - name: Cache Cargo registry and build
+      # Two caches on purpose. Downloaded crates are cheap and useful across any
+      # lockfile, so the registry falls back to the newest prior entry. The build
+      # tree restores only on an exact lockfile match: a prefix fallback used to
+      # unpack a ~20 GB tree from a different Bevy version next to the fresh one
+      # (the 2026-09-26 disk exhaustion), and every stale artifact rode along into
+      # the next saved cache.
+      - name: Cache Cargo registry
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-ci-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-ci-
+          key: ${{ runner.os }}-ci-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-ci-registry-
+
+      - name: Cache build tree
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-ci-target-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Format check
         run: cargo fmt --check
 
       - name: Unit tests
         run: cargo test
+
+      # Headroom after the largest compile, so a disk-pressure regression shows
+      # up in the log before it becomes another dead runner.
+      - name: Report disk usage
+        if: always()
+        run: |
+          df -h / | tail -1
+          du -sh target ~/.cargo/registry 2>/dev/null || true
 
       # `--all-targets` lints test code too; `-D warnings` keeps the tree
       # warning-free on both compilation targets (the project norm in CLAUDE.md).
