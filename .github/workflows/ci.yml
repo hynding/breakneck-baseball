@@ -32,9 +32,10 @@ jobs:
       - uses: actions/checkout@v4
 
       # The debug test tree (every e2e binary statically links all of Bevy) plus
-      # the restored build cache outgrow the runner's ~20 GB of free disk: the
+      # the restored build cache outgrew the runner's 86 GB of free disk: the
       # 2026-09-26 run died with "No space left on device" mid-compile. Drop the
-      # preinstalled toolchains this job never touches (~25 GB) and log headroom.
+      # preinstalled toolchains this job never touches (27 GB measured) and log
+      # headroom. Under `line-tables-only` a cold tree is ~23 GB (2026-09-27 run).
       - name: Free runner disk space
         run: |
           df -h / | tail -1
