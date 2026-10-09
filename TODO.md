@@ -12,7 +12,7 @@ needs a human (11, 33) or is a deliberate non-action (98).
 | Item | Work | Done when |
 |---|---|---|
 | 29 · boot warnings | Clear the three `B0004` hierarchy warnings at boot | `cargo test --test e2e full_game:: -- --nocapture 2>&1 \| grep -c B0004` prints `0`, and the browser console agrees (`/run-web`) |
-| 29 · sim slowdown | Profile the ~72% headless-sim slowdown since Bevy 0.15 (balance run 199 s vs 115 s) | A named cause + fix, or a measured "inherent to 0.17" note in `docs/agent/BEVY-UPGRADE-ASSESSMENT.md`; `cargo test --test balance_sim` wall time recorded before/after |
+| 29 · sim slowdown | Headless sim ~72% slower since Bevy 0.15. *Measured 2026-10-09* (`tests/e2e/sim_profile.rs`): no hot system — 380 system runs/frame, 52% of the frame is executor overhead, game systems 4.8%; three levers listed in `docs/agent/BEVY-UPGRADE-ASSESSMENT.md` | Each lever tried and its ms/frame recorded there; `cargo nextest run --test balance_sim` wall time before/after, bands unmoved |
 | 29 · step 3 | Bevy 0.17 → 0.18 (AnimationTarget split, UI extraction rework) in a git worktree | Every gate in `BEVY-UPGRADE-ASSESSMENT.md` green on the branch, incl. the browser run |
 | 78 · remainder | Pause-board height cap for < 530 px viewports | `/run-web` screenshot at a 400 px-tall viewport shows the whole board; `cargo test --test e2e pause_subs::` green |
 

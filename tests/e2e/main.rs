@@ -47,6 +47,8 @@ mod model_contract;
 mod passive_walks;
 mod pause_subs;
 mod scenarios;
+#[cfg(feature = "profile")]
+mod sim_profile;
 mod swing_startup;
 mod touch_pipeline;
 mod walkup;

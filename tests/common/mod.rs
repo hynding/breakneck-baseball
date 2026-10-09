@@ -76,7 +76,7 @@ pub fn start_game(app: &mut App, select_key: KeyCode) {
 /// afterwards: `app.add_systems(DriveGame, drive)`.
 #[allow(dead_code)]
 pub fn headless_app() -> App {
-    build_headless_app(false)
+    build_headless_app(false, None)
 }
 
 /// Like [`headless_app`], but pins **single-threaded, run-to-run deterministic**
@@ -91,10 +91,20 @@ pub fn headless_app() -> App {
 /// balance sim uses it, so the other e2e harnesses keep the faster default.
 #[allow(dead_code)]
 pub fn deterministic_headless_app() -> App {
-    build_headless_app(true)
+    build_headless_app(true, None)
 }
 
-fn build_headless_app(single_threaded: bool) -> App {
+/// [`deterministic_headless_app`] with a custom `tracing` layer installed by
+/// `LogPlugin` — the seam the profiling probe uses to time every span.
+#[allow(dead_code)]
+pub fn deterministic_headless_app_with_log_layer(layer: LogLayerFn) -> App {
+    build_headless_app(true, Some(layer))
+}
+
+/// A `LogPlugin::custom_layer` hook.
+pub type LogLayerFn = fn(&mut App) -> Option<bevy::log::BoxedLayer>;
+
+fn build_headless_app(single_threaded: bool, log_layer: Option<LogLayerFn>) -> App {
     // Isolate the settings store before `SettingsPlugin` loads it: a
     // headless test must neither read the developer's real settings.json
     // (their volume/batting-style choices would silently steer test
@@ -141,6 +151,13 @@ fn build_headless_app(single_threaded: bool) -> App {
         })
     } else {
         default_plugins
+    };
+    let default_plugins = match log_layer {
+        Some(custom_layer) => default_plugins.set(bevy::log::LogPlugin {
+            custom_layer,
+            ..Default::default()
+        }),
+        None => default_plugins,
     };
     app.add_plugins(default_plugins)
         .add_plugins((RapierPhysicsPlugin::<NoUserData>::default(), GamePlugin))
