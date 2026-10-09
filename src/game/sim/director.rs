@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 use crate::game::ball::Baseball;
 use crate::game::batting::style_for;
 use crate::game::fielding::ActivePlay;
-use crate::game::flow::{Phase, Play, swing_dt_ms};
+use crate::game::flow::{Phase, Play, swing_dt_at_contact_ms};
 use crate::game::input::{Controllers, InputSource, Intents, KeyScheme, TeamIntent};
 use crate::game::settings::{BattingStyle, Settings};
 use crate::game::{GameState, ScoreBoard, Team};
@@ -135,8 +135,10 @@ pub enum Condition {
     OnDefense,
     /// The pre-pitch steal window is open.
     InStealWindow,
-    /// The live pitch is within `early_ms` of the plate: the signed swing
-    /// timing error has risen to `-early_ms` (0 = dead-on, rising late).
+    /// The live pitch is within `early_ms` of the plate *for a swing pressed
+    /// now*: the timing error the bat would arrive with (a swing has a
+    /// startup, `flow::SWING_CONTACT_SECS`) has risen to `-early_ms`
+    /// (0 = the bat meets the ball dead-on, rising late).
     PlateEta {
         early_ms: f32,
     },
@@ -382,7 +384,9 @@ fn direct(
             ball_q
                 .single()
                 .ok()
-                .map(|(tf, vel)| swing_dt_ms(tf.translation.z, vel.linvel.z))
+                // The error the *bat* would arrive with if pressed now — a
+                // script's `PlateEta` aims the swing, not the button.
+                .map(|(tf, vel)| swing_dt_at_contact_ms(tf.translation.z, vel.linvel.z))
         })
         .flatten();
 

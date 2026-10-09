@@ -2,8 +2,11 @@
 
 Verbatim source: the pre-slim CLAUDE.md (also preserved whole in `docs/agent/ARCHITECTURE-FULL.md`).
 
-Batting *feel* is a data-driven spine, not a hit-or-miss check: every judged swing measures its
-timing error against the ball's plate ETA (`flow::swing_dt_ms`, early = negative) and
+Batting *feel* is a data-driven spine, not a hit-or-miss check. A press *starts* the swing and
+the judgement waits `flow::SWING_CONTACT_SECS` (0.15 s — the authored `BatterSwing` clip's
+contact frame, pinned by `animation::BATTER_SWING_CONTACT_FRACTION`) for the bat to come through
+the zone, so the swing is seen before the ball leaves it; every judged swing then measures its
+timing error at the bat against the ball's plate ETA (`flow::swing_dt_ms`, early = negative) and
 `rules::contact_quality` grades it into `ContactQuality::{Whiff, FoulTip, Weak, Solid, Perfect}`
 off the active `Ruleset` windows (`perfect_ms`/`solid_ms`/`foul_ms`), with the exit speed scaled
 by that quality's multiplier (`exit_solid`/`exit_perfect`) and the launch pulled by
@@ -11,7 +14,13 @@ by that quality's multiplier (`exit_solid`/`exit_perfect`) and the launch pulled
 windows, but kept on every exhaustive match.
 
 Flow fires one `ContactEvent { quality, batting_team, dt_ms }` per swing (whiffs included) as a
-read-only report for presentation; the rule/physics consequence is applied at the swing site.
+read-only report for presentation; the rule/physics consequence is applied where the bat arrives.
+A whiff is the exception: its report and its strike call fire together at the take trigger (the
+ball past `late_swing_z`, i.e. into the mitt), so the miss is *seen* — bat through, ball into
+the glove — before it is announced, and the EARLY/LATE stamp lands with the strike text. Synthetic
+batters (the CPU in `sim/ai.rs`, Director `PlateEta`, the Meter's forced whiff, e2e drives) time
+their *press* off `flow::swing_dt_at_contact_ms` / `bat_arrival_z`, so their realized timing at
+the bat is unchanged by the startup and the balance economy doesn't move with it.
 
 The *input* front-ends are three real adapters in `src/game/sim/batting.rs` (the `SwingCommands`
 seam that `flow::pitch_live` consumes without seeing the style — `adapt_swings` is chained between

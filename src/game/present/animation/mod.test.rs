@@ -95,3 +95,18 @@ fn personality_clips_have_the_right_loop_mode() {
         assert!(!clip.looping(), "{clip:?} must not loop");
     }
 }
+
+/// Flow judges a swing `flow::SWING_CONTACT_SECS` after the press so the
+/// ball leaves the bat (or is missed) on the frame the bat visibly comes
+/// through the zone. That instant is a fraction of the authored
+/// `BatterSwing` clip; if either side is retuned, the other must follow.
+#[test]
+fn swing_startup_matches_the_clips_contact_frame() {
+    let clip_contact = AnimClip::BatterSwing.duration() * BATTER_SWING_CONTACT_FRACTION;
+    let startup = crate::game::flow::SWING_CONTACT_SECS;
+    assert!(
+        (clip_contact - startup).abs() <= 0.02,
+        "BatterSwing puts the bat through the zone at {clip_contact:.3} s but flow judges the \
+         swing at {startup:.3} s — retune SWING_CONTACT_SECS or the clip"
+    );
+}

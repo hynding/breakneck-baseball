@@ -44,15 +44,52 @@ const LIVE_PLAY_BUFFER: f32 = 5.0;
 const LIVE_PLAY_MIN: f32 = 4.0;
 const LIVE_PLAY_MAX: f32 = 11.0;
 
-/// Signed swing-timing error, in milliseconds, at the instant the batter
-/// commits: how far the ball is from the plate converted to time by its own
-/// z-speed, signed so an **early** swing (ball still out in front, `z > PLATE_Z`)
-/// is **negative** and a **late** swing (ball already past, `z < PLATE_Z`) is
-/// positive. `vel_z` is the ball's z-velocity — negative, since it travels
-/// toward the plate at −Z — and is clamped away from zero so a stalled ball
-/// can't divide by zero. This is the seam [`rules::contact_quality`] grades.
+/// Signed swing-timing error, in milliseconds, at the instant the bat comes
+/// through the zone: how far the ball is from the plate converted to time by
+/// its own z-speed, signed so an **early** swing (ball still out in front,
+/// `z > PLATE_Z`) is **negative** and a **late** swing (ball already past,
+/// `z < PLATE_Z`) is positive. `vel_z` is the ball's z-velocity — negative,
+/// since it travels toward the plate at −Z — and is clamped away from zero so
+/// a stalled ball can't divide by zero. This is the seam
+/// [`rules::contact_quality`] grades. Callers timing a *press* (the CPU, the
+/// Director, the Meter's forced swing) want [`swing_dt_at_contact_ms`],
+/// which looks the swing's startup ahead.
 pub(crate) fn swing_dt_ms(ball_z: f32, vel_z: f32) -> f32 {
     1000.0 * (ball_z - PLATE_Z) / vel_z.min(-f32::EPSILON)
+}
+
+/// Seconds from the swing press to the bat coming through the zone — the
+/// swing's startup. A press *starts* the swing; the ball is judged (and
+/// leaves the bat, or is missed) only once the bat arrives, so the swing is
+/// seen before its consequence, the way the reference footage plays it
+/// (docs/agent/SMB3-REFERENCE-NOTES.md §2.3/§2.5). Pinned to the authored
+/// `BatterSwing` clip: its arms whip through the zone at ~35% of 0.42 s
+/// (`animation::BATTER_SWING_CONTACT_FRACTION`, tested against this value),
+/// so the ball leaves the bat on the frame the bat visibly gets there.
+pub const SWING_CONTACT_SECS: f32 = 0.15;
+
+/// Where the ball will be when a bat pressed *now* comes through the zone:
+/// the press-timing helper every synthetic batter (CPU, Director scripts,
+/// tests) uses to aim a press so the *bat*, not the button, meets the ball
+/// at the wanted spot. Straight-line extrapolation: over the startup the
+/// z-speed drifts by a couple of ms of timing at most, inside every window.
+pub fn bat_arrival_z(ball_z: f32, vel_z: f32) -> f32 {
+    ball_z + vel_z * SWING_CONTACT_SECS
+}
+
+/// [`swing_dt_ms`] as it will read when a swing pressed now is judged — the
+/// timing error the bat arrives with.
+pub fn swing_dt_at_contact_ms(ball_z: f32, vel_z: f32) -> f32 {
+    swing_dt_ms(bat_arrival_z(ball_z, vel_z), vel_z)
+}
+
+/// A swing the batter has committed to, waiting for the bat to come through
+/// the zone (`Play::pitch.swing`).
+#[derive(Clone, Copy, Debug)]
+pub(super) struct PendingSwing {
+    input: crate::game::batting::SwingInput,
+    /// `Time::elapsed_secs` at which the bat arrives and the swing is judged.
+    at: f32,
 }
 
 /// The Z at which a swing's timing error would read exactly `foul_ms` late —
@@ -327,7 +364,22 @@ pub(super) fn pitch_live(
     // flight, defeating the `is_changed()` guards in the HUD, the jersey and
     // team-colour painters, and `runner::sync_runners` (TODO 78).
 
-    if let Some(swing) = swing_commands.take(batter) {
+    // A press starts the swing; the bat comes through the zone
+    // `SWING_CONTACT_SECS` later, and that is when it is judged. A second
+    // press mid-swing is nothing (the rig ignores it too: `trigger_swing`).
+    if let Some(input) = swing_commands.take(batter) {
+        if play.pitch.swing.is_none() {
+            play.pitch.swing = Some(PendingSwing {
+                input,
+                at: time.elapsed_secs() + SWING_CONTACT_SECS,
+            });
+        }
+    }
+
+    if let Some(PendingSwing { input: swing, .. }) =
+        play.pitch.swing.filter(|s| time.elapsed_secs() >= s.at)
+    {
+        play.pitch.swing = None;
         // The spatial band is the OUTER eligibility gate: a ball out of the
         // batter's reach is a whiff regardless of timing. Within the band,
         // `contact_quality` grades the swing off its timing error — so a Whiff
@@ -356,16 +408,20 @@ pub(super) fn pitch_live(
             Some(cursor) => rules::pci_aim(cursor - Vec2::new(pos.x, pos.y)),
             None => swing.aim,
         };
-        // Fired on every judged swing (whiffs included) for later presentation
-        // systems; the rules/physics consequence follows below.
-        contact_ev.write(ContactEvent {
-            quality,
-            batting_team: batter,
-            dt_ms,
-        });
-        // Remember this swing's grade for presentation — the home-run
-        // fireworks scale up off a dead-on Perfect (see `game::fx`).
-        play.live.last_contact_quality = Some(quality);
+        // Fired on every judged swing for later presentation systems; the
+        // rules/physics consequence follows below. A whiff's report waits
+        // for its call (see the `Whiff` arm) so the timing stamp lands
+        // with the strike text, not ahead of it.
+        if quality != rules::ContactQuality::Whiff {
+            contact_ev.write(ContactEvent {
+                quality,
+                batting_team: batter,
+                dt_ms,
+            });
+            // Remember this swing's grade for presentation — the home-run
+            // fireworks scale up off a dead-on Perfect (see `game::fx`).
+            play.live.last_contact_quality = Some(quality);
+        }
         match quality {
             // A ball in play, shaped by the quality's exit multiplier and the
             // timing-driven pull yaw. (`Weak` never comes from the Classic
@@ -404,25 +460,50 @@ pub(super) fn pitch_live(
                 play.pitch.taken = true; // the catcher gloves the tipped ball
                 end_pitch(&mut play, &rules.pace, ResultBeat::Foul);
             }
-            // A swing and miss — exactly today's whiff path.
+            // A swing and miss: the bat has come through and the ball is
+            // still flying. The call waits for the ball to cross the plate
+            // (the take trigger below) so the miss is seen before it is
+            // announced — the reference's bat-passes → ball-in-the-mitt →
+            // STRIKE beat. Nothing else about the pitch changes: it flies
+            // on untouched and `catcher_receives` gloves it as a take.
             rules::ContactQuality::Whiff => {
-                // Swinging through a curveball in the dirt with first base
-                // open: the catcher can't hold strike three and the batter
-                // runs.
-                let mut ump = Umpire::new(&mut score, &mut bases, &rules, &mut banner);
-                let beat = judge_whiff(&mut play, &mut ump, &mut order, batter);
-                end_pitch(&mut play, &rules.pace, beat);
+                play.pitch.whiff = Some(dt_ms);
             }
         }
+        if play.pitch.whiff.is_none() {
+            return;
+        }
+    }
+
+    // A swing still on its way through can't be judged yet, whatever the
+    // ball does meanwhile (it will grade a whiff when the bat arrives).
+    if play.pitch.swing.is_some() {
         return;
     }
 
-    // No swing: once the ball is past the foul window's own late edge (a
-    // swing here couldn't grade as anything but a take anyway), judge it.
+    // Once the ball is past the foul window's own late edge (a swing here
+    // couldn't grade as anything but a take anyway), judge it: the stashed
+    // swing-through if the bat already came and went, else the take.
     if pos.z < late_exit_z {
-        let cross = play.pitch.crossing.unwrap_or(Vec2::new(pos.x, pos.y));
         let mut ump = Umpire::new(&mut score, &mut bases, &rules, &mut banner);
-        let beat = judge_take(cross, &mut play, &mut ump, &mut order, batter);
+        let beat = if let Some(dt_ms) = play.pitch.whiff.take() {
+            // The miss's report lands with its call: whoosh, EARLY/LATE
+            // stamp and the strike text on one frame (audio pairs the two
+            // to hear a *swinging* strikeout).
+            contact_ev.write(ContactEvent {
+                quality: rules::ContactQuality::Whiff,
+                batting_team: batter,
+                dt_ms,
+            });
+            play.live.last_contact_quality = Some(rules::ContactQuality::Whiff);
+            // Swinging through a curveball in the dirt with first base
+            // open: the catcher can't hold strike three and the batter
+            // runs.
+            judge_whiff(&mut play, &mut ump, &mut order, batter)
+        } else {
+            let cross = play.pitch.crossing.unwrap_or(Vec2::new(pos.x, pos.y));
+            judge_take(cross, &mut play, &mut ump, &mut order, batter)
+        };
         end_pitch(&mut play, &rules.pace, beat);
     }
 }

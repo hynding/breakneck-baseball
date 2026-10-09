@@ -2,13 +2,15 @@
 //!
 //! Three scripted presses off identical straightaway changeups prove the
 //! `ContactEvent` spine and the Classic quality→physics mapping:
-//!   * a dead-on press (ball on the plate) grades `ContactQuality::Perfect`
-//!     and leaves the bat *faster* than
+//!   * a dead-on press (the bat meets the ball on the plate) grades
+//!     `ContactQuality::Perfect` and leaves the bat *faster* than
 //!   * a mistimed (early) press that grades `ContactQuality::Solid`, while
-//!   * a wildly early press (ball still way out front) grades
-//!     `ContactQuality::Whiff` and puts no ball in play.
+//!   * a wildly early press (the bat comes through with the ball still way
+//!     out front) grades `ContactQuality::Whiff` and puts no ball in play.
 //!
-//! Only the *press timing* is scripted; the outcomes fall out of the pure
+//! Only the *press timing* is scripted — each press is timed so the bat
+//! *arrives* (`flow::bat_arrival_z`, `SWING_CONTACT_SECS` after the press)
+//! with the ball inside a known z window; the outcomes fall out of the pure
 //! rules (`contact_quality` + the exit multipliers) exactly as the unit tests
 //! dictate.
 
@@ -18,7 +20,7 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::Velocity;
 
 use breakneck_baseball::game::ball::Baseball;
-use breakneck_baseball::game::flow::{BallInPlayEvent, ContactEvent, Phase, Play};
+use breakneck_baseball::game::flow::{BallInPlayEvent, ContactEvent, Phase, Play, bat_arrival_z};
 use breakneck_baseball::game::input::Intents;
 use breakneck_baseball::game::rules::ContactQuality;
 use breakneck_baseball::game::{GameState, ScoreBoard};
@@ -57,15 +59,16 @@ impl Default for Captured {
 }
 
 /// Pitches a straightaway changeup every PrePitch (neutral aim → changeup),
-/// and swings the batting side on a stage-specific ball-`z` window so each
-/// press lands in a known timing band.
+/// and swings the batting side on a stage-specific window over the `z` the
+/// bat will *meet* the ball at (`bat_arrival_z`), so each press lands in a
+/// known timing band once the swing's startup has run.
 fn drive(
     stage: Res<Stage>,
     state: Res<State<GameState>>,
     play: Option<Res<Play>>,
     score: Option<Res<ScoreBoard>>,
     mut intents: ResMut<Intents>,
-    ball: Query<&Transform, With<Baseball>>,
+    ball: Query<(&Transform, &Velocity), With<Baseball>>,
 ) {
     if *state.get() != GameState::Playing {
         return;
@@ -78,7 +81,7 @@ fn drive(
     let fielding = score.fielding_team();
     let batting = score.batting_team();
 
-    // Ball-z window the batter presses inside, per stage.
+    // Window on the z the bat meets the ball at, per stage.
     let window = match stage.0 {
         0 => Some((-0.3_f32, 0.3_f32)), // ball on the plate → Perfect
         1 => Some((1.3, 2.2)),          // ball still out front → Solid (early)
@@ -91,8 +94,8 @@ fn drive(
             intents.get_mut(fielding).action = true;
         }
         Phase::Pitch => {
-            if let (Some((zmin, zmax)), Ok(t)) = (window, ball.single()) {
-                let z = t.translation.z;
+            if let (Some((zmin, zmax)), Ok((t, v))) = (window, ball.single()) {
+                let z = bat_arrival_z(t.translation.z, v.linvel.z);
                 if z >= zmin && z <= zmax {
                     intents.get_mut(batting).action = true;
                 }

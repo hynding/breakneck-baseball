@@ -12,10 +12,11 @@
 mod common;
 
 use bevy::prelude::*;
+use bevy_rapier3d::prelude::Velocity;
 
 use breakneck_baseball::game::ball::Baseball;
 use breakneck_baseball::game::field::StrikeZoneOverlay;
-use breakneck_baseball::game::flow::{Phase, Play};
+use breakneck_baseball::game::flow::{Phase, Play, bat_arrival_z};
 use breakneck_baseball::game::input::Intents;
 use breakneck_baseball::game::ui::ContactStampText;
 use breakneck_baseball::game::{GameState, ScoreBoard};
@@ -25,14 +26,15 @@ use common::{DriveGame, headless_app, run_until, start_game};
 const MAX_FRAMES: u64 = 15_000;
 
 /// Pitches a straightaway changeup, then presses the batting side's action
-/// button the instant the ball is dead-on the plate — the exact stage-0
-/// script `e2e_contact_timing` uses to grade `ContactQuality::Perfect`.
+/// button so the bat meets the ball dead-on the plate (`bat_arrival_z`) — the
+/// exact stage-0 script `e2e_contact_timing` uses to grade
+/// `ContactQuality::Perfect`.
 fn drive(
     state: Res<State<GameState>>,
     play: Option<Res<Play>>,
     score: Option<Res<ScoreBoard>>,
     mut intents: ResMut<Intents>,
-    ball: Query<&Transform, With<Baseball>>,
+    ball: Query<(&Transform, &Velocity), With<Baseball>>,
 ) {
     if *state.get() != GameState::Playing {
         return;
@@ -50,8 +52,8 @@ fn drive(
             intents.get_mut(fielding).action = true;
         }
         Phase::Pitch => {
-            if let Ok(t) = ball.single() {
-                let z = t.translation.z;
+            if let Ok((t, v)) = ball.single() {
+                let z = bat_arrival_z(t.translation.z, v.linvel.z);
                 if (-0.3..=0.3).contains(&z) {
                     intents.get_mut(batting).action = true;
                 }

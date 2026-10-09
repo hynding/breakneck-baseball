@@ -11,9 +11,10 @@
 mod common;
 
 use bevy::prelude::*;
+use bevy_rapier3d::prelude::Velocity;
 
 use breakneck_baseball::game::ball::Baseball;
-use breakneck_baseball::game::flow::{CURTAIN_SECS, Phase, Play, ResultBeat};
+use breakneck_baseball::game::flow::{CURTAIN_SECS, Phase, Play, ResultBeat, bat_arrival_z};
 use breakneck_baseball::game::input::Intents;
 use breakneck_baseball::game::ui::{ContactStampText, CurtainRoot, PitchSpeedText};
 use breakneck_baseball::game::variant::Ruleset;
@@ -23,15 +24,15 @@ use common::{DT, DriveGame, headless_app, run_until, start_game};
 
 const MAX_FRAMES: u64 = 15_000;
 
-/// Pitches straight away, then presses the batting side's action button
-/// while the ball is still five metres out — far too early for any contact
-/// window, so the swing grades a `Whiff` (an EARLY one).
+/// Pitches straight away, then presses the batting side's action button so
+/// the bat comes through while the ball is still five metres out — far too
+/// early for any contact window, so the swing grades a `Whiff` (an EARLY one).
 fn drive(
     state: Res<State<GameState>>,
     play: Option<Res<Play>>,
     score: Option<Res<ScoreBoard>>,
     mut intents: ResMut<Intents>,
-    ball: Query<&Transform, With<Baseball>>,
+    ball: Query<(&Transform, &Velocity), With<Baseball>>,
 ) {
     if *state.get() != GameState::Playing {
         return;
@@ -49,8 +50,8 @@ fn drive(
             intents.get_mut(fielding).action = true;
         }
         Phase::Pitch => {
-            if let Ok(t) = ball.single() {
-                if (5.0..=6.0).contains(&t.translation.z) {
+            if let Ok((t, v)) = ball.single() {
+                if (5.0..=6.0).contains(&bat_arrival_z(t.translation.z, v.linvel.z)) {
                     intents.get_mut(batting).action = true;
                 }
             }

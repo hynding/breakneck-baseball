@@ -33,9 +33,15 @@ before changing behavior — most "bugs" here are deliberate design.
 2. **Pitch** — five-pitch arsenal by dominant held-aim axis at release (`PitchKind::from_aim`):
    up fastball, down curveball, left slider, right sinker, neutral changeup. Untouched pitches end
    in the mitt: `flow::catcher_receives` (skips balls in the dirt) fires `PitchCaughtEvent`.
-3. **Swing** — `flow::swing_dt_ms` measures timing error; `rules::contact_quality` grades it via
-   the active `Ruleset` windows. Three input adapters in `sim/batting.rs` (Classic / Swing Meter /
-   PCI) feed one `SwingCommands` seam; `adapt_swings` chains between `wind_up` and `pitch_live`.
+3. **Swing** — a press *starts* the swing; the bat comes through the zone
+   `flow::SWING_CONTACT_SECS` (0.15 s, the authored clip's contact frame) later and only then is
+   the swing judged: `flow::swing_dt_ms` measures the timing error at the bat, `rules::contact_quality`
+   grades it via the active `Ruleset` windows. A hit leaves the bat there; a whiff's strike is
+   called at the take trigger (ball past the late edge, into the mitt) so the miss is seen before
+   it is announced. Anything timing a *press* (the CPU, Director `PlateEta`, the Meter's forced
+   swing, tests) uses `flow::swing_dt_at_contact_ms` / `bat_arrival_z` so the bat, not the button,
+   meets the ball. Three input adapters in `sim/batting.rs` (Classic / Swing Meter / PCI) feed one
+   `SwingCommands` seam; `adapt_swings` chains between `wind_up` and `pitch_live`.
    **The CPU always bats Classic** (`batting::style_for`).
 4. **Live play** — contact settles only what physics settles (HR via `rules::classify_contact`).
    `sim/fielding.rs` runs a real chase and reports milestones as `flow::LiveBallEvent`s;

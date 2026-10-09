@@ -9,10 +9,11 @@
 mod common;
 
 use bevy::prelude::*;
+use bevy_rapier3d::prelude::Velocity;
 
 use breakneck_baseball::game::ball::Baseball;
 use breakneck_baseball::game::coach::{CheckId, CoachReport, Severity};
-use breakneck_baseball::game::flow::{Phase, Play};
+use breakneck_baseball::game::flow::{Phase, Play, bat_arrival_z};
 use breakneck_baseball::game::input::{Controllers, InputSource, Intents};
 use breakneck_baseball::game::variant::Ruleset;
 use breakneck_baseball::game::{GameState, ScoreBoard, Team};
@@ -68,7 +69,7 @@ fn scripted_drive(
     mut intents: ResMut<Intents>,
     play: Option<Res<Play>>,
     score: Option<Res<ScoreBoard>>,
-    ball: Query<&Transform, With<Baseball>>,
+    ball: Query<(&Transform, &Velocity), With<Baseball>>,
 ) {
     if *state.get() != GameState::Playing {
         return;
@@ -82,10 +83,13 @@ fn scripted_drive(
         Phase::PrePitch => {
             intents.get_mut(score.fielding_team()).action = true;
         }
+        // Home presses so the bat meets the ball just before the ideal
+        // contact point (`bat_arrival_z`), not on the press frame.
         Phase::Pitch if score.batting_team() == Team::Home => {
-            if let Ok(t) = ball.single() {
+            if let Ok((t, v)) = ball.single() {
                 intents.home.aim = Vec2::new(0.0, 1.0);
-                if t.translation.z <= 0.45 && t.translation.z >= 0.0 {
+                let z = bat_arrival_z(t.translation.z, v.linvel.z);
+                if (0.0..=0.45).contains(&z) {
                     intents.home.action = true;
                 }
             }

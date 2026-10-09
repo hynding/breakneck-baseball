@@ -12,9 +12,10 @@
 mod common;
 
 use bevy::prelude::*;
+use bevy_rapier3d::prelude::Velocity;
 
 use breakneck_baseball::game::ball::Baseball;
-use breakneck_baseball::game::flow::{Phase, Play};
+use breakneck_baseball::game::flow::{Phase, Play, bat_arrival_z};
 use breakneck_baseball::game::input::Intents;
 use breakneck_baseball::game::rules::Bases;
 use breakneck_baseball::game::runner::Runner;
@@ -87,11 +88,12 @@ fn take_strikes(intents: &mut Intents, play: &Play, fielding: breakneck_baseball
 }
 
 /// Pitch a centre changeup and top it late, sprayed at the first baseman — a
-/// fair grounder with a set fielder waiting on it.
+/// fair grounder with a set fielder waiting on it. The press is timed off
+/// where the bat *meets* the ball (`bat_arrival_z`), not the ball's current z.
 fn top_a_grounder(
     intents: &mut Intents,
     play: &Play,
-    ball: &Query<&Transform, With<Baseball>>,
+    ball: &Query<(&Transform, &Velocity), With<Baseball>>,
     fielding: breakneck_baseball::game::Team,
     batting: breakneck_baseball::game::Team,
 ) {
@@ -102,8 +104,8 @@ fn top_a_grounder(
             intent.action = true;
         }
         Phase::Pitch => {
-            if let Ok(t) = ball.single() {
-                let z = t.translation.z;
+            if let Ok((t, v)) = ball.single() {
+                let z = bat_arrival_z(t.translation.z, v.linvel.z);
                 if (-0.1..=0.05).contains(&z) {
                     // A low ball up the middle that gets down and stays live
                     // (fielded and thrown, not lined straight at a fielder for
@@ -131,7 +133,7 @@ fn drive_forced(
     play: Option<Res<Play>>,
     score: Option<Res<ScoreBoard>>,
     mut intents: ResMut<Intents>,
-    ball: Query<&Transform, With<Baseball>>,
+    ball: Query<(&Transform, &Velocity), With<Baseball>>,
 ) {
     if *state.get() != GameState::Playing {
         return;
@@ -184,7 +186,7 @@ fn drive_two_out(
     play: Option<Res<Play>>,
     score: Option<Res<ScoreBoard>>,
     mut intents: ResMut<Intents>,
-    ball: Query<&Transform, With<Baseball>>,
+    ball: Query<(&Transform, &Velocity), With<Baseball>>,
 ) {
     if *state.get() != GameState::Playing {
         return;

@@ -14,9 +14,10 @@
 mod common;
 
 use bevy::prelude::*;
+use bevy_rapier3d::prelude::Velocity;
 
 use breakneck_baseball::game::ball::Baseball;
-use breakneck_baseball::game::flow::{Phase, Play};
+use breakneck_baseball::game::flow::{Phase, Play, bat_arrival_z};
 use breakneck_baseball::game::input::Intents;
 use breakneck_baseball::game::roster::PlayerIdentity;
 use breakneck_baseball::game::rules::Bases;
@@ -89,15 +90,15 @@ fn expect_stage(app: &mut App, stage: usize, what: &str, milestone: impl FnMut(&
 // ── Scenario 1: HBP → SB → CS → HBP → force outs → HBP → hit-and-run ─────────
 
 /// Per-stage intents. The pitching side always initiates from PrePitch; the
-/// batting side arms steals in the windup and times its swings off the live
-/// ball position.
+/// batting side arms steals in the windup and times its swings off where the
+/// bat will meet the live ball (`bat_arrival_z`).
 fn drive_scenario(
     stage: Res<Stage>,
     state: Res<State<GameState>>,
     play: Option<Res<Play>>,
     score: Option<Res<ScoreBoard>>,
     mut intents: ResMut<Intents>,
-    ball: Query<&Transform, With<Baseball>>,
+    ball: Query<(&Transform, &Velocity), With<Baseball>>,
 ) {
     if *state.get() != GameState::Playing {
         return;
@@ -110,7 +111,8 @@ fn drive_scenario(
     let fielding = score.fielding_team();
     let batting = score.batting_team();
 
-    // (pitch aim, batter arms a steal?, batter swing window on ball z)
+    // (pitch aim, batter arms a steal?, batter swing window on the z where
+    // the bat meets the ball)
     let (pitch_aim, arm_steal, swing) = match stage.0 {
         // Top of the 1st: Home pitches to Away.
         // S0: full-inside changeup plunks the batter.
@@ -148,10 +150,10 @@ fn drive_scenario(
             intents.get_mut(batting).aim = Vec2::new(0.0, -1.0);
         }
         Phase::Pitch => {
-            if let (Some((z_min, z_max, aim)), Ok(t)) = (swing, ball.single()) {
+            if let (Some((z_min, z_max, aim)), Ok((t, v))) = (swing, ball.single()) {
                 let intent = intents.get_mut(batting);
                 intent.aim = aim;
-                let z = t.translation.z;
+                let z = bat_arrival_z(t.translation.z, v.linvel.z);
                 if z >= z_min && z <= z_max {
                     intent.action = true;
                 }
@@ -230,14 +232,15 @@ fn hbp_steals_force_outs_and_hit_and_run() {
 // ── Scenario 2: dropped third strike ─────────────────────────────────────────
 
 /// The pitcher spins curveballs; the batter flails at each one while it is
-/// far out of reach (a swinging strike). Strike three on a curve with first
-/// base open gets away — the batter reaches.
+/// far out of reach — the bat comes through with the ball still five metres
+/// out (a swinging strike). Strike three on a curve with first base open
+/// gets away — the batter reaches.
 fn drive_whiffs(
     state: Res<State<GameState>>,
     play: Option<Res<Play>>,
     score: Option<Res<ScoreBoard>>,
     mut intents: ResMut<Intents>,
-    ball: Query<&Transform, With<Baseball>>,
+    ball: Query<(&Transform, &Velocity), With<Baseball>>,
 ) {
     if *state.get() != GameState::Playing {
         return;
@@ -254,8 +257,8 @@ fn drive_whiffs(
             intent.action = true;
         }
         Phase::Pitch => {
-            if let Ok(t) = ball.single() {
-                if t.translation.z > 5.0 {
+            if let Ok((t, v)) = ball.single() {
+                if bat_arrival_z(t.translation.z, v.linvel.z) > 5.0 {
                     intents.get_mut(score.batting_team()).action = true;
                 }
             }

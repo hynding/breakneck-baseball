@@ -419,3 +419,18 @@ the probe that now guards it.
     live build (SWING & MISS pill + EARLY stamp + MPH, OUT 1/2/3 follow-ups, the wipe, the
     walk-up card all appear after spawning hidden) and by opening the pause board and the
     settings screen. Landed on top of the Bevy 0.17 merge.
+106. [x] A swing should be *seen* before the ball leaves the bat or the call is made (SMB3's
+    batting beat). — The press-frame judgement is gone: a press *starts* the swing
+    (`Play::pitch.swing`), and `flow::pitch_live` judges it `flow::SWING_CONTACT_SECS` (0.15 s)
+    later when the bat comes through the zone — pinned to the authored `BatterSwing` clip's
+    contact frame (`animation::BATTER_SWING_CONTACT_FRACTION`, unit-tested against the
+    constant). A hit leaves the bat on that frame; the 0.25 s plate hold now runs from there,
+    so the whole swing is on screen before the cut to the ball. A whiff stashes its timing
+    (`Play::pitch.whiff`) and fires its `ContactEvent` + strike call together at the take
+    trigger (ball past `late_swing_z`, into the mitt), so bat-through → ball-in-glove → STRIKE
+    plays in order and the EARLY/LATE stamp lands with the text for the whole beat. The CPU
+    (`ai.rs`), the Director's `PlateEta`, and the Meter's forced whiff all press one startup
+    ahead via `swing_dt_at_contact_ms` / `bat_arrival_z`, so their realized timing at the bat
+    is unchanged and `balance_sim` is unmoved; every press-window e2e was moved to the same
+    helper. New `tests/e2e_swing_startup.rs` pins press → contact latency and the whiff's
+    call-after-crossing.

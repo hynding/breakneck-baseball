@@ -7,11 +7,12 @@
 mod common;
 
 use bevy::prelude::*;
+use bevy_rapier3d::prelude::Velocity;
 
 use breakneck_baseball::game::animation::{AnimClip, Playing};
 use breakneck_baseball::game::ball::Baseball;
 use breakneck_baseball::game::camera::{BroadcastRig, Shot};
-use breakneck_baseball::game::flow::{CURTAIN_SECS, Phase, Play};
+use breakneck_baseball::game::flow::{CURTAIN_SECS, Phase, Play, bat_arrival_z};
 use breakneck_baseball::game::input::Intents;
 use breakneck_baseball::game::player::{BATTER_STAND_X, Batter, PlateUmpire};
 use breakneck_baseball::game::ui::{BannerText, CurtainRoot, WalkUpLine, WalkUpText, WipeLabel};
@@ -27,15 +28,16 @@ const MAX_FRAMES: u64 = 30_000;
 struct Dismiss(bool);
 
 /// Pitches whenever the ball is held, swings far too early at every pitch
-/// (three whiffs = a strikeout), and, when told to, presses the batting
-/// side's action to dismiss the walk-up.
+/// (the bat comes through with the ball still five metres out; three whiffs
+/// = a strikeout), and, when told to, presses the batting side's action to
+/// dismiss the walk-up.
 fn drive(
     state: Res<State<GameState>>,
     dismiss: Res<Dismiss>,
     play: Option<Res<Play>>,
     score: Option<Res<ScoreBoard>>,
     mut intents: ResMut<Intents>,
-    ball: Query<&Transform, With<Baseball>>,
+    ball: Query<(&Transform, &Velocity), With<Baseball>>,
 ) {
     if *state.get() != GameState::Playing {
         return;
@@ -55,8 +57,8 @@ fn drive(
             }
         }
         Phase::Pitch => {
-            if let Ok(t) = ball.single() {
-                if (5.0..=6.0).contains(&t.translation.z) {
+            if let Ok((t, v)) = ball.single() {
+                if (5.0..=6.0).contains(&bat_arrival_z(t.translation.z, v.linvel.z)) {
                     intents.get_mut(batting).action = true;
                 }
             }

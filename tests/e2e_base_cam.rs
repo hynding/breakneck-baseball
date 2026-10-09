@@ -7,11 +7,12 @@
 mod common;
 
 use bevy::prelude::*;
+use bevy_rapier3d::prelude::Velocity;
 
 use breakneck_baseball::game::animation::{AnimClip, Playing};
 use breakneck_baseball::game::ball::Baseball;
 use breakneck_baseball::game::camera::{BroadcastRig, Shot};
-use breakneck_baseball::game::flow::{Phase, Play};
+use breakneck_baseball::game::flow::{Phase, Play, bat_arrival_z};
 use breakneck_baseball::game::input::Intents;
 use breakneck_baseball::game::player::Umpire;
 use breakneck_baseball::game::variant::Ruleset;
@@ -23,13 +24,14 @@ const MAX_FRAMES: u64 = 20_000;
 
 /// Pitch a centre changeup and top it late up the middle — the same low
 /// single `e2e_baserunning_breaks` uses: a fair grounder a set fielder
-/// gathers and throws.
+/// gathers and throws. The press lands where the bat *meets* the ball
+/// (`bat_arrival_z`), not where the ball is on the press frame.
 fn drive(
     state: Res<State<GameState>>,
     play: Option<Res<Play>>,
     score: Option<Res<ScoreBoard>>,
     mut intents: ResMut<Intents>,
-    ball: Query<&Transform, With<Baseball>>,
+    ball: Query<(&Transform, &Velocity), With<Baseball>>,
 ) {
     if *state.get() != GameState::Playing {
         return;
@@ -48,8 +50,8 @@ fn drive(
             intent.action = true;
         }
         Phase::Pitch => {
-            if let Ok(t) = ball.single() {
-                if (-0.1..=0.05).contains(&t.translation.z) {
+            if let Ok((t, v)) = ball.single() {
+                if (-0.1..=0.05).contains(&bat_arrival_z(t.translation.z, v.linvel.z)) {
                     let intent = intents.get_mut(batting);
                     intent.aim = Vec2::new(0.0, -1.0);
                     intent.action = true;
@@ -168,7 +170,7 @@ fn drive_fly(
     play: Option<Res<Play>>,
     score: Option<Res<ScoreBoard>>,
     mut intents: ResMut<Intents>,
-    ball: Query<&Transform, With<Baseball>>,
+    ball: Query<(&Transform, &Velocity), With<Baseball>>,
 ) {
     if *state.get() != GameState::Playing {
         return;
@@ -183,8 +185,8 @@ fn drive_fly(
             intents.get_mut(score.fielding_team()).action = true;
         }
         Phase::Pitch => {
-            if let Ok(t) = ball.single() {
-                if (-0.3..=0.3).contains(&t.translation.z) {
+            if let Ok((t, v)) = ball.single() {
+                if (-0.3..=0.3).contains(&bat_arrival_z(t.translation.z, v.linvel.z)) {
                     intents.get_mut(score.batting_team()).action = true;
                 }
             }

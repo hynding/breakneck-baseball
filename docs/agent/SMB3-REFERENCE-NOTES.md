@@ -387,6 +387,7 @@ by up to a second, so time beats *within* one extraction only.
 | C — cut-based shots | done, TADA 98 | `camera::Shot`, `pick_shot`, fielder/base cams, 0.25 s hold |
 | D — walk-up | done, TADA 99 + 102 | `Play::walkup`, `Shot::WalkUp`, `ui/walkup.rs`; the themed wipe (`WIPE_SECS`, `WipeLabel`) before it |
 | E — strikeout / score | done, TADA 100 + 103 | `Shot::ReactionCam`, `PlayBanner::follow_up` score and out-count lines, the batter's walk-off on `MoveIntent`, umpire clips (`UmpStrike`/`UmpPunchOut`/`UmpSafe`) signalling every call |
+| F — swing startup (2026-09-28) | done, TADA 106 | A press *starts* the swing; the ball is judged `flow::SWING_CONTACT_SECS` (0.15 s, the clip's contact frame) later when the bat comes through, so the swing is seen before the ball leaves it. A whiff's strike is called once the ball is into the mitt (the take trigger), never on the press frame — §2.3's bat-passes → ball-crosses → STRIKE order. The CPU, Director and Meter press one startup ahead (`swing_dt_at_contact_ms`), so the economy is unmoved. |
 
 Nothing from the plan is left open. TODO 105 (the balance harness was pacing-sensitive because
 the CPU noise read the wall clock) was fixed by reseeding per pitch (TADA 101), which is what

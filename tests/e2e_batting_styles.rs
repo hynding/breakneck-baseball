@@ -38,7 +38,7 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::Velocity;
 
 use breakneck_baseball::game::ball::{Baseball, HitEvent};
-use breakneck_baseball::game::flow::{ContactEvent, Phase, Play};
+use breakneck_baseball::game::flow::{ContactEvent, Phase, Play, swing_dt_at_contact_ms};
 use breakneck_baseball::game::input::Intents;
 use breakneck_baseball::game::rules::ContactQuality;
 use breakneck_baseball::game::settings::{BattingStyle, Settings};
@@ -53,13 +53,14 @@ const STAGE_FRAMES: u64 = 15_000;
 /// The swing-timing error (ms) the release stage aims for: comfortably inside
 /// the tuned solid window (90 ms) so the graded quality beats `FoulTip`. The
 /// meter fires the frame the button is released, so the batter releases the
-/// first frame the ball's live `dt` reaches this band.
+/// first frame the timing the bat *would arrive with* (`swing_dt_at_contact_ms`)
+/// reaches this band.
 const RELEASE_DT_MS: f32 = -80.0;
 
 /// The swing-timing target (ms) the PCI stages press at: near the plate
 /// (`dt ≈ 0`) so timing is *not* the limiting factor — stage 3's degraded grade
 /// is then attributable to the cursor distance alone, and stage 4's dead-center
-/// swing lands the top grade. Same live-`dt` band read the meter release uses.
+/// swing lands the top grade. Same arrival-`dt` band read the meter release uses.
 const PCI_PRESS_DT_MS: f32 = -6.0;
 
 /// How many staged at-bats run in total (3 meter + 2 PCI).
@@ -109,12 +110,13 @@ fn drive(
                 intents.get_mut(batting).action = true;
             }
             // Release swing: hold to load while the ball is still out front,
-            // then drop the button the first frame the live timing reaches the
-            // solid band — which fires the meter's swing that same frame.
+            // then drop the button the first frame the timing the bat would
+            // arrive with reaches the solid band — which fires the meter's
+            // swing that same frame.
             1 => {
                 let in_band = ball.single().is_ok_and(|(t, v)| {
                     let vz = v.linvel.z.min(-f32::EPSILON);
-                    let dt = 1000.0 * t.translation.z / vz; // == flow::swing_dt_ms
+                    let dt = swing_dt_at_contact_ms(t.translation.z, vz);
                     dt >= RELEASE_DT_MS
                 });
                 intents.get_mut(batting).action_held = !in_band;
@@ -145,13 +147,13 @@ fn drive(
     }
 }
 
-/// True the first frame the ball's live swing timing reaches [`PCI_PRESS_DT_MS`]
-/// (recomputed here exactly like `flow::swing_dt_ms`), so a PCI press lands near
-/// the plate rather than at a fixed z.
+/// True the first frame the timing a swing pressed now would arrive with
+/// (`flow::swing_dt_at_contact_ms`) reaches [`PCI_PRESS_DT_MS`], so the *bat*
+/// meets the ball near the plate rather than the press landing at a fixed z.
 fn in_press_band(ball: &Query<(&Transform, &Velocity), With<Baseball>>) -> bool {
     ball.single().is_ok_and(|(t, v)| {
         let vz = v.linvel.z.min(-f32::EPSILON);
-        let dt = 1000.0 * t.translation.z / vz;
+        let dt = swing_dt_at_contact_ms(t.translation.z, vz);
         dt >= PCI_PRESS_DT_MS
     })
 }

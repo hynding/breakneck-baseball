@@ -38,7 +38,8 @@ mod pitch;
 mod result;
 mod umpire;
 
-pub(crate) use pitch::{late_swing_z, swing_dt_ms};
+pub(crate) use pitch::late_swing_z;
+pub use pitch::{SWING_CONTACT_SECS, bat_arrival_z, swing_dt_at_contact_ms};
 
 // ── Tuning constants ──────────────────────────────────────────────────────────
 
@@ -226,6 +227,16 @@ struct PitchState {
     /// The kind of the pitch currently in flight (set at release). Drives the
     /// dropped-third-strike and steal resolutions.
     kind: Option<rules::PitchKind>,
+    /// A swing the batter has committed to but whose bat hasn't come
+    /// through the zone yet: the press starts the swing, and the judgement
+    /// waits [`pitch::SWING_CONTACT_SECS`] for the bat to arrive — so the
+    /// swing is *seen* before the ball leaves it (or misses it).
+    swing: Option<pitch::PendingSwing>,
+    /// The bat came through and missed (the judged timing error, ms): the
+    /// strike is called only once the ball has crossed the plate into the
+    /// mitt — the same trigger a take is judged on — so the miss is seen
+    /// before it is announced.
+    whiff: Option<f32>,
     /// The last pitch ended untouched (take / swing-through): the ball is on
     /// its way to the catcher's mitt, and [`catcher_receives`] may stop it.
     taken: bool,

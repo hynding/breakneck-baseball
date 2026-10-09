@@ -11,7 +11,9 @@ use bevy_rapier3d::prelude::Velocity;
 
 use crate::game::ScoreBoard;
 use crate::game::ball::Baseball;
-use crate::game::flow::{LeadState, Phase, Play, late_swing_z, swing_dt_ms};
+use crate::game::flow::{
+    LeadState, Phase, Play, bat_arrival_z, late_swing_z, swing_dt_at_contact_ms,
+};
 use crate::game::input::{Controllers, InputSource, Intents};
 use crate::game::rules::{Bases, GRAVITY, steal_candidate};
 use crate::game::scenario::PitchOverride;
@@ -404,9 +406,15 @@ pub fn cpu_offense(
     // never swung through. Committing out here lets an early draw fire while
     // the ball is still unreachable, i.e. a genuine timing whiff. `decision_z`
     // carries a little skill-scaled jitter so the commit depth varies.
+    // Every depth here is where the *bat* would meet the ball if pressed
+    // now (`bat_arrival_z`): the swing has a startup (`flow::
+    // SWING_CONTACT_SECS`), so the CPU presses that much ahead, and its
+    // realized timing at the bat is exactly the drawn target — the balance
+    // economy (`tests/balance_sim.rs`) doesn't move with the startup.
+    let arrival_z = bat_arrival_z(pos.z, ball_vel.linvel.z);
     if cpu.will_swing.is_none() {
         let decision_z = 6.5 + cpu.noise(3.1) * 1.5;
-        if pos.z > decision_z {
+        if arrival_z > decision_z {
             intents.get_mut(team).action = false;
             return;
         }
@@ -440,17 +448,19 @@ pub fn cpu_offense(
         }
     }
 
-    // Committed to swinging: press when the live timing error reaches the drawn
-    // target, OR at the last frame the swing can still connect (`late_swing_z`,
-    // where the error equals `foul_ms`) — whichever comes first. `swing_dt_ms`
-    // rises from negative (ball out front) through zero toward positive (past
-    // the plate). An *early* target fires while the ball is still beyond
+    // Committed to swinging: press when the timing error *the bat will arrive
+    // with* (`swing_dt_at_contact_ms` — the press-time read plus the swing's
+    // startup) reaches the drawn target, OR at the last frame the swing can
+    // still connect (the bat arriving at `late_swing_z`, where the error
+    // equals `foul_ms`) — whichever comes first. The error rises from negative
+    // (ball out front) through zero toward positive (past the plate). An
+    // *early* target fires while the bat would still arrive beyond
     // `SWING_EARLY_Z` → a real swing-through (Whiff). A *late* target fires at
     // the reachable-late edge → an honest FoulTip/Whiff, instead of the ball
     // reaching the take judgment first and being scored a called strike (which
     // is what used to make the CPU's K take-driven rather than whiff-driven).
-    let dt_ms = swing_dt_ms(pos.z, ball_vel.linvel.z);
-    let past_late_edge = pos.z <= late_swing_z(ball_vel.linvel.z, rules.batting.foul_ms);
+    let dt_ms = swing_dt_at_contact_ms(pos.z, ball_vel.linvel.z);
+    let past_late_edge = arrival_z <= late_swing_z(ball_vel.linvel.z, rules.batting.foul_ms);
     if !ready_to_press(dt_ms, target_dt) && !past_late_edge {
         intents.get_mut(team).action = false;
         return;

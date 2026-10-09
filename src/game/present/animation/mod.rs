@@ -93,6 +93,14 @@ pub enum AnimClip {
     CelebrateBatFlip,
 }
 
+/// Where in `BatterSwing`'s play-through the bat comes through the zone:
+/// the authored clip (tools/build_player.py) whips the arms across between
+/// f = 0.3 and 0.4, and the blocky fallback (`poses.rs`) peaks its sweep at
+/// 0.5. Flow judges the swing `flow::SWING_CONTACT_SECS` after the press,
+/// which is pinned to this fraction of the clip (see `mod.test.rs`) so the
+/// ball leaves the bat on the frame the bat visibly gets there.
+pub const BATTER_SWING_CONTACT_FRACTION: f32 = 0.35;
+
 impl AnimClip {
     /// Seconds one play-through lasts.
     pub fn duration(self) -> f32 {

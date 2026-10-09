@@ -96,6 +96,8 @@ pub(super) fn result_phase(
     play.pitch.gloved = false;
     play.pitch.pending = None;
     play.pitch.kind = None;
+    play.pitch.swing = None;
+    play.pitch.whiff = None;
     play.duel.armed = false;
     play.duel.big_jump = false;
     play.duel.window_lead = false;

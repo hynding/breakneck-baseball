@@ -13,9 +13,12 @@ use crate::game::settings::{BattingStyle, Settings};
 use crate::game::variant::Ruleset;
 use crate::game::{ScoreBoard, Team};
 
-/// One swing, decided this frame. The swing instant is implicit (the frame
-/// the command exists); `pci_offset` is the PCI cursor's zone-plane position
-/// at the press (world x / height y), `None` for Classic and Meter.
+/// One swing, decided this frame. The press instant is implicit (the frame
+/// the command exists) — the bat itself arrives a swing's startup later
+/// (`flow::SWING_CONTACT_SECS`), which is when the swing is graded;
+/// `pci_offset` is the PCI cursor's zone-plane position at the press
+/// (world x / height y), `None` for Classic and Meter.
+#[derive(Clone, Copy, Debug)]
 pub struct SwingInput {
     pub aim: Vec2,
     pub pci_offset: Option<Vec2>,
@@ -286,14 +289,15 @@ pub fn adapt_swings(
             }
         }
         // Hold the action to load the meter, release to swing. A release
-        // fires this frame's command; still holding once the ball crosses the
-        // late swing edge forces a swing that `pitch_live` grades a Whiff (the
-        // ball is already beyond `late_swing_z`, so the reachability gate
-        // catches it) — the spec's "held past the FoulTip window = a swinging
-        // whiff", with no new flow logic.
+        // fires this frame's command; still holding once the *bat* could no
+        // longer reach the ball (a swing pressed now would come through
+        // past the late swing edge) forces a swing that `pitch_live` grades
+        // a Whiff (the ball is beyond `late_swing_z` when the bat arrives,
+        // so the reachability gate catches it) — the spec's "held past the
+        // FoulTip window = a swinging whiff", with no new flow logic.
         BattingStyle::SwingMeter => {
             let ball_past = ball_q.single().is_ok_and(|(tf, vel)| {
-                tf.translation.z
+                crate::game::flow::bat_arrival_z(tf.translation.z, vel.linvel.z)
                     < crate::game::flow::late_swing_z(vel.linvel.z, rules.batting.foul_ms)
             });
             let was = meter.loading(team);
