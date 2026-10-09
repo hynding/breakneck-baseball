@@ -118,8 +118,8 @@ Beside the Coach `counts`/`recent`, every autoplay report carries:
 
 - `game` — `runs` {home, away}, `inning`, `top_of_inning`, `contact` (swing grades by
   `ContactQuality`), `home_runs_hit`, `fair_live`, `foul_live`;
-- `frames` — `count`, `p50_ms`/`p95_ms`/`p99_ms` (whole-ms buckets), `max_ms`: real
-  frame times while `Playing`.
+- `frames` — `count`, `p50_ms`/`p95_ms`/`p99_ms` (whole-ms buckets, saturating at 100),
+  `over_100ms`, `max_ms`: real frame times while `Playing`.
 
 Both reset at every game start, so an attract loop reports per game. Keep a report from
 `main` as the baseline and diff the summaries instead of eyeballing two runs:
@@ -135,9 +135,12 @@ sanity check (contact mix shifted? runs collapsed to 0–0?), not an exact match
 `balance_sim` stays the economy arbiter. A `frames.p95_ms` jump on the same machine and
 build profile is a real performance regression; hand it to the `bevy-perf` skill. In a cloud
 container there is no display for a native window, so run the wasm build in the
-pre-installed headless Chromium (Playwright) and read `localStorage['bb-coach-report']`;
-there `frames` measures software rendering, so only compare against a baseline from the
-same container.
+pre-installed headless Chromium (Playwright, `--enable-unsafe-swiftshader`) and read
+`localStorage['bb-coach-report']`. Software WebGL2 there is very slow. Measured 2026-10-09
+on the 4-core container: ~1 frame per 0.1–1.8 s, every frame in `over_100ms`. That is enough
+to prove boot → first pitch → graded contact and a populated report in ~4 minutes, but not
+to finish a game or say anything about frame pacing. Use the headless e2e suites and
+`balance_sim` for outcomes, and a real GPU (maintainer's Mac) for `frames`.
 
 ## The real-input smoke test
 
