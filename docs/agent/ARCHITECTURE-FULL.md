@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Toolchain (this machine)
 
-Rust is installed via Homebrew's rustup and is **not on the default PATH**. Prefix commands with:
+On macOS, Rust is installed via Homebrew's rustup and is **not on the default PATH**; prefix commands with the line below. Claude Code cloud sessions have cargo on PATH and are provisioned by `.claude/hooks/session-start.sh` (see CLAUDE.md → Toolchain).
 
 ```sh
 export PATH="/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$PATH"
 ```
 
-`wasm-bindgen-cli` must exactly match the `wasm-bindgen` version in `Cargo.lock` (currently 0.2.126). If `cargo update` bumps it, reinstall with `cargo binstall wasm-bindgen-cli --version <new-version> -y` (binstall = prebuilt, seconds; avoid plain `cargo install`).
+`wasm-bindgen-cli` must exactly match the `wasm-bindgen` version in `Cargo.lock` (currently 0.2.127). If `cargo update` bumps it, reinstall with `cargo binstall wasm-bindgen-cli --version <new-version> -y` (binstall = prebuilt, seconds; avoid plain `cargo install`).
 
 ## Commands
 

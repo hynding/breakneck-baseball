@@ -3,17 +3,25 @@
 Guidance for Claude Code in this repo. The full long-form architecture narrative lives in
 `docs/agent/ARCHITECTURE-FULL.md`; domain detail loads on demand via the skills listed below.
 
-## Toolchain (this machine)
+## Toolchain
 
-Rust is installed via Homebrew's rustup and is **not on the default PATH**. Prefix commands with:
+**macOS (the maintainer's machine):** Rust comes from Homebrew's rustup and is **not on the default
+PATH**. Prefix commands with:
 
 ```sh
 export PATH="/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$PATH"
 ```
 
+**Claude Code cloud sessions (Linux):** cargo is already on PATH, and `.claude/hooks/session-start.sh`
+provisions the container: it installs Bevy's system libraries, the wasm target and the matching
+`wasm-bindgen`, sets line-tables-only debug info, and warms `target/` in the background. Progress
+goes to `target/.session-warm.log`. A `cargo` command run meanwhile waits on the build lock and then
+reuses the result. A cold warm-up takes ~20–25 min on the 4-core container, so start with work that
+doesn't need cargo.
+
 `wasm-bindgen-cli` must exactly match the `wasm-bindgen` version in `Cargo.lock` (currently 0.2.127).
 If `cargo update` bumps it, reinstall with `cargo binstall wasm-bindgen-cli --version <new-version> -y`
-(binstall = prebuilt, seconds; avoid plain `cargo install`).
+(binstall = prebuilt, seconds; avoid plain `cargo install`). The cloud hook re-matches it each session.
 
 ## Commands
 
@@ -23,6 +31,8 @@ cargo run                            # native desktop build
 cargo run --features dev             # faster iteration: links Bevy as a dylib + .glb hot-reload
 cargo run --features "dev debug"     # + F1 in-game debug panel
 cargo test                           # unit tests + headless e2e (run after flow/rules/menu/input/ai changes)
+cargo test --lib                     # unit tests only — the fast inner loop
+cargo test --test e2e matrix::       # one e2e suite (every suite is a module of the one tests/e2e/ binary)
 cargo build --target wasm32-unknown-unknown   # web build (debug)
 wasm-bindgen --out-dir web/out --target web target/wasm32-unknown-unknown/debug/breakneck-baseball.wasm
 python3 -m http.server --directory web 8080   # serve, then open http://localhost:8080
@@ -100,10 +110,21 @@ Loaded on trigger from `.claude/skills/`; each SKILL.md says when.
 - `coach` — the always-on expectation checker: what it checks, tolerances, reading `CoachReport`, adding a check. Load when players misbehave or before touching `sim/fielding.rs`, `sim/runner.rs`, `sim/flow/`.
 - `auto-playtest` — the Director, `.ron` scripts, the mode matrix, and self-driving native/wasm runs. Load for "playtest", "verify 2 player", "test PCI/Meter", or when adding an input device or batting adapter.
 - `run-web` — build, serve, and verify the browser build.
-- `rust-skills` — generic Rust guidelines (265 rules); use for any Rust authoring/review.
+- `rust-skills` — generic Rust guidelines (265 rules, one file each under `.agents/skills/rust-skills/rules/`) plus where this crate departs from them. Load for reviews, refactors, `unsafe`, or hot-path work — not for routine edits that follow the surrounding code.
 
 Long-form narrative (how every subsystem fits together): `docs/agent/ARCHITECTURE-FULL.md`.
-The user's work queue is `TODO.md`; completed items move to `TADA.md`.
+The user's work queue is `TODO.md` — its "Start here" table lists what an agent can close alone,
+each with a done-when check; completed items move to `TADA.md`.
+
+## Agent workflow
+
+- Cargo serializes every command on the `target/` lock. Overlap one cargo command with non-cargo work
+  (reading, docs, browser checks), not with a second cargo command — that one only queues.
+- Multi-session work (e.g. TODO 29's Bevy migrations) goes in a git worktree so the main checkout stays
+  usable. A worktree has its own `target/`, so budget a cold build for it.
+- Ground claims in the measuring tools rather than prose: `balance_sim` for the economy, the Coach for
+  player behaviour, `model_contract` for the rig, and the autoplay report's `game`/`frames` summary for
+  run-to-run comparisons (auto-playtest skill).
 
 ## Dual-target constraints
 

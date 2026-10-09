@@ -20,7 +20,7 @@ model, and edge-specific rules: `reference/bands.md` (read it before touching an
    in-game and offers a **paste-ready diff export** to bring the numbers back to code.
 3. **Run the sim:**
    ```sh
-   export PATH="/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$PATH"
+   export PATH="/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$PATH"   # macOS only
    cargo test --test balance_sim            # N=40, ~1.5 min
    cargo test --test balance_sim -- --ignored   # N=100 deep-tune variant, several minutes
    ```

@@ -112,6 +112,33 @@ every ~10 s; the `COACH_REPORT` console line lands at game end);
 screenshot at findings and at the `playtest-review` skill's moment list.
 Screenshots/reports go under `playtest-artifacts/` (gitignored).
 
+## Comparing runs (the report as data)
+
+Beside the Coach `counts`/`recent`, every autoplay report carries:
+
+- `game` — `runs` {home, away}, `inning`, `top_of_inning`, `contact` (swing grades by
+  `ContactQuality`), `home_runs_hit`, `fair_live`, `foul_live`;
+- `frames` — `count`, `p50_ms`/`p95_ms`/`p99_ms` (whole-ms buckets), `max_ms`: real
+  frame times while `Playing`.
+
+Both reset at every game start, so an attract loop reports per game. Keep a report from
+`main` as the baseline and diff the summaries instead of eyeballing two runs:
+
+```sh
+jq -S '{game, frames, counts}' baseline.json > /tmp/a.json
+jq -S '{game, frames, counts}' coach-report.json > /tmp/b.json
+diff /tmp/a.json /tmp/b.json
+```
+
+Native and wasm runs step on the real clock, so `game` differs run to run. Read it as a
+sanity check (contact mix shifted? runs collapsed to 0–0?), not an exact match;
+`balance_sim` stays the economy arbiter. A `frames.p95_ms` jump on the same machine and
+build profile is a real performance regression; hand it to the `bevy-perf` skill. In a cloud
+container there is no display for a native window, so run the wasm build in the
+pre-installed headless Chromium (Playwright) and read `localStorage['bb-coach-report']`;
+there `frames` measures software rendering, so only compare against a baseline from the
+same container.
+
 ## The real-input smoke test
 
 Everything above goes through the Director seam by design; one thin check
