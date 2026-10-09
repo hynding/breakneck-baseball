@@ -20,7 +20,8 @@ stamp=target/.claude-clippy-clean
 if [ -f "$stamp" ] && [ -z "$(find src tests -name '*.rs' -newer "$stamp" -print -quit 2>/dev/null)" ]; then
   exit 0
 fi
-if pgrep -f 'session-warm-build' >/dev/null 2>&1; then
+warm_pid=$(cat target/.session-warm.pid 2>/dev/null)
+if [ -n "$warm_pid" ] && grep -qa session-warm "/proc/$warm_pid/cmdline" 2>/dev/null; then
   echo "clippy skipped: the session-start warm build is still running (target/.session-warm.log)"
   exit 0
 fi
