@@ -52,7 +52,20 @@ if [ -n "$want" ] && [ "$want" != "$have" ]; then
   rm -rf "$tmp"
 fi
 
-# 4. Line tables only for debug builds (same trade as ci.yml): panics keep
+# 4. cargo-nextest (`.config/nextest.toml`): runs every test binary's tests in
+#    one pool. Prebuilt release binary, like wasm-bindgen above.
+if ! cargo nextest --version >/dev/null 2>&1; then
+  log "installing cargo-nextest"
+  tmp=$(mktemp -d)
+  if curl -sSfL https://get.nexte.st/latest/linux | tar xz -C "$tmp"; then
+    install -m 755 "$tmp/cargo-nextest" "$HOME/.cargo/bin/"
+  else
+    log "cargo-nextest download failed; \`cargo test\` still works"
+  fi
+  rm -rf "$tmp"
+fi
+
+# 5. Line tables only for debug builds (same trade as ci.yml): panics keep
 #    file:line, the debug tree shrinks several-fold, and the container's disk
 #    allowance survives a full test build. User-level cargo config rather than
 #    an env var, so every cargo invocation (Bash, the Stop hook's clippy, the
@@ -67,7 +80,7 @@ debug = "line-tables-only"
 TOML
 fi
 
-# 5. Warm the build tree in the background so the first test run starts from
+# 6. Warm the build tree in the background so the first test run starts from
 #    compiled dependencies. Detached: the session doesn't wait on it, and a
 #    `cargo` command run meanwhile simply blocks on the build-directory lock
 #    and then reuses the result. Progress: target/.session-warm.log.

@@ -86,14 +86,23 @@ jobs:
       - name: Format check
         run: cargo fmt --check
 
-      - name: Unit tests
-        run: cargo test
+      # cargo-nextest (.config/nextest.toml) runs every test binary's tests in
+      # one pool, one process per test: 454 s for the full suite against 1289 s
+      # under `cargo test` on a 4-core box (2026-10-09). Prebuilt binary, the
+      # same source the cloud session hook uses. nextest skips doctests; none
+      # exist today — add `cargo test --doc` here if that changes.
+      - name: Install cargo-nextest
+        run: curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C "${CARGO_HOME:-$HOME/.cargo}/bin"
+
+      - name: Tests (unit + e2e + balance sim)
+        run: cargo nextest run --no-fail-fast
 
       # The creator stage only exists under the `debug` feature, so its e2e
-      # suite is invisible to the plain run above. It went red unnoticed at the
-      # Bevy 0.17 upgrade (TADA 107); this keeps it in the gate.
+      # suite is invisible to the run above. It went red unnoticed at the
+      # Bevy 0.17 upgrade (TADA 107); this keeps it in the gate. Quoted: a
+      # trailing `::` is a YAML mapping indicator.
       - name: Creator e2e (debug feature)
-        run: "cargo test --features debug --test e2e creator::"
+        run: "cargo nextest run --features debug --test e2e creator::"
 
       # Headroom after the largest compile, so a disk-pressure regression shows
       # up in the log before it becomes another dead runner.

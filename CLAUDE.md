@@ -23,6 +23,9 @@ doesn't need cargo.
 If `cargo update` bumps it, reinstall with `cargo binstall wasm-bindgen-cli --version <new-version> -y`
 (binstall = prebuilt, seconds; avoid plain `cargo install`). The cloud hook re-matches it each session.
 
+`cargo-nextest` is the test runner (`.config/nextest.toml`); CI and the cloud hook install it, on the
+Mac it's `cargo binstall cargo-nextest -y`. Plain `cargo test` still works and must keep working.
+
 ## Commands
 
 ```sh
@@ -30,9 +33,10 @@ cargo check                          # fast compile check (~45 s cold, seconds w
 cargo run                            # native desktop build
 cargo run --features dev             # faster iteration: links Bevy as a dylib + .glb hot-reload
 cargo run --features "dev debug"     # + F1 in-game debug panel
-cargo test                           # unit tests + headless e2e (run after flow/rules/menu/input/ai changes)
+cargo nextest run                    # full suite: unit + headless e2e + balance sim (~7.5 min on 4 cores; run after flow/rules/menu/input/ai changes)
+cargo test                           # the same suite without nextest, ~3× slower (binaries run one after another)
 cargo test --lib                     # unit tests only — the fast inner loop
-cargo test --test e2e matrix::       # one e2e suite (every suite is a module of the one tests/e2e/ binary)
+cargo nextest run --test e2e matrix::   # one e2e suite (every suite is a module of the one tests/e2e/ binary)
 cargo build --target wasm32-unknown-unknown   # web build (debug)
 wasm-bindgen --out-dir web/out --target web target/wasm32-unknown-unknown/debug/breakneck-baseball.wasm
 python3 -m http.server --directory web 8080   # serve, then open http://localhost:8080
@@ -82,7 +86,7 @@ Violating any of these breaks the build, breaks wasm, or corrupts gameplay state
   in this repo means "split into production submodules", which is why tests get a sibling file
   rather than `<name>/tests.rs`.
 - `tests/e2e/` suites inject input from the `DriveGame` schedule, never from the test body — the input plugin's `PreUpdate` clear wipes presses made outside it (`tests/common/mod.rs`). Exemption: raw *window events* (`TouchInput`) are double-buffered and survive to `InputSystem`, so `tests/e2e/touch_pipeline.rs` sends them from the test body; the rule is about `ButtonInput` presses.
-- Every `tests/e2e/` suite is a module of one test binary, so they share a process: never `std::env::set_var`/`remove_var` or otherwise change process-global state there. A test that must gets its own binary (`tests/e2e_settings.rs`; `tests/balance_sim.rs` stands alone because it pins Bevy's process-global task pools).
+- Every `tests/e2e/` suite is a module of one test binary, so under `cargo test` they share a process (nextest isolates each test, but the rule holds for both runners): never `std::env::set_var`/`remove_var` or otherwise change process-global state there. A test that must gets its own binary (`tests/e2e_settings.rs`; `tests/balance_sim.rs` stands alone because it pins Bevy's process-global task pools).
 - Scripted e2e batted balls must be sprayed at a *set* fielder's spot — the steal window means the defense is back in position before every pitch (`tests/common/mod.rs` helpers).
 - Roster names are A–Z only — jersey lettering uses a built-in 5×7 bitmap font (`src/game/present/jersey.rs`; guards: `roster::tests::jersey_names_fit_the_procedural_font`, `tests/e2e/appearance_contract.rs`).
 - Never hand-export the player model from the Blender GUI — `tools/export_glb.py` pins the settings the runtime loader and `tests/e2e/model_contract.rs` depend on; always run the build/export script pair.
