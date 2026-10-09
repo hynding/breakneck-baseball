@@ -123,7 +123,8 @@ each with a done-when check; completed items move to `TADA.md`.
   `cargo test` releases the lock once its binaries start running, so the next compile can overlap a
   long test run. Overlap non-cargo work (reading, docs, browser checks) freely.
 - Multi-session work (e.g. TODO 29's Bevy migrations) goes in a git worktree so the main checkout stays
-  usable. A worktree has its own `target/`, so budget a cold build for it.
+  usable. A worktree gets its own `target/` (a cold build), unless you point `CARGO_TARGET_DIR` at the
+  main checkout's `target/` to reuse compiled dependencies; its builds then share that lock.
 - Ground claims in the measuring tools rather than prose: `balance_sim` for the economy, the Coach for
   player behaviour, `model_contract` for the rig, and the autoplay report's `game`/`frames` summary for
   run-to-run comparisons (auto-playtest skill).

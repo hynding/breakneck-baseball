@@ -45,7 +45,8 @@ comprehensive answer; it covers unit + e2e + balance.
 Measured 2026-10-09 in a 4-core cloud container (expect a fast Mac to be ~3× quicker): full
 `cargo test` 21.5 min run time (`balance_sim` 9 min, the `e2e` binary 12.5 min with its suites in
 parallel; the slowest suites are `fielder_spots`, `batter_runs`, `cpu_timing`, `matrix`). After a
-`src/` edit, the test build takes ~30 s. A cold build is ~16 min.
+one-line `src/` edit, every test binary is rebuilt in ~11 s (it was ~250 s when each suite was its
+own binary). A cold build is ~16 min.
 
 ## Guarding suites by area (`cargo test --test e2e <module>::`)
 
