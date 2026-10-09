@@ -18,9 +18,13 @@ have cargo on PATH; see CLAUDE.md → Toolchain).
 | `tests/balance_sim.rs` | the offensive-economy arbiter | pins single-threaded Bevy task pools, which are process-global |
 | `tests/e2e_settings.rs` | settings-store round trip | sets `BREAKNECK_SETTINGS_PATH`, which is process-global |
 
-Filter to one suite with its module path: `cargo test --test e2e matrix::`, or a single test with
-`cargo test --test e2e matrix::cpu_vs_cpu_ignores_style`. Several suites in one run go after
-`--`: `cargo test --test e2e -- matrix:: cpu:: coach::` (a test matching any filter runs).
+**Runner: `cargo nextest run`** (`.config/nextest.toml`): one process per test, every binary's
+tests in one pool. `cargo test` runs the same tests and must keep working, but its binaries run one
+after another and its e2e apps share one process-global task pool, so it is ~3× slower.
+
+Filter to one suite with its module path: `cargo nextest run --test e2e matrix::`, or a single test
+with `cargo nextest run --test e2e matrix::cpu_vs_cpu_ignores_style`. Several filters are OR'd:
+`cargo nextest run --test e2e matrix:: cpu:: coach::`.
 
 ## Routing table
 
@@ -30,25 +34,26 @@ Filter to one suite with its module path: `cargo test --test e2e matrix::`, or a
 | Physics, rendering, or any `present/` code | `cargo check --target wasm32-unknown-unknown` **as well** | the crate ships dual-target; wasm-only breakage is common (getrandom, SIMD Rapier, WebGL2) |
 | `sim/flow/`, `core/rules/`, `meta/menu.rs`, `meta/input.rs`, `sim/ai.rs` | inner loop: `cargo test --lib` + the guarding suites below; before commit: full `cargo test` | the headless e2e suite scripts full games through these systems |
 | Only pure rules logic (quick loop) | `cargo test --lib` (fast) then full `cargo test` before commit | unit tests for rules/variant/input/theme/roster/jersey live in the lib target |
-| `model_assets.rs`, `tools/*.py`, `assets-src/`, `player.glb`, `AnimClip`/`CLIP_TABLE` | `cargo test --test e2e model_contract::` (+ `gltf_` suites) | pins clip/material/bone names + tri/bone/size budgets against the .glb |
-| `data/players.ron`, `meta/appearance.rs`, roster/jersey | `cargo test --test e2e appearance_contract::` + `identity::` + `dressing::` | shipped player definitions + identity plumbing |
-| Any `Ruleset` window/multiplier/spread (`perfect_ms`, `solid_ms`, `foul_ms`, `exit_*`, `pull_yaw_per_ms`, `cpu_timing_spread_ms`) or `sim/ai.rs` decision noise | `cargo test --test balance_sim` (~1.5 min, N=40) | the arbiter of the offensive economy — see the `tune-balance` skill |
-| New/changed system ordering (any `add_systems`) | `cargo test --test e2e ambiguity_audit::` | schedule-ambiguity gate |
+| `model_assets.rs`, `tools/*.py`, `assets-src/`, `player.glb`, `AnimClip`/`CLIP_TABLE` | `cargo nextest run --test e2e model_contract::` (+ `gltf_` suites) | pins clip/material/bone names + tri/bone/size budgets against the .glb |
+| `data/players.ron`, `meta/appearance.rs`, roster/jersey | `cargo nextest run --test e2e appearance_contract::` + `identity::` + `dressing::` | shipped player definitions + identity plumbing |
+| Any `Ruleset` window/multiplier/spread (`perfect_ms`, `solid_ms`, `foul_ms`, `exit_*`, `pull_yaw_per_ms`, `cpu_timing_spread_ms`) or `sim/ai.rs` decision noise | `cargo nextest run --test balance_sim` (~7.5 min on 4 cores, N=40) | the arbiter of the offensive economy — see the `tune-balance` skill |
+| New/changed system ordering (any `add_systems`) | `cargo nextest run --test e2e ambiguity_audit::` | schedule-ambiguity gate |
 | UI (`present/ui/`, `subs.rs`, `settings/screen.rs`, menu) | web build + browser check via `/run-web` | the wasm UI gotcha only reproduces in the browser |
-| `meta/settings/` persistence | `cargo test --lib` (settings tests serialize via `ENV_LOCK`) + `cargo test --test e2e_settings` | the env-var seam is easy to break |
+| `meta/settings/` persistence | `cargo test --lib` (settings tests serialize via `ENV_LOCK`) + `cargo nextest run --test e2e_settings` | the env-var seam is easy to break |
 | `Cargo.toml` / `Cargo.lock` / `.cargo/config.toml` | both-target `cargo check`; if `wasm-bindgen` bumped, reinstall CLI to match (`cargo binstall wasm-bindgen-cli --version <lock version> -y`) | CI derives the bindgen version from the committed lockfile |
 | `.github/workflows/pages.yml` or `web/` | full wasm-release build: `cargo build --profile wasm-release --target wasm32-unknown-unknown` + bindgen + serve | Pages deploys `web/` on every push to main |
 
 Multiple rows can match one change — run the union. When in doubt, `cargo test` is the
 comprehensive answer; it covers unit + e2e + balance.
 
-Measured 2026-10-09 in a 4-core cloud container (expect a fast Mac to be ~3× quicker): full
-`cargo test` 21.5 min run time (`balance_sim` 9 min, the `e2e` binary 12.5 min with its suites in
-parallel; the slowest suites are `fielder_spots`, `batter_runs`, `cpu_timing`, `matrix`). After a
-one-line `src/` edit, every test binary is rebuilt in ~11 s (it was ~250 s when each suite was its
-own binary). A cold build is ~16 min.
+Measured 2026-10-09 in a 4-core cloud container (expect a fast Mac to be quicker): full
+`cargo nextest run` **7.5 min** (373 tests; `balance_sim` at 453 s is the critical path and the
+whole e2e suite finishes inside it; next-slowest: `fielder_spots` 239 s, `batter_runs` 159 s,
+`cpu_timing` 157 s). The same suite under `cargo test`: 21.5 min. After a one-line `src/` edit,
+every test binary is rebuilt in ~11 s (it was ~250 s when each suite was its own binary). A cold
+build is ~16 min.
 
-## Guarding suites by area (`cargo test --test e2e <module>::`)
+## Guarding suites by area (`cargo nextest run --test e2e <module>::`)
 
 | Area | Modules |
 |---|---|
@@ -66,7 +71,8 @@ own binary). A cold build is ~16 min.
 
 1. `cargo check` on native, plus wasm if any matched row says so.
 2. The matched test commands above. Read the actual output: "Finished" ≠ "passed"; look for
-   `test result: ok` on every binary.
+   nextest's `Summary … N passed` with no `FAIL`/`TIMEOUT` lines (`test result: ok` per binary
+   under `cargo test`).
 3. `cargo fmt --check` — the PostToolUse hook formats on write, but catch stragglers.
 4. `cargo clippy --all-targets -- -D warnings` — CI denies warnings. The Stop hook runs clippy
    after any turn that changed `.rs` files and hands findings back, but don't rely on it alone.
