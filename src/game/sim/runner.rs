@@ -72,7 +72,7 @@ const TROT_DELAY: f32 = 0.9;
 /// The batter running out a live ball whose call hasn't come yet. If the
 /// resolution puts the batter on base, [`sync_runners`] adopts this rig's
 /// position so the runner doesn't teleport back to the plate. Public so
-/// `tests/e2e_batter_runs.rs` can assert the run-on-contact convention
+/// `tests/e2e/batter_runs.rs` can assert the run-on-contact convention
 /// (docs/BASEBALL.md "The batter always runs on contact") directly.
 #[derive(Component)]
 pub struct BatterGhost;

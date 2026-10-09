@@ -1,6 +1,6 @@
 //! Dressing e2e: looks follow identity across flips, without per-pitch churn.
 
-mod common;
+use crate::common;
 
 use bevy::prelude::*;
 use breakneck_baseball::game::gear::GearProp;

@@ -11,7 +11,7 @@
 //! Everything is deterministic — outcomes follow from pitch kind, aim, and
 //! swing timing exactly as the unit-tested rules dictate.
 
-mod common;
+use crate::common;
 
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::Velocity;

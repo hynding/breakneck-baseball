@@ -181,7 +181,7 @@ fn exit_creator(keyboard: Res<ButtonInput<KeyCode>>, mut next_state: ResMut<Next
 /// preview rig carries none, so the two stampers never fight over this
 /// entity. Deliberately a system separate from the egui panel (`panel::creator_panel`
 /// only ever mutates `cs.working`/`cs.status`) so this same path is what
-/// both the panel and the headless e2e (`tests/e2e_creator.rs`) drive.
+/// both the panel and the headless e2e (`tests/e2e/creator.rs`) drive.
 ///
 /// Also records exactly what it wrote into [`LastAppliedRoster`] — the
 /// yardstick [`sync_creator_from_external_reload`] compares `defs.0`

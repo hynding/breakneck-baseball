@@ -10,7 +10,7 @@
 //! other** in `Update`; presentation-only pairs (UI, fx, cameras, jerseys)
 //! are reported but allowed — they cannot feed back into the trajectory.
 
-mod common;
+use crate::common;
 
 use bevy::ecs::schedule::{LogLevel, ScheduleBuildSettings};
 use bevy::prelude::*;

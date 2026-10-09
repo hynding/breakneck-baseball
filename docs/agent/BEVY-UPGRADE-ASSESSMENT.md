@@ -36,7 +36,7 @@ Version pairing along the path: Bevy 0.16 ↔ rapier 0.29/0.30 · 0.17 ↔ 0.31/
 - **AnimationGraph (0.17, 0.18)** — 0.17 requires re-saving serialized graphs (ours are built in
   code, so likely light), but 0.18 **splits the `AnimationTarget` component** — the glTF
   clip-driver seam in `present/animation/driver.rs` must be re-verified against
-  `tests/model_contract.rs` and the 150 ms cross-fade behavior re-tested by eye.
+  `tests/e2e/model_contract.rs` and the 150 ms cross-fade behavior re-tested by eye.
 - **UI internals (0.16–0.18)** — `UiImage` → `ImageNode` (0.16), extraction `z_order` type change
   (0.18). Our UI is `Node`/`BackgroundColor`/text-heavy, so mostly renames — but the
   **wasm/WebGL2 alpha-0-at-first-extract gotcha is undocumented behavior** of the 0.15

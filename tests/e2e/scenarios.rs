@@ -1,7 +1,7 @@
 //! Scenario presets applied to the live headless game: the jump-cut template
 //! for rule regressions — no inning-scripting to reach a situation.
 
-mod common;
+use crate::common;
 
 use bevy::prelude::*;
 use breakneck_baseball::game::ScoreBoard;

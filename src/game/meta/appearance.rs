@@ -14,7 +14,7 @@ pub const APPEARANCE_VERSION: u32 = 1;
 /// Defines a fieldless enum together with a `NAMES` const listing every
 /// variant's RON identifier, generated from the exact same variant list the
 /// enum declares — the single source of truth the strict-identifier check in
-/// `tests/appearance_contract.rs` reads (an id in `data/players.ron` that
+/// `tests/e2e/appearance_contract.rs` reads (an id in `data/players.ron` that
 /// isn't in `NAMES` for its field is a typo, not a forward-compat unknown).
 /// Because `NAMES` is built with `stringify!` over the same token list as
 /// the enum body, the two cannot drift apart the way a hand-duplicated
@@ -217,11 +217,11 @@ use bevy::prelude::Resource;
 pub const EMBEDDED_PLAYERS_RON: &str = include_str!("../../../data/players.ron");
 
 /// Parses the embedded file. Panicking is correct here: the contract test
-/// (`tests/appearance_contract.rs`) makes a bad file unshippable, so at
+/// (`tests/e2e/appearance_contract.rs`) makes a bad file unshippable, so at
 /// runtime this is an assertion, not error handling.
 pub fn embedded_roster_file() -> RosterFile {
     parse_roster_file(EMBEDDED_PLAYERS_RON)
-        .expect("embedded data/players.ron must parse — see tests/appearance_contract.rs")
+        .expect("embedded data/players.ron must parse — see tests/e2e/appearance_contract.rs")
 }
 
 /// The live player definitions: embedded content at startup, replaced by

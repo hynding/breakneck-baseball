@@ -6,7 +6,7 @@
 //! warn-only via [`KNOWN_ISSUES`]; the allowlist is printed loudly on every
 //! run and each entry must link its TODO.md item.
 
-mod common;
+use crate::common;
 
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::Velocity;

@@ -11,7 +11,7 @@
 //! rule (which exists because the input plugin's PreUpdate clear wipes
 //! *presses* made outside it) doesn't apply to them.
 
-mod common;
+use crate::common;
 
 use bevy::input::touch::{TouchInput, TouchPhase};
 use bevy::prelude::*;

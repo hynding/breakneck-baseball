@@ -16,7 +16,7 @@ export PATH="/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$PATH"
 provisions the container: it installs Bevy's system libraries, the wasm target and the matching
 `wasm-bindgen`, sets line-tables-only debug info, and warms `target/` in the background. Progress
 goes to `target/.session-warm.log`. A `cargo` command run meanwhile waits on the build lock and then
-reuses the result. A cold warm-up takes ~20–25 min on the 4-core container, so start with work that
+reuses the result. A cold warm-up takes ~15–20 min on the 4-core container, so start with work that
 doesn't need cargo.
 
 `wasm-bindgen-cli` must exactly match the `wasm-bindgen` version in `Cargo.lock` (currently 0.2.127).
@@ -69,9 +69,9 @@ Violating any of these breaks the build, breaks wasm, or corrupts gameplay state
 - wasm UI: an element that is alpha-0 at first extract never renders again; container roots need a `BackgroundColor`; UI roots spawned mid-`Playing` don't render — show/hide by mutating children of roots painted at spawn (`ui::hidden_tint`, `src/game/present/ui/`). Hidden chrome also toggles `Visibility` (spawning `Hidden` is fine on 0.17 wasm) so the keep-alive tint never ghosts over a dark sky.
 - wasm UI: never tick a per-frame `ResMut` (Timer resource) in a system that also holds `&mut` queries on rendered UI — the queried entities stop being extracted on WebGL2; hold a fade *deadline* instead (`BannerFadeAt` in `src/game/present/ui/banner.rs`, wasm-ui-and-present skill).
 - `model_assets.rs` and `src/game/models/` never move from `src/game/` top level — `embedded_asset!` derives both the `include_bytes!` path and the `embedded://` asset path from the file's own location (`src/game/model_assets.rs`).
-- No RNG anywhere in `src/game/core/rules/` — advanced rules are deterministic, keyed off data the engine already computes.
+- No RNG anywhere in `src/game/core/rules/` — advanced rules are deterministic, keyed off data the engine already computes (guard: `rules::tests::rules_sources_draw_no_randomness`).
 - `fx`, `fielding`, and `runner` never mutate `ScoreBoard` or `Bases` — they report or mirror; only `flow` applies rules (`src/game/sim/flow/`).
-- Any writer of `Time<Virtual>` `relative_speed` must compose with `juice::BaseSpeed`, never assume 1.0 (`src/game/present/juice.rs`).
+- Any writer of `Time<Virtual>` `relative_speed` must compose with `juice::BaseSpeed`, never assume 1.0 (`src/game/present/juice.rs`; guard: `juice::tests::watchdog_restores_to_base_speed_not_one`).
 - Keep the `bevy` `wav` feature in `Cargo.toml` — procedural audio synthesizes in-memory WAVs and needs bevy_audio's decoder.
 - Keep `getrandom_backend="wasm_js"` rustflags in `.cargo/config.toml` — getrandom ≥ 0.3 fails to compile on wasm without it.
 - Unit tests live in a sibling `<name>.test.rs`, pulled in by the source file's last item:
@@ -81,10 +81,11 @@ Violating any of these breaks the build, breaks wasm, or corrupts gameplay state
   crates that see only the public API and would force `pub` on internals. A `<name>/` directory
   in this repo means "split into production submodules", which is why tests get a sibling file
   rather than `<name>/tests.rs`.
-- `tests/e2e_*` inject input from the `DriveGame` schedule, never from the test body — the input plugin's `PreUpdate` clear wipes presses made outside it (`tests/common/mod.rs`). Exemption: raw *window events* (`TouchInput`) are double-buffered and survive to `InputSystem`, so `tests/e2e_touch_pipeline.rs` sends them from the test body; the rule is about `ButtonInput` presses.
+- `tests/e2e/` suites inject input from the `DriveGame` schedule, never from the test body — the input plugin's `PreUpdate` clear wipes presses made outside it (`tests/common/mod.rs`). Exemption: raw *window events* (`TouchInput`) are double-buffered and survive to `InputSystem`, so `tests/e2e/touch_pipeline.rs` sends them from the test body; the rule is about `ButtonInput` presses.
+- Every `tests/e2e/` suite is a module of one test binary, so they share a process: never `std::env::set_var`/`remove_var` or otherwise change process-global state there. A test that must gets its own binary (`tests/e2e_settings.rs`; `tests/balance_sim.rs` stands alone because it pins Bevy's process-global task pools).
 - Scripted e2e batted balls must be sprayed at a *set* fielder's spot — the steal window means the defense is back in position before every pitch (`tests/common/mod.rs` helpers).
-- Roster names are A–Z only — jersey lettering uses a built-in 5×7 bitmap font (`src/game/present/jersey.rs`).
-- Never hand-export the player model from the Blender GUI — `tools/export_glb.py` pins the settings the runtime loader and `tests/model_contract.rs` depend on; always run the build/export script pair.
+- Roster names are A–Z only — jersey lettering uses a built-in 5×7 bitmap font (`src/game/present/jersey.rs`; guards: `roster::tests::jersey_names_fit_the_procedural_font`, `tests/e2e/appearance_contract.rs`).
+- Never hand-export the player model from the Blender GUI — `tools/export_glb.py` pins the settings the runtime loader and `tests/e2e/model_contract.rs` depend on; always run the build/export script pair.
 - All rig motion flows through `src/game/present/animation/` (`Playing`/`MoveIntent`) — never rotate rig parts or step rig transforms directly.
 - The ball ignores player capsules via collision groups (`BALL_GROUP`/`PLAYER_GROUP`) — a pitch glancing off the batter's collider would corrupt the called count (`src/game/sim/ball.rs`).
 - The CPU always bats Classic regardless of settings (`batting::style_for`) and `tests/balance_sim.rs` is the arbiter of the offensive economy — retune windows/multipliers/spread there, not by feel.
@@ -118,8 +119,9 @@ each with a done-when check; completed items move to `TADA.md`.
 
 ## Agent workflow
 
-- Cargo serializes every command on the `target/` lock. Overlap one cargo command with non-cargo work
-  (reading, docs, browser checks), not with a second cargo command — that one only queues.
+- Cargo builds serialize on the `target/` lock: a second build started meanwhile only queues. A
+  `cargo test` releases the lock once its binaries start running, so the next compile can overlap a
+  long test run. Overlap non-cargo work (reading, docs, browser checks) freely.
 - Multi-session work (e.g. TODO 29's Bevy migrations) goes in a git worktree so the main checkout stays
   usable. A worktree has its own `target/`, so budget a cold build for it.
 - Ground claims in the measuring tools rather than prose: `balance_sim` for the economy, the Coach for

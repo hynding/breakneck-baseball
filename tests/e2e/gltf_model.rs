@@ -1,7 +1,7 @@
 //! The embedded player.glb must load headless and build the shared
 //! AnimationGraph — the gate every glTF rig depends on.
 
-mod common;
+use crate::common;
 
 use breakneck_baseball::game::model_assets::RigAnimations;
 

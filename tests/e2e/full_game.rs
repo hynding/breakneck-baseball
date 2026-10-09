@@ -9,7 +9,7 @@
 //! swings dead-red at the ideal contact point with full uppercut aim — a
 //! deterministic home run and an immediate walk-off in the bottom of the 1st.
 
-mod common;
+use crate::common;
 
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::Velocity;

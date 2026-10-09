@@ -7,7 +7,7 @@
 //! the Director's `Intents` seam, which is what makes a future control
 //! mechanism covered automatically.
 
-mod common;
+use crate::common;
 
 use bevy::app::App;
 use breakneck_baseball::game::batting::style_for;

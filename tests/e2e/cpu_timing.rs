@@ -8,7 +8,7 @@
 //!
 //! Only the *pitch* is scripted (a human pitcher lobs straightaway
 //! changeups); every swing decision and its timing is the CPU's own, exactly
-//! like `e2e_cpu.rs`.
+//! like `e2e/cpu.rs`.
 //!
 //! **Margin, not marginal (review fix):** Rapier/Bevy's multithreaded
 //! physics isn't bit-reproducible run-to-run, so a variety assertion at the
@@ -23,7 +23,7 @@
 //! tests in `ai.rs` (`ready_to_press_*`); this e2e only needs to prove the
 //! wiring reaches the ECS/physics live, with a fat margin against jitter.
 
-mod common;
+use crate::common;
 
 use bevy::prelude::*;
 
@@ -64,7 +64,7 @@ struct PitchCount {
 struct Qualities(Vec<ContactQuality>);
 
 /// Pitches straightaway whenever the human (Home) fields, exactly like
-/// `e2e_cpu.rs`; the CPU bats — including its swing timing — on its own.
+/// `e2e/cpu.rs`; the CPU bats — including its swing timing — on its own.
 fn drive(
     state: Res<State<GameState>>,
     play: Option<Res<Play>>,

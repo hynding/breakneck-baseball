@@ -4,7 +4,7 @@
 //! announced in), keep that shot through the result pause, and only return
 //! to the duel framing for the next pitch.
 
-mod common;
+use crate::common;
 
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::Velocity;

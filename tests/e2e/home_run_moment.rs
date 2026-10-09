@@ -12,7 +12,7 @@
 //!     review fix, so the slow-mo/juice and trot are no longer truncated by a
 //!     GameOver fired at contact.
 
-mod common;
+use crate::common;
 
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::Velocity;

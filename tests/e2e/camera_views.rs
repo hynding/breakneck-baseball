@@ -4,7 +4,7 @@
 //! unit tests in `camera.rs`. Standard variant only: it's the only one with
 //! a catcher (front yard has none, see `variant.rs`).
 
-mod common;
+use crate::common;
 
 use bevy::prelude::*;
 

@@ -1,7 +1,7 @@
 //! Every person on the field spawns as a glTF SceneRoot rig whose skeleton
 //! instantiates headless (AnimationPlayer present under each root).
 
-mod common;
+use crate::common;
 
 use bevy::animation::AnimationPlayer;
 use bevy::input::keyboard::KeyCode;

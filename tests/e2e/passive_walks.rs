@@ -10,7 +10,7 @@
 //! the arbiter of the CPU-vs-CPU economy; this test guards the
 //! human-facing symptom the sim cannot see.
 
-mod common;
+use crate::common;
 
 use bevy::prelude::*;
 

@@ -1,6 +1,6 @@
 //! Identity plumbing e2e: rigs know who they are; runners wear jerseys.
 
-mod common;
+use crate::common;
 
 use bevy::prelude::*;
 use breakneck_baseball::game::Team;
@@ -182,7 +182,7 @@ fn fidgets_fire_between_pitches_when_enabled() {
 
 /// Arms exactly one pitch: while `armed`, the first frame the phase is
 /// `PrePitch` gets a one-shot `action` press, then disarms itself so the
-/// driver goes quiet for the rest of the run — unlike `e2e_cpu.rs`'s `drive`
+/// driver goes quiet for the rest of the run — unlike `e2e/cpu.rs`'s `drive`
 /// (which presses `action` on every `PrePitch` frame and would keep forcing
 /// fresh windups every time the phase cycles back), this fires exactly one
 /// pitch so the second `PrePitch` stretch in
@@ -310,7 +310,7 @@ fn fidget_accumulator_survives_a_pitch_interlude() {
 }
 
 /// Top 1st: Away bats (CPU by default), Home pitches — a human key press, so
-/// this test scripts it directly (the `e2e_cpu.rs` `drive` pattern) rather
+/// this test scripts it directly (the `e2e/cpu.rs` `drive` pattern) rather
 /// than waiting on an idle keyboard.
 fn drive_pitch_in_pre_pitch(
     play: Option<Res<breakneck_baseball::game::flow::Play>>,

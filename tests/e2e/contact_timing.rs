@@ -14,7 +14,7 @@
 //! rules (`contact_quality` + the exit multipliers) exactly as the unit tests
 //! dictate.
 
-mod common;
+use crate::common;
 
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::Velocity;

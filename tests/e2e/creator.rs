@@ -2,7 +2,7 @@
 //! through the SAME pipeline gameplay uses, Esc leaves.
 #![cfg(feature = "debug")]
 
-mod common;
+use crate::common;
 
 use bevy::prelude::*;
 use breakneck_baseball::game::appearance::{Headwear, RosterDefs};

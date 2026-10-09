@@ -12,7 +12,7 @@
 //!     strike is called only once the ball has crossed the plate into the
 //!     mitt — the miss is *seen* before it is announced.
 
-mod common;
+use crate::common;
 
 use bevy::prelude::*;
 

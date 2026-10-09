@@ -62,6 +62,7 @@ cargo run                            # standard build
 cargo run --features dev             # faster iteration (dylib + asset hot-reload)
 cargo run --features "dev debug"     # + F1 in-game debug panel
 cargo test                           # unit tests + headless e2e
+cargo test --test e2e matrix::       # one e2e suite (all live in the tests/e2e/ binary)
 ```
 
 > **Linux prerequisite:** `libasound2-dev`, `libudev-dev`, and `libwayland-dev` for Bevy's

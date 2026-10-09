@@ -42,6 +42,11 @@ Filter to one suite with its module path: `cargo test --test e2e matrix::`, or a
 Multiple rows can match one change — run the union. When in doubt, `cargo test` is the
 comprehensive answer; it covers unit + e2e + balance.
 
+Measured 2026-10-09 in a 4-core cloud container (expect a fast Mac to be ~3× quicker): full
+`cargo test` 21.5 min run time (`balance_sim` 9 min, the `e2e` binary 12.5 min with its suites in
+parallel; the slowest suites are `fielder_spots`, `batter_runs`, `cpu_timing`, `matrix`). After a
+`src/` edit, the test build takes ~30 s. A cold build is ~16 min.
+
 ## Guarding suites by area (`cargo test --test e2e <module>::`)
 
 | Area | Modules |
@@ -66,8 +71,9 @@ comprehensive answer; it covers unit + e2e + balance.
    after any turn that changed `.rs` files and hands findings back, but don't rely on it alone.
 
 **Running long commands.** In the main session a full `cargo test` can run in the background
-(you're re-invoked when it exits) while you do non-cargo work. Two `cargo` commands in one
-`target/` serialize on the build lock, so a "parallel" wasm check and test run only queue.
+(you're re-invoked when it exits) while you do other work. Two cargo *builds* in one `target/`
+serialize on the build lock, so a "parallel" wasm check queues behind a test build. Once the
+test binaries are running, cargo has released the lock and the next build can proceed.
 Subagents should run cargo in the foreground and report the result.
 
 ## E2e harness rules (when writing/altering tests)

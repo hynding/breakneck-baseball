@@ -4,7 +4,7 @@
 //! either on its own or on the batting side's action — through the curtain,
 //! with the duel framing back for the next pitch.
 
-mod common;
+use crate::common;
 
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::Velocity;

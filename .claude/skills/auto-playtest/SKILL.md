@@ -24,7 +24,7 @@ is untestable here and violates the seam; don't build one.
 - `Human` — real input passes through (default).
 - `Cpu` — the slot's `InputSource` is routed to the existing AI (attract
   mode). CPU slots always bat Classic — `batting::style_for` — regardless
-  of settings; `tests/e2e_matrix.rs::cpu_vs_cpu_ignores_style` pins this.
+  of settings; `tests/e2e/matrix.rs::cpu_vs_cpu_ignores_style` pins this.
 - `Scripted(script)` — a data script drives the slot. Scripted slots stay
   keyboard-sourced (pseudo-human), so the configured batting style applies.
 
@@ -55,7 +55,7 @@ parsing.
 
 ## The mode matrix
 
-`tests/e2e_matrix.rs`: {1P vs CPU, 2P} × {Classic, Meter, PCI} + one
+`tests/e2e/matrix.rs`: {1P vs CPU, 2P} × {Classic, Meter, PCI} + one
 CPU-vs-CPU cell, each a short `balanced`-scripted game asserting progress,
 a judged swing, and **zero Coach violations**. ~37 s wall for all seven
 cells — runs on every `cargo test`, not `#[ignore]`d. The harness seam is

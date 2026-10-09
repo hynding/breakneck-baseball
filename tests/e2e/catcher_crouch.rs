@@ -16,7 +16,7 @@
 //! his crouch. It fails at HEAD (he stays in RunCycle forever) and passes once
 //! `locomote` sheds a target-less RunCycle.
 
-mod common;
+use crate::common;
 
 use bevy::prelude::*;
 

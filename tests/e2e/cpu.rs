@@ -1,7 +1,7 @@
 //! End-to-end: the CPU offense (including its steal calls) plays a complete
 //! half-inning against a scripted human pitcher without stalling the game.
 
-mod common;
+use crate::common;
 
 use bevy::prelude::*;
 

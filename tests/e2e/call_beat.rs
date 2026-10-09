@@ -8,7 +8,7 @@
 //!     on the frame the phase flips to `PrePitch` (the reset lands unseen),
 //!   * and open the curtain again on its own once the next duel is up.
 
-mod common;
+use crate::common;
 
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::Velocity;

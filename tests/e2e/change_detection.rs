@@ -17,7 +17,7 @@
 //! the outcome of every play is identical either way and all the correctness
 //! tests stay green. This probe watches the ticks directly.
 
-mod common;
+use crate::common;
 
 use bevy::prelude::*;
 

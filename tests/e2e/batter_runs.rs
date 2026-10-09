@@ -18,7 +18,7 @@
 //!   on a forward predicted-foul ball, retire when it lands foul, and the
 //!   real batter must be back in the box immediately after.
 
-mod common;
+use crate::common;
 
 use bevy::prelude::*;
 use breakneck_baseball::game::flow::{BallInPlayEvent, LiveBallEvent};

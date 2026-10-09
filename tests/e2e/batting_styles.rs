@@ -32,7 +32,7 @@
 //! Only the *input timing* (and, for PCI, the cursor steering) is scripted; the
 //! graded outcomes fall out of the same pure rules the Classic e2e leans on.
 
-mod common;
+use crate::common;
 
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::Velocity;
@@ -193,15 +193,12 @@ fn advance(app: &mut App, stage: usize, what: &str, milestone: impl FnMut(&mut A
 
 #[test]
 fn swing_meter_and_pci_cursor_route_and_grade() {
-    // Isolate settings persistence to a per-process temp file BEFORE the app
-    // boots: this test mutates `Settings`, and `persist_settings` would
-    // otherwise write `SwingMeter` into the shared platform config dir and
-    // corrupt every other test that boots expecting the default Classic style.
-    let dir = std::env::temp_dir().join(format!("bb-e2e-styles-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    // FIXME: Audit that the environment access only happens in single-threaded code.
-    unsafe { std::env::set_var("BREAKNECK_SETTINGS_PATH", dir.join("settings.json")) };
-
+    // This test mutates `Settings`, and `persist_settings` writes every change
+    // to the store. The harness already points the store at a per-process temp
+    // file, and every booting test resets `Settings` to defaults after load, so
+    // the persisted `SwingMeter` can't reach the developer's real config or
+    // steer another suite. Never set or remove the env var here: every e2e
+    // suite shares this process (`tests/e2e/main.rs`).
     let mut app = headless_app();
     app.init_resource::<Stage>();
     app.init_resource::<Captured>();
@@ -310,8 +307,4 @@ fn swing_meter_and_pci_cursor_route_and_grade() {
         cap.hit[4],
         "the dead-center PCI swing must put a ball in play"
     );
-
-    // FIXME: Audit that the environment access only happens in single-threaded code.
-    unsafe { std::env::remove_var("BREAKNECK_SETTINGS_PATH") };
-    let _ = std::fs::remove_dir_all(&dir);
 }

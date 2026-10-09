@@ -22,7 +22,7 @@
 //! order pointing anywhere *else* — a cover bag, a stale intercept — is
 //! precisely the TODO 30 bug and still counts.
 
-mod common;
+use crate::common;
 
 use bevy::prelude::*;
 

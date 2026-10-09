@@ -9,7 +9,7 @@
 //! grounders are topped late and sprayed at a set fielder's spot, and every
 //! pitch waits out the pre-pitch steal window when runners are aboard.
 
-mod common;
+use crate::common;
 
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::Velocity;

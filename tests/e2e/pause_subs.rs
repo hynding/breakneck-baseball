@@ -31,7 +31,7 @@
 //! `AutoPitch` lets the test suppress `drive()`'s `action` intent for the
 //! frames it cares about pause landing cleanly, so pausing is exercised on a
 //! frame that isn't also fighting to start the next pitch.
-mod common;
+use crate::common;
 
 use bevy::prelude::*;
 

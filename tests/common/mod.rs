@@ -159,7 +159,7 @@ fn build_headless_app(single_threaded: bool) -> App {
         .insert_resource(breakneck_baseball::game::juice::JuiceDisabled)
         // The Coach observes every headless run (default-on in tests): it
         // never mutates gameplay, and any e2e may read its `CoachReport`.
-        // `e2e_coach.rs` is the suite that asserts on it.
+        // `e2e/coach.rs` is the suite that asserts on it.
         .insert_resource(breakneck_baseball::game::coach::CoachEnabled)
         // `player.rs`'s `batter_fidgets` occasionally replaces the batter's
         // held-stance `Playing` with a fidget clip between pitches — real

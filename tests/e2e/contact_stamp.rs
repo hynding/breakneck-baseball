@@ -9,7 +9,7 @@
 //!     expires — the fix for the review finding that the box could vanish
 //!     the very frame the pulse was set.
 
-mod common;
+use crate::common;
 
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::Velocity;
