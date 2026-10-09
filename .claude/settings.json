@@ -30,7 +30,7 @@
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/stop-clippy.sh",
-            "timeout": 180,
+            "timeout": 320,
             "statusMessage": "Running cargo clippy"
           }
         ]

@@ -184,6 +184,14 @@ fn build_headless_app(single_threaded: bool) -> App {
     app.init_resource::<TapKey>();
     app.add_systems(DriveGame, apply_taps);
 
+    // Debug builds carry bevy_egui, whose context bookkeeping wants winit's
+    // event-loop proxy. Headless there is none (`WinitPlugin` is disabled
+    // above), and Bevy's default handler panics on the missing resource
+    // before the first frame (TODO 107). Narrowed, not silenced: see the
+    // handler.
+    #[cfg(feature = "debug")]
+    app.set_error_handler(headless_debug_error_handler);
+
     // Driving `app.update()` by hand skips what `App::run` would do: wait out
     // async plugin setup (the wgpu adapter request), then run `finish` /
     // `cleanup`, which insert late resources like `CapturedScreenshots`.
@@ -204,6 +212,32 @@ fn build_headless_app(single_threaded: bool) -> App {
         }
     }
     app
+}
+
+/// Lets exactly one error through, panicking on everything else like Bevy's
+/// default: bevy_egui 0.37's `on_egui_context_added_system` takes a hard
+/// `Res<EventLoopProxyWrapper<WakeUp>>`, a resource only `WinitPlugin`
+/// creates, and a failed `Res` validation is an error rather than a skip. With
+/// no window there is no egui context for that system to register, so skipping
+/// it changes nothing. Both the parameter and the system are matched by name,
+/// so a different missing resource, or the same one elsewhere, still fails
+/// the test loudly.
+#[cfg(feature = "debug")]
+fn headless_debug_error_handler(
+    error: bevy::ecs::error::BevyError,
+    ctx: bevy::ecs::error::ErrorContext,
+) {
+    use bevy::ecs::system::SystemParamValidationError;
+    let egui_wants_winit = error
+        .downcast_ref::<SystemParamValidationError>()
+        .is_some_and(|e| e.param.as_string().contains("EventLoopProxyWrapper"))
+        && ctx
+            .name()
+            .as_string()
+            .contains("on_egui_context_added_system");
+    if !egui_wants_winit {
+        bevy::ecs::error::panic(error, ctx);
+    }
 }
 
 /// One cell of the control-configuration matrix: who drives each slot.

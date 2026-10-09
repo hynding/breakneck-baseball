@@ -89,6 +89,12 @@ jobs:
       - name: Unit tests
         run: cargo test
 
+      # The creator stage only exists under the `debug` feature, so its e2e
+      # suite is invisible to the plain run above. It went red unnoticed at the
+      # Bevy 0.17 upgrade (TADA 107); this keeps it in the gate.
+      - name: Creator e2e (debug feature)
+        run: cargo test --features debug --test e2e creator::
+
       # Headroom after the largest compile, so a disk-pressure regression shows
       # up in the log before it becomes another dead runner.
       - name: Report disk usage

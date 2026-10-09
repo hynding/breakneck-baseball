@@ -28,7 +28,7 @@ fi
 
 mkdir -p target
 started=$(mktemp target/.claude-clippy.XXXXXX)
-out=$(timeout 150 cargo clippy --all-targets --message-format short 2>&1)
+out=$(timeout 290 cargo clippy --all-targets --message-format short 2>&1)
 status=$?
 if [ "$status" = 124 ]; then
   rm -f "$started"

@@ -15,11 +15,10 @@ needs a human (11, 33) or is a deliberate non-action (98).
 | 29 · sim slowdown | Profile the ~72% headless-sim slowdown since Bevy 0.15 (balance run 199 s vs 115 s) | A named cause + fix, or a measured "inherent to 0.17" note in `docs/agent/BEVY-UPGRADE-ASSESSMENT.md`; `cargo test --test balance_sim` wall time recorded before/after |
 | 29 · step 3 | Bevy 0.17 → 0.18 (AnimationTarget split, UI extraction rework) in a git worktree | Every gate in `BEVY-UPGRADE-ASSESSMENT.md` green on the branch, incl. the browser run |
 | 78 · remainder | Pause-board height cap for < 530 px viewports | `/run-web` screenshot at a 400 px-tall viewport shows the whole board; `cargo test --test e2e pause_subs::` green |
-| 107 | Creator e2e is red under `--features debug` (see 107 below) | `cargo test --features debug --test e2e creator::` green, and a CI step runs it so it can't rot again |
 
 ## Test-suite gaps
 
-107. [ ] high tests — **All five `creator::` e2e tests fail under `--features debug`**, and nothing
+107. [x] high tests — **All five `creator::` e2e tests fail under `--features debug`**, and nothing
     runs them: CI only `cargo check`s the debug feature, never `cargo test`s it. Found 2026-10-09
     and reproduced on `a8b6384` (before the tests/e2e/ merge), so it dates from the Bevy 0.17
     upgrade. Every test dies at boot with `bevy_egui::input::WindowToEguiContextMap::
@@ -29,6 +28,7 @@ needs a human (11, 33) or is a deliberate non-action (98).
     the debug-feature harness what bevy_egui needs, or disable its winit-dependent input
     systems headless. Then add `cargo test --features debug --test e2e creator::` to
     `.github/workflows/ci.yml`.
+    *Done 2026-10-09 — see TADA 107.*
 
 ## Needs a human / native hardware session
 

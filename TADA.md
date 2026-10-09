@@ -434,3 +434,13 @@ the probe that now guards it.
     is unchanged and `balance_sim` is unmoved; every press-window e2e was moved to the same
     helper. New `tests/e2e_swing_startup.rs` pins press → contact latency and the whiff's
     call-after-crossing.
+107. [x] TODO 107 — the `creator::` e2e suite is green again under `--features debug`, and CI
+    runs it. — The harness, not the game: bevy_egui 0.37's `on_egui_context_added_system`
+    takes a hard `Res<EventLoopProxyWrapper<WakeUp>>`, which only `WinitPlugin` creates, and a
+    failed `Res` validation is an error Bevy's default handler panics on. Under the `debug`
+    feature `tests/common/mod.rs` now installs `headless_debug_error_handler`, which lets
+    exactly that error through (matched on both the parameter and the system name) and panics
+    on everything else. Headless there is no window and so no egui context to register, so
+    skipping the system changes nothing. `.github/workflows/ci.yml` gained a
+    `cargo test --features debug --test e2e creator::` step, and the cloud session-start hook
+    warms that binary too.

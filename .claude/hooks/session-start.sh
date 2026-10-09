@@ -77,7 +77,8 @@ pid=$(cat target/.session-warm.pid 2>/dev/null || true)
 if ! { [ -n "$pid" ] && grep -qa session-warm "/proc/$pid/cmdline" 2>/dev/null; }; then
   log "warming target/ in the background (tail -f target/.session-warm.log)"
   nohup setsid nice -n 10 bash -c '
-    cargo test --no-run && cargo clippy --all-targets
+    cargo test --no-run && cargo clippy --all-targets \
+      && cargo test --no-run --features debug --test e2e
     echo "warm build exit=$?"
     rm -f target/.session-warm.pid
   ' >target/.session-warm.log 2>&1 </dev/null &
