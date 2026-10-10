@@ -100,6 +100,27 @@ so far), upgrade that far first.
   transform, then check the bands are unmoved); (3) disable plugins the headless app never
   needs (picking, gizmos, light/camera visibility) in the harness, each removing its systems'
   executor cost — after checking which e2e suites rely on them. Re-run the probe after each.
+  *Levers tried 2026-10-10* (probe numbers, same container; `cargo nextest run --test e2e
+  sim_profile:: --run-ignored only --features profile`):
+  **(1) done, shipped** — the duel cards and the Swing Meter fill were repainted every frame
+  (11 `Text` + 3 colours + a `Node` dirtied per frame with nothing changing; the probe's
+  change-detection counters found them). Guarded writes: `ui_layout_system` 92 → 52 µs/frame,
+  `measure_text_system` 50 → 7, `bevy_ui` 10.2% → 5.5% of the frame, the inning 20.5 → 17.7 s
+  (**2.5 → 2.16 ms/frame**). Applies to the shipped build too.
+  **(2) measured, not adopted** — `HeadlessConfig::skip_skeletal_sampling` strips
+  `AnimationTarget` from bones: 2.16 → **1.82 ms/frame** (−16%; `animate_targets` 207 → 11 µs,
+  transform propagation 72 → 21, bone `Transform` churn 191 → 19 per frame). But it is not
+  outcome-neutral: the same inning ends 45 frames apart; first difference at frame 444, where
+  fielders break on contact one frame earlier *with* sampling. Not physics, not a bone read, not
+  the stripping system's schedule placement — the open suspect is archetype-order-dependent
+  query iteration in a fielding decision (`tests/e2e/skeletal_switch.rs` has the finding, the
+  ignored gate test, and a lockstep diagnostic that prints the first divergent frame).
+  Attribute that, and the balance sim gets the 16%.
+  **(3) not worth it** — picking is ~1% of the frame and drives `Interaction` for the touch UI,
+  settings taps, menu and pause board; gizmos 0.4%; light/camera visibility (~3.5%) can't be
+  removed without the present layer's asset types. Left alone.
+  Net so far: 2.5 → 2.16 ms/frame headless (−14%), 52% of the frame still executor overhead
+  across ~380 system runs — the 0.15 → 0.17 system-count story stands.
 - **Step 2, 0.16.1 → 0.17.3** (2026-08-25, this commit): Messages API crate-wide,
   `BorderColor::all`, `Justify`, `SystemCondition`, `bevy::light`, `WindowResolution(u32)`,
   rapier 0.32, inspector-egui 0.34. Clippy `-D warnings` green on default/dev+debug/autoplay;

@@ -12,7 +12,7 @@ needs a human (11, 33) or is a deliberate non-action (98).
 | Item | Work | Done when |
 |---|---|---|
 | 29 · boot warnings | Clear the three `B0004` hierarchy warnings at boot | `cargo test --test e2e full_game:: -- --nocapture 2>&1 \| grep -c B0004` prints `0`, and the browser console agrees (`/run-web`) |
-| 29 · sim slowdown | Headless sim ~72% slower since Bevy 0.15. *Measured 2026-10-09* (`tests/e2e/sim_profile.rs`): no hot system — 380 system runs/frame, 52% of the frame is executor overhead, game systems 4.8%; three levers listed in `docs/agent/BEVY-UPGRADE-ASSESSMENT.md` | Each lever tried and its ms/frame recorded there; `cargo nextest run --test balance_sim` wall time before/after, bands unmoved |
+| 29 · sim slowdown | Headless sim ~72% slower since Bevy 0.15. *2026-10-10:* lever 1 shipped (2.5 → 2.16 ms/frame, UI repaint churn), lever 3 ruled out, lever 2 (skip skeletal sampling, −16%) **measured but blocked**: it changes fielder break timing by a frame — suspect archetype-order-dependent iteration in a fielding decision; `tests/e2e/skeletal_switch.rs` has the gate test (ignored) and a lockstep diagnostic. Details in `docs/agent/BEVY-UPGRADE-ASSESSMENT.md` | The ignored `skeletal_switch::skipping_skeletal_sampling_does_not_change_the_inning` passes (mechanism found and fixed, with its own regression test), then `balance_sim` adopts the switch and its wall time drops |
 | 29 · step 3 | Bevy 0.17 → 0.18 (AnimationTarget split, UI extraction rework) in a git worktree | Every gate in `BEVY-UPGRADE-ASSESSMENT.md` green on the branch, incl. the browser run |
 | 78 · remainder | Pause-board height cap for < 530 px viewports | `/run-web` screenshot at a 400 px-tall viewport shows the whole board; `cargo test --test e2e pause_subs::` green |
 
