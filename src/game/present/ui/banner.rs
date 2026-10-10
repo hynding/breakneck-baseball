@@ -207,6 +207,10 @@ pub(super) fn spawn_duel_panels(commands: &mut Commands, theme: &Theme) {
             .spawn((
                 DuelPanel,
                 GameplayEntity,
+                // A hidden-tinted root repainted only on change now (every
+                // write in `update_duel_panels` is guarded), so it takes the
+                // wasm keep-alive marker like the pause board and walk-up.
+                super::KeepAliveUi,
                 node,
                 BackgroundColor(ui.panel_bg),
                 BorderColor::all(ui.panel_border),
@@ -264,13 +268,17 @@ pub(super) fn update_duel_panels(
         if *visibility != desired {
             *visibility = desired;
         }
-        if visible {
-            bg.0 = ui.panel_bg;
-            *border = BorderColor::all(ui.panel_border);
+        // Every write below is guarded: this runs each frame of play, and an
+        // unconditional assignment marks the component changed even when the
+        // value is identical, which re-ran UI layout and text shaping on
+        // every frame (TODO 29's profile: 11 texts + both cards per frame).
+        let (want_bg, want_border) = if visible {
+            (ui.panel_bg, ui.panel_border)
         } else {
-            bg.0 = hidden_tint(ui.panel_bg);
-            *border = BorderColor::all(hidden_tint(ui.panel_border));
-        }
+            (hidden_tint(ui.panel_bg), hidden_tint(ui.panel_border))
+        };
+        bg.set_if_neq(BackgroundColor(want_bg));
+        border.set_if_neq(BorderColor::all(want_border));
     }
 
     let team_label = |team: Team| team.label();
@@ -281,7 +289,7 @@ pub(super) fn update_duel_panels(
     };
     for (line, mut text, mut color) in &mut lines {
         if !visible {
-            **text = String::new();
+            super::set_text_if_neq(&mut text, "");
             continue;
         }
         let (value, tint) = match line.0 {
@@ -314,8 +322,8 @@ pub(super) fn update_duel_panels(
             DuelLineKind::LegendSlider => ("AIM LEFT:  SLIDER".to_string(), ui.text_dim),
             DuelLineKind::LegendSinker => ("AIM RIGHT: SINKER".to_string(), ui.text_dim),
         };
-        **text = value;
-        color.0 = tint;
+        super::set_text_if_neq(&mut text, &value);
+        super::set_color_if_neq(&mut color, tint);
     }
 }
 
