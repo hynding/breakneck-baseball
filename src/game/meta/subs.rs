@@ -43,7 +43,7 @@ struct SubsCard;
 
 /// Marker for the controls-help dialog card, spawned alongside the
 /// substitution board and shown/hidden with it (see the module docs and
-/// `tests/e2e_pause_subs.rs`, which queries this to prove pause reveals it).
+/// `tests/e2e/pause_subs.rs`, which queries this to prove pause reveals it).
 #[derive(Component)]
 pub struct ControlsDialog;
 

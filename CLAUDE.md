@@ -3,17 +3,28 @@
 Guidance for Claude Code in this repo. The full long-form architecture narrative lives in
 `docs/agent/ARCHITECTURE-FULL.md`; domain detail loads on demand via the skills listed below.
 
-## Toolchain (this machine)
+## Toolchain
 
-Rust is installed via Homebrew's rustup and is **not on the default PATH**. Prefix commands with:
+**macOS (the maintainer's machine):** Rust comes from Homebrew's rustup and is **not on the default
+PATH**. Prefix commands with:
 
 ```sh
 export PATH="/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$PATH"
 ```
 
+**Claude Code cloud sessions (Linux):** cargo is already on PATH, and `.claude/hooks/session-start.sh`
+provisions the container: it installs Bevy's system libraries, the wasm target and the matching
+`wasm-bindgen`, sets line-tables-only debug info, and warms `target/` in the background. Progress
+goes to `target/.session-warm.log`. A `cargo` command run meanwhile waits on the build lock and then
+reuses the result. A cold warm-up takes ~15–20 min on the 4-core container, so start with work that
+doesn't need cargo.
+
 `wasm-bindgen-cli` must exactly match the `wasm-bindgen` version in `Cargo.lock` (currently 0.2.127).
 If `cargo update` bumps it, reinstall with `cargo binstall wasm-bindgen-cli --version <new-version> -y`
-(binstall = prebuilt, seconds; avoid plain `cargo install`).
+(binstall = prebuilt, seconds; avoid plain `cargo install`). The cloud hook re-matches it each session.
+
+`cargo-nextest` is the test runner (`.config/nextest.toml`); CI and the cloud hook install it, on the
+Mac it's `cargo binstall cargo-nextest -y`. Plain `cargo test` still works and must keep working.
 
 ## Commands
 
@@ -22,7 +33,10 @@ cargo check                          # fast compile check (~45 s cold, seconds w
 cargo run                            # native desktop build
 cargo run --features dev             # faster iteration: links Bevy as a dylib + .glb hot-reload
 cargo run --features "dev debug"     # + F1 in-game debug panel
-cargo test                           # unit tests + headless e2e (run after flow/rules/menu/input/ai changes)
+cargo nextest run                    # full suite: unit + headless e2e + balance sim (~7.5 min on 4 cores; run after flow/rules/menu/input/ai changes)
+cargo test                           # the same suite without nextest, ~3× slower (binaries run one after another)
+cargo test --lib                     # unit tests only — the fast inner loop
+cargo nextest run --test e2e matrix::   # one e2e suite (every suite is a module of the one tests/e2e/ binary)
 cargo build --target wasm32-unknown-unknown   # web build (debug)
 wasm-bindgen --out-dir web/out --target web target/wasm32-unknown-unknown/debug/breakneck-baseball.wasm
 python3 -m http.server --directory web 8080   # serve, then open http://localhost:8080
@@ -59,9 +73,9 @@ Violating any of these breaks the build, breaks wasm, or corrupts gameplay state
 - wasm UI: an element that is alpha-0 at first extract never renders again; container roots need a `BackgroundColor`; UI roots spawned mid-`Playing` don't render — show/hide by mutating children of roots painted at spawn (`ui::hidden_tint`, `src/game/present/ui/`). Hidden chrome also toggles `Visibility` (spawning `Hidden` is fine on 0.17 wasm) so the keep-alive tint never ghosts over a dark sky.
 - wasm UI: never tick a per-frame `ResMut` (Timer resource) in a system that also holds `&mut` queries on rendered UI — the queried entities stop being extracted on WebGL2; hold a fade *deadline* instead (`BannerFadeAt` in `src/game/present/ui/banner.rs`, wasm-ui-and-present skill).
 - `model_assets.rs` and `src/game/models/` never move from `src/game/` top level — `embedded_asset!` derives both the `include_bytes!` path and the `embedded://` asset path from the file's own location (`src/game/model_assets.rs`).
-- No RNG anywhere in `src/game/core/rules/` — advanced rules are deterministic, keyed off data the engine already computes.
+- No RNG anywhere in `src/game/core/rules/` — advanced rules are deterministic, keyed off data the engine already computes (guard: `rules::tests::rules_sources_draw_no_randomness`).
 - `fx`, `fielding`, and `runner` never mutate `ScoreBoard` or `Bases` — they report or mirror; only `flow` applies rules (`src/game/sim/flow/`).
-- Any writer of `Time<Virtual>` `relative_speed` must compose with `juice::BaseSpeed`, never assume 1.0 (`src/game/present/juice.rs`).
+- Any writer of `Time<Virtual>` `relative_speed` must compose with `juice::BaseSpeed`, never assume 1.0 (`src/game/present/juice.rs`; guard: `juice::tests::watchdog_restores_to_base_speed_not_one`).
 - Keep the `bevy` `wav` feature in `Cargo.toml` — procedural audio synthesizes in-memory WAVs and needs bevy_audio's decoder.
 - Keep `getrandom_backend="wasm_js"` rustflags in `.cargo/config.toml` — getrandom ≥ 0.3 fails to compile on wasm without it.
 - Unit tests live in a sibling `<name>.test.rs`, pulled in by the source file's last item:
@@ -71,10 +85,11 @@ Violating any of these breaks the build, breaks wasm, or corrupts gameplay state
   crates that see only the public API and would force `pub` on internals. A `<name>/` directory
   in this repo means "split into production submodules", which is why tests get a sibling file
   rather than `<name>/tests.rs`.
-- `tests/e2e_*` inject input from the `DriveGame` schedule, never from the test body — the input plugin's `PreUpdate` clear wipes presses made outside it (`tests/common/mod.rs`). Exemption: raw *window events* (`TouchInput`) are double-buffered and survive to `InputSystem`, so `tests/e2e_touch_pipeline.rs` sends them from the test body; the rule is about `ButtonInput` presses.
+- `tests/e2e/` suites inject input from the `DriveGame` schedule, never from the test body — the input plugin's `PreUpdate` clear wipes presses made outside it (`tests/common/mod.rs`). Exemption: raw *window events* (`TouchInput`) are double-buffered and survive to `InputSystem`, so `tests/e2e/touch_pipeline.rs` sends them from the test body; the rule is about `ButtonInput` presses.
+- Every `tests/e2e/` suite is a module of one test binary, so under `cargo test` they share a process (nextest isolates each test, but the rule holds for both runners): never `std::env::set_var`/`remove_var` or otherwise change process-global state there. A test that must gets its own binary (`tests/e2e_settings.rs`; `tests/balance_sim.rs` stands alone because it pins Bevy's process-global task pools).
 - Scripted e2e batted balls must be sprayed at a *set* fielder's spot — the steal window means the defense is back in position before every pitch (`tests/common/mod.rs` helpers).
-- Roster names are A–Z only — jersey lettering uses a built-in 5×7 bitmap font (`src/game/present/jersey.rs`).
-- Never hand-export the player model from the Blender GUI — `tools/export_glb.py` pins the settings the runtime loader and `tests/model_contract.rs` depend on; always run the build/export script pair.
+- Roster names are A–Z only — jersey lettering uses a built-in 5×7 bitmap font (`src/game/present/jersey.rs`; guards: `roster::tests::jersey_names_fit_the_procedural_font`, `tests/e2e/appearance_contract.rs`).
+- Never hand-export the player model from the Blender GUI — `tools/export_glb.py` pins the settings the runtime loader and `tests/e2e/model_contract.rs` depend on; always run the build/export script pair.
 - All rig motion flows through `src/game/present/animation/` (`Playing`/`MoveIntent`) — never rotate rig parts or step rig transforms directly.
 - The ball ignores player capsules via collision groups (`BALL_GROUP`/`PLAYER_GROUP`) — a pitch glancing off the batter's collider would corrupt the called count (`src/game/sim/ball.rs`).
 - The CPU always bats Classic regardless of settings (`batting::style_for`) and `tests/balance_sim.rs` is the arbiter of the offensive economy — retune windows/multipliers/spread there, not by feel.
@@ -100,10 +115,23 @@ Loaded on trigger from `.claude/skills/`; each SKILL.md says when.
 - `coach` — the always-on expectation checker: what it checks, tolerances, reading `CoachReport`, adding a check. Load when players misbehave or before touching `sim/fielding.rs`, `sim/runner.rs`, `sim/flow/`.
 - `auto-playtest` — the Director, `.ron` scripts, the mode matrix, and self-driving native/wasm runs. Load for "playtest", "verify 2 player", "test PCI/Meter", or when adding an input device or batting adapter.
 - `run-web` — build, serve, and verify the browser build.
-- `rust-skills` — generic Rust guidelines (265 rules); use for any Rust authoring/review.
+- `rust-skills` — generic Rust guidelines (265 rules, one file each under `.agents/skills/rust-skills/rules/`) plus where this crate departs from them. Load for reviews, refactors, `unsafe`, or hot-path work — not for routine edits that follow the surrounding code.
 
 Long-form narrative (how every subsystem fits together): `docs/agent/ARCHITECTURE-FULL.md`.
-The user's work queue is `TODO.md`; completed items move to `TADA.md`.
+The user's work queue is `TODO.md` — its "Start here" table lists what an agent can close alone,
+each with a done-when check; completed items move to `TADA.md`.
+
+## Agent workflow
+
+- Cargo builds serialize on the `target/` lock: a second build started meanwhile only queues. A
+  `cargo test` releases the lock once its binaries start running, so the next compile can overlap a
+  long test run. Overlap non-cargo work (reading, docs, browser checks) freely.
+- Multi-session work (e.g. TODO 29's Bevy migrations) goes in a git worktree so the main checkout stays
+  usable. A worktree gets its own `target/` (a cold build), unless you point `CARGO_TARGET_DIR` at the
+  main checkout's `target/` to reuse compiled dependencies; its builds then share that lock.
+- Ground claims in the measuring tools rather than prose: `balance_sim` for the economy, the Coach for
+  player behaviour, `model_contract` for the rig, and the autoplay report's `game`/`frames` summary for
+  run-to-run comparisons (auto-playtest skill).
 
 ## Dual-target constraints
 

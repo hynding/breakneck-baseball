@@ -1,0 +1,22 @@
+# cargo-nextest profile (`cargo nextest run`). One process per test, and every
+# test binary's tests share one pool, so the balance sim's single-threaded game
+# runs alongside the e2e suite instead of after it as under `cargo test`. The
+# per-test process also gives each headless Bevy app its own task pool; under
+# `cargo test` the 69 e2e apps share one process-global pool and contend.
+# Measured 2026-10-09, 4-core cloud container, warm tree: 454 s for the full
+# suite (373 tests; balance_sim 453 s is the critical path) against 1289 s
+# for `cargo test`.
+# Per-process tests also make the two reasons `balance_sim` and `e2e_settings`
+# stand apart (process-global task pools, a process-global env var) moot here;
+# they stay separate binaries because `cargo test` must keep working too.
+
+[profile.default]
+# Every e2e boots a full headless Bevy app and the longest suites run ~5 min
+# on 4 cores; nextest's 60 s "slow" marker would flag most of them.
+slow-timeout = { period = "300s", terminate-after = 4 }
+
+[[profile.default.overrides]]
+# The balance sim is the one long serial test: start it first so it overlaps
+# the e2e suite rather than trailing it.
+filter = 'binary(balance_sim)'
+priority = 100

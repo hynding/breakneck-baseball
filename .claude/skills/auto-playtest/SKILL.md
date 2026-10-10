@@ -24,7 +24,7 @@ is untestable here and violates the seam; don't build one.
 - `Human` — real input passes through (default).
 - `Cpu` — the slot's `InputSource` is routed to the existing AI (attract
   mode). CPU slots always bat Classic — `batting::style_for` — regardless
-  of settings; `tests/e2e_matrix.rs::cpu_vs_cpu_ignores_style` pins this.
+  of settings; `tests/e2e/matrix.rs::cpu_vs_cpu_ignores_style` pins this.
 - `Scripted(script)` — a data script drives the slot. Scripted slots stay
   keyboard-sourced (pseudo-human), so the configured batting style applies.
 
@@ -55,7 +55,7 @@ parsing.
 
 ## The mode matrix
 
-`tests/e2e_matrix.rs`: {1P vs CPU, 2P} × {Classic, Meter, PCI} + one
+`tests/e2e/matrix.rs`: {1P vs CPU, 2P} × {Classic, Meter, PCI} + one
 CPU-vs-CPU cell, each a short `balanced`-scripted game asserting progress,
 a judged swing, and **zero Coach violations**. ~37 s wall for all seven
 cells — runs on every `cargo test`, not `#[ignore]`d. The harness seam is
@@ -111,6 +111,36 @@ report any time from `localStorage.getItem('bb-coach-report')` (flushed
 every ~10 s; the `COACH_REPORT` console line lands at game end);
 screenshot at findings and at the `playtest-review` skill's moment list.
 Screenshots/reports go under `playtest-artifacts/` (gitignored).
+
+## Comparing runs (the report as data)
+
+Beside the Coach `counts`/`recent`, every autoplay report carries:
+
+- `game` — `runs` {home, away}, `inning`, `top_of_inning`, `contact` (swing grades by
+  `ContactQuality`), `home_runs_hit`, `fair_live`, `foul_live`;
+- `frames` — `count`, `p50_ms`/`p95_ms`/`p99_ms` (whole-ms buckets, saturating at 100),
+  `over_100ms`, `max_ms`: real frame times while `Playing`.
+
+Both reset at every game start, so an attract loop reports per game. Keep a report from
+`main` as the baseline and diff the summaries instead of eyeballing two runs:
+
+```sh
+jq -S '{game, frames, counts}' baseline.json > /tmp/a.json
+jq -S '{game, frames, counts}' coach-report.json > /tmp/b.json
+diff /tmp/a.json /tmp/b.json
+```
+
+Native and wasm runs step on the real clock, so `game` differs run to run. Read it as a
+sanity check (contact mix shifted? runs collapsed to 0–0?), not an exact match;
+`balance_sim` stays the economy arbiter. A `frames.p95_ms` jump on the same machine and
+build profile is a real performance regression; hand it to the `bevy-perf` skill. In a cloud
+container there is no display for a native window, so run the wasm build in the
+pre-installed headless Chromium (Playwright, `--enable-unsafe-swiftshader`) and read
+`localStorage['bb-coach-report']`. Software WebGL2 there is very slow. Measured 2026-10-09
+on the 4-core container: ~1 frame per 0.1–1.8 s, every frame in `over_100ms`. That is enough
+to prove boot → first pitch → graded contact and a populated report in ~4 minutes, but not
+to finish a game or say anything about frame pacing. Use the headless e2e suites and
+`balance_sim` for outcomes, and a real GPU (maintainer's Mac) for `frames`.
 
 ## The real-input smoke test
 

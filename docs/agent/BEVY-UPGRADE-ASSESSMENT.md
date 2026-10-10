@@ -36,7 +36,7 @@ Version pairing along the path: Bevy 0.16 ↔ rapier 0.29/0.30 · 0.17 ↔ 0.31/
 - **AnimationGraph (0.17, 0.18)** — 0.17 requires re-saving serialized graphs (ours are built in
   code, so likely light), but 0.18 **splits the `AnimationTarget` component** — the glTF
   clip-driver seam in `present/animation/driver.rs` must be re-verified against
-  `tests/model_contract.rs` and the 150 ms cross-fade behavior re-tested by eye.
+  `tests/e2e/model_contract.rs` and the 150 ms cross-fade behavior re-tested by eye.
 - **UI internals (0.16–0.18)** — `UiImage` → `ImageNode` (0.16), extraction `z_order` type change
   (0.18). Our UI is `Node`/`BackgroundColor`/text-heavy, so mostly renames — but the
   **wasm/WebGL2 alpha-0-at-first-extract gotcha is undocumented behavior** of the 0.15
@@ -84,6 +84,22 @@ so far), upgrade that far first.
   hierarchy/`ChildOf`, `Query::single` Results, event renames, rapier 0.30,
   inspector-egui 0.31. All native gates green; wasm blocked on the banner bug below.
   Headless sim ~72% slower than 0.15 (balance run 199 s vs 115 s) — carried forward.
+  *Measured 2026-10-09* with `tests/e2e/sim_profile.rs` (bevy-perf skill): one CPU-vs-CPU
+  inning at 100 Hz, single-threaded, 4-core cloud container, 8161 frames at 2.3–2.6 ms/frame.
+  **340 distinct systems, ~380 system runs per frame, and only 48% of the frame is inside any
+  system** — the rest is executor cost (run conditions, command application, change ticks)
+  that scales with system count. Inside systems: `bevy_animation` 12% (`animate_targets`,
+  skeletal sampling), `bevy_ui` 10% (layout 4%, text measure + layout 4%, every frame),
+  `bevy_rapier3d` 5%, `bevy_transform` 4%, the game's own systems **4.8%**. `PostUpdate`
+  alone is 57% of the frame. So there is no hot system to fix: 0.17 runs more engine systems
+  per frame than 0.15 did (light and camera visibility, picking, UI picking, gizmos are all
+  registered headless) and the sim pays the fixed cost of each. Levers, by expected payoff:
+  (1) check whether some HUD text is rewritten every frame — text measure + layout at 4% with
+  no window suggests so, and it would cost the wasm build too; (2) let the balance harness
+  skip skeletal sampling (bone poses are cosmetic — confirm nothing in `sim/` reads a bone
+  transform, then check the bands are unmoved); (3) disable plugins the headless app never
+  needs (picking, gizmos, light/camera visibility) in the harness, each removing its systems'
+  executor cost — after checking which e2e suites rely on them. Re-run the probe after each.
 - **Step 2, 0.16.1 → 0.17.3** (2026-08-25, this commit): Messages API crate-wide,
   `BorderColor::all`, `Justify`, `SystemCondition`, `bevy::light`, `WindowResolution(u32)`,
   rapier 0.32, inspector-egui 0.34. Clippy `-D warnings` green on default/dev+debug/autoplay;

@@ -1,5 +1,17 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/session-start.sh",
+            "timeout": 600,
+            "statusMessage": "Provisioning cloud container"
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Write|Edit",
@@ -17,8 +29,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"${CLAUDE_PROJECT_DIR:-.}\" && out=$(PATH=\"/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$PATH\" cargo clippy --all-targets 2>&1 | grep -E '^(warning|error)' | grep -v '^warning: the following packages contain code' | tail -12); if [ -n \"$out\" ]; then printf 'clippy:\\n%s\\n' \"$out\"; fi; true",
-            "timeout": 120,
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/stop-clippy.sh",
+            "timeout": 320,
             "statusMessage": "Running cargo clippy"
           }
         ]
