@@ -56,6 +56,9 @@ debug = ["dep:bevy-inspector-egui"]
 # both targets, which is why it is not folded into `dev` (whose dylib
 # linking / hot-reload semantics it does not want).
 autoplay = []
+# Per-system timing spans for the headless profiling probe
+# (`tests/e2e/sim_profile.rs`); never on by default — spans cost frame time.
+profile = ["bevy/trace"]
 
 [lints.rust]
 unexpected_cfgs = "warn"

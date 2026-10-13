@@ -33,8 +33,8 @@ blender --background assets-src/player.blend --python tools/export_glb.py # expo
 ```
 
 Never hand-export from the Blender GUI — `export_glb.py` pins the settings (Y-up,
-NLA-tracks-as-animations, skins) the runtime loader and `tests/model_contract.rs` depend on.
-`tests/model_contract.rs` pins the `.glb` against `model_assets::CLIP_TABLE` (clip/material/bone
+NLA-tracks-as-animations, skins) the runtime loader and `tests/e2e/model_contract.rs` depend on.
+`tests/e2e/model_contract.rs` pins the `.glb` against `model_assets::CLIP_TABLE` (clip/material/bone
 names plus tri/bone/size budgets) so Blender and Rust can only drift in ways CI catches.
 
 `model_assets.rs` and `src/game/models/` stay at `src/game/` top level — `embedded_asset!`

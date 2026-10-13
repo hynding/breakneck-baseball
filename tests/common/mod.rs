@@ -76,7 +76,7 @@ pub fn start_game(app: &mut App, select_key: KeyCode) {
 /// afterwards: `app.add_systems(DriveGame, drive)`.
 #[allow(dead_code)]
 pub fn headless_app() -> App {
-    build_headless_app(false)
+    build_headless_app(false, None)
 }
 
 /// Like [`headless_app`], but pins **single-threaded, run-to-run deterministic**
@@ -91,10 +91,20 @@ pub fn headless_app() -> App {
 /// balance sim uses it, so the other e2e harnesses keep the faster default.
 #[allow(dead_code)]
 pub fn deterministic_headless_app() -> App {
-    build_headless_app(true)
+    build_headless_app(true, None)
 }
 
-fn build_headless_app(single_threaded: bool) -> App {
+/// [`deterministic_headless_app`] with a custom `tracing` layer installed by
+/// `LogPlugin` — the seam the profiling probe uses to time every span.
+#[allow(dead_code)]
+pub fn deterministic_headless_app_with_log_layer(layer: LogLayerFn) -> App {
+    build_headless_app(true, Some(layer))
+}
+
+/// A `LogPlugin::custom_layer` hook.
+pub type LogLayerFn = fn(&mut App) -> Option<bevy::log::BoxedLayer>;
+
+fn build_headless_app(single_threaded: bool, log_layer: Option<LogLayerFn>) -> App {
     // Isolate the settings store before `SettingsPlugin` loads it: a
     // headless test must neither read the developer's real settings.json
     // (their volume/batting-style choices would silently steer test
@@ -142,6 +152,13 @@ fn build_headless_app(single_threaded: bool) -> App {
     } else {
         default_plugins
     };
+    let default_plugins = match log_layer {
+        Some(custom_layer) => default_plugins.set(bevy::log::LogPlugin {
+            custom_layer,
+            ..Default::default()
+        }),
+        None => default_plugins,
+    };
     app.add_plugins(default_plugins)
         .add_plugins((RapierPhysicsPlugin::<NoUserData>::default(), GamePlugin))
         .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
@@ -159,7 +176,7 @@ fn build_headless_app(single_threaded: bool) -> App {
         .insert_resource(breakneck_baseball::game::juice::JuiceDisabled)
         // The Coach observes every headless run (default-on in tests): it
         // never mutates gameplay, and any e2e may read its `CoachReport`.
-        // `e2e_coach.rs` is the suite that asserts on it.
+        // `e2e/coach.rs` is the suite that asserts on it.
         .insert_resource(breakneck_baseball::game::coach::CoachEnabled)
         // `player.rs`'s `batter_fidgets` occasionally replaces the batter's
         // held-stance `Playing` with a fidget clip between pitches — real
@@ -184,6 +201,14 @@ fn build_headless_app(single_threaded: bool) -> App {
     app.init_resource::<TapKey>();
     app.add_systems(DriveGame, apply_taps);
 
+    // Debug builds carry bevy_egui, whose context bookkeeping wants winit's
+    // event-loop proxy. Headless there is none (`WinitPlugin` is disabled
+    // above), and Bevy's default handler panics on the missing resource
+    // before the first frame (TODO 107). Narrowed, not silenced: see the
+    // handler.
+    #[cfg(feature = "debug")]
+    app.set_error_handler(headless_debug_error_handler);
+
     // Driving `app.update()` by hand skips what `App::run` would do: wait out
     // async plugin setup (the wgpu adapter request), then run `finish` /
     // `cleanup`, which insert late resources like `CapturedScreenshots`.
@@ -204,6 +229,32 @@ fn build_headless_app(single_threaded: bool) -> App {
         }
     }
     app
+}
+
+/// Lets exactly one error through, panicking on everything else like Bevy's
+/// default: bevy_egui 0.37's `on_egui_context_added_system` takes a hard
+/// `Res<EventLoopProxyWrapper<WakeUp>>`, a resource only `WinitPlugin`
+/// creates, and a failed `Res` validation is an error rather than a skip. With
+/// no window there is no egui context for that system to register, so skipping
+/// it changes nothing. Both the parameter and the system are matched by name,
+/// so a different missing resource, or the same one elsewhere, still fails
+/// the test loudly.
+#[cfg(feature = "debug")]
+fn headless_debug_error_handler(
+    error: bevy::ecs::error::BevyError,
+    ctx: bevy::ecs::error::ErrorContext,
+) {
+    use bevy::ecs::system::SystemParamValidationError;
+    let egui_wants_winit = error
+        .downcast_ref::<SystemParamValidationError>()
+        .is_some_and(|e| e.param.as_string().contains("EventLoopProxyWrapper"))
+        && ctx
+            .name()
+            .as_string()
+            .contains("on_egui_context_added_system");
+    if !egui_wants_winit {
+        bevy::ecs::error::panic(error, ctx);
+    }
 }
 
 /// One cell of the control-configuration matrix: who drives each slot.

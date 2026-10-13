@@ -61,7 +61,7 @@ it didn't), `Late` (it happened past tolerance), `Style` (legal but ugly).
 
 - `CoachReport` (resource): `count(check, severity)`, `total(severity)`,
   `recent` ring buffer (64), `samples`.
-- Headless: `tests/e2e_coach.rs` prints the per-check table and fails on any
+- Headless: `tests/e2e/coach.rs` prints the per-check table and fails on any
   violation not in its `KNOWN_ISSUES` allowlist. The allowlist is printed on
   every run and every entry must link a TODO.md item — keep it loud, keep it
   short, and empty it as fixes land.
@@ -83,7 +83,7 @@ it didn't), `Late` (it happened past tolerance), `Style` (legal but ugly).
    the glove-line height are tracked per frame).
 3. **Unit tests both ways** in `core/coach.rs`: a passing sequence and a
    violating sequence, in the same file, `core/rules` test style.
-4. **Run the gate**: `cargo test --test e2e_coach` against the real game
+4. **Run the gate**: `cargo test --test e2e coach::` against the real game
    before trusting the check — the first version of a check usually needs its
    exemptions taught (see the dirt-ball two-observation-point lesson in
    `sim/coach.rs`).

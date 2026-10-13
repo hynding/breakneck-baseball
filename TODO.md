@@ -2,6 +2,34 @@
 
 NOTE: Everything that has been completed gets moved to TADA.md
 
+## Start here — agent-ready queue
+
+Open work a cloud agent session can close alone (no ear, gamepad, GPU window, or player
+judgment), each with the check that says it's done. Keep this list current: add an item
+when it becomes agent-ready, drop it when it moves to TADA. Everything not listed here
+needs a human (11, 33) or is a deliberate non-action (98).
+
+| Item | Work | Done when |
+|---|---|---|
+| 29 · boot warnings | Clear the three `B0004` hierarchy warnings at boot | `cargo test --test e2e full_game:: -- --nocapture 2>&1 \| grep -c B0004` prints `0`, and the browser console agrees (`/run-web`) |
+| 29 · sim slowdown | Headless sim ~72% slower since Bevy 0.15. *Measured 2026-10-09* (`tests/e2e/sim_profile.rs`): no hot system — 380 system runs/frame, 52% of the frame is executor overhead, game systems 4.8%; three levers listed in `docs/agent/BEVY-UPGRADE-ASSESSMENT.md` | Each lever tried and its ms/frame recorded there; `cargo nextest run --test balance_sim` wall time before/after, bands unmoved |
+| 29 · step 3 | Bevy 0.17 → 0.18 (AnimationTarget split, UI extraction rework) in a git worktree | Every gate in `BEVY-UPGRADE-ASSESSMENT.md` green on the branch, incl. the browser run |
+| 78 · remainder | Pause-board height cap for < 530 px viewports | `/run-web` screenshot at a 400 px-tall viewport shows the whole board; `cargo test --test e2e pause_subs::` green |
+
+## Test-suite gaps
+
+107. [x] high tests — **All five `creator::` e2e tests fail under `--features debug`**, and nothing
+    runs them: CI only `cargo check`s the debug feature, never `cargo test`s it. Found 2026-10-09
+    and reproduced on `a8b6384` (before the tests/e2e/ merge), so it dates from the Bevy 0.17
+    upgrade. Every test dies at boot with `bevy_egui::input::WindowToEguiContextMap::
+    on_egui_context_added_system: Res<EventLoopProxyWrapper<WakeUp>> ... Resource does not exist`.
+    bevy_egui now wants winit's event-loop proxy, which the headless harness never creates
+    (`WinitPlugin` is disabled in `tests/common/mod.rs`). Fix in the harness, not the game: give
+    the debug-feature harness what bevy_egui needs, or disable its winit-dependent input
+    systems headless. Then add `cargo test --features debug --test e2e creator::` to
+    `.github/workflows/ci.yml`.
+    *Done 2026-10-09 — see TADA 107.*
+
 ## Needs a human / native hardware session
 
 11. [ ] nice audio — Audio events presumed firing (crowd/cracks synthesized at startup;

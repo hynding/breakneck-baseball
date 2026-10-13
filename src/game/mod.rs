@@ -226,7 +226,7 @@ pub struct GameplayEntity;
 /// `Flow`), the ball applies flow's pitch/hit events, the defense reacts to
 /// the contact, the runners react to the defense's reports, and rig
 /// locomotion applies every `MoveIntent` written this frame.
-/// `tests/ambiguity_audit.rs` is the gate that keeps this exhaustive.
+/// `tests/e2e/ambiguity_audit.rs` is the gate that keeps this exhaustive.
 #[derive(bevy::ecs::schedule::SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GameplayOrder {
     /// Input routing (gamepad hotplug fallback).

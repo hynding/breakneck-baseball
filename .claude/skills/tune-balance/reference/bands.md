@@ -65,5 +65,5 @@ All on `Ruleset` (`src/game/core/variant.rs`), consumed by `rules::contact_quali
   standard +0.55, whose backspin lift parks at the top edge) **paired with** the batter's
   ahead-count compensation (timing draw ×0.65, chase ×0.5). The pairing is load-bearing:
   a pitcher-only pull converts walk PAs into strikeouts (K% brushed 29.7 in the reverted
-  2026-08-21 attempt). `tests/e2e_passive_walks.rs` guards the human-facing symptom
+  2026-08-21 attempt). `tests/e2e/passive_walks.rs` guards the human-facing symptom
   (passive half ≤ 3 BB; was 10); the bands here still arbitrate the CPU-vs-CPU economy.

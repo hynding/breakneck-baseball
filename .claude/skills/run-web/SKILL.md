@@ -12,7 +12,7 @@ Builds the wasm32 target, generates JS bindings, and serves `web/` locally. The 
 ## Workflow
 
 ```sh
-export PATH="/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$PATH"
+export PATH="/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$PATH"   # macOS only; cloud sessions already have cargo
 
 # 1. Build (debug ≈ 2 min cold; use --profile wasm-release for a small binary)
 cargo build --target wasm32-unknown-unknown

@@ -14,6 +14,11 @@ turn on diagnostics, find *which system* is slow, then apply the matching patter
   `src/game/meta/debug.rs`). For per-system numbers add
   `bevy::diagnostic::{SystemInformationDiagnosticsPlugin, LogDiagnosticsPlugin}` temporarily:
   `LogDiagnosticsPlugin::default()` prints every diagnostic on a 1 s cadence.
+- **Headless sim, per system:** `tests/e2e/sim_profile.rs` plays one CPU-vs-CPU inning with
+  Bevy's `trace` spans on and prints wall time per system and per schedule (TODO 29's
+  "sim slower since 0.15" probe). `cargo nextest run --features profile --test e2e
+  sim_profile:: --run-ignored only --no-capture` — compare probe runs with probe runs only;
+  spans cost frame time.
 - Native release ≠ wasm: WebGL2 is the slow path (no compute, fewer threads, driver overhead).
   Measure on the wasm build for web-facing complaints (`/run-web`).
 - The debug Time tab and `juice.rs` both scale `Time<Virtual>` — a "slow" game may just be a

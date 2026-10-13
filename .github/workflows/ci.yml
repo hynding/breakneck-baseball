@@ -15,7 +15,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   # CI never attaches a debugger. Line tables keep panic file:line in test
-  # output while shrinking the debug tree (rlibs + every e2e binary) several-fold,
+  # output while shrinking the debug tree (rlibs + the test binaries) several-fold,
   # which is what keeps `target` inside the runner's disk and the 10 GB cache cap.
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
   CARGO_PROFILE_TEST_DEBUG: line-tables-only
@@ -31,11 +31,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The debug test tree (every e2e binary statically links all of Bevy) plus
-      # the restored build cache outgrew the runner's 86 GB of free disk: the
-      # 2026-09-26 run died with "No space left on device" mid-compile. Drop the
-      # preinstalled toolchains this job never touches (27 GB measured) and log
-      # headroom. Under `line-tables-only` a cold tree is ~23 GB (2026-09-27 run).
+      # The debug test tree plus the restored build cache once outgrew the
+      # runner's 86 GB of free disk: the 2026-09-26 run died with "No space left
+      # on device" mid-compile, when each of 36 test files was its own ~600 MB
+      # binary statically linking all of Bevy (~23 GB cold under
+      # `line-tables-only`). The e2e suites now share one binary (tests/e2e/),
+      # which cut the whole cold debug tree from ~27 GB to ~8 GB (2026-10-09).
+      # Dropping the preinstalled toolchains this job never touches (27 GB
+      # measured) stays as cheap headroom.
       - name: Free runner disk space
         run: |
           df -h / | tail -1
@@ -83,8 +86,23 @@ jobs:
       - name: Format check
         run: cargo fmt --check
 
-      - name: Unit tests
-        run: cargo test
+      # cargo-nextest (.config/nextest.toml) runs every test binary's tests in
+      # one pool, one process per test: 454 s for the full suite against 1289 s
+      # under `cargo test` on a 4-core box (2026-10-09). Prebuilt binary, the
+      # same source the cloud session hook uses. nextest skips doctests; none
+      # exist today — add `cargo test --doc` here if that changes.
+      - name: Install cargo-nextest
+        run: curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C "${CARGO_HOME:-$HOME/.cargo}/bin"
+
+      - name: Tests (unit + e2e + balance sim)
+        run: cargo nextest run --no-fail-fast
+
+      # The creator stage only exists under the `debug` feature, so its e2e
+      # suite is invisible to the run above. It went red unnoticed at the
+      # Bevy 0.17 upgrade (TADA 107); this keeps it in the gate. Quoted: a
+      # trailing `::` is a YAML mapping indicator.
+      - name: Creator e2e (debug feature)
+        run: "cargo nextest run --features debug --test e2e creator::"
 
       # Headroom after the largest compile, so a disk-pressure regression shows
       # up in the log before it becomes another dead runner.

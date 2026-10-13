@@ -4,6 +4,9 @@
 //! wasm alike. Findings stream as JSON lines (stderr natively, the console
 //! on the web) and a `coach-report.json` lands at every game end (a file
 //! natively; localStorage plus a `COACH_REPORT` console line on the web).
+//! Beside the Coach counts the report carries a `game` summary (score,
+//! contact grades, balls in play) and a `frames` summary (real frame-time
+//! percentiles), so two runs diff as data rather than by eye.
 //!
 //! The module also carries the always-on wasm **beacon**: two console
 //! breadcrumbs (`bb-state …`, `bb-first-pitch`) that browser automation
@@ -13,15 +16,19 @@
 
 #[cfg(feature = "autoplay")]
 mod drive {
+    use std::collections::BTreeMap;
+
     use bevy::app::AppExit;
     use bevy::prelude::*;
     use serde_json::json;
 
-    use crate::game::GameState;
     use crate::game::coach::{
         CheckId, CoachEnabled, CoachFinding, CoachFindingEvent, CoachReport, Severity,
     };
     use crate::game::director::{Director, DriveGame, Policy, script};
+    use crate::game::flow::{BallInPlayEvent, ContactEvent};
+    use crate::game::rules::ContactKind;
+    use crate::game::{GameState, ScoreBoard};
 
     /// Boot grace before the menu key is pressed (asset spawns settle).
     const MENU_GRACE_SECS: f32 = 1.0;
@@ -39,6 +46,8 @@ mod drive {
         script: Option<String>,
         innings: Option<u32>,
         once: bool,
+        /// Native only: the web build persists to localStorage instead.
+        #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
         report_path: String,
     }
 
@@ -137,6 +146,109 @@ mod drive {
         }
     }
 
+    /// Frame-time histogram width: one bucket per millisecond, the last
+    /// bucket catching every frame at or beyond it.
+    const FRAME_BUCKETS: usize = 101;
+
+    /// What one game looked like, beside the Coach's verdicts: the outcome
+    /// tallies and real frame times. Observe-only like the Coach — it reads
+    /// events and clocks, never gameplay state it could perturb. Reset at
+    /// every game start, so an attract loop reports per game.
+    #[derive(Resource)]
+    struct RunSummary {
+        /// `ContactEvent` grades, keyed by the `ContactQuality` name.
+        contact: BTreeMap<String, u32>,
+        home_runs: u32,
+        fair_live: u32,
+        foul_live: u32,
+        frames: u64,
+        /// Real frame time in whole milliseconds, clamped into the last bucket.
+        frame_ms: [u32; FRAME_BUCKETS],
+        max_frame_ms: f32,
+    }
+
+    impl Default for RunSummary {
+        fn default() -> Self {
+            Self {
+                contact: BTreeMap::new(),
+                home_runs: 0,
+                fair_live: 0,
+                foul_live: 0,
+                frames: 0,
+                frame_ms: [0; FRAME_BUCKETS],
+                max_frame_ms: 0.0,
+            }
+        }
+    }
+
+    impl RunSummary {
+        /// The smallest whole-millisecond bucket holding fraction `p` of frames.
+        fn frame_percentile(&self, p: f64) -> usize {
+            let target = (self.frames as f64 * p).ceil() as u64;
+            let mut seen = 0u64;
+            for (ms, &n) in self.frame_ms.iter().enumerate() {
+                seen += u64::from(n);
+                if seen >= target.max(1) {
+                    return ms;
+                }
+            }
+            FRAME_BUCKETS - 1
+        }
+    }
+
+    fn reset_summary(mut summary: ResMut<RunSummary>) {
+        *summary = RunSummary::default();
+    }
+
+    fn tally_summary(
+        time: Res<Time<Real>>,
+        mut contacts: MessageReader<ContactEvent>,
+        mut in_play: MessageReader<BallInPlayEvent>,
+        mut summary: ResMut<RunSummary>,
+    ) {
+        for c in contacts.read() {
+            *summary
+                .contact
+                .entry(format!("{:?}", c.quality))
+                .or_insert(0) += 1;
+        }
+        for b in in_play.read() {
+            match b.kind {
+                ContactKind::HomeRun => summary.home_runs += 1,
+                ContactKind::Live { fair: true } => summary.fair_live += 1,
+                ContactKind::Live { fair: false } => summary.foul_live += 1,
+            }
+        }
+        let ms = time.delta_secs() * 1000.0;
+        summary.frames += 1;
+        summary.frame_ms[(ms as usize).min(FRAME_BUCKETS - 1)] += 1;
+        summary.max_frame_ms = summary.max_frame_ms.max(ms);
+    }
+
+    fn summary_doc(summary: &RunSummary, score: &ScoreBoard) -> serde_json::Value {
+        json!({
+            "game": {
+                "runs": { "home": score.home_runs, "away": score.away_runs },
+                "inning": score.inning,
+                "top_of_inning": score.top_of_inning,
+                "contact": summary.contact,
+                "home_runs_hit": summary.home_runs,
+                "fair_live": summary.fair_live,
+                "foul_live": summary.foul_live,
+            },
+            "frames": {
+                "count": summary.frames,
+                "p50_ms": summary.frame_percentile(0.50),
+                "p95_ms": summary.frame_percentile(0.95),
+                "p99_ms": summary.frame_percentile(0.99),
+                "max_ms": summary.max_frame_ms,
+                // The percentiles saturate at the last bucket; this says how
+                // many frames sit there (software rendering lands them all).
+                "over_100ms": summary.frame_ms[FRAME_BUCKETS - 1],
+            },
+        })
+    }
+
     fn finding_json(f: &CoachFinding) -> serde_json::Value {
         json!({
             "check": f.check.label(),
@@ -162,7 +274,11 @@ mod drive {
         }
     }
 
-    fn report_doc(report: &CoachReport) -> serde_json::Value {
+    fn report_doc(
+        report: &CoachReport,
+        summary: &RunSummary,
+        score: &ScoreBoard,
+    ) -> serde_json::Value {
         let counts: Vec<_> = CheckId::ALL
             .iter()
             .flat_map(|&check| {
@@ -175,11 +291,17 @@ mod drive {
                 json!({"check": check.label(), "severity": format!("{sev:?}"), "count": n})
             })
             .collect();
-        json!({
+        let mut doc = json!({
             "samples": report.samples,
             "counts": counts,
             "recent": report.recent.iter().map(finding_json).collect::<Vec<_>>(),
-        })
+        });
+        if let (Some(doc), serde_json::Value::Object(extra)) =
+            (doc.as_object_mut(), summary_doc(summary, score))
+        {
+            doc.extend(extra);
+        }
+        doc
     }
 
     /// Persists the report where the platform's automation can pull it: a
@@ -205,19 +327,30 @@ mod drive {
     /// Mid-game flush every few seconds, so an inning-length watched run
     /// still yields a pullable report (the report is cumulative; the
     /// game-end write below just makes it final). Quiet: no console line.
-    fn flush_report(time: Res<Time<Real>>, mut last: Local<f32>, report: Res<CoachReport>) {
+    fn flush_report(
+        time: Res<Time<Real>>,
+        mut last: Local<f32>,
+        report: Res<CoachReport>,
+        summary: Res<RunSummary>,
+        score: Res<ScoreBoard>,
+    ) {
         if time.elapsed_secs() - *last < 10.0 {
             return;
         }
         *last = time.elapsed_secs();
-        persist(&report_doc(&report), &config());
+        persist(&report_doc(&report, &summary, &score), &config());
     }
 
     /// The game ended: dump the final report, announce it on the console,
     /// and exit if this is a one-shot run.
-    fn write_report(report: Res<CoachReport>, mut exit: MessageWriter<AppExit>) {
+    fn write_report(
+        report: Res<CoachReport>,
+        summary: Res<RunSummary>,
+        score: Res<ScoreBoard>,
+        mut exit: MessageWriter<AppExit>,
+    ) {
         let cfg = config();
-        let doc = report_doc(&report);
+        let doc = report_doc(&report, &summary, &score);
         emit(&format!("COACH_REPORT {doc}"));
         persist(&doc, &cfg);
         if cfg.once {
@@ -233,13 +366,17 @@ mod drive {
             // native self-driving run (the web target registers them itself).
             #[cfg(not(target_arch = "wasm32"))]
             app.add_plugins(super::WebBeaconPlugin);
-            app.add_systems(Startup, setup)
+            app.init_resource::<RunSummary>()
+                .add_systems(Startup, setup)
                 .add_systems(DriveGame, navigate_menus)
+                .add_systems(crate::game::game_start(), reset_summary)
                 .add_systems(
                     Update,
                     (
                         log_findings,
-                        flush_report.run_if(in_state(GameState::Playing)),
+                        (tally_summary, flush_report)
+                            .chain()
+                            .run_if(in_state(GameState::Playing)),
                     ),
                 )
                 .add_systems(
