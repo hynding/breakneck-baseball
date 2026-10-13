@@ -23,8 +23,7 @@
 - glb budgets enforced by `model_contract.rs` (`MAX_GLB_BYTES` 512 KiB, bones ≤ 48); clip-name set equality means Blender and `CLIP_TABLE` must land in the same commit.
 - One action per NLA track (multi-strip tracks export wrong) — `bake_clips` already guarantees this; don't bypass it. Never keyframe wardrobe/mesh objects.
 - Fidgets/celebrations respect `Time<Virtual>` (they ride `Playing` timers, which already do) and NEVER fire during the steal window, windup, or pitch flight.
-- Commit per task; messages end with:
-Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+- Commit per task; messages end with the session's `Co-Authored-By:` trailer (whichever of Opus 5.5 or Fable 5.1 is running; the harness supplies the exact line).
 
 ---
 

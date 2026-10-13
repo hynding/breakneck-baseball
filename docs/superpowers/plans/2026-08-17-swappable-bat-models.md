@@ -18,7 +18,7 @@
 - Task 5 onward must also pass `cargo check --features "dev debug"` (the 16-system-param limit only bites there).
 - Existing e2e + balance suites must pass unchanged except the tests this plan explicitly edits. No `Ruleset` window retuning.
 - Roster names are A–Z only (jersey font); `data/players.ron` is never edited by this plan.
-- Commit at the end of every task with the `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` trailer.
+- Commit at the end of every task with the session's `Co-Authored-By:` trailer (whichever of Opus 5.5 or Fable 5.1 is running; the harness supplies the exact line).
 
 ---
 

@@ -100,7 +100,10 @@ Loaded on trigger from `.claude/skills/`; each SKILL.md says when.
 - `coach` — the always-on expectation checker: what it checks, tolerances, reading `CoachReport`, adding a check. Load when players misbehave or before touching `sim/fielding.rs`, `sim/runner.rs`, `sim/flow/`.
 - `auto-playtest` — the Director, `.ron` scripts, the mode matrix, and self-driving native/wasm runs. Load for "playtest", "verify 2 player", "test PCI/Meter", or when adding an input device or batting adapter.
 - `run-web` — build, serve, and verify the browser build.
-- `rust-skills` — generic Rust guidelines (265 rules); use for any Rust authoring/review.
+
+Generic Rust guidelines (265 rules, vendored from `leonardomso/rust-skills`) live in
+`.agents/skills/rust-skills/rules/` and are deliberately not linked into `.claude/skills/`. Read a
+specific rule file when it applies; `bevy-perf` cites the ones that matter for this crate.
 
 Long-form narrative (how every subsystem fits together): `docs/agent/ARCHITECTURE-FULL.md`.
 The user's work queue is `TODO.md`; completed items move to `TADA.md`.

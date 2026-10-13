@@ -15,7 +15,7 @@
 - Dual target: after physics/render-adjacent changes run `cargo check` **and** `cargo check --target wasm32-unknown-unknown` (with `--features debug` from Task 3 on).
 - The `debug` feature must never be enabled in the Pages release build (`.github/workflows/pages.yml` is untouched).
 - Home plate at origin, +Z toward the field; first base at −X.
-- Commit after every task with the `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` trailer.
+- Commit after every task with the session's `Co-Authored-By:` trailer (whichever of Opus 5.5 or Fable 5.1 is running; the harness supplies the exact line).
 
 ## File Structure
 
