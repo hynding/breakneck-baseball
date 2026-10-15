@@ -14,7 +14,7 @@
 - Verify both targets after gameplay changes: `cargo check` AND `cargo check --target wasm32-unknown-unknown`
 - fx/fielding/runner modules must never mutate `ScoreBoard` or `Bases`
 - The e2e (`tests/e2e_full_game.rs`) must stay green: Away takes center changeups (no HBP/steal/dropped-third triggers), Home homers (unchanged path)
-- Commit per task; messages end with `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`
+- Commit per task; messages end with the session's `Co-Authored-By:` trailer (whichever of Opus 5.5 or Fable 5.1 is running; the harness supplies the exact line)
 
 ## Rule Designs (deterministic, no RNG)
 

@@ -19,7 +19,7 @@
 - No RNG in `rules.rs`; no gameplay behavior changes in this phase (appearance is data only until Phase 2).
 - Keep `Cargo.lock` committed (CI derives wasm-bindgen version from it).
 - The wasm build has no filesystem: disk reads/writes are `#[cfg]`-gated to native (`not(target_arch = "wasm32")`), and shipping builds use the embedded RON only.
-- Commit after every green task with the `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` trailer.
+- Commit after every green task with the session's `Co-Authored-By:` trailer (whichever of Opus 5.5 or Fable 5.1 is running; the harness supplies the exact line).
 
 ---
 

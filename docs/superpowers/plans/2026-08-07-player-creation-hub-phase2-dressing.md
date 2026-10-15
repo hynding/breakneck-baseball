@@ -18,8 +18,7 @@
 - No Blender changes in this phase — all gear is procedural Bevy primitives (the `Head`/`LowerArm.*` bones already exist in the glb and `ATTACH_BONES` guards them).
 - Umpires have no `PlayerIdentity` and are never dressed (base skin, team-recolored cap as today). The Blocky fallback rig is out of scope (both built-in themes use the glTF model; documented judgment call).
 - No gameplay behavior changes; `fx/fielding/runner` still never mutate `ScoreBoard`/`Bases`.
-- Commit per task; messages end with:
-Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+- Commit per task; messages end with the session's `Co-Authored-By:` trailer (whichever of Opus 5.5 or Fable 5.1 is running; the harness supplies the exact line).
 
 ---
 
