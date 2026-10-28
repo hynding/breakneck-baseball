@@ -33,7 +33,7 @@ use bevy::log::tracing_subscriber::registry::LookupSpan;
 use bevy::prelude::*;
 use breakneck_baseball::game::input::{Controllers, InputSource};
 use breakneck_baseball::game::{GameState, ScoreBoard};
-use common::{deterministic_headless_app_with_log_layer, run_until, start_game, tap_key};
+use common::{HeadlessConfig, headless_app_with, run_until, start_game, tap_key};
 
 /// Same step as `tests/balance_sim.rs`: this probe measures the sim the
 /// balance harness runs.
@@ -111,13 +111,99 @@ fn profile_layer(_: &mut App) -> Option<BoxedLayer> {
     Some(Box::new(ProfileLayer))
 }
 
+/// Per-frame change-detection churn: how many of each component were marked
+/// changed since the previous frame. A UI node or text that changes every
+/// frame re-runs layout/measure every frame (lever 1 in the assessment).
+#[derive(Resource, Default)]
+struct Churn {
+    frames: u64,
+    text: u64,
+    node: u64,
+    text_color: u64,
+    background: u64,
+    transform: u64,
+    global_transform: u64,
+    /// Per-entity counts for the UI kinds, with a sample of what it holds, so
+    /// the table names the churners.
+    churners: HashMap<(Entity, &'static str), (u64, String)>,
+}
+
+/// Runs in `Last`, so `Changed<T>` here means "changed anywhere this frame".
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn count_churn(
+    mut churn: ResMut<Churn>,
+    text: Query<(), Changed<Text>>,
+    node: Query<(), Changed<Node>>,
+    text_color: Query<(), Changed<TextColor>>,
+    background: Query<(), Changed<BackgroundColor>>,
+    text_changed: Query<(Entity, &Text), Changed<Text>>,
+    node_changed: Query<(Entity, Option<&Name>), Changed<Node>>,
+    text_color_changed: Query<(Entity, Option<&Name>, Option<&Text>), Changed<TextColor>>,
+    background_changed: Query<(Entity, Option<&Name>), Changed<BackgroundColor>>,
+    transform: Query<(), Changed<Transform>>,
+    global_transform: Query<(), Changed<GlobalTransform>>,
+) {
+    churn.frames += 1;
+    churn.text += text.iter().count() as u64;
+    churn.node += node.iter().count() as u64;
+    churn.text_color += text_color.iter().count() as u64;
+    churn.background += background.iter().count() as u64;
+    for (entity, text) in &text_changed {
+        let e = churn.churners.entry((entity, "Text")).or_default();
+        e.0 += 1;
+        e.1 = text.0.chars().take(28).collect();
+    }
+    for (entity, name) in &node_changed {
+        let e = churn.churners.entry((entity, "Node")).or_default();
+        e.0 += 1;
+        e.1 = name.map(|n| n.as_str().to_string()).unwrap_or_default();
+    }
+    for (entity, name, text) in &text_color_changed {
+        let e = churn.churners.entry((entity, "TextColor")).or_default();
+        e.0 += 1;
+        e.1 = text
+            .map(|t| t.0.chars().take(28).collect())
+            .or_else(|| name.map(|n| n.as_str().to_string()))
+            .unwrap_or_default();
+    }
+    for (entity, name) in &background_changed {
+        let e = churn
+            .churners
+            .entry((entity, "BackgroundColor"))
+            .or_default();
+        e.0 += 1;
+        e.1 = name.map(|n| n.as_str().to_string()).unwrap_or_default();
+    }
+    churn.transform += transform.iter().count() as u64;
+    churn.global_transform += global_transform.iter().count() as u64;
+}
+
 #[test]
 #[ignore = "profiling probe, not a gate — see the module doc for the command"]
 fn where_one_cpu_inning_spends_its_time() {
-    let mut app = deterministic_headless_app_with_log_layer(profile_layer);
+    profile_one_inning(false);
+}
+
+/// The same inning with `HeadlessConfig::skip_skeletal_sampling`, the
+/// balance sim's configuration — the two tables together say what the switch
+/// buys.
+#[test]
+#[ignore = "profiling probe, not a gate — see the module doc for the command"]
+fn where_one_cpu_inning_spends_its_time_without_skeletal_sampling() {
+    profile_one_inning(true);
+}
+
+fn profile_one_inning(skip_skeletal_sampling: bool) {
+    let mut app = headless_app_with(HeadlessConfig {
+        single_threaded: true,
+        log_layer: Some(profile_layer),
+        skip_skeletal_sampling,
+    });
     app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
         Duration::from_secs_f64(SIM_DT),
     ));
+    app.init_resource::<Churn>();
+    app.add_systems(Last, count_churn);
     // 9 -> 1 inning (the menu cycle wraps), one-player mode, then both slots
     // to the CPU — exactly `balance_sim::play_one_game`.
     tap_key(&mut app, KeyCode::KeyI);
@@ -130,6 +216,7 @@ fn where_one_cpu_inning_spends_its_time() {
 
     // Boot and menu frames are not the sim: start counting at first pitch.
     TOTALS.lock().expect("profile totals").clear();
+    *app.world_mut().resource_mut::<Churn>() = Churn::default();
     let wall = Instant::now();
     let frames = run_until(&mut app, MAX_FRAMES, |app| {
         let over = *app.world().resource::<State<GameState>>().get() == GameState::GameOver;
@@ -145,7 +232,8 @@ fn where_one_cpu_inning_spends_its_time() {
 
     let score = app.world().resource::<ScoreBoard>();
     println!(
-        "\nsim profile — one CPU-vs-CPU inning: {frames} frames in {:.1} s wall \
+        "\nsim profile — one CPU-vs-CPU inning (skip_skeletal_sampling={skip_skeletal_sampling}): \
+         {frames} frames in {:.1} s wall \
          ({:.2} ms/frame; schedule:Main {:.2} ms/frame); final {}-{}\n",
         wall.as_secs_f64(),
         wall.as_secs_f64() * 1000.0 / frames as f64,
@@ -181,6 +269,33 @@ fn where_one_cpu_inning_spends_its_time() {
     }
     let mut by_crate: Vec<_> = by_crate.into_iter().collect();
     by_crate.sort_by_key(|&(_, total)| std::cmp::Reverse(total));
+    let c = app.world().resource::<Churn>();
+    let per = |n: u64| n as f64 / c.frames.max(1) as f64;
+    println!(
+        "changed per frame: Text {:.2}, Node {:.2}, TextColor {:.2}, BackgroundColor {:.2}, \
+         Transform {:.1}, GlobalTransform {:.1}\n",
+        per(c.text),
+        per(c.node),
+        per(c.text_color),
+        per(c.background),
+        per(c.transform),
+        per(c.global_transform),
+    );
+
+    let mut churners: Vec<_> = c.churners.iter().collect();
+    churners.sort_by_key(|(_, (n, _))| std::cmp::Reverse(*n));
+    println!(
+        "{:>8} {:>7}  churners (changes over the run)",
+        "changes", "/frame"
+    );
+    for ((entity, kind), (n, sample)) in churners.iter().take(24) {
+        println!(
+            "{n:>8} {:>7.2}  {kind} {entity} {sample:?}",
+            *n as f64 / c.frames.max(1) as f64
+        );
+    }
+    println!();
+
     println!(
         "{:>9} {:>9} {:>6}  systems by crate",
         "total ms", "us/frame", "%Main"

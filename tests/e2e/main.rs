@@ -49,6 +49,7 @@ mod pause_subs;
 mod scenarios;
 #[cfg(feature = "profile")]
 mod sim_profile;
+mod skeletal_switch;
 mod swing_startup;
 mod touch_pipeline;
 mod walkup;

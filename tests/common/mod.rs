@@ -76,7 +76,7 @@ pub fn start_game(app: &mut App, select_key: KeyCode) {
 /// afterwards: `app.add_systems(DriveGame, drive)`.
 #[allow(dead_code)]
 pub fn headless_app() -> App {
-    build_headless_app(false, None)
+    headless_app_with(HeadlessConfig::default())
 }
 
 /// Like [`headless_app`], but pins **single-threaded, run-to-run deterministic**
@@ -91,20 +91,77 @@ pub fn headless_app() -> App {
 /// balance sim uses it, so the other e2e harnesses keep the faster default.
 #[allow(dead_code)]
 pub fn deterministic_headless_app() -> App {
-    build_headless_app(true, None)
+    headless_app_with(HeadlessConfig {
+        single_threaded: true,
+        ..Default::default()
+    })
 }
 
 /// [`deterministic_headless_app`] with a custom `tracing` layer installed by
 /// `LogPlugin` — the seam the profiling probe uses to time every span.
 #[allow(dead_code)]
 pub fn deterministic_headless_app_with_log_layer(layer: LogLayerFn) -> App {
-    build_headless_app(true, Some(layer))
+    headless_app_with(HeadlessConfig {
+        single_threaded: true,
+        log_layer: Some(layer),
+        ..Default::default()
+    })
 }
 
 /// A `LogPlugin::custom_layer` hook.
 pub type LogLayerFn = fn(&mut App) -> Option<bevy::log::BoxedLayer>;
 
-fn build_headless_app(single_threaded: bool, log_layer: Option<LogLayerFn>) -> App {
+/// The harness's switches. The named constructors above are the common
+/// shapes; [`headless_app_with`] takes the full set.
+#[derive(Default, Clone, Copy)]
+#[allow(dead_code)]
+pub struct HeadlessConfig {
+    /// Single-threaded executor + one-thread task pools (see
+    /// [`deterministic_headless_app`]).
+    pub single_threaded: bool,
+    /// A `tracing` layer for `LogPlugin` (the profiling probe).
+    pub log_layer: Option<LogLayerFn>,
+    /// Strip `AnimationTarget` from every bone as rigs spawn, so
+    /// `bevy_animation::animate_targets` samples nothing. Worth 16% of the
+    /// headless frame (TODO 29 lever 2, `tests/e2e/sim_profile.rs`). Bone
+    /// poses are cosmetic — the rules and the Coach read rig *root*
+    /// transforms, jerseys and gear find bones by walking `Children` — and
+    /// `tests/e2e/skeletal_switch.rs` pins that the inning is frame-identical
+    /// with and without it (it took a Rapier sync fix in `GamePlugin` to make
+    /// that true). The balance sim uses it; suites that assert on bone poses
+    /// must not.
+    pub skip_skeletal_sampling: bool,
+}
+
+/// Removes `AnimationTarget` from any entity that has one — every frame, so
+/// rigs spawned mid-run (a new game in the same app) are covered too.
+/// `try_remove`: a bone seen here can be gone by the command flush (a runner
+/// despawned recursively, a scene instance landing on a parent that already
+/// left), and a plain `remove` on a dead entity is an error the harness
+/// turns into a panic.
+fn strip_animation_targets(
+    mut commands: Commands,
+    targets: Query<Entity, With<bevy::animation::AnimationTarget>>,
+) {
+    for entity in &targets {
+        commands
+            .entity(entity)
+            .try_remove::<bevy::animation::AnimationTarget>();
+    }
+}
+
+/// Builds the headless app from a [`HeadlessConfig`].
+#[allow(dead_code)]
+pub fn headless_app_with(cfg: HeadlessConfig) -> App {
+    build_headless_app(cfg)
+}
+
+fn build_headless_app(cfg: HeadlessConfig) -> App {
+    let HeadlessConfig {
+        single_threaded,
+        log_layer,
+        skip_skeletal_sampling,
+    } = cfg;
     // Isolate the settings store before `SettingsPlugin` loads it: a
     // headless test must neither read the developer's real settings.json
     // (their volume/batting-style choices would silently steer test
@@ -200,6 +257,11 @@ fn build_headless_app(single_threaded: bool, log_layer: Option<LogLayerFn>) -> A
     // the harness only adds its keyboard-tap injector to it.
     app.init_resource::<TapKey>();
     app.add_systems(DriveGame, apply_taps);
+    if skip_skeletal_sampling {
+        // `First`: before this frame's `PostUpdate` sampling sees a rig the
+        // scene spawner finished last frame.
+        app.add_systems(Last, strip_animation_targets);
+    }
 
     // Debug builds carry bevy_egui, whose context bookkeeping wants winit's
     // event-loop proxy. Headless there is none (`WinitPlugin` is disabled

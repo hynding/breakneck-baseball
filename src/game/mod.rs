@@ -248,6 +248,24 @@ pub struct GamePlugin;
 
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
+        // bevy_rapier 0.32's `SyncBackend` set runs before Bevy's transform
+        // propagation and calls its own copy of `propagate_parent_transforms`
+        // to read fresh `GlobalTransform`s — but not `mark_dirty_trees`, the
+        // Bevy 0.16+ step that flags which trees propagation visits. A rig
+        // root moved by `locomote` this frame is therefore unflagged when
+        // Rapier looks, its kinematic body keeps last frame's pose, and the
+        // write-back snaps the root back for one frame. Skeletal sampling
+        // hid this (bones dirty every tree every frame); without it fielders
+        // break a frame late (TODO 29 lever 2, `tests/e2e/skeletal_switch.rs`).
+        // Flagging the trees first makes kinematic rigs follow their
+        // transforms the same frame regardless of animation. Idempotent: the
+        // second run inside Bevy's own `Propagate` set breaks early on
+        // already-flagged trees.
+        app.add_systems(
+            PostUpdate,
+            bevy::transform::systems::mark_dirty_trees
+                .before(bevy_rapier3d::plugin::PhysicsSet::SyncBackend),
+        );
         app
             // State machine
             .init_state::<GameState>()

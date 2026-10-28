@@ -68,7 +68,7 @@ use breakneck_baseball::game::input::{Controllers, InputSource};
 use breakneck_baseball::game::rules::BattingOrder;
 use breakneck_baseball::game::{GameState, ScoreBoard, Team};
 
-use common::{DriveGame, deterministic_headless_app, run_until, start_game, tap_key};
+use common::{DriveGame, HeadlessConfig, headless_app_with, run_until, start_game, tap_key};
 
 /// Hard cap per game. A one-inning CPU game settles in a few thousand frames;
 /// this is a generous backstop (and covers a tie that spills into extras)
@@ -198,7 +198,15 @@ struct GameStats {
 /// distinct clock offset (`· OFFSET_STRIDE_FRAMES`) idled before the game
 /// starts, so this game's AI noise stream is well separated from every other's.
 fn play_one_game(game_index: u32) -> GameStats {
-    let mut app = deterministic_headless_app();
+    // Single-threaded for run-to-run determinism (see the module doc) and
+    // without skeletal sampling: bone poses cannot reach the rules, and
+    // `tests/e2e/skeletal_switch.rs` pins that the inning is frame-identical
+    // either way — the sampling was ~16% of the headless frame for nothing.
+    let mut app = headless_app_with(HeadlessConfig {
+        single_threaded: true,
+        skip_skeletal_sampling: true,
+        ..Default::default()
+    });
     app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
         std::time::Duration::from_secs_f64(SIM_DT),
     ));

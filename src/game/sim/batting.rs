@@ -80,7 +80,7 @@ impl MeterState {
 /// The *batting* team's current meter load fraction (`0..1`), republished every
 /// frame for presentation — the animation stance-sink and the UI meter bar read
 /// it. Always 0 for Classic/PCI batters and whenever no load is open.
-#[derive(Resource, Default)]
+#[derive(Resource, Default, PartialEq)]
 pub struct MeterLoad(pub f32);
 
 /// The PCI cursor's per-team position on the zone plane, in zone coordinates
@@ -270,7 +270,10 @@ pub fn adapt_swings(
                 PciState::clamp_to_zone(c);
             }
         }
-        load.0 = 0.0;
+        // `set_if_neq`: an unconditional write marks the resource changed every
+        // frame, which defeats `ui::hud::update_meter_bar`'s change guard and
+        // relayouts the HUD each frame (TODO 29's profile).
+        load.set_if_neq(MeterLoad(0.0));
         return;
     }
     // (The Zone Pad's anticipatory-press-at-delivery arrives here as an
@@ -358,7 +361,8 @@ pub fn adapt_swings(
     }
     // Republish the batting team's load for presentation (0 for any style that
     // never opened a hold, and 0 the frame a swing fires and clears it).
-    load.0 = meter.load_frac(team, now);
+    // Change-gated for the same reason as the early return above.
+    load.set_if_neq(MeterLoad(meter.load_frac(team, now)));
 }
 
 /// Registers [`SwingCommands`]; the [`adapt_swings`] system itself is chained

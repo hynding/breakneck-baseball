@@ -444,3 +444,18 @@ the probe that now guards it.
     skipping the system changes nothing. `.github/workflows/ci.yml` gained a
     `cargo test --features debug --test e2e creator::` step, and the cloud session-start hook
     warms that binary too.
+108. [x] TODO 29 lever 2 — the balance sim skips skeletal sampling: **439 → 299 s** (−32%) with
+    bit-identical aggregates (43 K / 275 PA, 31 runs, 21 HR before and after). — Adopting it
+    first failed its own gate: the same CPU inning ended 45 frames apart. The lockstep diagnostic
+    in `tests/e2e/skeletal_switch.rs` traced that to frame 444, where fielders broke on contact a
+    frame earlier *with* sampling — both runs had set the `MoveIntent`s that frame, `locomote`
+    moved the rigs in both, but Rapier's write-back snapped the roots back in one. Root cause, a
+    bevy_rapier 0.32 / Bevy 0.17 integration gap: Rapier's `SyncBackend` propagates transforms
+    with its own copy of `propagate_parent_transforms` but without Bevy 0.16+'s
+    `mark_dirty_trees`, so a rig root moved this frame is unflagged and skipped, its kinematic
+    body keeps the old pose, and the write-back overwrites the root for one frame. Skeletal
+    sampling hid it by flagging every rig's tree every frame. `GamePlugin` now runs
+    `mark_dirty_trees` before `PhysicsSet::SyncBackend`; the gate
+    (`skipping_skeletal_sampling_does_not_change_the_inning`) and the in-process determinism
+    control are live tests. The shipped game's trajectory is unchanged (the sampled path never
+    lagged), but kinematic rigs no longer depend on animation churn to follow their transforms.
