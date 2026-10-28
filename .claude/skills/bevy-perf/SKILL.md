@@ -5,7 +5,7 @@ description: Use when the game is "slow", "stuttering", "dropping frames", "lagg
 
 # Bevy Performance (0.15-era notes, crate on 0.17)
 
-Profile before optimizing (`rust-skills/rules/perf-profile-first.md`). In Bevy that means:
+Profile before optimizing (`.agents/skills/rust-skills/rules/perf-profile-first.md`). In Bevy that means:
 turn on diagnostics, find *which system* is slow, then apply the matching pattern below.
 
 ## Measure first
@@ -41,9 +41,9 @@ turn on diagnostics, find *which system* is slow, then apply the matching patter
   writing an identical value still flags it; use `set_if_neq` where that matters.
 - Don't call `query.get(entity)` inside a per-entity inner loop (O(n·m) archetype lookups) —
   restructure to iterate once, or collect the lookup side into a `HashMap` first
-  (`rust-skills/rules/perf-collect-once.md`).
+  (`.agents/skills/rust-skills/rules/perf-collect-once.md`).
 - Use `Local<Vec<_>>`/`Local<HashMap<_>>` for per-system scratch buffers and `.clear()` them,
-  instead of allocating per frame (`rust-skills/rules/mem-reuse-collections.md`,
+  instead of allocating per frame (`.agents/skills/rust-skills/rules/mem-reuse-collections.md`,
   `mem-with-capacity.md`).
 - `par_iter` helps big homogeneous loops natively; useless on wasm (single thread).
 
@@ -76,11 +76,11 @@ turn on diagnostics, find *which system* is slow, then apply the matching patter
   textures (jerseys, field) comfortably under it, and MSAA/shadow-map defaults (4x / 2048)
   are worth revisiting explicitly for WebGL2.
 - Binary size is a perf metric on web (download = startup time): `--profile wasm-release`
-  already sets `opt-level = "z"` + LTO (`rust-skills/rules/perf-release-profile.md`).
+  already sets `opt-level = "z"` + LTO (`.agents/skills/rust-skills/rules/perf-release-profile.md`).
 
 ## Generic Rust perf — don't restate, read these
 
-`rust-skills/rules/`: `perf-profile-first.md`, `perf-iter-over-index.md`,
+`.agents/skills/rust-skills/rules/`: `perf-profile-first.md`, `perf-iter-over-index.md`,
 `perf-collect-once.md`, `perf-entry-api.md`, `mem-reuse-collections.md`,
 `mem-with-capacity.md`, `mem-avoid-format.md`, `anti-format-hot-path.md`,
 `anti-collect-intermediate.md`, `anti-clone-excessive.md`.

@@ -12,7 +12,7 @@
 
 - PATH prefix for cargo; verify native + wasm targets; zero clippy warnings
 - Deterministic scripts only — milestones on resource state, generous frame caps
-- Commits end with `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`
+- Commits end with the session's `Co-Authored-By:` trailer (whichever of Opus 5.5 or Fable 5.1 is running; the harness supplies the exact line)
 
 ## Scenario designs (all physics-verified against rules.rs constants)
 

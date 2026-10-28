@@ -29,7 +29,7 @@
 - **Visibility rule:** widen private items only as far as needed — `pub(super)` for sibling submodules inside a split directory; `pub(crate)` only if a different module needs it (none expected; if one appears, note it in the commit message).
 - **Helper placement rule (splits):** a private helper moves with its only caller; a helper shared across submodules stays in the split's `mod.rs` (or moves to the submodule of its primary caller as `pub(super)`). Cluster tables below may shift by ±1 helper under this rule — that's fine; inventing new structure is not.
 - **Wasm/WebGL2 UI gotcha and all other CLAUDE.md rules remain in force.**
-- Commit messages end with `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
+- Commit messages end with the session's `Co-Authored-By:` trailer (whichever of Opus 5.5 or Fable 5.1 is running; the harness supplies the exact line).
 
 ---
 
@@ -103,7 +103,7 @@ git commit -m "refactor: migrate to Rust edition 2024
 
 cargo fix --edition fallout only; no behavior change.
 
-Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+Co-Authored-By: Claude <running model> <noreply@anthropic.com>"
 ```
 
 ---
@@ -226,7 +226,7 @@ model_assets.rs + models/ stay at src/game/ (embedded_asset! path
 derivation); appearance.rs carries one include_str! literal bump
 (../../data -> ../../../data) for its new depth.
 
-Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+Co-Authored-By: Claude <running model> <noreply@anthropic.com>"
 ```
 
 ---
@@ -299,7 +299,7 @@ git commit -m "refactor: split rules.rs into core/rules/ submodules
 Pure movement behind pub use facade; shared test fixtures extracted to
 cfg(test) test_support.rs byte-identical. game::rules::* paths unchanged.
 
-Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+Co-Authored-By: Claude <running model> <noreply@anthropic.com>"
 ```
 
 ---
@@ -647,7 +647,7 @@ git checkout main
 git pull --ff-only
 git merge --no-ff refactor/layered-modules -m "refactor: layered module hierarchy, edition 2024, lint pass
 
-Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+Co-Authored-By: Claude <running model> <noreply@anthropic.com>"
 git push
 ```
 

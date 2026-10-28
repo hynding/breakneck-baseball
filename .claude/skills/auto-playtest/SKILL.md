@@ -65,10 +65,11 @@ Headless conventions still apply (`tests/common/mod.rs`): inject from
 `DriveGame` only (the schedule now lives in the game and the harness
 re-exports it), `JuiceDisabled` stays inserted, 240 Hz virtual time.
 
-**Determinism**: the CPU's "randomness" is hash noise over *virtual elapsed
-time* (`ai::hash01(time.elapsed_secs() * k)`), and the harness steps time
-manually — so runs are reproducible without a seed as long as the schedule
-order is fixed. `deterministic_headless_app()` pins single-threaded
+**Determinism**: the CPU's "randomness" is hash noise keyed on a per-game
+salt (the virtual clock at game start) plus the pitch sequence
+(`CpuState::seed` in `sim/ai.rs`), so pacing changes don't reshuffle
+outcomes. The harness steps time manually, which fixes the salt — runs are
+reproducible without a seed as long as the schedule order is fixed. `deterministic_headless_app()` pins single-threaded
 execution for frame-for-frame reproducibility (the balance sim uses it);
 the default multi-threaded harness is reproducible in outcome but may
 jitter on ambiguous system orderings.

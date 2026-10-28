@@ -14,7 +14,7 @@
 - After physics/rendering changes verify both targets: `cargo check` AND `cargo check --target wasm32-unknown-unknown`
 - Bevy 0.15 idioms; home plate at world origin, +Z toward the field
 - Don't hardcode baseball facts in systems — variants are data (variant.rs)
-- Commit after each task; messages end with `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`
+- Commit after each task; messages end with the session's `Co-Authored-By:` trailer (whichever of Opus 5.5 or Fable 5.1 is running; the harness supplies the exact line)
 
 ## Rules Audit (2026-07-18)
 

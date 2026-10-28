@@ -18,8 +18,7 @@
 - The panel mutates only data (`CreatorState`/`RosterDefs`/`Rosters`) — never meshes/materials directly (spec §5's honesty property).
 - Save must never write an invalid file: `RosterDefs::validate` gates every write; a failed validation surfaces in the panel, leaves the file untouched.
 - clippy `-D warnings` (with and without `--features "dev debug"`), fmt.
-- Commit per task, ending:
-Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+- Commit per task, ending with the session's `Co-Authored-By:` trailer (whichever of Opus 5.5 or Fable 5.1 is running; the harness supplies the exact line).
 
 ---
 
