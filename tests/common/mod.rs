@@ -122,21 +122,23 @@ pub struct HeadlessConfig {
     /// A `tracing` layer for `LogPlugin` (the profiling probe).
     pub log_layer: Option<LogLayerFn>,
     /// Strip `AnimationTarget` from every bone as rigs spawn, so
-    /// `bevy_animation::animate_targets` samples nothing. Measured worth 16%
-    /// of the headless frame (TODO 29 lever 2, `tests/e2e/sim_profile.rs`),
-    /// and **not adopted by the balance sim**: it is not outcome-neutral.
-    /// Nothing in `sim/` reads a bone, yet the same CPU inning diverges —
-    /// fielders break on contact one frame earlier *with* sampling
-    /// (`tests/e2e/skeletal_switch.rs` has the lockstep diagnostic). The
-    /// likely path is query-iteration order: stripping creates extra bone
-    /// archetypes, shifting archetype ids, so a fielding decision that depends
-    /// on which entity a query yields first lands a frame apart. Until that
-    /// is attributed and fixed, only the profiling probe uses this.
+    /// `bevy_animation::animate_targets` samples nothing. Worth 16% of the
+    /// headless frame (TODO 29 lever 2, `tests/e2e/sim_profile.rs`). Bone
+    /// poses are cosmetic — the rules and the Coach read rig *root*
+    /// transforms, jerseys and gear find bones by walking `Children` — and
+    /// `tests/e2e/skeletal_switch.rs` pins that the inning is frame-identical
+    /// with and without it (it took a Rapier sync fix in `GamePlugin` to make
+    /// that true). The balance sim uses it; suites that assert on bone poses
+    /// must not.
     pub skip_skeletal_sampling: bool,
 }
 
 /// Removes `AnimationTarget` from any entity that has one — every frame, so
 /// rigs spawned mid-run (a new game in the same app) are covered too.
+/// `try_remove`: a bone seen here can be gone by the command flush (a runner
+/// despawned recursively, a scene instance landing on a parent that already
+/// left), and a plain `remove` on a dead entity is an error the harness
+/// turns into a panic.
 fn strip_animation_targets(
     mut commands: Commands,
     targets: Query<Entity, With<bevy::animation::AnimationTarget>>,
@@ -144,7 +146,7 @@ fn strip_animation_targets(
     for entity in &targets {
         commands
             .entity(entity)
-            .remove::<bevy::animation::AnimationTarget>();
+            .try_remove::<bevy::animation::AnimationTarget>();
     }
 }
 

@@ -6,20 +6,20 @@
 //! twice, with and without the switch, should end on the same frame with the
 //! same score.
 //!
-//! **It doesn't (2026-10-10).** Same score, 8161 vs 8116 frames. The lockstep
-//! diagnostic below finds the first difference at frame 444: the ball at the
-//! plate, physics identical, and every fielder root moved by `locomote` one
-//! frame earlier with sampling — their `MoveIntent` targets were set a frame
-//! apart. No `sim/` system reads a bone; the rig roots carry no animation
-//! components; Rapier's body pose matches the root transform in both runs;
-//! and moving the stripping system between schedules changes nothing. The
-//! remaining suspect is iteration order: stripping creates extra bone
-//! archetypes at spawn, which shifts archetype ids and so the order a query
-//! yields fielders, and a decision that depends on that order lands a frame
-//! apart. That is a determinism hazard in its own right (archetype creation
-//! order is not something gameplay should depend on). The premise test stays
-//! `#[ignore]`d as the ready-made gate for whoever attributes and fixes it;
-//! the balance sim keeps sampling until it passes.
+//! It didn't, at first (2026-10-10): same score, 8161 vs 8116 frames, and the
+//! lockstep diagnostic below put the first difference at frame 444 — the
+//! ball at the plate, physics identical, every fielder root moved by
+//! `locomote` one frame earlier *with* sampling although both runs set the
+//! `MoveIntent` targets on the same frame. Rapier's kinematic body had kept
+//! the previous pose and its write-back snapped the root back. Root cause:
+//! bevy_rapier 0.32's `SyncBackend` propagates transforms with its own copy
+//! of `propagate_parent_transforms` but without Bevy 0.16+'s
+//! `mark_dirty_trees`, so a root moved this frame is not flagged and is
+//! skipped — unless bone churn flagged its tree the frame before, which is
+//! exactly what skeletal sampling did. `GamePlugin` now runs
+//! `mark_dirty_trees` before `PhysicsSet::SyncBackend` (see its comment),
+//! and this gate holds: the inning is frame-identical either way. It stays
+//! a gate because the balance sim relies on it.
 
 use crate::common;
 
@@ -88,7 +88,6 @@ fn play_one_cpu_inning(skip_skeletal_sampling: bool) -> Outcome {
 }
 
 #[test]
-#[ignore = "fails today (see the module doc): the gate for adopting skip_skeletal_sampling in balance_sim"]
 fn skipping_skeletal_sampling_does_not_change_the_inning() {
     let sampled = play_one_cpu_inning(false);
     let skipped = play_one_cpu_inning(true);
@@ -157,12 +156,11 @@ fn where_the_skipped_inning_first_diverges() {
             ),
         ];
         let mut rigs: Vec<String> = world
-            .query::<(Entity, &Transform, &MoveIntent, Option<&Playing>)>()
+            .query::<(&Transform, &MoveIntent, Option<&Playing>)>()
             .iter(world)
-            .map(|(e, t, _, p)| {
+            .map(|(t, _, p)| {
                 format!(
-                    "rig{}=({:.3},{:.3},{:.3}){}",
-                    e.index(),
+                    "rig=({:.3},{:.3},{:.3}){}",
                     t.translation.x,
                     t.translation.y,
                     t.translation.z,
@@ -204,11 +202,13 @@ fn where_the_skipped_inning_first_diverges() {
                     })
             })
             .unwrap_or_else(|| "none".into());
+        let phase = format!("{:?}", world.resource::<Play>().phase);
         let e = world.entity(entity);
+        let intent_target = e.get::<MoveIntent>().and_then(|i| i.target).is_some();
         let t = e.get_ref::<Transform>().expect("rig Transform");
         let g = e.get_ref::<GlobalTransform>().expect("rig GlobalTransform");
         format!(
-            "T=({:.3},{:.3},{:.3}) T.changed={} G.changed={} body={} rb={:?} target={} player={}",
+            "phase={phase} intent.target={intent_target} T=({:.3},{:.3},{:.3}) T.changed={} G.changed={} body={} rb={:?} target={} player={}",
             t.translation.x,
             t.translation.y,
             t.translation.z,

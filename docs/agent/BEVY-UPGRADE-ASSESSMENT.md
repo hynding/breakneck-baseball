@@ -119,8 +119,16 @@ so far), upgrade that far first.
   **(3) not worth it** — picking is ~1% of the frame and drives `Interaction` for the touch UI,
   settings taps, menu and pause board; gizmos 0.4%; light/camera visibility (~3.5%) can't be
   removed without the present layer's asset types. Left alone.
-  Net so far: 2.5 → 2.16 ms/frame headless (−14%), 52% of the frame still executor overhead
-  across ~380 system runs — the 0.15 → 0.17 system-count story stands.
+  *2026-10-28, lever 2 resolved and adopted (TADA 108).* The frame-444 divergence was not
+  iteration order: both runs set the fielders' `MoveIntent`s that frame and `locomote` moved
+  the rigs in both, but Rapier's write-back snapped the roots back in the unsampled run. Root
+  cause: bevy_rapier 0.32's `SyncBackend` runs before `TransformSystems::Propagate` and uses its
+  own copy of `propagate_parent_transforms` without `mark_dirty_trees`, so a root moved this
+  frame is unflagged and skipped; bone churn had been flagging every rig's tree every frame.
+  `GamePlugin` now runs `mark_dirty_trees` before `PhysicsSet::SyncBackend`. With that, the
+  gate passes (frame-identical innings), `balance_sim` takes the switch: **439 → 299 s** with
+  bit-identical aggregates. Net: **2.5 → 1.82 ms/frame** headless (−27%); the remaining
+  ~52% executor overhead across ~380 system runs is the 0.15 → 0.17 system-count story.
 - **Step 2, 0.16.1 → 0.17.3** (2026-08-25, this commit): Messages API crate-wide,
   `BorderColor::all`, `Justify`, `SystemCondition`, `bevy::light`, `WindowResolution(u32)`,
   rapier 0.32, inspector-egui 0.34. Clippy `-D warnings` green on default/dev+debug/autoplay;

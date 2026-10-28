@@ -36,7 +36,7 @@ with `cargo nextest run --test e2e matrix::cpu_vs_cpu_ignores_style`. Several fi
 | Only pure rules logic (quick loop) | `cargo test --lib` (fast) then full `cargo test` before commit | unit tests for rules/variant/input/theme/roster/jersey live in the lib target |
 | `model_assets.rs`, `tools/*.py`, `assets-src/`, `player.glb`, `AnimClip`/`CLIP_TABLE` | `cargo nextest run --test e2e model_contract::` (+ `gltf_` suites) | pins clip/material/bone names + tri/bone/size budgets against the .glb |
 | `data/players.ron`, `meta/appearance.rs`, roster/jersey | `cargo nextest run --test e2e appearance_contract::` + `identity::` + `dressing::` | shipped player definitions + identity plumbing |
-| Any `Ruleset` window/multiplier/spread (`perfect_ms`, `solid_ms`, `foul_ms`, `exit_*`, `pull_yaw_per_ms`, `cpu_timing_spread_ms`) or `sim/ai.rs` decision noise | `cargo nextest run --test balance_sim` (~7.5 min on 4 cores, N=40) | the arbiter of the offensive economy — see the `tune-balance` skill |
+| Any `Ruleset` window/multiplier/spread (`perfect_ms`, `solid_ms`, `foul_ms`, `exit_*`, `pull_yaw_per_ms`, `cpu_timing_spread_ms`) or `sim/ai.rs` decision noise | `cargo nextest run --test balance_sim` (~5 min on 4 cores, N=40) | the arbiter of the offensive economy — see the `tune-balance` skill |
 | New/changed system ordering (any `add_systems`) | `cargo nextest run --test e2e ambiguity_audit::` | schedule-ambiguity gate |
 | UI (`present/ui/`, `subs.rs`, `settings/screen.rs`, menu) | web build + browser check via `/run-web` | the wasm UI gotcha only reproduces in the browser |
 | `meta/settings/` persistence | `cargo test --lib` (settings tests serialize via `ENV_LOCK`) + `cargo nextest run --test e2e_settings` | the env-var seam is easy to break |
@@ -47,9 +47,9 @@ Multiple rows can match one change — run the union. When in doubt, `cargo test
 comprehensive answer; it covers unit + e2e + balance.
 
 Measured 2026-10-09 in a 4-core cloud container (expect a fast Mac to be quicker): full
-`cargo nextest run` **7.5 min** (373 tests; `balance_sim` at 453 s is the critical path and the
-whole e2e suite finishes inside it; next-slowest: `fielder_spots` 239 s, `batter_runs` 159 s,
-`cpu_timing` 157 s). The same suite under `cargo test`: 21.5 min. After a one-line `src/` edit,
+`cargo nextest run` **~5 min** (376 tests; `balance_sim` at ~300 s is the critical path and the
+whole e2e suite finishes inside it; next-slowest: `fielder_spots` ~240 s, `batter_runs` ~155 s,
+`cpu_timing` ~140 s). It was 7.5 min before TADA 107/108 and 21.5 min under `cargo test`. After a one-line `src/` edit,
 every test binary is rebuilt in ~11 s (it was ~250 s when each suite was its own binary). A cold
 build is ~16 min.
 
