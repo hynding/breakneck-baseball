@@ -74,12 +74,22 @@ fn ground_intercept_picks_the_infielder_on_the_roll_path_not_the_battery() {
     let launch = Vec3::new(2.0, -2.0, 26.0);
     let landing = Vec3::new(0.2, 0.0, 3.0);
     let (who, spot) = ground_intercept(&fielders, landing, launch, &pace);
-    assert_ne!(who, Some(0), "the catcher never chases a grounder up the middle");
+    assert_ne!(
+        who,
+        Some(0),
+        "the catcher never chases a grounder up the middle"
+    );
     assert!(who.is_some(), "somebody on the path cuts it off");
-    assert!(spot.z > landing.z, "the cut-off is down the path, past the bounce");
+    assert!(
+        spot.z > landing.z,
+        "the cut-off is down the path, past the bounce"
+    );
     // Nobody anywhere near the path: it runs out, and the roll end is returned.
     let far = [Vec3::new(-60.0, 0.0, 90.0)];
     let (nobody, end) = ground_intercept(&far, landing, launch, &pace);
     assert_eq!(nobody, None);
-    assert!(end.z > 15.0, "the roll end is well into the infield, got {end:?}");
+    assert!(
+        end.z > 15.0,
+        "the roll end is well into the infield, got {end:?}"
+    );
 }

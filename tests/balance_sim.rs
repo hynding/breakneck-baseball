@@ -533,7 +533,12 @@ fn assert_bands(agg: &Aggregate) {
     let checks: [(&str, f64, &std::ops::RangeInclusive<f64>, &str); 6] = [
         ("BB%", agg.bb_pct, &BB_PCT_BAND, "6..11"),
         ("HBP%", agg.hbp_pct, &HBP_PCT_BAND, "0..2"),
-        ("pitches/PA", agg.pitches_per_pa, &PITCHES_PER_PA_BAND, "3.3..4.3"),
+        (
+            "pitches/PA",
+            agg.pitches_per_pa,
+            &PITCHES_PER_PA_BAND,
+            "3.3..4.3",
+        ),
         ("BABIP", agg.babip, &BABIP_BAND, ".250..340"),
         ("CS/9", agg.caught_stealing_per9, &CS9_BAND, "0..1"),
         ("pickoffs/9", agg.pickoffs_per9, &PICKOFFS9_BAND, "0..0.6"),
