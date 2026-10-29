@@ -89,7 +89,31 @@ pub(super) fn resolve_live_play(
     for ev in events.read() {
         resolution = match *ev {
             LiveBallEvent::Caught { pos } => {
-                Some(Some(Outcome::Out(rules::resolve_catch(pos, &field))))
+                let kind = rules::resolve_catch(
+                    pos,
+                    &bases,
+                    score.outs,
+                    play.runners_going(),
+                    &field,
+                    &rules_res,
+                );
+                let outcome = Outcome::Out(kind);
+                if matches!(
+                    kind,
+                    rules::OutKind::Fly {
+                        tag: rules::TagUp::Scores | rules::TagUp::ThrownOut,
+                        ..
+                    }
+                ) {
+                    // A runner tags from third: the outfielder's throw home
+                    // is in the air, and the play at the plate is announced
+                    // when it arrives — like any decided throw.
+                    play.live.pending_call = Some(outcome);
+                    play.resolved = true;
+                    play.timer = Timer::from_seconds(THROW_SETTLE_CAP + 1.0, TimerMode::Once);
+                    return;
+                }
+                Some(Some(outcome))
             }
             LiveBallEvent::Landed { pos } if !rules::is_fair(pos, &field) => Some(None),
             // A fair bounce just keeps the play alive.
@@ -107,6 +131,7 @@ pub(super) fn resolve_live_play(
                     base,
                     &bases,
                     play.runners_going(),
+                    score.outs,
                     call,
                     &field,
                     &rules_res,

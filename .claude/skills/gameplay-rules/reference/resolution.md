@@ -55,6 +55,17 @@ later bag relays to first and either turns two (`Outcome::DoublePlay`, with the 
 choreographed) or concedes the batter (`Outcome::FieldersChoice`) — grounder double plays are
 never awarded by fiat, and a hit-and-run jump takes the runner forces off the table.
 
+Runners aboard read the play too. On a clean hit the lead runner the hit doesn't
+already score reads for one base more (`rules::read_extra_base` — from his secondary
+lead, breaking on contact with two out); when he goes and the throw can still contest
+it, `throw_target` throws to his bag — the play at the plate — and `resolve_thrown`
+races him there (`Outcome::ExtraBase { safe }`), while a throw anywhere else concedes
+the base. On a caught fly with fewer than two out, the runner on third tags and races
+the throw home (`rules::read_tag_up` → `OutKind::Fly { tag }`); fielding throws home
+after the transfer and flow holds the call as `pending_call` until the throw arrives,
+exactly like a decided gather throw. Both reads go when the race is no worse than
+`PaceTuning::send_aggression_secs`, so a band of sends get cut down.
+
 The batting side has a live say too (`RunnerCall`, read from held aim at resolution): Down sends
 the batter for the extra base (cut down `Stretching` if the race is lost), Up holds him a base
 early. A human defense also steers the chaser directly with aim during the chase (`steer_chaser` —

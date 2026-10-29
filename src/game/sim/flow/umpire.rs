@@ -173,6 +173,8 @@ impl<'a, 'w> Umpire<'a, 'w> {
                 );
                 let base_text = if play.doubled_off {
                     "DOUBLED OFF!"
+                } else if play.thrown_out_home {
+                    "OUT AT THE PLATE!"
                 } else if play.runs > 0 && matches!(kind, OutKind::Fly { .. }) {
                     "SAC FLY"
                 } else {
@@ -204,13 +206,37 @@ impl<'a, 'w> Umpire<'a, 'w> {
                 self.announce_out("FIELDER'S CHOICE", BannerTone::Bad, before);
             }
             Outcome::Hit(n) => {
-                let label = match n {
-                    1 => "SINGLE".to_string(),
-                    2 => "DOUBLE".to_string(),
-                    3 => "TRIPLE".to_string(),
-                    n => format!("{n} BASES!"),
-                };
-                self.hit(n, &label, BannerTone::Good, runners_going);
+                self.hit(n, &hit_label(n), BannerTone::Good, runners_going);
+            }
+            Outcome::ExtraBase { hit, runner, safe } => {
+                let to = runner + hit as usize + 1;
+                let home = to >= self.bases.count();
+                let (runs, _) =
+                    rules::apply_extra_base(self.score, self.bases, self.rules, hit, runner, safe);
+                let label = hit_label(hit);
+                if safe {
+                    let text = if home {
+                        format!("{label}, HE SCORES!")
+                    } else {
+                        format!("{label}, TAKES THE EXTRA BASE!")
+                    };
+                    if runs > 0 {
+                        self.announce_scoring(format!("{text}  +{runs}"), BannerTone::Good);
+                    } else {
+                        self.announce(text, BannerTone::Good);
+                    }
+                } else {
+                    let text = if home {
+                        format!("{label}, OUT AT THE PLATE!")
+                    } else {
+                        format!("{label}, CUT DOWN AT {}!", base_name(to))
+                    };
+                    if runs > 0 {
+                        self.announce_scoring(format!("{text}  +{runs}"), BannerTone::Bad);
+                    } else {
+                        self.announce_out(text, BannerTone::Bad, before);
+                    }
+                }
             }
             // A home run is worth one more base than the field has.
             Outcome::HomeRun => {
@@ -236,5 +262,25 @@ impl<'a, 'w> Umpire<'a, 'w> {
     pub(super) fn foul_tip(&mut self) {
         rules::foul(self.score, self.rules);
         self.announce("FOUL", BannerTone::Info);
+    }
+}
+
+/// The banner name of a clean hit worth `n` bases.
+fn hit_label(n: u32) -> String {
+    match n {
+        1 => "SINGLE".to_string(),
+        2 => "DOUBLE".to_string(),
+        3 => "TRIPLE".to_string(),
+        n => format!("{n} BASES!"),
+    }
+}
+
+/// The banner name of 0-indexed bag `base`.
+fn base_name(base: usize) -> String {
+    match base {
+        0 => "FIRST".to_string(),
+        1 => "SECOND".to_string(),
+        2 => "THIRD".to_string(),
+        b => format!("BASE {}", b + 1),
     }
 }

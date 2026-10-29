@@ -1,5 +1,6 @@
 //! Unit tests for [`super`] — the count module.
 
+use super::super::TagUp;
 use super::super::test_support::*;
 use super::*;
 use crate::game::variant::CountRules;
@@ -264,7 +265,10 @@ fn deep_fly_is_a_sacrifice() {
         &mut score,
         &mut bases,
         &std_rules(),
-        OutKind::Fly { deep: true },
+        OutKind::Fly {
+            deep: true,
+            tag: TagUp::Scores,
+        },
         false,
     );
     assert_eq!((play.outs, play.runs), (1, 1));
@@ -280,11 +284,106 @@ fn shallow_fly_holds_the_runners() {
         &mut score,
         &mut bases,
         &std_rules(),
-        OutKind::Fly { deep: false },
+        OutKind::Fly {
+            deep: false,
+            tag: TagUp::Hold,
+        },
         false,
     );
     assert_eq!((play.outs, play.runs), (1, 0));
     assert_eq!(bases, with(&[2]));
+}
+
+#[test]
+fn runner_tagging_from_third_can_be_cut_down_at_the_plate() {
+    // Runners on second and third, one out: the runner from third loses
+    // the race home (two outs, the side retired), so nobody scores.
+    let mut score = batting_home(1);
+    let mut bases = with(&[1, 2]);
+    let play = apply_batted_out(
+        &mut score,
+        &mut bases,
+        &std_rules(),
+        OutKind::Fly {
+            deep: true,
+            tag: TagUp::ThrownOut,
+        },
+        false,
+    );
+    assert!(play.thrown_out_home);
+    assert_eq!((play.outs, play.runs), (2, 0));
+    assert!(
+        score.top_of_inning,
+        "the second out on the play ends the half"
+    );
+
+    // Nobody out: the trailing runner moves up on the throw home.
+    let mut score = batting_home(0);
+    let mut bases = with(&[1, 2]);
+    let play = apply_batted_out(
+        &mut score,
+        &mut bases,
+        &std_rules(),
+        OutKind::Fly {
+            deep: true,
+            tag: TagUp::ThrownOut,
+        },
+        false,
+    );
+    assert_eq!((play.outs, play.runs, score.outs), (2, 0, 2));
+    assert_eq!(bases, with(&[2]));
+}
+
+#[test]
+fn deep_fly_runner_on_second_holds_behind_a_held_third() {
+    let mut score = batting_home(0);
+    let mut bases = with(&[1, 2]);
+    let play = apply_batted_out(
+        &mut score,
+        &mut bases,
+        &std_rules(),
+        OutKind::Fly {
+            deep: true,
+            tag: TagUp::Hold,
+        },
+        false,
+    );
+    assert_eq!((play.outs, play.runs), (1, 0));
+    assert_eq!(bases, with(&[1, 2]));
+}
+
+#[test]
+fn runner_scoring_from_second_on_a_single() {
+    // Runners on first and second: the lead runner takes the extra base
+    // home, the trailing runner and batter take the single's base.
+    let mut score = batting_home(0);
+    let mut bases = with(&[0, 1]);
+    let (runs, outs) = apply_extra_base(&mut score, &mut bases, &std_rules(), 1, 1, true);
+    assert_eq!((runs, outs), (1, 0));
+    assert_eq!(score.home_runs, 1);
+    assert_eq!(bases, with(&[0, 1]));
+}
+
+#[test]
+fn runner_cut_down_going_first_to_third() {
+    let mut score = batting_home(0);
+    let mut bases = with(&[0]);
+    let (runs, outs) = apply_extra_base(&mut score, &mut bases, &std_rules(), 1, 0, false);
+    assert_eq!((runs, outs, score.outs), (0, 1, 1));
+    assert_eq!(bases, with(&[0]), "the batter holds first");
+}
+
+#[test]
+fn runs_ahead_of_a_third_out_at_the_plate_count() {
+    // Two out, runners on first and third, a double: the runner from third
+    // scores well ahead of the play, then the runner from first is cut
+    // down trying to score — the run counts.
+    let mut score = batting_home(2);
+    let mut bases = with(&[0, 2]);
+    let (runs, outs) = apply_extra_base(&mut score, &mut bases, &std_rules(), 2, 0, false);
+    assert_eq!((runs, outs), (1, 1));
+    assert_eq!(score.home_runs, 1);
+    assert!(score.top_of_inning, "the out at the plate ends the half");
 }
 
 #[test]
@@ -295,7 +394,10 @@ fn two_out_deep_fly_ends_the_half_scoreless() {
         &mut score,
         &mut bases,
         &std_rules(),
-        OutKind::Fly { deep: true },
+        OutKind::Fly {
+            deep: true,
+            tag: TagUp::Hold,
+        },
         false,
     );
     assert_eq!(play.runs, 0);
@@ -324,7 +426,10 @@ fn runner_going_on_a_caught_fly_is_doubled_off() {
         &mut score,
         &mut bases,
         &std_rules(),
-        OutKind::Fly { deep: false },
+        OutKind::Fly {
+            deep: false,
+            tag: TagUp::Hold,
+        },
         true,
     );
     assert!(play.doubled_off);

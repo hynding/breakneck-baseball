@@ -5,8 +5,8 @@ use crate::game::ScoreBoard;
 use crate::game::variant::Ruleset;
 
 use super::{
-    BallCall, Bases, OutKind, StrikeCall, advance_runners_only, advance_trailing, advance_walk,
-    double_off_lead_runner, tag_up,
+    BallCall, Bases, OutKind, StrikeCall, advance_extra_base, advance_runners_only,
+    advance_trailing, advance_walk, double_off_lead_runner, tag_up,
 };
 
 /// Records a taken ball. The final ball walks the batter (forcing runners) and
@@ -89,6 +89,8 @@ pub struct OutPlay {
     pub double_play: bool,
     /// A sent runner was caught off base when the ball was caught.
     pub doubled_off: bool,
+    /// The runner tagging from third was thrown out at the plate.
+    pub thrown_out_home: bool,
 }
 
 /// Applies a batted-ball out with its base-running consequences.
@@ -111,6 +113,7 @@ pub fn apply_batted_out(
         runs: 0,
         double_play: false,
         doubled_off: false,
+        thrown_out_home: false,
     };
     match kind {
         OutKind::Ground => {
@@ -120,11 +123,14 @@ pub fn apply_batted_out(
                 play.runs = advance_trailing(bases);
             }
         }
-        OutKind::Fly { deep } => {
+        OutKind::Fly { deep, tag } => {
             if runners_going {
                 play.doubled_off = double_off_lead_runner(bases);
-            } else if deep && outs_left > 1 {
-                play.runs = tag_up(bases);
+            } else if outs_left > 1 {
+                let (runs, cut_down) = tag_up(bases, deep, tag);
+                play.runs = runs;
+                play.outs += cut_down;
+                play.thrown_out_home = cut_down > 0;
             }
         }
         OutKind::Pop | OutKind::FoulPop => {
@@ -164,6 +170,7 @@ pub fn apply_double_play(score: &mut ScoreBoard, bases: &mut Bases, rules: &Rule
         runs: 0,
         double_play: true,
         doubled_off: false,
+        thrown_out_home: false,
     };
     bases.set(0, false); // the forced runner dies at the middle bag
     if play.outs < outs_left {
@@ -192,6 +199,7 @@ pub fn apply_fielders_choice(
         runs: 0,
         double_play: false,
         doubled_off: false,
+        thrown_out_home: false,
     };
     if out_base > 0 {
         bases.set(out_base - 1, false);
@@ -210,6 +218,27 @@ pub fn apply_fielders_choice(
     reset_count(score);
     charge_out(score, bases, rules);
     play
+}
+
+/// Applies [`Outcome::ExtraBase`]: a `hit` worth that many bases on which
+/// the runner from `runner` went for one more — taking it when `safe`, else
+/// thrown out there. Runs that crossed ahead of him count (they were home
+/// before the tag). Returns (runs scored, outs recorded).
+pub fn apply_extra_base(
+    score: &mut ScoreBoard,
+    bases: &mut Bases,
+    rules: &Ruleset,
+    hit: u32,
+    runner: usize,
+    safe: bool,
+) -> (u32, u32) {
+    let (runs, outs) = advance_extra_base(bases, hit, runner, safe);
+    score.add_runs(runs);
+    reset_count(score);
+    for _ in 0..outs {
+        charge_out(score, bases, rules);
+    }
+    (runs, outs)
 }
 
 /// Resets balls and strikes for a new at-bat.
