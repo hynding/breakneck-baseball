@@ -37,6 +37,7 @@ mod cpu_timing;
 mod creator;
 mod dressing;
 mod fielder_spots;
+mod frame_rate;
 mod full_game;
 mod gltf_model;
 mod gltf_rig;
