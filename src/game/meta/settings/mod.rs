@@ -218,6 +218,44 @@ impl TrailColor {
     }
 }
 
+/// The player's graphics-quality choice. `Auto` picks a tier for the device
+/// it runs on; the fixed tiers force one. What each tier changes (MSAA,
+/// shadow-map size, render scale) and the Auto heuristic live in
+/// `game::quality`, which applies the resolved tier.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum GraphicsQuality {
+    #[default]
+    Auto,
+    Low,
+    Medium,
+    High,
+}
+
+impl GraphicsQuality {
+    pub fn label(self) -> &'static str {
+        match self {
+            GraphicsQuality::Auto => "Auto",
+            GraphicsQuality::Low => "Low",
+            GraphicsQuality::Medium => "Medium",
+            GraphicsQuality::High => "High",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            GraphicsQuality::Auto => GraphicsQuality::Low,
+            GraphicsQuality::Low => GraphicsQuality::Medium,
+            GraphicsQuality::Medium => GraphicsQuality::High,
+            GraphicsQuality::High => GraphicsQuality::Auto,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        // 3 nexts = 1 prev in a 4-cycle.
+        self.next().next().next()
+    }
+}
+
 /// Everything the player can configure. Persisted on every change.
 #[derive(Resource, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Settings {
@@ -246,6 +284,10 @@ pub struct Settings {
     /// stores keep their other options.
     #[serde(default)]
     pub reduce_motion: bool,
+    /// Graphics quality tier (serde-defaulted to Auto so old stores pick
+    /// the device's tier instead of resetting every option).
+    #[serde(default)]
+    pub graphics: GraphicsQuality,
     /// Master volume, 0.0..=1.0, applied via [`bevy::audio::GlobalVolume`].
     pub volume: f32,
     /// Regular-season length for the *next* short season (menu **L**; one
@@ -276,6 +318,7 @@ impl Default for Settings {
             trail_color: TrailColor::default(),
             show_strike_zone: true,
             reduce_motion: false,
+            graphics: GraphicsQuality::default(),
             volume: 0.7,
             season_length: season::DEFAULT_SEASON_LENGTH,
             season: None,
