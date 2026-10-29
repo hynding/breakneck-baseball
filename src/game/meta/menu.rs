@@ -58,6 +58,7 @@ enum CycleAction {
     Innings,
     Theme,
     Touch,
+    Difficulty,
     SeasonLength,
 }
 
@@ -264,6 +265,11 @@ fn build_menu(
                             MenuAction::Cycle(CycleAction::Theme),
                         ),
                         (
+                            "D   CPU difficulty",
+                            settings.difficulty.label().to_string(),
+                            MenuAction::Cycle(CycleAction::Difficulty),
+                        ),
+                        (
                             "G   Touch swing",
                             settings.touch_scheme.label().to_string(),
                             MenuAction::Cycle(CycleAction::Touch),
@@ -371,7 +377,7 @@ fn controls_hint(device: ActiveDevice) -> String {
             "D-pad / stick: move   A: choose   Left/Right: change\nStart: play   Select: settings   B: back\nIn play: stick to aim, A to pitch or swing\n{RUNNER}"
         ),
         ActiveDevice::Keyboard => format!(
-            "1 / 2: play   3: season   F I T G L: change options   S: settings\nArrows + Enter also move and choose\nIn play: WASD + Space (P1), Arrows + Right-Ctrl (P2)\n{RUNNER}{}",
+            "1 / 2: play   3: season   F I T D G L: change options   S: settings\nArrows + Enter also move and choose\nIn play: WASD + Space (P1), Arrows + Right-Ctrl (P2)\n{RUNNER}{}",
             creator_hint()
         ),
         ActiveDevice::Touch => {
@@ -437,6 +443,7 @@ fn apply_cycle(
             **theme = config.theme.build();
         }
         CycleAction::Touch => settings.touch_scheme = settings.touch_scheme.next(),
+        CycleAction::Difficulty => settings.difficulty = settings.difficulty.next(),
         CycleAction::SeasonLength => {
             settings.season_length =
                 crate::game::season::next_season_length(settings.season_length);
@@ -544,8 +551,8 @@ impl StartGame<'_, '_> {
     }
 }
 
-/// Cycles the field (**F**), innings (**I**), theme (**T**), and touch
-/// swing scheme (**G**); the rebuild system picks the edit up off the
+/// Cycles the field (**F**), innings (**I**), theme (**T**), CPU
+/// difficulty (**D**) and touch swing scheme (**G**); the rebuild system picks the edit up off the
 /// resource's change tick. Keyboard only: a pad changes options through the
 /// cursor ([`menu_navigate`]), so its face buttons keep their conventional
 /// roles instead of each owning an option.
@@ -556,10 +563,11 @@ fn cycle_options(
     mut settings: ResMut<Settings>,
 ) {
     // One row per hotkey: keyboard key, the cycle.
-    const HOTKEYS: [(KeyCode, CycleAction); 5] = [
+    const HOTKEYS: [(KeyCode, CycleAction); 6] = [
         (KeyCode::KeyF, CycleAction::Field),
         (KeyCode::KeyI, CycleAction::Innings),
         (KeyCode::KeyT, CycleAction::Theme),
+        (KeyCode::KeyD, CycleAction::Difficulty),
         (KeyCode::KeyG, CycleAction::Touch),
         (KeyCode::KeyL, CycleAction::SeasonLength),
     ];

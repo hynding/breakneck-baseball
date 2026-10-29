@@ -102,6 +102,34 @@ fn graphics_quality_cycles_and_wraps() {
     }
 }
 
+#[test]
+fn difficulty_steps_cycle_and_climb_in_skill() {
+    let mut d = Difficulty::Easy;
+    let mut seen = Vec::new();
+    for _ in 0..4 {
+        seen.push(d);
+        d = d.next();
+    }
+    assert_eq!(d, Difficulty::Easy, "four nexts wrap back to Easy");
+    for pair in seen.windows(2) {
+        assert!(
+            pair[0].skill() < pair[1].skill(),
+            "{} must play easier than {}",
+            pair[0].label(),
+            pair[1].label()
+        );
+    }
+    for d in seen {
+        assert_eq!(d.next().prev(), d);
+        assert!((0.0..=1.0).contains(&d.skill()));
+    }
+    // The default is the skill every balance band was tuned at.
+    assert!(
+        (Difficulty::default().skill() - crate::game::ai::CpuConfig::default().skill).abs()
+            < f32::EPSILON
+    );
+}
+
 /// A pre-trail settings store (no trail fields) must still load — the
 /// new fields are serde-defaulted, not a breaking schema change that
 /// would silently reset every player's existing choices.
@@ -117,6 +145,11 @@ fn legacy_store_without_trail_fields_loads_with_defaults() {
         s.graphics,
         GraphicsQuality::Auto,
         "quality defaults to Auto"
+    );
+    assert_eq!(
+        s.difficulty,
+        Difficulty::Normal,
+        "difficulty defaults to Normal"
     );
     assert_eq!(s.batting_style[0], BattingStyle::SwingMeter);
     assert!((s.volume - 0.5).abs() < 1e-6);
