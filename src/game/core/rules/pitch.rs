@@ -135,7 +135,7 @@ pub fn hit_spin(vel: Vec3) -> Vec3 {
 /// top of the contact continuum. With `exit_perfect` 1.28 on top this is a
 /// ~100 mph barrel; with `exit_solid` 0.95 at the Solid edge it is a ~60 mph
 /// blooper. `tests/balance_sim.rs` arbitrates this number, not feel.
-const EXIT_PEAK: f32 = 34.0;
+const EXIT_PEAK: f32 = 31.0;
 /// How much of [`EXIT_PEAK`] a swing at the very edge of the foul window has
 /// lost (0.36 → a 130 ms-late swing still leaves the bat at 64% of peak).
 /// Linear in the timing error so Solid contact is a real *continuum* from

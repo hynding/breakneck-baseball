@@ -16,13 +16,30 @@ If this file and the test disagree, the test wins — update this file.
 > measures K% 15.8 / runs/9 3.71 / HR/9 2.14 (one process, N=40) — inside every band,
 > with the spread row below still the pre-reseed figures until re-measured.
 
+> 2026-10-29 (realism retune, P0 of the bot-vs-bot study): late swings no longer die in the
+> catcher's glove, Solid contact is a real batted ball (`rules::hit_velocity` is a continuum),
+> grounders are cut off on their roll path (`rules::ground_intercept*`, infield gather radius at
+> the grass line), the CPU takes 3-0 and most first pitches, and steals/pickoffs are
+> situational. The economy was re-centred on MLB 2025 and six new signals are asserted. The
+> HR/9 band moved *down* (1.3..3.2 → 0.6..2.2) because the designed HR rate changed, not to
+> pass a run; the K% floor moved 13 → 11 for the same reason (live K% is 14–15). Measured at
+> N=40 (one process): K% 14.0, runs/9 5.6, HR/9 1.1, BB% 8.2, HBP% 0, pitches/PA 3.3,
+> BABIP .367, CS/9 0.2, pickoffs/9 0.6. `tests/realism_sim.rs` (ignored,
+> nine-inning, JSONL events) is the harness those numbers were tuned against.
+
 ## Asserted bands (N=40, `balance_bands_hold`)
 
-| Signal | Asserted band | Nominal target | Measured spread (N=40, cross-process) |
+| Signal | Asserted band | Nominal target | Measured (N=40) |
 |---|---|---|---|
-| K% (strikeouts / PA) | 13.0 ..= 27.0 | 15..30 | 17.2 .. 21.9 |
-| runs / team / 9 | 2.0 ..= 7.5 | 3.0..8.0 | 2.8 .. 4.4 |
-| HR / team / 9 | 1.3 ..= 3.2 | 0.5..2.5 | 1.9 .. 2.7 |
+| K% (strikeouts / PA) | 11.0 ..= 27.0 | 15..30 | 14.0 (pre-retune spread 17.2 .. 21.9) |
+| runs / team / 9 | 2.0 ..= 7.5 | 3.0..8.0 | 5.6 (pre-retune 2.8 .. 4.4) |
+| HR / team / 9 | 0.6 ..= 2.2 | 0.5..2.5 | 1.1 (pre-retune 1.9 .. 2.7) |
+| BB% (walks / PA) | 5.0 ..= 13.0 | 6..11 | 8.2 |
+| HBP% | 0.0 ..= 2.5 | 0..2 | 0.0 |
+| pitches / PA | 2.9 ..= 4.5 | 3.3..4.3 | 3.3 |
+| BABIP | .220 ..= .400 | .250..340 | .367 |
+| CS / team / 9 | 0.0 ..= 1.6 | 0..1 | 0.2 |
+| pickoffs / team / 9 | 0.0 ..= 1.5 | 0..0.6 | 0.6 |
 
 Asserted bands are wider than nominal on purpose: they're sized to the measured per-process
 spread plus margin for a binary-layout shift, so a seed change can nudge the mean but never
@@ -43,7 +60,7 @@ cross a band. Reaching a floor means a *systematic* regression, not noise.
 
 ## Edge-specific rules
 
-- **HR/9 ceiling (3.2)**: if it trips, the fix is an HR-retune via **CPU-side levers**
+- **HR/9 ceiling (2.2)**: if it trips, the fix is an HR-retune via **CPU-side levers**
   (`cpu_timing_spread_ms`, the `ai.rs` launch-aim distribution) — NOT a wider band and NOT
   the frozen human-facing `Ruleset` exit multipliers.
 - **runs/9 floor (2.0)**: catches offensive collapse; ~0.8 below measured min so seed noise

@@ -57,6 +57,8 @@ const GROUND_SPEED_DECAY: f32 = 0.9;
 /// A fielder may arrive this much after the ball and still cut it off — he
 /// is ranging to a spot on its path, not diving at a point in time.
 const GROUND_WAIT_MARGIN: f32 = 0.35;
+/// How far ahead the roll is projected when looking for a cut-off.
+const GROUND_HORIZON_SECS: f32 = 6.0;
 
 /// Where the infield cuts off a ground ball: a point on the ball's roll path
 /// (straight on from its first bounce `landing`, along the `launch`
@@ -75,15 +77,43 @@ pub fn ground_intercept(
     launch: Vec3,
     pace: &PaceTuning,
 ) -> (Option<usize>, Vec3) {
-    let dir = Vec2::new(launch.x, launch.z).normalize_or_zero();
-    let v0 = Vec2::new(launch.x, launch.z).length() * GROUND_SPEED_RETAIN;
+    let hvel = Vec2::new(launch.x, launch.z) * GROUND_SPEED_RETAIN;
+    roll_intercept(fielders, landing, hvel, pace)
+}
+
+/// [`ground_intercept`] for a ball already on the ground: the chaser
+/// re-plans every frame from the live position and horizontal velocity, so
+/// a hot grounder is met on its path rather than chased from behind (a
+/// 40 m/s grounder outruns a 7 m/s fielder until it has rolled past the
+/// outfield grass — the 2026-10 harness measured a .60 BABIP on grounders
+/// off the chase-the-ball targeting). Returns the cut-off spot, or `None`
+/// when this fielder cannot get in front of it before it stops.
+pub fn ground_intercept_from(
+    fielder: Vec3,
+    pos: Vec3,
+    vel: Vec3,
+    pace: &PaceTuning,
+) -> Option<Vec3> {
+    let hvel = Vec2::new(vel.x, vel.z);
+    let (who, spot) = roll_intercept(&[fielder], pos, hvel, pace);
+    who.map(|_| spot)
+}
+
+fn roll_intercept(
+    fielders: &[Vec3],
+    start: Vec3,
+    hvel: Vec2,
+    pace: &PaceTuning,
+) -> (Option<usize>, Vec3) {
+    let dir = hvel.normalize_or_zero();
+    let v0 = hvel.length();
     let along = |t: f32| v0 * (1.0 - (-GROUND_SPEED_DECAY * t).exp()) / GROUND_SPEED_DECAY;
     let point = |t: f32| {
         let s = along(t);
-        Vec3::new(landing.x + dir.x * s, 0.0, landing.z + dir.y * s)
+        Vec3::new(start.x + dir.x * s, 0.0, start.z + dir.y * s)
     };
     let mut t = 0.0;
-    while t <= 6.0 {
+    while t <= GROUND_HORIZON_SECS {
         let p = point(t);
         if let Some((i, _)) = fielders
             .iter()
@@ -96,7 +126,7 @@ pub fn ground_intercept(
         }
         t += 0.1;
     }
-    (None, point(6.0))
+    (None, point(GROUND_HORIZON_SECS))
 }
 
 /// Numerically integrates a batted ball's flight from contact height with the

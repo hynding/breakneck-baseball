@@ -79,13 +79,18 @@ fn the_package_arms_engage_together_at_two_balls() {
 fn three_ball_counts_take_more_often() {
     // 3-0 is close to an automatic take, 3-1 selective, 3-2 and every
     // other count a normal offer — the walk's whole existence rides on it.
-    assert!(three_ball_take_scale(3, 0) < 0.25);
-    assert!(three_ball_take_scale(3, 1) < 1.0);
-    assert!(three_ball_take_scale(3, 1) > three_ball_take_scale(3, 0));
-    assert_eq!(three_ball_take_scale(3, 2), 1.0);
+    assert!(count_take_scale(3, 0) < 0.25);
+    assert!(count_take_scale(3, 1) < 1.0);
+    assert!(count_take_scale(3, 1) > count_take_scale(3, 0));
+    assert_eq!(count_take_scale(3, 2), 1.0);
+    // The first pitch is taken more often than a mid-count strike, but it
+    // is nowhere near the 3-0 take.
+    assert!(count_take_scale(0, 0) < 1.0 && count_take_scale(0, 0) > 0.5);
     for balls in 0..=2 {
         for strikes in 0..=2 {
-            assert_eq!(three_ball_take_scale(balls, strikes), 1.0);
+            if (balls, strikes) != (0, 0) {
+                assert_eq!(count_take_scale(balls, strikes), 1.0);
+            }
         }
     }
 }
@@ -103,8 +108,10 @@ fn ahead_count_timing_draw_is_strictly_tighter() {
 
 #[test]
 fn steal_rate_is_situational() {
-    let mut score = ScoreBoard::default();
-    score.inning = 3;
+    let mut score = ScoreBoard {
+        inning: 3,
+        ..Default::default()
+    };
     let base = steal_rate(0.05, &score);
     assert!((base - 0.05).abs() < 1e-6, "an early, tied game runs at the base rate");
     score.outs = 2;
@@ -114,4 +121,21 @@ fn steal_rate_is_situational() {
     assert!(steal_rate(0.05, &score) > base, "late and close: the running game is on");
     score.home_runs = 6;
     assert_eq!(steal_rate(0.05, &score), 0.0, "nobody runs in a blowout");
+}
+
+#[test]
+fn a_pitcher_challenges_a_hitter_who_never_offers() {
+    // Only deep in the count with two called strikes taken, and only while
+    // the hitter has yet to swing — the moment he offers, the honest scatter
+    // is back. Taking the way to 3-0 is patience, not passivity.
+    for balls in 0..=3 {
+        for strikes in 0..=1 {
+            assert_eq!(taker_scatter_scale(false, balls, strikes), 1.0);
+        }
+    }
+    assert_eq!(taker_scatter_scale(false, 1, 2), 1.0);
+    for balls in 2..=3 {
+        assert!(taker_scatter_scale(false, balls, 2) < 1.0, "balls={balls}");
+        assert_eq!(taker_scatter_scale(true, balls, 2), 1.0);
+    }
 }

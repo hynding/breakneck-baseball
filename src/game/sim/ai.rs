@@ -36,6 +36,10 @@ impl Default for CpuConfig {
 pub struct CpuState {
     /// Counts down between CPU pitches so it doesn't fire instantly.
     pitch_delay: Timer,
+    /// Whether the batter has offered at anything this plate appearance —
+    /// the CPU pitcher's read of a hitter who is just standing there (see
+    /// [`taker_scatter_scale`]).
+    batter_swung_this_pa: bool,
     /// True once the AI batter has already committed a swing decision this pitch.
     decided_swing: bool,
     /// Whether the AI batter has decided to offer at this pitch at all —
@@ -120,6 +124,7 @@ impl Default for CpuState {
     fn default() -> Self {
         Self {
             pitch_delay: Timer::from_seconds(0.9, TimerMode::Once),
+            batter_swung_this_pa: false,
             decided_swing: false,
             will_swing: None,
             swing_target_dt: None,
@@ -181,14 +186,19 @@ pub(crate) fn ready_to_press(dt_ms: f32, target_dt: f32) -> bool {
 /// A pitcher behind in the count (2 balls and up) stops nibbling: his aim
 /// scatter shrinks to this fraction of the base spread.
 pub(crate) fn behind_scatter_scale(balls: u32) -> f32 {
-    // No pull any more: at the original 0.4 ball three was thrown 14 times
-    // in 2,446 two-ball pitches and the CPU walked nobody in 100 games
-    // (2026-10 realism study); even 0.7 gave four walks in 48. The package
-    // now keeps its arsenal arm (get-it-over, no benders in the dirt) and
-    // the batter's arms; the scatter stays honest so ball four can exist.
-    // Kept as a dial so a variant can nibble or groove.
-    let _ = balls;
-    1.0
+    // A gentle pull, not the original 0.4 (at which ball three was thrown
+    // 14 times in 2,446 two-ball pitches and the CPU walked nobody in 100
+    // games, 2026-10 realism study): the base scatter stays honest so ball
+    // four can exist, while a pitcher at three balls still gets it over
+    // often enough that a batter who never swings doesn't walk every time
+    // up (`tests/e2e/passive_walks.rs`).
+    // Walks are decided almost entirely at three balls, and this dial is
+    // sharp: 0.85/0.7 at two/three balls cut the CPU-vs-CPU walk rate from
+    // 9.9% to 4.9% of PAs (MLB 8.4%).
+    match balls {
+        0..=2 => 1.0,
+        _ => 0.85,
+    }
 }
 
 /// Whether the count calls for the get-it-over arsenal (no benders or
@@ -231,14 +241,34 @@ pub(crate) fn steal_rate(base: f32, score: &ScoreBoard) -> f32 {
     p
 }
 
-/// How much of the usual in-zone offer rate the hitter keeps at three balls:
+/// The scatter a pitcher keeps against a hitter who has taken two called
+/// strikes without offering at anything all plate appearance, once the
+/// count is full or near it: he challenges him. A hitter who swings keeps
+/// the honest scatter — this is what stops a completely passive batter from
+/// milking walk after walk (`tests/e2e/passive_walks.rs`) without pulling
+/// the CPU-vs-CPU walk rate down with it. (Keyed on balls alone it did: the
+/// CPU hitter often takes his way to 2-0 or 3-0 — that is patience, not
+/// passivity — and the CPU walk rate fell from 8.6% to 3.4% of PAs.)
+pub(crate) fn taker_scatter_scale(swung_this_pa: bool, balls: u32, strikes: u32) -> f32 {
+    if !swung_this_pa && balls >= 2 && strikes >= 2 {
+        0.5
+    } else {
+        1.0
+    }
+}
+
+/// How much of the usual in-zone offer rate the hitter keeps by count:
 /// the 3-0 green light is rare (MLB hitters swing at ~10% of 3-0 pitches),
-/// 3-1 is selective, 3-2 is a normal swing. Walks live or die here — a
-/// hitter who hacks at 3-0 never draws one.
-pub(crate) fn three_ball_take_scale(balls: u32, strikes: u32) -> f32 {
+/// 3-1 is selective, and the first pitch is often taken too (MLB hitters
+/// offer at ~30% of 0-0 pitches, against ~47% overall); 3-2 and the rest
+/// are a normal swing. Walks and pitches-per-PA live or die here — a hitter
+/// who hacks at 3-0 never draws one, and one who hacks at every 0-0 strike
+/// ends a quarter of his plate appearances on one pitch.
+pub(crate) fn count_take_scale(balls: u32, strikes: u32) -> f32 {
     match (balls, strikes) {
         (3, 0) => 0.15,
         (3, 1) => 0.7,
+        (0, 0) => 0.7,
         _ => 1.0,
     }
 }
@@ -262,6 +292,15 @@ pub fn cpu_defense(
         return;
     }
 
+    // Read the hitter: a fresh count at the wind-up starts a new plate
+    // appearance; any press during the pitch is an offer.
+    if play.phase == Phase::WindUp && score.balls == 0 && score.strikes == 0 {
+        cpu.batter_swung_this_pa = false;
+    }
+    if play.phase == Phase::Pitch && intents.get(score.batting_team()).action {
+        cpu.batter_swung_this_pa = true;
+    }
+
     // Only act while waiting to pitch; keep the button released otherwise.
     if play.phase != Phase::PrePitch {
         intents.get_mut(team).action = false;
@@ -276,10 +315,11 @@ pub fn cpu_defense(
         let intent = intents.get_mut(team);
         intent.action = false;
         if lead.extended {
-            // ~0.25 throws per second of extended lead, deterministic noise.
+            // ~0.1 throws per second of extended lead, deterministic noise.
             // (Was ~0.5: with the offense stretching on 18% of windows that
-            // made 2.1 pickoffs per team-game, ~40× MLB's 0.05.)
-            let p = (0.15 + 0.25 * cfg.skill) * time.delta_secs();
+            // made 2.1 pickoffs per team-game, ~40× MLB's 0.05; 0.25 still
+            // picked off 0.7 a game.)
+            let p = (0.06 + 0.1 * cfg.skill) * time.delta_secs();
             intent.action = cpu.frame_roll(3.9) < p;
         }
         // Re-arm only a short post-window beat instead of the full
@@ -305,7 +345,9 @@ pub fn cpu_defense(
             // their pitches in it, and the old 0.55 scatter (±0.27 m at the
             // plate against a 0.25 m zone half-width) was a strike machine
             // that never walked anyone.
-            let spread = (0.75 * (1.0 - cfg.skill) + 0.2) * behind_scatter_scale(score.balls);
+            let spread = (0.7 * (1.0 - cfg.skill) + 0.2)
+                * behind_scatter_scale(score.balls)
+                * taker_scatter_scale(cpu.batter_swung_this_pa, score.balls, score.strikes);
             let mut aim = Vec2::new(cpu.noise(1.7) * spread, cpu.noise(2.3) * spread * 0.5);
             let roll = cpu.roll(4.3);
             if wants_get_it_over(score.balls) {
@@ -387,8 +429,8 @@ pub fn cpu_offense(
         let extend = if steal_candidate(&bases).is_some() {
             if play.in_steal_window() {
                 let roll = cpu.roll(5.3);
-                let p = steal_rate(0.02 + 0.04 * cfg.skill, &score);
-                *cpu.window_steal.get_or_insert_with(|| roll < p)
+                let p = steal_rate(0.012 + 0.024 * cfg.skill, &score);
+                *cpu.window_steal.get_or_insert(roll < p)
             } else {
                 cpu.window_steal == Some(true)
             }
@@ -415,9 +457,9 @@ pub fn cpu_offense(
         cpu.swing_target_dt = None;
         let committed = cpu.window_steal == Some(true);
         let roll = cpu.roll(6.1);
-        let p = steal_rate(0.03 + 0.04 * cfg.skill, &score);
+        let p = steal_rate(0.018 + 0.024 * cfg.skill, &score);
         let send = steal_candidate(&bases).is_some()
-            && (committed || *cpu.steal_call.get_or_insert_with(|| roll < p));
+            && (committed || *cpu.steal_call.get_or_insert(roll < p));
         let intent = intents.get_mut(team);
         intent.action = false;
         if send {
@@ -498,7 +540,7 @@ pub fn cpu_offense(
         let roll = cpu.roll(5.0);
         let swing = if in_zone {
             // Usually offers at strikes — except on the 3-0 take.
-            roll < (0.5 + 0.4 * cfg.skill) * three_ball_take_scale(score.balls, score.strikes)
+            roll < (0.5 + 0.4 * cfg.skill) * count_take_scale(score.balls, score.strikes)
         } else {
             // Rarely chases balls — and half as often when ahead in the
             // count (the patience arm of the TODO 10 package).
@@ -533,15 +575,15 @@ pub fn cpu_offense(
     cpu.decided_swing = true;
     let intent = intents.get_mut(team);
     intent.action = true;
-    // Spread the intended launch across the whole stick (aim.y −1..1 → a
-    // −4°..32° base launch before the timing tilt tops or lifts it), so the
-    // batted-ball mix lands near the real ~40% grounders / 40% liners+flies
-    // split instead of a wall of 10°–20° line drives (the 2026-10 realism
-    // harness measured a .45 BABIP off the old narrow aim). The launch aim is
-    // the CPU's home-run dial — a towering uppercut clears the regulation
-    // fence — so HR/9 is checked in tests/balance_sim.rs. Horizontal spray is
-    // unchanged.
-    intent.aim = Vec2::new(cpu.noise(7.0) * 0.6, cpu.noise(9.0));
+    // Spread the intended launch from choppers through line drives to flies
+    // (aim.y −1.0..0.8 → a −4°..28° base launch before the timing tilt tops
+    // or lifts it), so the batted-ball mix lands near the real ~40% grounders
+    // / 40% liners+flies split instead of a wall of 10°–20° line drives (the
+    // 2026-10 realism harness measured a .45 BABIP off the old narrow aim).
+    // The launch aim is the CPU's home-run dial — a towering uppercut clears
+    // the regulation fence — so the top of the stick is left to humans and
+    // HR/9 is checked in tests/balance_sim.rs. Horizontal spray is unchanged.
+    intent.aim = Vec2::new(cpu.noise(7.0) * 0.6, cpu.noise(9.0) * 0.9 - 0.1);
 }
 
 #[cfg(test)]
