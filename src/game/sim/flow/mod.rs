@@ -27,7 +27,8 @@
 use bevy::prelude::*;
 
 use crate::game::ai::{
-    CpuConfig, CpuState, cpu_defense, cpu_offense, reset_cpu_clock, tick_cpu_clock,
+    CpuConfig, CpuState, apply_difficulty, cpu_defense, cpu_offense, reset_cpu_clock,
+    tick_cpu_clock,
 };
 use crate::game::rules::{self, Bases, BattingOrder, Outcome};
 use crate::game::variant::Ruleset;
@@ -679,7 +680,7 @@ impl Plugin for FlowPlugin {
             .add_message::<PlayBanner>()
             .add_systems(
                 crate::game::game_start(),
-                (pitch::reset_flow, reset_cpu_clock),
+                (pitch::reset_flow, reset_cpu_clock, apply_difficulty),
             )
             .add_systems(
                 Update,
