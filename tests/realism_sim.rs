@@ -13,6 +13,7 @@ use breakneck_baseball::game::ball::{HitEvent, PitchEvent, WallBangEvent};
 use breakneck_baseball::game::coach::CoachFindingEvent;
 use breakneck_baseball::game::flow::{BallInPlayEvent, ContactEvent, LiveBallEvent, Play, PlayBanner};
 use breakneck_baseball::game::input::{Controllers, InputSource};
+use breakneck_baseball::game::player::Fielder;
 use breakneck_baseball::game::rules::{Bases, BattingOrder};
 use breakneck_baseball::game::{GameState, ScoreBoard, Team};
 
@@ -50,7 +51,11 @@ fn log_events(
     mut live: MessageReader<LiveBallEvent>,
     mut coach: MessageReader<CoachFindingEvent>,
     mut log: ResMut<Log>,
+    fielders: Query<(&Fielder, &Transform)>,
 ) {
+    let mut fl: Vec<(usize, Vec3)> = fielders.iter().map(|(f, t)| (f.index, t.translation)).collect();
+    fl.sort_by_key(|x| x.0);
+    let fpos = fl.iter().map(|(_, p)| format!("[{:.1},{:.1}]", p.x, p.z)).collect::<Vec<_>>().join(",");
     let t = time.elapsed_secs_f64();
     let b = (0..3).map(|i| if bases.is_occupied(i) { '1' } else { '0' }).collect::<String>();
     let head = format!(
@@ -106,12 +111,12 @@ fn log_events(
         push(&mut log, "contact", format!(",\"q\":\"{:?}\",\"dt\":{:.1},\"team\":\"{:?}\"", e.quality, e.dt_ms, e.batting_team));
     }
     for e in bip.read() {
-        push(&mut log, "bip", format!(",\"kind\":\"{:?}\",\"class\":\"{:?}\",\"land\":[{:.2},{:.2},{:.2}]", e.kind, e.contact_class, e.landing.x, e.landing.y, e.landing.z));
+        push(&mut log, "bip", format!(",\"kind\":\"{:?}\",\"class\":\"{:?}\",\"land\":[{:.2},{:.2},{:.2}],\"f\":[{fpos}]", e.kind, e.contact_class, e.landing.x, e.landing.y, e.landing.z));
     }
     for e in live.read() {
         let s = match *e {
             LiveBallEvent::Caught { pos } => format!(",\"ev\":\"caught\",\"pos\":[{:.2},{:.2},{:.2}]", pos.x, pos.y, pos.z),
-            LiveBallEvent::Landed { pos } => format!(",\"ev\":\"landed\",\"pos\":[{:.2},{:.2},{:.2}]", pos.x, pos.y, pos.z),
+            LiveBallEvent::Landed { pos } => format!(",\"ev\":\"landed\",\"pos\":[{:.2},{:.2},{:.2}],\"f\":[{fpos}]", pos.x, pos.y, pos.z),
             LiveBallEvent::Thrown { pos, base, race_time } => format!(",\"ev\":\"thrown\",\"pos\":[{:.2},{:.2},{:.2}],\"base\":{base},\"race\":{race_time:.2}", pos.x, pos.y, pos.z),
             LiveBallEvent::Settled => ",\"ev\":\"settled\"".to_string(),
         };
