@@ -31,6 +31,19 @@ impl Default for CpuConfig {
     }
 }
 
+/// Locks the player's menu difficulty into [`CpuConfig`] at game start, so
+/// a game plays at one skill throughout (the menu is the only place it can
+/// change). A harness without `SettingsPlugin` keeps whatever `CpuConfig`
+/// it set up.
+pub fn apply_difficulty(
+    settings: Option<Res<crate::game::settings::Settings>>,
+    mut cfg: ResMut<CpuConfig>,
+) {
+    if let Some(settings) = settings {
+        cfg.skill = settings.difficulty.skill();
+    }
+}
+
 /// Per-pitch bookkeeping for the AI.
 #[derive(Resource)]
 pub struct CpuState {

@@ -42,6 +42,7 @@ fn row_consts_agree_with_their_labels() {
         (ROW_TRAIL_COLOR, "TRAIL COLOR"),
         (ROW_REDUCE_MOTION, "REDUCE MOTION"),
         (ROW_STRIKE_ZONE, "STRIKE ZONE"),
+        (ROW_GRAPHICS, "GRAPHICS"),
         (ROW_VOLUME, "VOLUME"),
         (ROW_CLOSE, "CLOSE"),
     ] {

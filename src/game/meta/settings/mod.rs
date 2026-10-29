@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use bevy::log::warn;
 
 use crate::game::GameState;
+use crate::game::season::{self, Season};
 
 mod screen;
 pub use screen::{SettingsCursorRow, open_settings};
@@ -217,6 +218,98 @@ impl TrailColor {
     }
 }
 
+/// The player's graphics-quality choice. `Auto` picks a tier for the device
+/// it runs on; the fixed tiers force one. What each tier changes (MSAA,
+/// shadow-map size, render scale) and the Auto heuristic live in
+/// `game::quality`, which applies the resolved tier.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum GraphicsQuality {
+    #[default]
+    Auto,
+    Low,
+    Medium,
+    High,
+}
+
+impl GraphicsQuality {
+    pub fn label(self) -> &'static str {
+        match self {
+            GraphicsQuality::Auto => "Auto",
+            GraphicsQuality::Low => "Low",
+            GraphicsQuality::Medium => "Medium",
+            GraphicsQuality::High => "High",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            GraphicsQuality::Auto => GraphicsQuality::Low,
+            GraphicsQuality::Low => GraphicsQuality::Medium,
+            GraphicsQuality::Medium => GraphicsQuality::High,
+            GraphicsQuality::High => GraphicsQuality::Auto,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        // 3 nexts = 1 prev in a 4-cycle.
+        self.next().next().next()
+    }
+}
+
+/// How tough the CPU opponent plays — the menu face of
+/// [`crate::game::ai::CpuConfig::skill`], a stepped slider rather than a raw
+/// float so every level is a value the economy has been exercised at.
+/// `Normal` is the skill the balance sim and every e2e suite play at, so the
+/// default changes nothing; the other steps sit evenly either side of it.
+/// The CPU-vs-CPU economy can't arbitrate this one — `skill` sharpens both
+/// CPU teams at once — so the steps are about how hard the CPU is for a
+/// human, not about the league average.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum Difficulty {
+    Easy,
+    #[default]
+    Normal,
+    Hard,
+    Expert,
+}
+
+impl Difficulty {
+    pub fn label(self) -> &'static str {
+        match self {
+            Difficulty::Easy => "Easy",
+            Difficulty::Normal => "Normal",
+            Difficulty::Hard => "Hard",
+            Difficulty::Expert => "Expert",
+        }
+    }
+
+    /// The `CpuConfig::skill` this step plays at (0.0 = easy, 1.0 = tough).
+    /// Expert stops short of 1.0: at 1.0 the CPU hitter never chases and
+    /// its pitcher's scatter bottoms out, which reads as a machine.
+    pub fn skill(self) -> f32 {
+        match self {
+            Difficulty::Easy => 0.15,
+            Difficulty::Normal => 0.4,
+            Difficulty::Hard => 0.65,
+            Difficulty::Expert => 0.9,
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Difficulty::Easy => Difficulty::Normal,
+            Difficulty::Normal => Difficulty::Hard,
+            Difficulty::Hard => Difficulty::Expert,
+            Difficulty::Expert => Difficulty::Easy,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        // 3 nexts = 1 prev in a 4-cycle.
+        self.next().next().next()
+    }
+}
+
 /// Everything the player can configure. Persisted on every change.
 #[derive(Resource, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Settings {
@@ -245,12 +338,33 @@ pub struct Settings {
     /// stores keep their other options.
     #[serde(default)]
     pub reduce_motion: bool,
+    /// Graphics quality tier (serde-defaulted to Auto so old stores pick
+    /// the device's tier instead of resetting every option).
+    #[serde(default)]
+    pub graphics: GraphicsQuality,
+    /// CPU opponent difficulty (serde-defaulted to Normal so old stores
+    /// keep the skill they have always played against).
+    #[serde(default)]
+    pub difficulty: Difficulty,
     /// Master volume, 0.0..=1.0, applied via [`bevy::audio::GlobalVolume`].
     pub volume: f32,
+    /// Regular-season length for the *next* short season (menu **L**; one
+    /// of [`season::SEASON_LENGTHS`]). Serde-defaulted for old stores.
+    #[serde(default = "default_season_length")]
+    pub season_length: u32,
+    /// The short season in progress (or just finished, until the next one
+    /// starts) — schedule, results and final. Lives in the settings store
+    /// so it survives a relaunch on both native and web.
+    #[serde(default)]
+    pub season: Option<Season>,
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn default_season_length() -> u32 {
+    season::DEFAULT_SEASON_LENGTH
 }
 
 impl Default for Settings {
@@ -262,7 +376,11 @@ impl Default for Settings {
             trail_color: TrailColor::default(),
             show_strike_zone: true,
             reduce_motion: false,
+            graphics: GraphicsQuality::default(),
+            difficulty: Difficulty::default(),
             volume: 0.7,
+            season_length: season::DEFAULT_SEASON_LENGTH,
+            season: None,
         }
     }
 }
@@ -273,6 +391,13 @@ impl Settings {
     pub fn clamped(&self) -> Self {
         let mut result = self.clone();
         result.volume = result.volume.clamp(0.0, 1.0);
+        if !season::SEASON_LENGTHS.contains(&result.season_length) {
+            result.season_length = season::DEFAULT_SEASON_LENGTH;
+        }
+        // A season this build can't continue is dropped, not half-played.
+        if result.season.as_ref().is_some_and(|s| !s.is_valid()) {
+            result.season = None;
+        }
         result
     }
 }

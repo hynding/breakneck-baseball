@@ -27,7 +27,8 @@
 use bevy::prelude::*;
 
 use crate::game::ai::{
-    CpuConfig, CpuState, cpu_defense, cpu_offense, reset_cpu_clock, tick_cpu_clock,
+    CpuConfig, CpuState, apply_difficulty, cpu_defense, cpu_offense, reset_cpu_clock,
+    tick_cpu_clock,
 };
 use crate::game::rules::{self, Bases, BattingOrder, Outcome};
 use crate::game::variant::Ruleset;
@@ -355,13 +356,28 @@ impl Play {
     }
 
     /// The hit the umpire has already decided but not yet announced (the
-    /// throw is still in the air): `Some(bases)` lets the runner rigs break
-    /// for the bases they've earned while the play finishes.
-    pub fn pending_hit(&self) -> Option<u32> {
+    /// throw is still in the air): `Some((bases, extra))` lets the runner
+    /// rigs break for the bases they've earned while the play finishes —
+    /// `extra` names the runner (by origin base) going for one more, and
+    /// whether he makes it.
+    pub fn pending_hit(&self) -> Option<(u32, Option<(usize, bool)>)> {
         match self.live.pending_call {
-            Some(Outcome::Hit(n)) => Some(n),
+            Some(Outcome::Hit(n)) => Some((n, None)),
+            Some(Outcome::ExtraBase { hit, runner, safe }) => Some((hit, Some((runner, safe)))),
             _ => None,
         }
+    }
+
+    /// Whether the decided-but-unannounced call is a caught fly with the
+    /// runner on third tagging: he breaks for the plate on the throw.
+    pub fn pending_tag_up(&self) -> bool {
+        matches!(
+            self.live.pending_call,
+            Some(Outcome::Out(rules::OutKind::Fly {
+                tag: rules::TagUp::Scores | rules::TagUp::ThrownOut,
+                ..
+            }))
+        )
     }
 
     /// The most recent judged swing's quality this at-bat (any swing), or
@@ -699,7 +715,7 @@ impl Plugin for FlowPlugin {
             .add_message::<PlayBanner>()
             .add_systems(
                 crate::game::game_start(),
-                (pitch::reset_flow, reset_cpu_clock),
+                (pitch::reset_flow, reset_cpu_clock, apply_difficulty),
             )
             .add_systems(
                 Update,

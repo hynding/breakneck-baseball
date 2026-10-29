@@ -97,6 +97,9 @@ enum PlayState {
         holder: Entity,
         held_at: f32,
         race_time: f32,
+        /// A caught fly with the runner on third tagging: the throw goes
+        /// home after the transfer, no choice to make (the call is decided).
+        tag_throw: bool,
     },
     /// The ball has been thrown and is on its way to `catcher`. When the
     /// throw started a double play, `relay_to` is the bag the receiver fires
@@ -255,6 +258,8 @@ fn chase_and_gather(
     play: Res<Play>,
     field: Res<FieldSpec>,
     ruleset: Res<Ruleset>,
+    bases: Res<rules::Bases>,
+    score: Res<ScoreBoard>,
     mut ball_q: Query<(Entity, &Transform, &mut Velocity), With<Baseball>>,
     mut fielders: Query<(Entity, &Transform, &mut MoveIntent), With<Fielder>>,
     mut reports: MessageWriter<LiveBallEvent>,
@@ -297,7 +302,32 @@ fn chase_and_gather(
                 intent.target = None;
             }
             reports.write(LiveBallEvent::Caught { pos: ball_pos });
-            active.state = PlayState::Done;
+            // The same tag-up read flow calls: a runner tagging from third
+            // draws the throw home.
+            let tagging = matches!(
+                rules::resolve_catch(
+                    ball_pos,
+                    &bases,
+                    score.outs,
+                    play.runners_going(),
+                    &field,
+                    &ruleset,
+                ),
+                rules::OutKind::Fly {
+                    tag: rules::TagUp::Scores | rules::TagUp::ThrownOut,
+                    ..
+                }
+            );
+            active.state = if tagging {
+                PlayState::Holding {
+                    holder: chaser,
+                    held_at: time.elapsed_secs(),
+                    race_time: play.since_contact(time.elapsed_secs()),
+                    tag_throw: true,
+                }
+            } else {
+                PlayState::Done
+            };
             return;
         }
         // First bounce: the fair/foul call point; from here it's a ground ball.
@@ -340,6 +370,7 @@ fn chase_and_gather(
             holder: chaser,
             held_at: time.elapsed_secs(),
             race_time: play.since_contact(time.elapsed_secs()),
+            tag_throw: false,
         };
     } else if let Ok((_, tf, mut intent)) = fielders.get_mut(chaser) {
         // Get in front of it: aim for the spot on its roll where the chaser
@@ -376,10 +407,13 @@ fn hold_and_throw(
         holder,
         held_at,
         race_time,
+        tag_throw,
     } = active.state
     else {
         return;
     };
+    // A tag-up throw leaves after the call is decided (the play is
+    // `resolved` but still `InPlay` until the throw arrives).
     if play.phase != Phase::InPlay {
         return;
     }
@@ -402,7 +436,12 @@ fn hold_and_throw(
         None
     };
     let going = play.runners_going();
-    let (base, throw_time) = if let Some(base) = manual {
+    let (base, throw_time) = if tag_throw {
+        if now - held_at < ruleset.pace.throw_transfer_secs {
+            return;
+        }
+        (field.base_count(), race_time)
+    } else if let Some(base) = manual {
         (base, play.since_contact(now))
     } else if now - held_at >= ruleset.pace.auto_throw_delay_secs {
         let target = rules::throw_target(
@@ -410,6 +449,7 @@ fn hold_and_throw(
             race_time,
             &bases,
             going,
+            score.outs,
             &field,
             &ruleset.pace,
         );
@@ -421,17 +461,22 @@ fn hold_and_throw(
     // Same pure race flow will run: if this throw turns two, the receiver
     // fires the visible relay on to first.
     let call = rules::runner_call_from_aim(intents.get(score.batting_team()).aim);
-    let outcome = rules::resolve_thrown(
-        ball_tf.translation,
-        throw_time,
-        base,
-        &bases,
-        going,
-        call,
-        &field,
-        &ruleset,
-    );
-    let relay_to = matches!(outcome, rules::Outcome::DoublePlay).then_some(0);
+    let relay_to = (!tag_throw)
+        .then(|| {
+            rules::resolve_thrown(
+                ball_tf.translation,
+                throw_time,
+                base,
+                &bases,
+                going,
+                score.outs,
+                call,
+                &field,
+                &ruleset,
+            )
+        })
+        .filter(|outcome| matches!(outcome, rules::Outcome::DoublePlay))
+        .map(|_| 0);
 
     let target_pos = cover_pos(&field, base);
     let receiver = active

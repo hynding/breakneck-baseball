@@ -5,7 +5,9 @@
 use crate::common;
 
 use bevy::prelude::*;
+use breakneck_baseball::game::ai::CpuConfig;
 use breakneck_baseball::game::input::ActiveDevice;
+use breakneck_baseball::game::settings::{Difficulty, Settings};
 use breakneck_baseball::game::{GameConfig, GameMode, GameState};
 use common::{DriveGame, headless_app, run_until, tap_key};
 
@@ -76,9 +78,9 @@ fn pad_cursor_changes_options_and_starts_the_focused_mode() {
         GameState::MainMenu
     );
 
-    // Rows: One Player, Two Players, Field, Innings, ... — down to Innings
-    // and step it with Right.
-    for _ in 0..3 {
+    // Rows: One Player, Two Players, Season, Field, Innings, ... — down to
+    // Innings and step it with Right.
+    for _ in 0..4 {
         tap_pad(&mut app, GamepadButton::DPadDown);
     }
     tap_pad(&mut app, GamepadButton::DPadRight);
@@ -89,7 +91,7 @@ fn pad_cursor_changes_options_and_starts_the_focused_mode() {
     );
 
     // Back up to Two Players and choose it with A.
-    for _ in 0..2 {
+    for _ in 0..3 {
         tap_pad(&mut app, GamepadButton::DPadUp);
     }
     tap_pad(&mut app, GamepadButton::South);
@@ -100,6 +102,56 @@ fn pad_cursor_changes_options_and_starts_the_focused_mode() {
     let config = app.world().resource::<GameConfig>();
     assert_eq!(config.mode, GameMode::TwoPlayers);
     assert_eq!(config.innings, stepped, "the stepped innings must carry in");
+}
+
+/// The CPU difficulty row is a cursor stop like every option: Right steps
+/// it, Start plays One Player from it, and the chosen step is the skill
+/// the CPU actually plays the game at.
+#[test]
+fn pad_steps_cpu_difficulty_into_the_game() {
+    let mut app = pad_app();
+    assert_eq!(
+        app.world().resource::<Settings>().difficulty,
+        Difficulty::Normal
+    );
+    // Rows: One Player, Two Players, Field, Innings, Theme, CPU difficulty.
+    for _ in 0..5 {
+        tap_pad(&mut app, GamepadButton::DPadDown);
+    }
+    assert!(
+        menu_text(&mut app).contains("> CPU difficulty"),
+        "cursor should rest on the difficulty row:\n{}",
+        menu_text(&mut app)
+    );
+    tap_pad(&mut app, GamepadButton::DPadRight);
+    assert_eq!(
+        app.world().resource::<Settings>().difficulty,
+        Difficulty::Hard
+    );
+    // Option values are accent-tinted `TextSpan` children of the row.
+    let world = app.world_mut();
+    assert!(
+        world
+            .query::<&TextSpan>()
+            .iter(world)
+            .any(|span| span.0 == "Hard"),
+        "menu shows the new step"
+    );
+
+    tap_pad(&mut app, GamepadButton::Start);
+    let started = run_until(&mut app, 2_000, |app| {
+        *app.world().resource::<State<GameState>>().get() == GameState::Playing
+    });
+    assert!(started.is_some(), "Start never launched the game");
+    assert_eq!(
+        app.world().resource::<GameConfig>().mode,
+        GameMode::OnePlayer
+    );
+    let skill = app.world().resource::<CpuConfig>().skill;
+    assert!(
+        (skill - Difficulty::Hard.skill()).abs() < f32::EPSILON,
+        "the CPU plays at {skill}, not the chosen Hard step"
+    );
 }
 
 #[test]

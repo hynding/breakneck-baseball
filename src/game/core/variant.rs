@@ -62,6 +62,10 @@ impl Ruleset {
         diff!(pace.hit_and_run_jump_secs);
         diff!(pace.stretch_grace_secs);
         diff!(pace.runner_margin_secs);
+        diff!(pace.secondary_lead_frac);
+        diff!(pace.tag_apply_secs);
+        diff!(pace.send_aggression_secs);
+        diff!(pace.throw_contest_secs);
         diff!(pace.result_secs);
         diff!(pace.ball_result_secs);
         diff!(pace.strike_result_secs);
@@ -166,6 +170,16 @@ pub struct PaceTuning {
     /// Bang-bang margin: ties and near-ties go to the runner — was
     /// `rules::RUNNER_MARGIN`.
     pub runner_margin_secs: f32,
+    /// How far (as a fraction of a base leg) a runner aboard is off his bag
+    /// at contact — where his extra-base read starts.
+    pub secondary_lead_frac: f32,
+    /// Time to put a tag on a runner at a bag no force covers.
+    pub tag_apply_secs: f32,
+    /// How far a losing race a runner still gambles on when reading for the
+    /// extra base or tagging from third.
+    pub send_aggression_secs: f32,
+    /// The latest (behind a sent runner) a throw still goes to his bag.
+    pub throw_contest_secs: f32,
     /// Seconds the result banner lingers after a batted ball's call (and a
     /// pickoff) before the next pitch — was `flow::RESULT_SECS`. The pitch
     /// results have their own holds below (TODO 101); [`Self::result_secs_for`]
@@ -209,6 +223,10 @@ impl Default for PaceTuning {
             hit_and_run_jump_secs: rules::HIT_AND_RUN_JUMP,
             stretch_grace_secs: rules::STRETCH_GRACE,
             runner_margin_secs: rules::RUNNER_MARGIN,
+            secondary_lead_frac: rules::SECONDARY_LEAD_FRAC,
+            tag_apply_secs: rules::TAG_APPLY,
+            send_aggression_secs: rules::SEND_AGGRESSION,
+            throw_contest_secs: rules::THROW_CONTEST,
             result_secs: flow::RESULT_SECS,
             ball_result_secs: flow::BALL_RESULT_SECS,
             strike_result_secs: flow::STRIKE_RESULT_SECS,

@@ -79,6 +79,57 @@ fn trail_style_and_color_cycle_and_wrap() {
     assert_eq!(TrailColor::Ember.prev(), TrailColor::Frost);
 }
 
+#[test]
+fn graphics_quality_cycles_and_wraps() {
+    let mut q = GraphicsQuality::Auto;
+    let mut seen = Vec::new();
+    for _ in 0..4 {
+        seen.push(q);
+        q = q.next();
+    }
+    assert_eq!(q, GraphicsQuality::Auto, "four nexts wrap back to Auto");
+    assert_eq!(
+        seen,
+        [
+            GraphicsQuality::Auto,
+            GraphicsQuality::Low,
+            GraphicsQuality::Medium,
+            GraphicsQuality::High
+        ]
+    );
+    for q in seen {
+        assert_eq!(q.next().prev(), q);
+    }
+}
+
+#[test]
+fn difficulty_steps_cycle_and_climb_in_skill() {
+    let mut d = Difficulty::Easy;
+    let mut seen = Vec::new();
+    for _ in 0..4 {
+        seen.push(d);
+        d = d.next();
+    }
+    assert_eq!(d, Difficulty::Easy, "four nexts wrap back to Easy");
+    for pair in seen.windows(2) {
+        assert!(
+            pair[0].skill() < pair[1].skill(),
+            "{} must play easier than {}",
+            pair[0].label(),
+            pair[1].label()
+        );
+    }
+    for d in seen {
+        assert_eq!(d.next().prev(), d);
+        assert!((0.0..=1.0).contains(&d.skill()));
+    }
+    // The default is the skill every balance band was tuned at.
+    assert!(
+        (Difficulty::default().skill() - crate::game::ai::CpuConfig::default().skill).abs()
+            < f32::EPSILON
+    );
+}
+
 /// A pre-trail settings store (no trail fields) must still load — the
 /// new fields are serde-defaulted, not a breaking schema change that
 /// would silently reset every player's existing choices.
@@ -90,8 +141,51 @@ fn legacy_store_without_trail_fields_loads_with_defaults() {
     assert_eq!(s.trail_color, TrailColor::Ember);
     assert!(s.show_strike_zone, "zone overlay defaults on");
     assert!(!s.reduce_motion, "full motion defaults on");
+    assert_eq!(
+        s.graphics,
+        GraphicsQuality::Auto,
+        "quality defaults to Auto"
+    );
+    assert_eq!(
+        s.difficulty,
+        Difficulty::Normal,
+        "difficulty defaults to Normal"
+    );
     assert_eq!(s.batting_style[0], BattingStyle::SwingMeter);
     assert!((s.volume - 0.5).abs() < 1e-6);
+}
+
+/// A pre-season store loads with no season and the default length; a
+/// season in the store survives the round trip; corrupt season data is
+/// dropped on load instead of resetting every other option.
+#[test]
+fn season_fields_default_round_trip_and_clamp() {
+    let legacy = r#"{"batting_style":["SwingMeter","ClassicTiming"],"volume":0.5}"#;
+    let s: Settings = serde_json::from_str(legacy).unwrap();
+    assert_eq!(s.season, None);
+    assert_eq!(s.season_length, crate::game::season::DEFAULT_SEASON_LENGTH);
+
+    let mut season = crate::game::season::Season::new(1, 6);
+    season.record(3, 1);
+    let with_season = Settings {
+        season: Some(season.clone()),
+        season_length: 12,
+        ..Default::default()
+    };
+    let json = serde_json::to_string(&with_season).unwrap();
+    let back: Settings = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.clamped(), with_season);
+
+    let mut corrupt = with_season.clone();
+    corrupt.season_length = 5;
+    corrupt.season.as_mut().unwrap().length = 7;
+    let fixed = corrupt.clamped();
+    assert_eq!(fixed.season, None);
+    assert_eq!(
+        fixed.season_length,
+        crate::game::season::DEFAULT_SEASON_LENGTH
+    );
+    assert_eq!(fixed.batting_style, with_season.batting_style);
 }
 
 #[test]

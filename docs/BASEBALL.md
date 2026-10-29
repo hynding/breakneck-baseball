@@ -171,6 +171,30 @@ runner-rig choreography — never the call):
 5. **The batter always runs on contact** (fair-ball assumption); the engine
    resets him on a foul.
 
+**Taking the extra base.** On a clean hit the lead runner the hit doesn't
+already score reads whether to take one base more: second to home or first to
+third on a single, first to home on a double. MLB runners take the extra base
+about 41% of the time they have the chance (Baseball-Reference's league XBT%).
+The game models it as a race (`rules::read_extra_base`): the runner starts from
+his secondary lead (`PaceTuning::secondary_lead_frac`, about 15 ft), a reaction
+behind the bat with fewer than two out and on contact with two; the throw to
+his bag needs its transfer, flight, and the tag (`tag_apply_secs`). He goes
+when the race is no worse than a small gamble (`send_aggression_secs`), so a
+band of sends lose — the close play at the plate. The fielder throws to his bag
+when the throw can still get there in time to matter (`throw_contest_secs`),
+otherwise ahead of the batter.
+
+**Tagging from third.** Per the tag-up rule above, long flies score the runner
+and short ones rarely see an attempt "due to the high risk of being thrown
+out". The game races it (`rules::read_tag_up`): the runner retouches timed to
+the catch and runs 90 ft at sprint speed (about 3.7 s); the throw home needs
+its transfer, flight and the tag. With the default pace the break-even is a
+catch about 68 m (~220 ft) out — deeper flies are sacrifice flies, shallower
+ones hold, and the ones just short are where runners get thrown out (the same
+gamble band). The
+runner on second still takes third on a deep fly (`TAG_UP_MIN_DIST`) when the
+runner ahead has left the bag.
+
 **Force play:** "When a runner is bumped over to the next base by the advancing
 batter or by another runner who was bumped by the advancing batter, that runner
 is considered to have been forced to advance." The batter-runner always forces
@@ -223,6 +247,7 @@ CLAUDE.md's architecture notes for how each maps.
 - [Turface Athletics — Field layouts & dimensions](https://www.turface.com/education/resource-library/baseball-softball-field-layouts-dimensions)
 - [Mighty Grass — Baseball field dimensions guide](https://www.mightygrass.com/baseball-field-dimensions-guide/)
 - [Wikipedia — Tag up](https://en.wikipedia.org/wiki/Tag_up)
+- [Baseball-Reference — Baserunning stats (XBT%, league average 41%)](https://www.baseball-reference.com/blog/archives/10867.html)
 - [Baseball Training World — The 9 fundamentals of base running](https://baseballtrainingworld.com/the-9-fundamentals-of-base-running-in-baseball/)
 - [QC Baseball — Baserunning: tagging up](http://www.qcbaseball.com/skills/baserunning-tagging-up.aspx)
 - [Baseball Rules Academy — 5.06 Running the bases](https://baseballrulesacademy.com/official-rule/mlb/5-06-running-the-bases/)

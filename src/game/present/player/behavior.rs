@@ -269,7 +269,12 @@ pub(super) fn umpire_signals(
             Some(Outcome::Out(_) | Outcome::DoublePlay | Outcome::FieldersChoice { .. }) => {
                 (nearest_to_call(), AnimClip::UmpPunchOut)
             }
-            Some(Outcome::Hit(_)) => (nearest_to_call(), AnimClip::UmpSafe),
+            Some(Outcome::ExtraBase { safe: false, .. }) => {
+                (nearest_to_call(), AnimClip::UmpPunchOut)
+            }
+            Some(Outcome::Hit(_) | Outcome::ExtraBase { .. }) => {
+                (nearest_to_call(), AnimClip::UmpSafe)
+            }
             _ => return,
         },
         _ => return,
