@@ -11,7 +11,9 @@ use bevy::prelude::*;
 
 use breakneck_baseball::game::ball::{HitEvent, PitchEvent, WallBangEvent};
 use breakneck_baseball::game::coach::CoachFindingEvent;
-use breakneck_baseball::game::flow::{BallInPlayEvent, ContactEvent, LiveBallEvent, Play, PlayBanner};
+use breakneck_baseball::game::flow::{
+    BallInPlayEvent, ContactEvent, LiveBallEvent, Play, PlayBanner,
+};
 use breakneck_baseball::game::input::{Controllers, InputSource};
 use breakneck_baseball::game::rules::{Bases, BattingOrder};
 use breakneck_baseball::game::{GameState, ScoreBoard, Team};
@@ -52,14 +54,25 @@ fn log_events(
     mut log: ResMut<Log>,
 ) {
     let t = time.elapsed_secs_f64();
-    let b = (0..3).map(|i| if bases.is_occupied(i) { '1' } else { '0' }).collect::<String>();
+    let b = (0..3)
+        .map(|i| if bases.is_occupied(i) { '1' } else { '0' })
+        .collect::<String>();
     let head = format!(
         "\"g\":{},\"t\":{:.3},\"inn\":{},\"top\":{},\"b\":{},\"s\":{},\"o\":{},\"bases\":\"{}\",\"h\":{},\"a\":{}",
-        log.game, t, score.inning, score.top_of_inning, score.balls, score.strikes, score.outs, b,
-        score.home_runs, score.away_runs
+        log.game,
+        t,
+        score.inning,
+        score.top_of_inning,
+        score.balls,
+        score.strikes,
+        score.outs,
+        b,
+        score.home_runs,
+        score.away_runs
     );
     let push = |log: &mut Log, kind: &str, extra: String| {
-        log.lines.push(format!("{{{head},\"k\":\"{kind}\"{extra}}}"));
+        log.lines
+            .push(format!("{{{head},\"k\":\"{kind}\"{extra}}}"));
     };
     let phase = format!("{:?}", play.phase);
     if phase != log.prev_phase {
@@ -89,37 +102,94 @@ fn log_events(
     }
     for e in banners.read() {
         let f = e.follow_up.as_deref().unwrap_or("");
-        push(&mut log, "banner", format!(",\"text\":\"{}\",\"fu\":\"{}\"", esc(&e.text), esc(f)));
+        push(
+            &mut log,
+            "banner",
+            format!(",\"text\":\"{}\",\"fu\":\"{}\"", esc(&e.text), esc(f)),
+        );
     }
     for e in pitches.read() {
         let v = e.velocity;
-        push(&mut log, "pitch", format!(",\"v\":[{:.3},{:.3},{:.3}],\"spin\":[{:.2},{:.2},{:.2}]", v.x, v.y, v.z, e.spin.x, e.spin.y, e.spin.z));
+        push(
+            &mut log,
+            "pitch",
+            format!(
+                ",\"v\":[{:.3},{:.3},{:.3}],\"spin\":[{:.2},{:.2},{:.2}]",
+                v.x, v.y, v.z, e.spin.x, e.spin.y, e.spin.z
+            ),
+        );
     }
     for e in hits.read() {
         let v = e.velocity;
-        push(&mut log, "hit", format!(",\"v\":[{:.3},{:.3},{:.3}]", v.x, v.y, v.z));
+        push(
+            &mut log,
+            "hit",
+            format!(",\"v\":[{:.3},{:.3},{:.3}]", v.x, v.y, v.z),
+        );
     }
     for e in walls.read() {
-        push(&mut log, "wall", format!(",\"pos\":[{:.2},{:.2},{:.2}]", e.pos.x, e.pos.y, e.pos.z));
+        push(
+            &mut log,
+            "wall",
+            format!(",\"pos\":[{:.2},{:.2},{:.2}]", e.pos.x, e.pos.y, e.pos.z),
+        );
     }
     for e in contacts.read() {
-        push(&mut log, "contact", format!(",\"q\":\"{:?}\",\"dt\":{:.1},\"team\":\"{:?}\"", e.quality, e.dt_ms, e.batting_team));
+        push(
+            &mut log,
+            "contact",
+            format!(
+                ",\"q\":\"{:?}\",\"dt\":{:.1},\"team\":\"{:?}\"",
+                e.quality, e.dt_ms, e.batting_team
+            ),
+        );
     }
     for e in bip.read() {
-        push(&mut log, "bip", format!(",\"kind\":\"{:?}\",\"class\":\"{:?}\",\"land\":[{:.2},{:.2},{:.2}]", e.kind, e.contact_class, e.landing.x, e.landing.y, e.landing.z));
+        push(
+            &mut log,
+            "bip",
+            format!(
+                ",\"kind\":\"{:?}\",\"class\":\"{:?}\",\"land\":[{:.2},{:.2},{:.2}]",
+                e.kind, e.contact_class, e.landing.x, e.landing.y, e.landing.z
+            ),
+        );
     }
     for e in live.read() {
         let s = match *e {
-            LiveBallEvent::Caught { pos } => format!(",\"ev\":\"caught\",\"pos\":[{:.2},{:.2},{:.2}]", pos.x, pos.y, pos.z),
-            LiveBallEvent::Landed { pos } => format!(",\"ev\":\"landed\",\"pos\":[{:.2},{:.2},{:.2}]", pos.x, pos.y, pos.z),
-            LiveBallEvent::Thrown { pos, base, race_time } => format!(",\"ev\":\"thrown\",\"pos\":[{:.2},{:.2},{:.2}],\"base\":{base},\"race\":{race_time:.2}", pos.x, pos.y, pos.z),
+            LiveBallEvent::Caught { pos } => format!(
+                ",\"ev\":\"caught\",\"pos\":[{:.2},{:.2},{:.2}]",
+                pos.x, pos.y, pos.z
+            ),
+            LiveBallEvent::Landed { pos } => format!(
+                ",\"ev\":\"landed\",\"pos\":[{:.2},{:.2},{:.2}]",
+                pos.x, pos.y, pos.z
+            ),
+            LiveBallEvent::Thrown {
+                pos,
+                base,
+                race_time,
+            } => format!(
+                ",\"ev\":\"thrown\",\"pos\":[{:.2},{:.2},{:.2}],\"base\":{base},\"race\":{race_time:.2}",
+                pos.x, pos.y, pos.z
+            ),
             LiveBallEvent::Settled => ",\"ev\":\"settled\"".to_string(),
         };
         push(&mut log, "live", s);
     }
     for e in coach.read() {
         let f = &e.0;
-        push(&mut log, "coach", format!(",\"check\":\"{:?}\",\"sev\":\"{:?}\",\"subj\":\"{}\",\"exp\":\"{}\",\"obs\":\"{}\"", f.check, f.severity, esc(&f.subject), esc(&f.expected), esc(&f.observed)));
+        push(
+            &mut log,
+            "coach",
+            format!(
+                ",\"check\":\"{:?}\",\"sev\":\"{:?}\",\"subj\":\"{}\",\"exp\":\"{}\",\"obs\":\"{}\"",
+                f.check,
+                f.severity,
+                esc(&f.subject),
+                esc(&f.expected),
+                esc(&f.observed)
+            ),
+        );
     }
 }
 
@@ -132,7 +202,10 @@ fn play_one(game_index: u32, innings: u32) -> Vec<String> {
     app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
         std::time::Duration::from_secs_f64(SIM_DT),
     ));
-    app.insert_resource(Log { game: game_index, ..Default::default() });
+    app.insert_resource(Log {
+        game: game_index,
+        ..Default::default()
+    });
     app.add_systems(DriveGame, log_events);
     for _ in 0..game_index * 37 {
         app.update();
@@ -167,7 +240,12 @@ fn play_one(game_index: u32, innings: u32) -> Vec<String> {
 #[test]
 #[ignore]
 fn realism_sim() {
-    let env = |k: &str, d: u32| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
+    let env = |k: &str, d: u32| {
+        std::env::var(k)
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(d)
+    };
     let n = env("BB_GAMES", 4);
     let start = env("BB_START", 0);
     let innings = env("BB_INNINGS", 9);
@@ -180,6 +258,10 @@ fn realism_sim() {
             writeln!(f, "{l}").unwrap();
         }
         f.flush().unwrap();
-        eprintln!("game {g} done in {:.1}s: {}", t0.elapsed().as_secs_f64(), lines.last().unwrap());
+        eprintln!(
+            "game {g} done in {:.1}s: {}",
+            t0.elapsed().as_secs_f64(),
+            lines.last().unwrap()
+        );
     }
 }

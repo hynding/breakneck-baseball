@@ -345,13 +345,9 @@ fn chase_and_gather(
         // Get in front of it: aim for the spot on its roll where the chaser
         // meets the ball, falling back to the ball itself once it has slowed
         // enough to be run down (or when it can't be headed off at all).
-        let spot = rules::ground_intercept_from(
-            tf.translation,
-            ball_pos,
-            ball_vel.linvel,
-            &ruleset.pace,
-        )
-        .unwrap_or(ball_pos);
+        let spot =
+            rules::ground_intercept_from(tf.translation, ball_pos, ball_vel.linvel, &ruleset.pace)
+                .unwrap_or(ball_pos);
         intent.target = Some(cap_inside_fence(spot, &field, GROUND_FENCE_MARGIN));
         intent.speed = ruleset.pace.fielder_speed;
     }
