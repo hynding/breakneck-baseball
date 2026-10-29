@@ -113,12 +113,18 @@ fn steal_rate_is_situational() {
         ..Default::default()
     };
     let base = steal_rate(0.05, &score);
-    assert!((base - 0.05).abs() < 1e-6, "an early, tied game runs at the base rate");
+    assert!(
+        (base - 0.05).abs() < 1e-6,
+        "an early, tied game runs at the base rate"
+    );
     score.outs = 2;
     assert!(steal_rate(0.05, &score) > base, "two outs: nothing to lose");
     score.outs = 0;
     score.inning = 8;
-    assert!(steal_rate(0.05, &score) > base, "late and close: the running game is on");
+    assert!(
+        steal_rate(0.05, &score) > base,
+        "late and close: the running game is on"
+    );
     score.home_runs = 6;
     assert_eq!(steal_rate(0.05, &score), 0.0, "nobody runs in a blowout");
 }
