@@ -182,6 +182,7 @@ fn deep_fly_plays_the_roar_without_contact_event() {
     app.world_mut().write_message(BallInPlayEvent {
         kind: ContactKind::Live { fair: true },
         landing: Vec3::new(0.0, 0.0, 90.0),
+        launch: Vec3::new(0.0, 25.0, 40.0),
         contact_class: ContactClass::DeepFly,
     });
     app.update();
@@ -203,6 +204,7 @@ fn home_run_plays_a_single_crowd_peak_roar() {
     app.world_mut().write_message(BallInPlayEvent {
         kind: ContactKind::HomeRun,
         landing: Vec3::new(0.0, 0.0, 120.0),
+        launch: Vec3::new(0.0, 30.0, 45.0),
         contact_class: ContactClass::DeepFly,
     });
     app.update();

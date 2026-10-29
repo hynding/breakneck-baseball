@@ -185,6 +185,10 @@ fn drive_fly(
             intents.get_mut(score.fielding_team()).action = true;
         }
         Phase::Pitch => {
+            // Stick up: a neutral aim is a 14° line drive since the
+            // `rules::hit_velocity` launch retune; the fly this probe wants
+            // needs the uppercut.
+            intents.get_mut(score.batting_team()).aim = Vec2::new(0.0, 0.8);
             if let Ok((t, v)) = ball.single() {
                 if (-0.3..=0.3).contains(&bat_arrival_z(t.translation.z, v.linvel.z)) {
                     intents.get_mut(score.batting_team()).action = true;

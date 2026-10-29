@@ -63,7 +63,7 @@ mod common;
 
 use bevy::prelude::*;
 
-use breakneck_baseball::game::flow::PlayBanner;
+use breakneck_baseball::game::flow::{Phase, Play, PlayBanner};
 use breakneck_baseball::game::input::{Controllers, InputSource};
 use breakneck_baseball::game::rules::BattingOrder;
 use breakneck_baseball::game::{GameState, ScoreBoard, Team};
@@ -112,13 +112,27 @@ struct SimTally {
     fouls: u32,
     called_strike: u32,
     whiff: u32,
+    pitches: u32,
+    picked_off: u32,
+    caught_stealing: u32,
+    stolen: u32,
+    singles: u32,
+    doubles: u32,
+    triples: u32,
+    prev_phase: Option<Phase>,
 }
 
 fn tally(
+    play: Res<Play>,
     order: Res<BattingOrder>,
     mut banners: MessageReader<PlayBanner>,
     mut sim: ResMut<SimTally>,
 ) {
+    // One pitch per WindUp edge.
+    if play.phase == Phase::WindUp && sim.prev_phase != Some(Phase::WindUp) {
+        sim.pitches += 1;
+    }
+    sim.prev_phase = Some(play.phase);
     let cur = (order.current(Team::Home), order.current(Team::Away));
     match sim.prev_slots {
         None => sim.prev_slots = Some(cur),
@@ -144,13 +158,22 @@ fn tally(
             sim.bb += 1;
         } else if t == "HIT BY PITCH" {
             sim.hbp += 1;
-        } else if t.starts_with("SINGLE")
-            || t.starts_with("DOUBLE ") // "DOUBLE  +1" etc; not "DOUBLE PLAY!"
-            || t == "DOUBLE"
-            || t.starts_with("TRIPLE")
-            || t.contains("BASES!")
-        {
+        } else if t.starts_with("SINGLE") {
             sim.hits += 1;
+            sim.singles += 1;
+        } else if t.starts_with("DOUBLE ") || t == "DOUBLE" {
+            // "DOUBLE  +1" etc; not "DOUBLE PLAY!"
+            sim.hits += 1;
+            sim.doubles += 1;
+        } else if t.starts_with("TRIPLE") || t.contains("BASES!") {
+            sim.hits += 1;
+            sim.triples += 1;
+        } else if t.starts_with("PICKED OFF") {
+            sim.picked_off += 1;
+        } else if t.starts_with("CAUGHT STEALING") {
+            sim.caught_stealing += 1;
+        } else if t.starts_with("STOLEN BASE") {
+            sim.stolen += 1;
         } else if t.starts_with("DOUBLE PLAY!") {
             sim.dp += 1;
         } else if t == "FIELDER'S CHOICE" {
@@ -192,6 +215,13 @@ struct GameStats {
     fouls: u32,
     called_strike: u32,
     whiff: u32,
+    pitches: u32,
+    picked_off: u32,
+    caught_stealing: u32,
+    stolen: u32,
+    singles: u32,
+    doubles: u32,
+    triples: u32,
 }
 
 /// Plays one complete one-inning CPU-vs-CPU game. `game_index` sets a coarse,
@@ -278,6 +308,13 @@ fn play_one_game(game_index: u32) -> GameStats {
         fouls: t.fouls,
         called_strike: t.called_strike,
         whiff: t.whiff,
+        pitches: t.pitches,
+        picked_off: t.picked_off,
+        caught_stealing: t.caught_stealing,
+        stolen: t.stolen,
+        singles: t.singles,
+        doubles: t.doubles,
+        triples: t.triples,
     }
 }
 
@@ -291,6 +328,15 @@ struct Aggregate {
     total_hr: u32,
     total_runs: u32,
     mean_frames: f64,
+    // The plate-appearance economy beyond the three headline rates — the
+    // 2026-10 realism study found zero walks, a 7× HBP rate and a 40× pickoff
+    // rate all passing the original three bands.
+    bb_pct: f64,
+    hbp_pct: f64,
+    pitches_per_pa: f64,
+    babip: f64,
+    pickoffs_per9: f64,
+    caught_stealing_per9: f64,
 }
 
 fn run_sim(n: u32) -> Aggregate {
@@ -306,9 +352,14 @@ fn run_sim(n: u32) -> Aggregate {
     let runs_per_team_per_inning = total_runs as f64 / (2.0 * n as f64);
     let hr_per_team_per_inning = total_hr as f64 / (2.0 * n as f64);
 
+    let s = |f: fn(&GameStats) -> u32| -> u32 { games.iter().map(f).sum() };
+    let per9 = |count: u32| count as f64 / (2.0 * n as f64) * 9.0;
+    let pa = total_pa.max(1) as f64;
+    // Balls in play that stayed in the park: hits (HR excluded) + batted outs.
+    let in_play = (s(|g| g.hits) + s(|g| g.batted_out) + s(|g| g.dp) + s(|g| g.fc)).max(1);
     let agg = Aggregate {
         n,
-        k_pct: 100.0 * total_k as f64 / total_pa.max(1) as f64,
+        k_pct: 100.0 * total_k as f64 / pa,
         runs_per9: runs_per_team_per_inning * 9.0,
         hr_per9: hr_per_team_per_inning * 9.0,
         total_pa,
@@ -316,9 +367,13 @@ fn run_sim(n: u32) -> Aggregate {
         total_hr,
         total_runs,
         mean_frames: total_frames as f64 / n as f64,
+        bb_pct: 100.0 * s(|g| g.bb) as f64 / pa,
+        hbp_pct: 100.0 * s(|g| g.hbp) as f64 / pa,
+        pitches_per_pa: s(|g| g.pitches) as f64 / pa,
+        babip: s(|g| g.hits) as f64 / in_play as f64,
+        pickoffs_per9: per9(s(|g| g.picked_off)),
+        caught_stealing_per9: per9(s(|g| g.caught_stealing)),
     };
-
-    let s = |f: fn(&GameStats) -> u32| -> u32 { games.iter().map(f).sum() };
     eprintln!(
         "\n=== balance-sim N={} ===\n\
          K%        = {:.1}%   (target 15..30;  {} K / {} PA)\n\
@@ -326,7 +381,10 @@ fn run_sim(n: u32) -> Aggregate {
          HR/9      = {:.2}    (target 0.5..2.5; {} HR total)\n\
          mean frames/game = {:.0}\n\
          --- PA outcomes: BB={} HBP={} hits={} HR={} battedOut={} DP={} FC={} K={} (sum={} vs PA={})\n\
-         --- pitch events: fouls={} calledStrike={} whiff={}",
+         --- pitch events: fouls={} calledStrike={} whiff={}\n\
+         --- economy: BB%={:.1} (target 6..11)  HBP%={:.1} (target 0..2)  pitches/PA={:.2} (target 3.3..4.3)\n\
+         ---          BABIP={:.3} (target .240..340)  hits 1B/2B/3B={}/{}/{}\n\
+         --- running/9: SB={:.2} CS={:.2} (target 0..1) pickoffs={:.2} (target 0..0.6)",
         agg.n,
         agg.k_pct,
         agg.total_k,
@@ -349,6 +407,16 @@ fn run_sim(n: u32) -> Aggregate {
         s(|g| g.fouls),
         s(|g| g.called_strike),
         s(|g| g.whiff),
+        agg.bb_pct,
+        agg.hbp_pct,
+        agg.pitches_per_pa,
+        agg.babip,
+        s(|g| g.singles),
+        s(|g| g.doubles),
+        s(|g| g.triples),
+        per9(s(|g| g.stolen)),
+        agg.caught_stealing_per9,
+        agg.pickoffs_per9,
     );
 
     agg
@@ -388,26 +456,60 @@ fn run_sim(n: u32) -> Aggregate {
 // pipeline under test and do not set floors here. Each edge below states the
 // risk it favors (flaky-gate if too tight vs toothless-gate if too loose) and
 // its anchor. Measured at N=40 across processes (this binary): K% 17.2..21.9,
-// runs/9 2.8..4.4, HR/9 1.9..2.7.
+// runs/9 2.8..4.4, HR/9 1.9..2.7 — until the 2026-10 realism retune
+// (`docs/BASEBALL.md`-anchored: late swings no longer die in the catcher's
+// glove, Solid contact is a real batted ball, grounders are cut off on their
+// roll, the CPU takes 3-0 and the first pitch, steals and pickoffs are
+// situational). That retune re-centred the economy on MLB 2025 (4.45 R/G,
+// 1.16 HR/G, BB 8.4%, K 22.2%, BABIP .291, 3.87 pitches/PA) and re-measured:
+// K% 14.0, runs/9 5.6, HR/9 1.1, BB% 8.2, HBP% 0.0, pitches/PA 3.3,
+// BABIP .367, CS/9 0.2, pickoffs/9 0.6 (one process, N=40; the nine-inning
+// harness `tests/realism_sim.rs` reads 5.6 R/G, 1.1 HR/G, BB 8.4%, K 16.5%).
 //
-//  * K% 13..27 — anchored to obs 17.2..21.9, ±~4 of margin each side (a chaotic
-//    game moves it ~0.3). Favors neither risk; symmetric because K% is stable.
+//  * K% 11..27 — was 13..27, anchored to obs 17.2..21.9 with ±~4 of margin
+//    each side (a chaotic game moves it ~0.3). The retune reads 14.0..15.3
+//    across runs, so the floor moved to 11 to keep ~3 of margin under the new
+//    live mean; a K-rate *collapse* is what it catches.
 //  * runs/9 2.0..7.5 — floor 2.0 sits ~0.8 below the measured min 2.8, catching
 //    a real offensive collapse without flaking on seed noise (a seed change
 //    can't reach it). Ceiling 7.5 is generous vs the max 4.4 — runs is the
 //    leveraged, chaotic signal (a run is a *chain* of decisions) so the high
-//    tail is the widest; the ceiling favors avoiding a flaky gate.
-//  * HR/9 1.3..3.2 — floor 1.3 sits ~0.6 below the measured min 1.9, so an
-//    HR-death regression trips it instead of passing. The park centres HR high
+//    tail is the widest; the ceiling favors avoiding a flaky gate. The retune
+//    reads 5.6, so the ceiling is ~1.9 above the live mean — the pre-retune
+//    economy's 23 runs a game (the realism harness's round 4) would trip it.
+//  * HR/9 0.6..2.2 — re-centred on the retune's 1.1 (MLB 1.16): floor 0.6
+//    catches the HR-death that the 2026-10 round-5 state showed (0.12 a game),
+//    ceiling 2.2 the round-4 explosion (6.8 a game). The park centres HR high
 //    (the regulation fence + `rules::hit_velocity` make squared-up contact at
-//    the spec `exit_solid`≈1.0 HR-prone, held down only by the CPU's flattened
-//    launch aim in `ai.rs`), so the ceiling 3.2 keeps headroom over the 2.7 max
-//    — but if it ever trips, the fix is an HR-retune ticket (CPU-side levers:
-//    `cpu_timing_spread_ms` / the `ai.rs` launch-aim distribution), NOT a wider
-//    band. The frozen human-facing `Ruleset` exits stay put.
-const K_PCT_BAND: std::ops::RangeInclusive<f64> = 13.0..=27.0; // nominal 15..30
+//    the spec `exit_solid`≈1.0 HR-prone), held down only by the CPU's launch
+//    aim in `ai.rs` (the top of the stick is left to humans) — so if either
+//    edge trips, the fix is an HR-retune ticket (CPU-side levers:
+//    `cpu_timing_spread_ms` / the `ai.rs` launch-aim distribution), NOT a
+//    wider band. The frozen human-facing `Ruleset` exits stay put.
+//  * BB% 5..13 — nominal 6..11 (MLB 8.4), live 8.2. Floor 5 catches the
+//    zero-walk economy the study found (the get-it-over package was pure
+//    strikes); ceiling 13 the 13.8% of the first retune round.
+//  * HBP% 0..2.5 — nominal 0..2 (MLB 1.1), live 0.0: the catch for the slider
+//    that used to drill the batter on a third of its throws (`ai.rs` clamps
+//    the pitch aim).
+//  * pitches/PA 2.9..4.5 — nominal 3.3..4.3 (MLB 3.87), live 3.3. Floor 2.9
+//    catches the swing-at-everything hitter (first-pitch hacking ended a
+//    quarter of PAs on one pitch).
+//  * BABIP .220..=.400 — nominal .250..340 (MLB .291), live .367 (still high:
+//    doubles run 2× MLB — a P1 outfield-range task). Ceiling .400 catches the
+//    .45–.60 of grounders skipping through / catcher-gloved fouls.
+//  * CS/9 0..1.6 and pickoffs/9 0..1.5 — nominal 0..1 / 0..0.6 (MLB 0.2 /
+//    0.05), live 0.2 / 0.6. These are the "CPU runs itself out of innings"
+//    guards: the study measured 3.5× MLB steals and 40× MLB pickoffs.
+const K_PCT_BAND: std::ops::RangeInclusive<f64> = 11.0..=27.0; // nominal 15..30
 const RUNS9_BAND: std::ops::RangeInclusive<f64> = 2.0..=7.5; // nominal 3.0..8.0
-const HR9_BAND: std::ops::RangeInclusive<f64> = 1.3..=3.2; // nominal 0.5..2.5
+const HR9_BAND: std::ops::RangeInclusive<f64> = 0.6..=2.2; // nominal 0.5..2.5
+const BB_PCT_BAND: std::ops::RangeInclusive<f64> = 5.0..=13.0; // nominal 6..11
+const HBP_PCT_BAND: std::ops::RangeInclusive<f64> = 0.0..=2.5; // nominal 0..2
+const PITCHES_PER_PA_BAND: std::ops::RangeInclusive<f64> = 2.9..=4.5; // nominal 3.3..4.3
+const BABIP_BAND: std::ops::RangeInclusive<f64> = 0.22..=0.40; // nominal .250..340
+const CS9_BAND: std::ops::RangeInclusive<f64> = 0.0..=1.6; // nominal 0..1
+const PICKOFFS9_BAND: std::ops::RangeInclusive<f64> = 0.0..=1.5; // nominal 0..0.6
 
 fn assert_bands(agg: &Aggregate) {
     assert!(
@@ -428,6 +530,25 @@ fn assert_bands(agg: &Aggregate) {
         agg.hr_per9,
         HR9_BAND,
     );
+    let checks: [(&str, f64, &std::ops::RangeInclusive<f64>, &str); 6] = [
+        ("BB%", agg.bb_pct, &BB_PCT_BAND, "6..11"),
+        ("HBP%", agg.hbp_pct, &HBP_PCT_BAND, "0..2"),
+        (
+            "pitches/PA",
+            agg.pitches_per_pa,
+            &PITCHES_PER_PA_BAND,
+            "3.3..4.3",
+        ),
+        ("BABIP", agg.babip, &BABIP_BAND, ".250..340"),
+        ("CS/9", agg.caught_stealing_per9, &CS9_BAND, "0..1"),
+        ("pickoffs/9", agg.pickoffs_per9, &PICKOFFS9_BAND, "0..0.6"),
+    ];
+    for (name, value, band, nominal) in checks {
+        assert!(
+            band.contains(&value),
+            "{name} {value:.3} out of asserted band {band:?} (nominal {nominal})",
+        );
+    }
 }
 
 /// The pinned harness: N=40 one-inning games, bands must hold. N was 20 under

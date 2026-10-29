@@ -181,7 +181,9 @@ impl Coach {
         }
 
         // The assigned chaser's intercept must track the live ball: the
-        // predicted landing while airborne, the ball itself on the ground.
+        // predicted landing while airborne; on the ground, the ball itself or
+        // a cut-off spot ahead of it on its roll (`rules::ground_intercept_from`
+        // sends the chaser to get in front of a hot grounder, not after it).
         let (Some(chaser), Some(ball)) = (s.chaser, &s.ball) else {
             return;
         };
@@ -189,9 +191,18 @@ impl Coach {
             return;
         };
         let goal = ball.predicted_landing.unwrap_or(ball.pos);
+        let on_roll_path = |t: Vec3| {
+            if ball.predicted_landing.is_some() {
+                return false;
+            }
+            let dir = Vec2::new(ball.vel.x, ball.vel.z).normalize_or_zero();
+            let rel = Vec2::new(t.x - ball.pos.x, t.z - ball.pos.z);
+            let ahead = rel.dot(dir);
+            ahead >= 0.0 && (rel - dir * ahead).length() <= self.tol.intercept_slack_m
+        };
         let tracking = fielder
             .move_target
-            .is_some_and(|t| flat_dist(t, goal) <= self.tol.intercept_slack_m)
+            .is_some_and(|t| flat_dist(t, goal) <= self.tol.intercept_slack_m || on_roll_path(t))
             // Standing on the goal with no order left is also converged.
             || flat_dist(fielder.pos, goal) <= self.tol.intercept_slack_m;
         if tracking {

@@ -140,8 +140,12 @@ pub(crate) const STRETCH_GRACE: f32 = 0.9;
 /// Bang-bang margin: ties and near-ties go to the runner.
 pub(crate) const RUNNER_MARGIN: f32 = 0.35;
 /// Gathers beyond this radius (scaled by hit_scale) concede first base — the
-/// out at first is only contested on infield balls.
-const INFIELD_GATHER_RADIUS: f32 = 30.0;
+/// out at first is only contested on infield balls. Sized to the grass line,
+/// ~95 ft from the mound centre (per docs/BASEBALL.md "Dirt, grass, and
+/// mowing"), i.e. ~47 m from the plate: the middle infielders stand ~36 m
+/// out, so the old 30 m gate turned every hot grounder they ranged back on
+/// into an uncontested single (2026-10 realism harness: 205 of 302).
+const INFIELD_GATHER_RADIUS: f32 = 47.0;
 /// A catch closer to home than this (scaled) is an infield pop.
 const POP_RADIUS: f32 = 30.0;
 

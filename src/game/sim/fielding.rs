@@ -157,16 +157,34 @@ fn assign_on_contact(
 ) {
     let pace = &ruleset.pace;
     for ev in events.read() {
-        let target = cap_inside_fence(ev.landing, &field, INTERCEPT_FENCE_MARGIN);
-
         // Everyone, ranked by how soon they could reach the landing point.
         let mut ranked: Vec<(Entity, Vec3)> = fielders
             .iter()
             .map(|(entity, tf, _)| (entity, tf.translation))
             .collect();
+        // A grounder is cut off on its roll path, not chased from its first
+        // bounce (which sits a few metres in front of the plate, where only
+        // the battery can get to it): the infielder who can get in front of
+        // it takes the chase and the rest cover the bags.
+        let mut cutoff = None;
+        let mut target = ev.landing;
+        if ev.contact_class == rules::ContactClass::Grounder {
+            let spots: Vec<Vec3> = ranked.iter().map(|(_, p)| *p).collect();
+            (cutoff, target) = rules::ground_intercept(&spots, ev.landing, ev.launch, pace);
+        }
+        let target = cap_inside_fence(target, &field, INTERCEPT_FENCE_MARGIN);
         ranked.sort_by(|a, b| {
             rules::catch_time(a.1, target, pace).total_cmp(&rules::catch_time(b.1, target, pace))
         });
+        if let Some(i) = cutoff {
+            // `ranked` was reordered above; find the cut-off fielder by
+            // entity, not by his pre-sort index.
+            let entity = fielders.iter().nth(i).map(|(e, _, _)| e);
+            if let Some(pos) = ranked.iter().position(|(e, _)| Some(*e) == entity) {
+                let chaser = ranked.remove(pos);
+                ranked.insert(0, chaser);
+            }
+        }
         let Some(&(chaser, _)) = ranked.first() else {
             continue;
         };
@@ -323,8 +341,14 @@ fn chase_and_gather(
             held_at: time.elapsed_secs(),
             race_time: play.since_contact(time.elapsed_secs()),
         };
-    } else if let Ok((_, _, mut intent)) = fielders.get_mut(chaser) {
-        intent.target = Some(cap_inside_fence(ball_pos, &field, GROUND_FENCE_MARGIN));
+    } else if let Ok((_, tf, mut intent)) = fielders.get_mut(chaser) {
+        // Get in front of it: aim for the spot on its roll where the chaser
+        // meets the ball, falling back to the ball itself once it has slowed
+        // enough to be run down (or when it can't be headed off at all).
+        let spot =
+            rules::ground_intercept_from(tf.translation, ball_pos, ball_vel.linvel, &ruleset.pace)
+                .unwrap_or(ball_pos);
+        intent.target = Some(cap_inside_fence(spot, &field, GROUND_FENCE_MARGIN));
         intent.speed = ruleset.pace.fielder_speed;
     }
 }

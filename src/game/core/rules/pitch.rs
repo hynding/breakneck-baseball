@@ -4,6 +4,7 @@
 use bevy::math::{Vec2, Vec3};
 
 use crate::game::ScoreBoard;
+use crate::game::variant::BattingTuning;
 
 use super::{
     Bases, GRAVITY, PITCH_SPEED, ZONE_HALF_WIDTH, ZONE_HIGH, ZONE_LOW, advance_walk,
@@ -130,26 +131,53 @@ pub fn hit_spin(vel: Vec3) -> Vec3 {
     Vec3::new(-6.0, vel.x.signum() * vel.length() * 0.25, 0.0)
 }
 
-/// Converts contact timing + aim into a batted-ball velocity.
-///
-/// Timing is everything: `contact_z ≈ 0.4` (ball on the plate) is squared-up
-/// for a hard line drive, while early contact (ball still out front) skies the
-/// ball for a pop-up and late contact tops it for a weak grounder. A tight
-/// window means mistimed swings produce catchable balls, keeping the out-rate
-/// and inning pace in line with arcade baseball.
-pub fn hit_velocity(contact_z: f32, aim: Vec2) -> Vec3 {
-    let ideal = 0.4_f32;
-    let timing = contact_z - ideal; // >0 early, <0 late
-    let quality = (1.0 - timing.abs() / 1.1).clamp(0.08, 1.0);
+/// Exit speed (m/s) of a dead-on swing before the quality multiplier — the
+/// top of the contact continuum. With `exit_perfect` 1.28 on top this is a
+/// ~100 mph barrel; with `exit_solid` 0.95 at the Solid edge it is a ~60 mph
+/// blooper. `tests/balance_sim.rs` arbitrates this number, not feel.
+const EXIT_PEAK: f32 = 31.0;
+/// How much of [`EXIT_PEAK`] a swing at the very edge of the foul window has
+/// lost (0.36 → a 130 ms-late swing still leaves the bat at 64% of peak).
+/// Linear in the timing error so Solid contact is a real *continuum* from
+/// blooper to liner instead of one fixed dribbler: the old model graded
+/// power by the ball's distance from a fixed point in *metres*, which at
+/// pitch speed bottomed out inside ~30 ms — every Solid swing left the bat
+/// at the same 39 mph.
+const EXIT_FALLOFF: f32 = 0.36;
+/// Degrees of launch tilt at one Solid-window of timing error: an early
+/// swing gets under the ball (pop-up), a late one tops it (grounder). The
+/// tilt grows with the *square* of the error, so Perfect contact keeps its
+/// aimed launch while Solid-edge contact is pushed to the extremes — the
+/// shape of real mishits (Statcast: soft contact is pop-ups and grounders,
+/// not 60 mph bloopers at a base-hit angle, which is where a linear tilt
+/// parked every Solid swing and ran up a .450 BABIP in the 2026-10 study).
+const TIMING_LAUNCH_DEG: f32 = 30.0;
 
-    let speed = 16.0 + 30.0 * quality;
-    // Aim sets the intended launch; mistiming skews it toward pop-up / grounder.
-    // A neutral swing (aim.y = 0) is a ~19° line drive — the base hit angle;
-    // aiming up trades hittability for home-run power. Spray is negated so
-    // stick-right pulls toward screen-right (world −X).
-    let launch_deg = (6.0 + 26.0 * (aim.y * 0.5 + 0.5) + timing * 8.0).clamp(-8.0, 72.0);
+/// Converts swing timing + aim into a batted-ball velocity.
+///
+/// Timing is everything: `dt_ms` is the signed swing error at the bat
+/// (`flow::swing_dt_ms`, early = negative). Dead-on is the hardest contact;
+/// exit speed falls linearly with |dt| across the foul window
+/// ([`EXIT_PEAK`], [`EXIT_FALLOFF`]), and the launch tilts up when early and
+/// down when late ([`TIMING_LAUNCH_DEG`]) — a mistimed swing still produces a
+/// catchable ball, keeping the out rate and inning pace in line with arcade
+/// baseball. Graded in milliseconds, never metres, so the feel is the same
+/// off a changeup and a heater. The pull-side yaw of mistimed contact is
+/// [`apply_contact_quality`]'s, not this function's.
+pub fn hit_velocity(dt_ms: f32, aim: Vec2, batting: &BattingTuning) -> Vec3 {
+    let miss = (dt_ms.abs() / batting.foul_ms.max(f32::EPSILON)).clamp(0.0, 1.0);
+    let speed = EXIT_PEAK * (1.0 - EXIT_FALLOFF * miss);
+    // Early (negative) timing tilts the launch up, late tilts it down, by
+    // up to 1.5 Solid-windows' worth so the foul-window fringe keeps tilting.
+    let err = (dt_ms / batting.solid_ms.max(f32::EPSILON)).clamp(-1.5, 1.5);
+    let tilt = -err.signum() * err * err * TIMING_LAUNCH_DEG;
+    // Aim sets the intended launch: stick-down (aim.y = −1) is a −4° chopper,
+    // neutral a 14° line drive — the base hit angle — and stick-up a 32° fly;
+    // aiming up trades hittability for home-run power. Spray is negated so stick-right pulls toward
+    // screen-right (world −X).
+    let launch_deg = (-4.0 + 36.0 * (aim.y * 0.5 + 0.5) + tilt).clamp(-8.0, 72.0);
     let launch = launch_deg.to_radians();
-    let spray = (aim_to_world_x(aim.x) * SPRAY_AIM_FRAC + timing * 0.05).clamp(-0.95, 0.95);
+    let spray = (aim_to_world_x(aim.x) * SPRAY_AIM_FRAC).clamp(-0.95, 0.95);
 
     let horizontal = speed * launch.cos();
     Vec3::new(
