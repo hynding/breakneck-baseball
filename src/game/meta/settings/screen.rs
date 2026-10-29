@@ -10,6 +10,7 @@ use bevy::color::Alpha;
 use super::BattingStyle;
 use super::{Settings, SettingsOpen};
 use crate::game::input::Controllers;
+use crate::game::quality::ActiveQuality;
 use crate::game::theme::Theme;
 use crate::game::ui::{
     KeepAliveUi, OverlayPaint, hidden_tint, overlay_card, overlay_root, set_color_if_neq,
@@ -90,10 +91,11 @@ const ROW_TRAIL: usize = 3;
 const ROW_TRAIL_COLOR: usize = 4;
 const ROW_REDUCE_MOTION: usize = 5;
 const ROW_STRIKE_ZONE: usize = 6;
-const ROW_VOLUME: usize = 7;
+const ROW_GRAPHICS: usize = 7;
+const ROW_VOLUME: usize = 8;
 /// The CLOSE pseudo-row (tap / Left / Right closes the screen — the touch
 /// equivalent of Esc). Keep it last; keep the array below in index order.
-const ROW_CLOSE: usize = 8;
+const ROW_CLOSE: usize = 9;
 
 const ROW_LABELS: [&str; ROW_CLOSE + 1] = [
     "P1 BATTING STYLE",
@@ -103,6 +105,7 @@ const ROW_LABELS: [&str; ROW_CLOSE + 1] = [
     "TRAIL COLOR",
     "REDUCE MOTION",
     "STRIKE ZONE",
+    "GRAPHICS",
     "VOLUME",
     "CLOSE",
 ];
@@ -181,6 +184,10 @@ pub(super) fn paint_settings_screen(
     settings: Res<Settings>,
     controllers: Res<Controllers>,
     theme: Res<Theme>,
+    // Optional so the screen still builds in a harness without
+    // `QualityPlugin`; the real app always has it.
+    quality: Option<Res<ActiveQuality>>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     mut roots: Query<
         (&mut BackgroundColor, &mut Visibility),
         (With<SettingsUi>, Without<SettingsCard>),
@@ -214,9 +221,11 @@ pub(super) fn paint_settings_screen(
     let Ok((mut title_text, mut title_color)) = title.single_mut() else {
         return;
     };
-    // Everything this system writes derives from exactly these five
+    // Everything this system writes derives from exactly these six
     // resources (`Controllers` for the resolved touch owner — its write is
-    // guarded, so its tick flips only on real ownership changes), so one
+    // guarded, so its tick flips only on real ownership changes; the
+    // window's scale factor only feeds the GRAPHICS row's "% res", which
+    // refreshes on the next edit or reopen), so one
     // early-return covers the ~100% common frame; `KeepAliveUi` on the root
     // and card keeps their wasm extraction alive (the 2026-08-27 bisect)
     // without per-frame repaints here.
@@ -224,7 +233,8 @@ pub(super) fn paint_settings_screen(
         || cursor.is_changed()
         || settings.is_changed()
         || controllers.is_changed()
-        || theme.is_changed())
+        || theme.is_changed()
+        || quality.as_ref().is_some_and(Res::is_changed))
     {
         return;
     }
@@ -294,6 +304,11 @@ pub(super) fn paint_settings_screen(
             // The zone overlay was persisted but reachable only via the
             // undiscoverable Z on the pause board (TODO 79).
             ROW_STRIKE_ZONE => on_off(settings.show_strike_zone).to_string(),
+            // Headless (no window) reads as 1x.
+            ROW_GRAPHICS => match &quality {
+                Some(q) => q.describe(windows.single().map_or(1.0, Window::scale_factor)),
+                None => settings.graphics.label().to_string(),
+            },
             ROW_VOLUME => format!("{:.0}%", settings.volume * 100.0),
             ROW_CLOSE => "tap / Esc".to_string(),
             // Loud, not silent: a newly appended row without a paint arm
@@ -389,6 +404,10 @@ fn cycle_row(
         }
         ROW_REDUCE_MOTION => settings.reduce_motion = !settings.reduce_motion,
         ROW_STRIKE_ZONE => settings.show_strike_zone = !settings.show_strike_zone,
+        ROW_GRAPHICS => {
+            let q = settings.graphics;
+            settings.graphics = if right { q.next() } else { q.prev() };
+        }
         ROW_VOLUME => {
             settings.volume = if right {
                 if wrap_volume && settings.volume >= 0.999 {
