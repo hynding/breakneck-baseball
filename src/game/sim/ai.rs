@@ -236,11 +236,11 @@ pub(crate) fn ahead_chase_scale(balls: u32) -> f32 {
 /// dirt were simply taken, and the count-aware arsenal cut the CPU K rate
 /// from 15% to 12.6% of PAs (MLB 22%).
 pub(crate) fn two_strike_chase_scale(strikes: u32) -> f32 {
-    if strikes >= 2 { 1.8 } else { 1.0 }
+    if strikes >= 2 { 2.2 } else { 1.0 }
 }
 
 /// How much wider the timing draw of a swing at a ball is (see `cpu_offense`).
-pub(crate) const CHASE_TIMING_SCALE: f32 = 1.5;
+pub(crate) const CHASE_TIMING_SCALE: f32 = 1.8;
 
 /// The per-pitch chance the CPU sends a runner, from a base rate: nothing
 /// in a blowout (the running game is a close-game weapon), a bump with two
@@ -330,7 +330,7 @@ pub(crate) fn pitch_mix(balls: u32, strikes: u32) -> [f32; 5] {
         // Full count: challenge, mostly with the heater.
         (3, 2) => [58.0, 12.0, 8.0, 8.0, 14.0],
         // Ahead: the put-away pitches.
-        (0, 2) | (1, 2) => [36.0, 8.0, 22.0, 22.0, 12.0],
+        (0, 2) | (1, 2) => [40.0, 8.0, 18.0, 20.0, 14.0],
         (0, 1) | (2, 2) => [40.0, 10.0, 18.0, 20.0, 12.0],
         // 0-0 and 1-1: establish the fastball, mix the rest.
         _ => [48.0, 12.0, 10.0, 15.0, 15.0],
@@ -364,11 +364,12 @@ pub(crate) fn call_pitch(roll: f32, balls: u32, strikes: u32) -> PitchKind {
 /// letters, a curve in the dirt — when the hitter is in a hole. MLB zone
 /// rate drops from ~50% overall to ~30% at 0-2 — but the CPU's breaking
 /// balls already live on the edges, so on top of them it only wastes one
-/// 0-2 pitch in three (at 0.5 and 0.3 the CPU K rate fell under 13%).
+/// 0-2 pitch in five (at 0.5 and 0.3 the CPU K rate fell to 11–13%: a
+/// wasted pitch is mostly a taken ball, not a strikeout).
 pub(crate) fn chase_rate(balls: u32, strikes: u32) -> f32 {
     match (balls, strikes) {
-        (0, 2) => 0.3,
-        (1, 2) => 0.15,
+        (0, 2) => 0.2,
+        (1, 2) => 0.1,
         _ => 0.0,
     }
 }

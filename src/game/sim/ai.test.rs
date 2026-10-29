@@ -166,12 +166,10 @@ fn the_call_follows_the_count() {
             "{b}-{s}"
         );
     }
-    // Ahead: breaking balls make up the bulk of the put-away calls.
+    // Ahead: more breaking balls, fewer heaters.
     for (b, s) in [(0, 2), (1, 2)] {
-        assert!(
-            share(b, s, Slider) + share(b, s, Curveball) >= 0.4,
-            "{b}-{s}"
-        );
+        let breaking = |b, s| share(b, s, Slider) + share(b, s, Curveball);
+        assert!(breaking(b, s) > breaking(0, 0) + 0.1, "{b}-{s}");
         assert!(share(b, s, Fastball) < share(0, 0, Fastball), "{b}-{s}");
     }
     // Every count stays a real mix, never a single pitch.
