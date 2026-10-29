@@ -203,6 +203,26 @@ occupied behind the lead runner (`rules::is_forced`). With two outs a force out
 ends the inning the instant it is recorded, so no run scores on the play
 (Baseball Rules Academy).
 
+## Outfield depth and fly-ball range (Statcast, via mlb.com; The Hardball Times)
+
+- Statcast puts the MLB-average **centre fielder 318 ft (96.9 m)** from home
+  plate at the pitch (mlb.com, 2018; shallow specialists play ~305 ft) and the
+  average **right fielder 294 ft (89.6 m)** (mlb.com, 2016). Corners mirror
+  each other in a neutral alignment, so left field uses the same depth.
+- Middle infielders set on the outfield grass behind the base path: in 2017
+  teams played their second baseman **145–159 ft (44–48 m)** deep against
+  left-handed batters (Baseball Prospectus, Statcast positioning).
+- A catch is made when the fielder's time to the spot (first step + run) is
+  under the ball's hang time. Lorenzo Cain's 2014 playoff catch: 0.37 s first
+  step, 82 ft covered in a 4.33 s hang (Kagan, *The Physics of Fielding*).
+  Kagan's table has hang times from 2.1 s (5° liner) to 6.6 s (45° fly); the
+  lowest liners are "a base hit in any ballpark".
+- Batted-ball type drives BABIP: line drives reach base over 70% of the time,
+  ground balls and fly balls about 25% (Wikipedia, *Batted ball*). League
+  BABIP is ~.290. The 2024 AL hit 12,692 singles, 3,808 doubles and 337
+  triples: **0.30 doubles per single, 1.57 doubles per team-game**
+  (Baseball-Reference league batting table).
+
 ## Stolen-base timing (mlb.com Statcast glossary, Bill James Online, Wikipedia "Pop time")
 
 A steal is a race of two stopwatches that both start at the pitcher's first
@@ -254,6 +274,12 @@ CLAUDE.md's architecture notes for how each maps.
 - [Baseball Rules Academy — 2.01 Layout of the field](https://baseballrulesacademy.com/official-rule/mlb/2-01-layout-field/) (line width, materials)
 - [Bat Flip Sports — How to chalk a baseball field like a pro](https://batflipsports.com/how-to-chalk-a-baseball-field/) (2–4 in chalk-line width)
 - [Fox Valley Paint — How to stripe a baseball field like a pro](https://foxvalleypaint.com/how-to-stripe-a-baseball-field/) (practical ~4 in foul-line width)
+- [MLB.com — Stats show Engel knows what he's doing in CF (Statcast CF depth)](https://www.mlb.com/news/chicago-white-sox-of-adam-engel-knows-defense-c265558984)
+- [MLB.com — Statcast outfield positioning (RF depth)](https://www.mlb.com/news/statcast-outfield-positioning-harper-mccutchen-c203465228)
+- [The Hardball Times — The Physics of Fielding](https://tht.fangraphs.com/the-physics-of-fielding/)
+- [Wikipedia — Batted ball](https://en.wikipedia.org/wiki/Batted_ball)
+- [Baseball-Reference — 2024 AL team batting](https://www.baseball-reference.com/leagues/AL/2024.shtml)
+- [Baseball Prospectus — The rise of the rover (2B depth, Statcast)](https://www.baseballprospectus.com/news/article/31983/rubbing-mud-the-rise-of-the-rover-and-the-fall-of-dozier)
 - [MLB.com — Pop Time (Statcast glossary)](https://www.mlb.com/glossary/statcast/pop-time)
 - [Wikipedia — Pop time](https://en.wikipedia.org/wiki/Pop_time)
 - [Bill James Online — Timing pitchers and catchers to prevent stolen bases](https://www.billjamesonline.com/timing_pitchers_and_catchers_to_prevent_stolen_bases_/?F_All=y)
