@@ -417,15 +417,8 @@ pub(super) fn spawn_lighting(
     ambient_fraction: f32,
     lights: &FieldTheme,
 ) {
-    // Explicit shadow-map budget for the one shadow-casting light (was the
-    // implicit 2048 default everywhere): keep 2048 texels on native, halve
-    // to 1024 on wasm/WebGL2 where the shadow pass fill rate is the
-    // constraint — the blocky rigs' soft field shadows don't need the
-    // resolution.
-    #[cfg(not(target_arch = "wasm32"))]
-    commands.insert_resource(bevy::light::DirectionalLightShadowMap { size: 2048 });
-    #[cfg(target_arch = "wasm32")]
-    commands.insert_resource(bevy::light::DirectionalLightShadowMap { size: 1024 });
+    // The shadow-map budget (`DirectionalLightShadowMap`) is the graphics
+    // quality tier's call — `game::quality` owns that resource.
     commands.spawn((
         GameplayEntity,
         DirectionalLight {
