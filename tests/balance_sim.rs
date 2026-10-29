@@ -468,6 +468,12 @@ fn run_sim(n: u32) -> Aggregate {
 // K% 14.0, runs/9 5.6, HR/9 1.1, BB% 8.2, HBP% 0.0, pitches/PA 3.3,
 // BABIP .367, CS/9 0.2, pickoffs/9 0.6 (one process, N=40; the nine-inning
 // harness `tests/realism_sim.rs` reads 5.6 R/G, 1.1 HR/G, BB 8.4%, K 16.5%).
+// The count-aware CPU arsenal (`ai::pitch_mix`: fastballs behind, breaking
+// balls and chase pitches ahead) then re-measured: K% 12.7, runs/9 3.8,
+// HR/9 1.2, BB% 6.5, pitches/PA 3.3, BABIP .311 (N=40; N=100 reads K% 13.2,
+// BB% 7.0), and the nine-inning harness 4.8 R/G, 1.06 HR/G, BB 6.9%,
+// K 14.8%, median homer 405 ft. K% sits nearer its floor than before: the
+// edge pitches the mix now calls are mostly taken balls.
 // The follow-up outfield-range fix (fielders at MLB depth) re-measured runs/9
 // 3.4, HR/9 0.8, K% 14.9, BABIP .301, doubles/9 2.4 (from 5.6 / 1.1 / 14.0 /
 // .367 / 4.6; the realism harness reads 4.15 R/G and 0.31 doubles per single,

@@ -315,12 +315,18 @@ fn exit_speed_is_a_continuum_over_the_timing_window() {
         solid_edge > 0.55 * dead_on,
         "Solid-edge contact must stay a real batted ball"
     );
-    let early = hit_velocity(-b.solid_ms, Vec2::ZERO, b).length();
-    let late = hit_velocity(b.solid_ms, Vec2::ZERO, b).length();
+    // Symmetric in |dt| — from a chopper aim, so the early tilt stays under
+    // the loft fade (which deliberately costs an under-the-ball pop-up its
+    // carry; `home_run_carry_tops_out_short_of_500_ft`).
+    let chop = Vec2::new(0.0, -1.0);
+    let early = hit_velocity(-b.solid_ms, chop, b).length();
+    let late = hit_velocity(b.solid_ms, chop, b).length();
     assert!(
         (early - late).abs() < 1e-3,
         "symmetric in |dt|: {early} vs {late}"
     );
+    let pop = hit_velocity(-b.solid_ms, Vec2::ZERO, b).length();
+    assert!(pop < late, "an early pop-up loses carry to the loft fade");
 }
 
 #[test]
@@ -340,4 +346,43 @@ fn early_contact_lifts_and_late_contact_tops_the_ball() {
         launch(b.solid_ms) < 8.0,
         "a Solid-edge late swing is a grounder"
     );
+}
+
+/// Carry in feet of a Perfect swing at `dt_ms` with launch aim `aim`, through
+/// the same flight model as the live ball.
+fn perfect_carry_ft(dt_ms: f32, aim: Vec2) -> f32 {
+    let r = std_rules();
+    let base = hit_velocity(dt_ms, aim, &r.batting);
+    let v = apply_contact_quality(base, ContactQuality::Perfect, dt_ms, &r);
+    let (landing, _) = predict_landing(
+        v,
+        hit_spin(v),
+        BALL_DRAG_FACTOR,
+        crate::game::ball::MAGNUS_FACTOR,
+    );
+    Vec2::new(landing.x, landing.z).length() / 0.3048
+}
+
+/// Home-run distance (per docs/BASEBALL.md, "Home run distance"): the very
+/// best swing the game allows — dead-on, at any launch aim, anywhere in the
+/// Perfect window — is a rare 480 ft moonshot, never a 500 ft one. Before
+/// the loft fade a full stick-up uppercut swung a touch early carried
+/// ~525 ft every time.
+#[test]
+fn home_run_carry_tops_out_short_of_500_ft() {
+    let b = std_rules().batting;
+    let mut longest = 0.0_f32;
+    for aim_step in -10..=10 {
+        for dt_step in -8..=8 {
+            let dt = b.perfect_ms * dt_step as f32 / 8.0;
+            let aim = Vec2::new(0.0, aim_step as f32 / 10.0);
+            longest = longest.max(perfect_carry_ft(dt, aim));
+        }
+    }
+    assert!(
+        (460.0..500.0).contains(&longest),
+        "longest Perfect carry {longest:.0} ft"
+    );
+    // A dead-on line-drive-to-fly aim is still a no-doubter.
+    assert!(perfect_carry_ft(0.0, Vec2::new(0.0, 0.7)) > 420.0);
 }

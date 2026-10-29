@@ -203,6 +203,27 @@ occupied behind the lead runner (`rules::is_forced`). With two outs a force out
 ends the inning the instant it is recorded, so no run scores on the play
 (Baseball Rules Academy).
 
+## Pitch mix by count (RotoWire usage tables; FanGraphs)
+
+| Fact | Real | In the game |
+|---|---|---|
+| League usage, 2025 | fastball (four-seam + sinker) 47.9%, slider 22.4%, changeup 10.0%, curveball 8.6%, cutter 7.6%, splitter 3.6% | `ai::pitch_mix` (cutter folds into the fastball family, splitter into the changeup) |
+| Hitter's counts (3-0, 3-1, 2-0) | some kind of fastball at least 70% of the time | `ai::pitch_mix` |
+| Pitcher's counts | breaking balls and chase pitches out of the zone; offspeed usage up ~10 points in the Statcast era | `ai::pitch_mix`, `ai::chase_rate` |
+
+The game has no cutter or splitter, and its control scheme ties a pitch's
+kind to its held aim (`rules::PitchKind::from_aim`), so the slider lives on
+the inside edge and the sinker on the outside one.
+
+## Home run distance (Sports Illustrated, Statcast)
+
+- A typical big-league homer travels about 400 ft.
+- 450 ft+ is rare: in 2024 the leader, Shohei Ohtani, hit six.
+- Nobody reached 480 ft in 2024; the longest was Jorge Soler's 478 ft.
+- The game allows a slightly longer arcade moonshot (~480–490 ft off a
+  dead-on uppercut) and nothing at 500 ft (`rules::hit_velocity`'s loft fade;
+  guard: `contact::tests::home_run_carry_tops_out_short_of_500_ft`).
+
 ## Outfield depth and fly-ball range (Statcast, via mlb.com; The Hardball Times)
 
 - Statcast puts the MLB-average **centre fielder 318 ft (96.9 m)** from home
@@ -274,6 +295,9 @@ CLAUDE.md's architecture notes for how each maps.
 - [Baseball Rules Academy — 2.01 Layout of the field](https://baseballrulesacademy.com/official-rule/mlb/2-01-layout-field/) (line width, materials)
 - [Bat Flip Sports — How to chalk a baseball field like a pro](https://batflipsports.com/how-to-chalk-a-baseball-field/) (2–4 in chalk-line width)
 - [Fox Valley Paint — How to stripe a baseball field like a pro](https://foxvalleypaint.com/how-to-stripe-a-baseball-field/) (practical ~4 in foul-line width)
+- [RotoWire — MLB pitch speed and usage, 2002 to 2025](https://www.rotowire.com/baseball/article/mlb-pitch-speed-and-usage-2002-to-2025-94262)
+- [FanGraphs — Checking in on the hitter's count](https://blogs.fangraphs.com/checking-in-on-the-hitters-count) (70%+ fastballs at 3-0, 3-1, 2-0)
+- [Sports Illustrated — The farthest and hardest-hit home runs of 2024](https://www.si.com/mlb/2024-mlb-season-home-runs-farthest-hardest-hit)
 - [MLB.com — Stats show Engel knows what he's doing in CF (Statcast CF depth)](https://www.mlb.com/news/chicago-white-sox-of-adam-engel-knows-defense-c265558984)
 - [MLB.com — Statcast outfield positioning (RF depth)](https://www.mlb.com/news/statcast-outfield-positioning-harper-mccutchen-c203465228)
 - [The Hardball Times — The Physics of Fielding](https://tht.fangraphs.com/the-physics-of-fielding/)

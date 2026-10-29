@@ -152,6 +152,18 @@ const EXIT_FALLOFF: f32 = 0.36;
 /// not 60 mph bloopers at a base-hit angle, which is where a linear tilt
 /// parked every Solid swing and ran up a .450 BABIP in the 2026-10 study).
 const TIMING_LAUNCH_DEG: f32 = 30.0;
+/// Launch angle (degrees) past which a swing is getting *under* the ball:
+/// every degree above it costs [`LOFT_FADE_PER_DEG`] of exit speed. Real
+/// carry peaks in the high 20s and falls off above it; this game's light
+/// drag kept a 40° uppercut carrying further than a 30° barrel, so a human
+/// living at full stick-up plus an early tilt hit 510–525 ft moonshots on
+/// every Perfect swing (per docs/BASEBALL.md, "Home run distance": nobody hit
+/// one 480 ft in 2024). Above the CPU's 28.8° launch-aim ceiling, so the
+/// CPU's home-run economy only feels it on early-tilted contact.
+const LOFT_FADE_START_DEG: f32 = 32.0;
+/// Fraction of exit speed lost per degree of launch above
+/// [`LOFT_FADE_START_DEG`].
+const LOFT_FADE_PER_DEG: f32 = 0.01;
 
 /// Converts swing timing + aim into a batted-ball velocity.
 ///
@@ -159,7 +171,8 @@ const TIMING_LAUNCH_DEG: f32 = 30.0;
 /// (`flow::swing_dt_ms`, early = negative). Dead-on is the hardest contact;
 /// exit speed falls linearly with |dt| across the foul window
 /// ([`EXIT_PEAK`], [`EXIT_FALLOFF`]), and the launch tilts up when early and
-/// down when late ([`TIMING_LAUNCH_DEG`]) — a mistimed swing still produces a
+/// down when late ([`TIMING_LAUNCH_DEG`]), and loft past
+/// [`LOFT_FADE_START_DEG`] costs speed — a mistimed swing still produces a
 /// catchable ball, keeping the out rate and inning pace in line with arcade
 /// baseball. Graded in milliseconds, never metres, so the feel is the same
 /// off a changeup and a heater. The pull-side yaw of mistimed contact is
@@ -177,6 +190,7 @@ pub fn hit_velocity(dt_ms: f32, aim: Vec2, batting: &BattingTuning) -> Vec3 {
     // screen-right (world −X).
     let launch_deg = (-4.0 + 36.0 * (aim.y * 0.5 + 0.5) + tilt).clamp(-8.0, 72.0);
     let launch = launch_deg.to_radians();
+    let speed = speed * (1.0 - LOFT_FADE_PER_DEG * (launch_deg - LOFT_FADE_START_DEG).max(0.0));
     let spray = (aim_to_world_x(aim.x) * SPRAY_AIM_FRAC).clamp(-0.95, 0.95);
 
     let horizontal = speed * launch.cos();
