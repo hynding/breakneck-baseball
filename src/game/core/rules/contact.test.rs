@@ -311,10 +311,16 @@ fn exit_speed_is_a_continuum_over_the_timing_window() {
     // to one floor value inside the Solid window (the old metres-based model
     // bottomed out within ~30 ms, so every Solid swing was the same dribbler).
     assert!(dead_on > perfect_edge && perfect_edge > solid_edge && solid_edge > foul_edge);
-    assert!(solid_edge > 0.55 * dead_on, "Solid-edge contact must stay a real batted ball");
+    assert!(
+        solid_edge > 0.55 * dead_on,
+        "Solid-edge contact must stay a real batted ball"
+    );
     let early = hit_velocity(-b.solid_ms, Vec2::ZERO, b).length();
     let late = hit_velocity(b.solid_ms, Vec2::ZERO, b).length();
-    assert!((early - late).abs() < 1e-3, "symmetric in |dt|: {early} vs {late}");
+    assert!(
+        (early - late).abs() < 1e-3,
+        "symmetric in |dt|: {early} vs {late}"
+    );
 }
 
 #[test]
@@ -325,7 +331,13 @@ fn early_contact_lifts_and_late_contact_tops_the_ball() {
         let v = hit_velocity(dt, Vec2::ZERO, b);
         v.y.atan2(v.z).to_degrees()
     };
-    assert!(launch(-b.solid_ms) > launch(0.0), "early swings get under the ball");
+    assert!(
+        launch(-b.solid_ms) > launch(0.0),
+        "early swings get under the ball"
+    );
     assert!(launch(b.solid_ms) < launch(0.0), "late swings top the ball");
-    assert!(launch(b.solid_ms) < 8.0, "a Solid-edge late swing is a grounder");
+    assert!(
+        launch(b.solid_ms) < 8.0,
+        "a Solid-edge late swing is a grounder"
+    );
 }
