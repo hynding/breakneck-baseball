@@ -391,6 +391,7 @@ fn home_run_queues_the_authored_celebration() {
     app.world_mut().write_message(BallInPlayEvent {
         kind: ContactKind::HomeRun,
         landing: Vec3::new(0.0, 0.0, 120.0),
+        launch: Vec3::new(0.0, 30.0, 45.0),
         contact_class: ContactClass::DeepFly,
     });
     for _ in 0..4 {

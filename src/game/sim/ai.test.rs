@@ -68,10 +68,25 @@ fn the_package_arms_engage_together_at_two_balls() {
         assert_eq!(ahead_chase_scale(balls), 1.0);
     }
     for balls in 2..=3 {
-        assert!(behind_scatter_scale(balls) < 1.0, "balls={balls}");
+        assert!(behind_scatter_scale(balls) <= 1.0, "balls={balls}");
         assert!(wants_get_it_over(balls), "balls={balls}");
         assert!(ahead_timing_scale(balls) < 1.0, "balls={balls}");
         assert!(ahead_chase_scale(balls) < 1.0, "balls={balls}");
+    }
+}
+
+#[test]
+fn three_ball_counts_take_more_often() {
+    // 3-0 is close to an automatic take, 3-1 selective, 3-2 and every
+    // other count a normal offer — the walk's whole existence rides on it.
+    assert!(three_ball_take_scale(3, 0) < 0.25);
+    assert!(three_ball_take_scale(3, 1) < 1.0);
+    assert!(three_ball_take_scale(3, 1) > three_ball_take_scale(3, 0));
+    assert_eq!(three_ball_take_scale(3, 2), 1.0);
+    for balls in 0..=2 {
+        for strikes in 0..=2 {
+            assert_eq!(three_ball_take_scale(balls, strikes), 1.0);
+        }
     }
 }
 
@@ -84,4 +99,19 @@ fn ahead_count_timing_draw_is_strictly_tighter() {
     let ahead = draw_target_dt(12.34, 70.0 * ahead_timing_scale(2));
     assert!(ahead.abs() < base.abs());
     assert_eq!(ahead, base * ahead_timing_scale(2));
+}
+
+#[test]
+fn steal_rate_is_situational() {
+    let mut score = ScoreBoard::default();
+    score.inning = 3;
+    let base = steal_rate(0.05, &score);
+    assert!((base - 0.05).abs() < 1e-6, "an early, tied game runs at the base rate");
+    score.outs = 2;
+    assert!(steal_rate(0.05, &score) > base, "two outs: nothing to lose");
+    score.outs = 0;
+    score.inning = 8;
+    assert!(steal_rate(0.05, &score) > base, "late and close: the running game is on");
+    score.home_runs = 6;
+    assert_eq!(steal_rate(0.05, &score), 0.0, "nobody runs in a blowout");
 }

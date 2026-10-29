@@ -265,7 +265,7 @@ fn perfect_contact_is_faster_than_solid() {
     // Identical base vector, different quality: Perfect's exit multiplier
     // must beat Solid's (whatever the shipped tuning sets them to, Perfect
     // is always the harder-hit ball — see `variant.rs`/tests/balance_sim.rs).
-    let base = hit_velocity(0.4, Vec2::ZERO);
+    let base = hit_velocity(0.0, Vec2::ZERO, &r.batting);
     let perfect = apply_contact_quality(base, ContactQuality::Perfect, 0.0, &r);
     let solid = apply_contact_quality(base, ContactQuality::Solid, 0.0, &r);
     assert!(perfect.length() > solid.length());
@@ -281,7 +281,7 @@ fn early_contact_pulls_toward_minus_x() {
     let r = std_rules();
     // A straightaway base vector (aim.x = 0, contact on the plate): purely
     // +Z, no side component.
-    let base = hit_velocity(0.4, Vec2::ZERO);
+    let base = hit_velocity(0.0, Vec2::ZERO, &r.batting);
     assert!(base.x.abs() < 1e-4, "base swing must start straightaway");
     // Early (negative dt) is the right-handed batter's pull: −X.
     let early = apply_contact_quality(base, ContactQuality::Solid, -80.0, &r);
@@ -297,4 +297,35 @@ fn early_contact_pulls_toward_minus_x() {
         "a late swing must push toward +X (got x = {})",
         late.x
     );
+}
+
+#[test]
+fn exit_speed_is_a_continuum_over_the_timing_window() {
+    let r = std_rules();
+    let b = &r.batting;
+    let dead_on = hit_velocity(0.0, Vec2::ZERO, b).length();
+    let perfect_edge = hit_velocity(b.perfect_ms, Vec2::ZERO, b).length();
+    let solid_edge = hit_velocity(b.solid_ms, Vec2::ZERO, b).length();
+    let foul_edge = hit_velocity(b.foul_ms, Vec2::ZERO, b).length();
+    // Strictly falling with |dt|, early and late alike, and never collapsing
+    // to one floor value inside the Solid window (the old metres-based model
+    // bottomed out within ~30 ms, so every Solid swing was the same dribbler).
+    assert!(dead_on > perfect_edge && perfect_edge > solid_edge && solid_edge > foul_edge);
+    assert!(solid_edge > 0.55 * dead_on, "Solid-edge contact must stay a real batted ball");
+    let early = hit_velocity(-b.solid_ms, Vec2::ZERO, b).length();
+    let late = hit_velocity(b.solid_ms, Vec2::ZERO, b).length();
+    assert!((early - late).abs() < 1e-3, "symmetric in |dt|: {early} vs {late}");
+}
+
+#[test]
+fn early_contact_lifts_and_late_contact_tops_the_ball() {
+    let r = std_rules();
+    let b = &r.batting;
+    let launch = |dt: f32| {
+        let v = hit_velocity(dt, Vec2::ZERO, b);
+        v.y.atan2(v.z).to_degrees()
+    };
+    assert!(launch(-b.solid_ms) > launch(0.0), "early swings get under the ball");
+    assert!(launch(b.solid_ms) < launch(0.0), "late swings top the ball");
+    assert!(launch(b.solid_ms) < 8.0, "a Solid-edge late swing is a grounder");
 }

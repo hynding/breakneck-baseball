@@ -54,7 +54,7 @@ fn pulled_liner_predicts_foul_forward() {
     // (a late swing cancels the spray instead and centers the ball).
     let aim = Vec2::new(1.0, 0.0);
     let dt_ms = -ruleset.batting.solid_ms;
-    let base = rules::hit_velocity(0.4, aim);
+    let base = rules::hit_velocity(dt_ms, aim, &ruleset.batting);
     let velocity =
         rules::apply_contact_quality(base, rules::ContactQuality::Solid, dt_ms, &ruleset);
     let (landing, _hang) = rules::predict_landing(
@@ -160,6 +160,7 @@ fn predicted_foul_forward_ball_is_run_out() {
     app.world_mut().write_message(BallInPlayEvent {
         kind: ContactKind::Live { fair: false },
         landing,
+        launch: Vec3::new(-20.0, 8.0, 14.0),
         contact_class,
     });
 

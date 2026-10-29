@@ -63,7 +63,7 @@ mod common;
 
 use bevy::prelude::*;
 
-use breakneck_baseball::game::flow::PlayBanner;
+use breakneck_baseball::game::flow::{Phase, Play, PlayBanner};
 use breakneck_baseball::game::input::{Controllers, InputSource};
 use breakneck_baseball::game::rules::BattingOrder;
 use breakneck_baseball::game::{GameState, ScoreBoard, Team};
@@ -112,13 +112,27 @@ struct SimTally {
     fouls: u32,
     called_strike: u32,
     whiff: u32,
+    pitches: u32,
+    picked_off: u32,
+    caught_stealing: u32,
+    stolen: u32,
+    singles: u32,
+    doubles: u32,
+    triples: u32,
+    prev_phase: Option<Phase>,
 }
 
 fn tally(
+    play: Res<Play>,
     order: Res<BattingOrder>,
     mut banners: MessageReader<PlayBanner>,
     mut sim: ResMut<SimTally>,
 ) {
+    // One pitch per WindUp edge.
+    if play.phase == Phase::WindUp && sim.prev_phase != Some(Phase::WindUp) {
+        sim.pitches += 1;
+    }
+    sim.prev_phase = Some(play.phase);
     let cur = (order.current(Team::Home), order.current(Team::Away));
     match sim.prev_slots {
         None => sim.prev_slots = Some(cur),
@@ -144,13 +158,22 @@ fn tally(
             sim.bb += 1;
         } else if t == "HIT BY PITCH" {
             sim.hbp += 1;
-        } else if t.starts_with("SINGLE")
-            || t.starts_with("DOUBLE ") // "DOUBLE  +1" etc; not "DOUBLE PLAY!"
-            || t == "DOUBLE"
-            || t.starts_with("TRIPLE")
-            || t.contains("BASES!")
-        {
+        } else if t.starts_with("SINGLE") {
             sim.hits += 1;
+            sim.singles += 1;
+        } else if t.starts_with("DOUBLE ") || t == "DOUBLE" {
+            // "DOUBLE  +1" etc; not "DOUBLE PLAY!"
+            sim.hits += 1;
+            sim.doubles += 1;
+        } else if t.starts_with("TRIPLE") || t.contains("BASES!") {
+            sim.hits += 1;
+            sim.triples += 1;
+        } else if t.starts_with("PICKED OFF") {
+            sim.picked_off += 1;
+        } else if t.starts_with("CAUGHT STEALING") {
+            sim.caught_stealing += 1;
+        } else if t.starts_with("STOLEN BASE") {
+            sim.stolen += 1;
         } else if t.starts_with("DOUBLE PLAY!") {
             sim.dp += 1;
         } else if t == "FIELDER'S CHOICE" {
@@ -192,6 +215,13 @@ struct GameStats {
     fouls: u32,
     called_strike: u32,
     whiff: u32,
+    pitches: u32,
+    picked_off: u32,
+    caught_stealing: u32,
+    stolen: u32,
+    singles: u32,
+    doubles: u32,
+    triples: u32,
 }
 
 /// Plays one complete one-inning CPU-vs-CPU game. `game_index` sets a coarse,
@@ -278,6 +308,13 @@ fn play_one_game(game_index: u32) -> GameStats {
         fouls: t.fouls,
         called_strike: t.called_strike,
         whiff: t.whiff,
+        pitches: t.pitches,
+        picked_off: t.picked_off,
+        caught_stealing: t.caught_stealing,
+        stolen: t.stolen,
+        singles: t.singles,
+        doubles: t.doubles,
+        triples: t.triples,
     }
 }
 
@@ -291,6 +328,15 @@ struct Aggregate {
     total_hr: u32,
     total_runs: u32,
     mean_frames: f64,
+    // The plate-appearance economy beyond the three headline rates — the
+    // 2026-10 realism study found zero walks, a 7× HBP rate and a 40× pickoff
+    // rate all passing the original three bands.
+    bb_pct: f64,
+    hbp_pct: f64,
+    pitches_per_pa: f64,
+    babip: f64,
+    pickoffs_per9: f64,
+    caught_stealing_per9: f64,
 }
 
 fn run_sim(n: u32) -> Aggregate {
@@ -306,9 +352,14 @@ fn run_sim(n: u32) -> Aggregate {
     let runs_per_team_per_inning = total_runs as f64 / (2.0 * n as f64);
     let hr_per_team_per_inning = total_hr as f64 / (2.0 * n as f64);
 
+    let s = |f: fn(&GameStats) -> u32| -> u32 { games.iter().map(f).sum() };
+    let per9 = |count: u32| count as f64 / (2.0 * n as f64) * 9.0;
+    let pa = total_pa.max(1) as f64;
+    // Balls in play that stayed in the park: hits (HR excluded) + batted outs.
+    let in_play = (s(|g| g.hits) + s(|g| g.batted_out) + s(|g| g.dp) + s(|g| g.fc)).max(1);
     let agg = Aggregate {
         n,
-        k_pct: 100.0 * total_k as f64 / total_pa.max(1) as f64,
+        k_pct: 100.0 * total_k as f64 / pa,
         runs_per9: runs_per_team_per_inning * 9.0,
         hr_per9: hr_per_team_per_inning * 9.0,
         total_pa,
@@ -316,9 +367,13 @@ fn run_sim(n: u32) -> Aggregate {
         total_hr,
         total_runs,
         mean_frames: total_frames as f64 / n as f64,
+        bb_pct: 100.0 * s(|g| g.bb) as f64 / pa,
+        hbp_pct: 100.0 * s(|g| g.hbp) as f64 / pa,
+        pitches_per_pa: s(|g| g.pitches) as f64 / pa,
+        babip: s(|g| g.hits) as f64 / in_play as f64,
+        pickoffs_per9: per9(s(|g| g.picked_off)),
+        caught_stealing_per9: per9(s(|g| g.caught_stealing)),
     };
-
-    let s = |f: fn(&GameStats) -> u32| -> u32 { games.iter().map(f).sum() };
     eprintln!(
         "\n=== balance-sim N={} ===\n\
          K%        = {:.1}%   (target 15..30;  {} K / {} PA)\n\
@@ -326,7 +381,10 @@ fn run_sim(n: u32) -> Aggregate {
          HR/9      = {:.2}    (target 0.5..2.5; {} HR total)\n\
          mean frames/game = {:.0}\n\
          --- PA outcomes: BB={} HBP={} hits={} HR={} battedOut={} DP={} FC={} K={} (sum={} vs PA={})\n\
-         --- pitch events: fouls={} calledStrike={} whiff={}",
+         --- pitch events: fouls={} calledStrike={} whiff={}\n\
+         --- economy: BB%={:.1} (target 5..11)  HBP%={:.1} (target 0..2.5)  pitches/PA={:.2} (target 3.0..4.3)\n\
+         ---          BABIP={:.3} (target .240..340)  hits 1B/2B/3B={}/{}/{}\n\
+         --- running/9: SB={:.2} CS={:.2} (target 0..1.6) pickoffs={:.2} (target 0..0.6)",
         agg.n,
         agg.k_pct,
         agg.total_k,
@@ -349,6 +407,16 @@ fn run_sim(n: u32) -> Aggregate {
         s(|g| g.fouls),
         s(|g| g.called_strike),
         s(|g| g.whiff),
+        agg.bb_pct,
+        agg.hbp_pct,
+        agg.pitches_per_pa,
+        agg.babip,
+        s(|g| g.singles),
+        s(|g| g.doubles),
+        s(|g| g.triples),
+        per9(s(|g| g.stolen)),
+        agg.caught_stealing_per9,
+        agg.pickoffs_per9,
     );
 
     agg

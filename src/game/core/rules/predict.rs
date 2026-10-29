@@ -46,6 +46,59 @@ pub fn best_catcher(
         .map(|(i, _)| i)
 }
 
+/// Fraction of the horizontal launch speed a ground ball keeps once it is
+/// down and skipping (the first bounces eat the rest), and the per-second
+/// decay of that speed as it rolls — the analytic twin of the live ball's
+/// restitution + rolling resistance (`ball::apply_drag`). Calibrated against
+/// the 2026-10 realism harness: too fast and infielders give up on balls
+/// they would field; too slow and they wait at a spot the ball never reaches.
+const GROUND_SPEED_RETAIN: f32 = 0.6;
+const GROUND_SPEED_DECAY: f32 = 0.9;
+/// A fielder may arrive this much after the ball and still cut it off — he
+/// is ranging to a spot on its path, not diving at a point in time.
+const GROUND_WAIT_MARGIN: f32 = 0.35;
+
+/// Where the infield cuts off a ground ball: a point on the ball's roll path
+/// (straight on from its first bounce `landing`, along the `launch`
+/// direction, slowing as it goes) that some fielder reaches no later than
+/// the ball, chosen as early on the path as possible so the throw is short.
+/// Returns that fielder (index into `fielders`) and the spot; `None` with
+/// the roll's end when nobody can cut it off and the ball will be run down.
+///
+/// Before this, a grounder's chaser was whoever could reach its *first
+/// bounce* soonest — three metres in front of the plate, i.e. the catcher
+/// or pitcher — and every other infielder went to cover a bag, so a 60 mph
+/// grounder skipped untouched through the infield for a double.
+pub fn ground_intercept(
+    fielders: &[Vec3],
+    landing: Vec3,
+    launch: Vec3,
+    pace: &PaceTuning,
+) -> (Option<usize>, Vec3) {
+    let dir = Vec2::new(launch.x, launch.z).normalize_or_zero();
+    let v0 = Vec2::new(launch.x, launch.z).length() * GROUND_SPEED_RETAIN;
+    let along = |t: f32| v0 * (1.0 - (-GROUND_SPEED_DECAY * t).exp()) / GROUND_SPEED_DECAY;
+    let point = |t: f32| {
+        let s = along(t);
+        Vec3::new(landing.x + dir.x * s, 0.0, landing.z + dir.y * s)
+    };
+    let mut t = 0.0;
+    while t <= 6.0 {
+        let p = point(t);
+        if let Some((i, _)) = fielders
+            .iter()
+            .enumerate()
+            .map(|(i, f)| (i, catch_time(*f, p, pace)))
+            .filter(|(_, ft)| *ft <= t + GROUND_WAIT_MARGIN)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+        {
+            return (Some(i), p);
+        }
+        t += 0.1;
+    }
+    (None, point(6.0))
+}
+
 /// Numerically integrates a batted ball's flight from contact height with the
 /// same gravity + drag + Magnus model the live ball uses (`ball::apply_drag`,
 /// `ball::apply_magnus`), returning the landing point (y = 0) and hang time.

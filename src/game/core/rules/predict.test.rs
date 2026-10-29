@@ -60,3 +60,26 @@ fn sidespin_bends_the_landing_point() {
         "Magnus should bend the carry"
     );
 }
+
+#[test]
+fn ground_intercept_picks_the_infielder_on_the_roll_path_not_the_battery() {
+    let pace = PaceTuning::default();
+    // Catcher behind the plate, pitcher on the mound, shortstop up the
+    // middle at regulation depth.
+    let catcher = Vec3::new(0.0, 0.0, -1.5);
+    let pitcher = Vec3::new(0.0, 0.0, 18.0);
+    let shortstop = Vec3::new(7.0, 0.0, 35.8);
+    let fielders = [catcher, pitcher, shortstop];
+    // A 60 mph grounder up the middle, bouncing 3 m in front of the plate.
+    let launch = Vec3::new(2.0, -2.0, 26.0);
+    let landing = Vec3::new(0.2, 0.0, 3.0);
+    let (who, spot) = ground_intercept(&fielders, landing, launch, &pace);
+    assert_ne!(who, Some(0), "the catcher never chases a grounder up the middle");
+    assert!(who.is_some(), "somebody on the path cuts it off");
+    assert!(spot.z > landing.z, "the cut-off is down the path, past the bounce");
+    // Nobody anywhere near the path: it runs out, and the roll end is returned.
+    let far = [Vec3::new(-60.0, 0.0, 90.0)];
+    let (nobody, end) = ground_intercept(&far, landing, launch, &pace);
+    assert_eq!(nobody, None);
+    assert!(end.z > 15.0, "the roll end is well into the infield, got {end:?}");
+}

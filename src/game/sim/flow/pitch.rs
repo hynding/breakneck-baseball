@@ -32,6 +32,16 @@ const PLATE_Z: f32 = 0.0;
 const SWING_EARLY_Z: f32 = 3.2; // ball this far in front = earliest contact
 /// Maximum horizontal miss the batter can still reach.
 const SWING_REACH_X: f32 = 1.8;
+/// Where the bat actually meets the ball, as a Z band about the plate: the
+/// *timing* windows are graded on the ball's true position (a 90 ms-late
+/// swing reads the ball 2–3 m past the plate, deep in the catcher's lap),
+/// but the batted ball leaves the bat from inside this band — the back edge
+/// of the plate (17 in deep, per docs/BASEBALL.md) to a bat's length out
+/// front. Before this clamp a late Solid swing launched the ball from
+/// behind the catcher, who gloved it on the same frame as a "foul pop out"
+/// (21% of all CPU plate appearances in the 2026-10 realism study).
+const CONTACT_Z_MIN: f32 = -0.45;
+const CONTACT_Z_MAX: f32 = 0.9;
 
 /// Home-run trot window: hang time plus a little air, clamped.
 const INPLAY_BUFFER: f32 = 1.2;
@@ -326,7 +336,7 @@ pub(super) fn pitch_live(
     field: Res<FieldSpec>,
     mut score: ResMut<ScoreBoard>,
     mut bases: ResMut<Bases>,
-    ball_q: Query<(&Transform, &Velocity), With<Baseball>>,
+    mut ball_q: Query<(&mut Transform, &Velocity), With<Baseball>>,
     mut hit_ev: MessageWriter<HitEvent>,
     mut in_play_ev: MessageWriter<BallInPlayEvent>,
     mut contact_ev: MessageWriter<ContactEvent>,
@@ -337,7 +347,7 @@ pub(super) fn pitch_live(
     if play.phase != Phase::Pitch || play.resolved {
         return;
     }
-    let Ok((ball, ball_vel)) = ball_q.single() else {
+    let Ok((mut ball, ball_vel)) = ball_q.single_mut() else {
         return;
     };
     let pos = ball.translation;
@@ -430,8 +440,11 @@ pub(super) fn pitch_live(
             rules::ContactQuality::Perfect
             | rules::ContactQuality::Solid
             | rules::ContactQuality::Weak => {
-                let base = rules::hit_velocity(pos.z, aim);
+                let base = rules::hit_velocity(dt_ms, aim, &rules.batting);
                 let velocity = rules::apply_contact_quality(base, quality, dt_ms, &rules);
+                // The ball leaves the bat from the contact band, not from
+                // wherever the timing read it (see `CONTACT_Z_MIN`).
+                ball.translation.z = pos.z.clamp(CONTACT_Z_MIN, CONTACT_Z_MAX);
                 hit_ev.write(HitEvent { velocity });
                 let (landing, hang_time) = rules::predict_landing(
                     velocity,
@@ -444,6 +457,7 @@ pub(super) fn pitch_live(
                 in_play_ev.write(BallInPlayEvent {
                     kind,
                     landing,
+                    launch: velocity,
                     contact_class,
                 });
                 play.live.contact_at = time.elapsed_secs();

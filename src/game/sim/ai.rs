@@ -152,11 +152,10 @@ pub(crate) fn noise(seed: f32) -> f32 {
 /// review fix).
 ///
 /// (A CPU-only "Perfect deadband" here — biasing the draw out of the dead-on
-/// window to cut barreled CPU home runs — was tried and reverted: because
-/// `hit_velocity`'s exit sweet spot is `contact_z ≈ 0.4` (≈ −11 ms of timing),
-/// not dt = 0, a symmetric-around-zero deadband excludes *all* hard contact,
-/// not just barrels, and collapses the offense. HR is instead held down by the
-/// flattened CPU launch aim below plus the balance harness's asserted slack.)
+/// window to cut barreled CPU home runs — was tried and reverted: it
+/// excluded *all* hard contact, not just barrels, and collapsed the offense.
+/// HR is instead held down by the flattened CPU launch aim below plus the
+/// balance harness's asserted slack.)
 pub(crate) fn draw_target_dt(seed: f32, spread_ms: f32) -> f32 {
     noise(seed) * spread_ms
 }
@@ -182,7 +181,14 @@ pub(crate) fn ready_to_press(dt_ms: f32, target_dt: f32) -> bool {
 /// A pitcher behind in the count (2 balls and up) stops nibbling: his aim
 /// scatter shrinks to this fraction of the base spread.
 pub(crate) fn behind_scatter_scale(balls: u32) -> f32 {
-    if balls >= 2 { 0.4 } else { 1.0 }
+    // No pull any more: at the original 0.4 ball three was thrown 14 times
+    // in 2,446 two-ball pitches and the CPU walked nobody in 100 games
+    // (2026-10 realism study); even 0.7 gave four walks in 48. The package
+    // now keeps its arsenal arm (get-it-over, no benders in the dirt) and
+    // the batter's arms; the scatter stays honest so ball four can exist.
+    // Kept as a dial so a variant can nibble or groove.
+    let _ = balls;
+    1.0
 }
 
 /// Whether the count calls for the get-it-over arsenal (no benders or
@@ -203,6 +209,38 @@ pub(crate) fn ahead_timing_scale(balls: u32) -> f32 {
 /// ahead, so the pitches the pitcher still misses with stay taken balls.
 pub(crate) fn ahead_chase_scale(balls: u32) -> f32 {
     if balls >= 2 { 0.5 } else { 1.0 }
+}
+
+/// The per-pitch chance the CPU sends a runner, from a base rate: nothing
+/// in a blowout (the running game is a close-game weapon), a bump with two
+/// outs or late and close. MLB teams attempt ~0.9 steals per game — roughly
+/// one pitch in forty with a runner able to go — against the 28% per pitch
+/// the CPU used to run at (3.3 attempts per team-game, 2026-10 study).
+pub(crate) fn steal_rate(base: f32, score: &ScoreBoard) -> f32 {
+    let margin = score.home_runs.abs_diff(score.away_runs);
+    if margin >= 4 {
+        return 0.0;
+    }
+    let mut p = base;
+    if score.outs == 2 {
+        p *= 1.5;
+    }
+    if score.inning >= 7 && margin <= 1 {
+        p *= 1.5;
+    }
+    p
+}
+
+/// How much of the usual in-zone offer rate the hitter keeps at three balls:
+/// the 3-0 green light is rare (MLB hitters swing at ~10% of 3-0 pitches),
+/// 3-1 is selective, 3-2 is a normal swing. Walks live or die here — a
+/// hitter who hacks at 3-0 never draws one.
+pub(crate) fn three_ball_take_scale(balls: u32, strikes: u32) -> f32 {
+    match (balls, strikes) {
+        (3, 0) => 0.15,
+        (3, 1) => 0.7,
+        _ => 1.0,
+    }
 }
 
 // ── Defense: the AI pitches ───────────────────────────────────────────────────
@@ -238,8 +276,10 @@ pub fn cpu_defense(
         let intent = intents.get_mut(team);
         intent.action = false;
         if lead.extended {
-            // ~0.5 attempts per second of extended lead, deterministic noise.
-            let p = (0.3 + 0.5 * cfg.skill) * time.delta_secs();
+            // ~0.25 throws per second of extended lead, deterministic noise.
+            // (Was ~0.5: with the offense stretching on 18% of windows that
+            // made 2.1 pickoffs per team-game, ~40× MLB's 0.05.)
+            let p = (0.15 + 0.25 * cfg.skill) * time.delta_secs();
             intent.action = cpu.frame_roll(3.9) < p;
         }
         // Re-arm only a short post-window beat instead of the full
@@ -261,7 +301,11 @@ pub fn cpu_defense(
             // Behind in the count the scatter pulls in and the arsenal goes
             // get-it-over (the TODO 10 package; the batter's ahead-count
             // compensation below keeps the CPU-vs-CPU bands honest).
-            let spread = (0.55 * (1.0 - cfg.skill) + 0.12) * behind_scatter_scale(score.balls);
+            // Wide enough to miss the zone: MLB pitchers land about half of
+            // their pitches in it, and the old 0.55 scatter (±0.27 m at the
+            // plate against a 0.25 m zone half-width) was a strike machine
+            // that never walked anyone.
+            let spread = (0.75 * (1.0 - cfg.skill) + 0.2) * behind_scatter_scale(score.balls);
             let mut aim = Vec2::new(cpu.noise(1.7) * spread, cpu.noise(2.3) * spread * 0.5);
             let roll = cpu.roll(4.3);
             if wants_get_it_over(score.balls) {
@@ -280,11 +324,21 @@ pub fn cpu_defense(
             } else if roll < 0.85 {
                 aim.y -= 0.55; // curveball
             } else if roll < 0.925 {
-                aim.x -= 0.6; // slider, sweeping in
+                // Slider, sweeping in. Its Magnus sweep carries it ~0.15 m
+                // further in than aimed, so this paints the inside edge
+                // (x ≈ +0.40 at the plate); the old 0.6 landed on the
+                // batter's hip (x ≈ +0.58 ≥ `BATTER_X_MIN`) — 35% of sliders
+                // plunked him and every CPU HBP was a slider.
+                aim.x -= 0.2;
             } else {
-                aim.x += 0.6; // sinker, running away
+                // Sinker, running away — the outside edge, not a foot off it.
+                aim.x += 0.35;
             }
-            aim.clamp(Vec2::splat(-1.0), Vec2::splat(1.0))
+            // Never *intend* a pitch at the batter: full-inside aim reaches
+            // his hip (`rules::hits_batter`), so the inside edge is the limit.
+            // A sweeping slider can still ride in from there — the honest
+            // plunking stays, the deliberate one goes.
+            aim.clamp(Vec2::new(-0.45, -1.0), Vec2::splat(1.0))
         };
 
         let intent = intents.get_mut(team);
@@ -333,8 +387,8 @@ pub fn cpu_offense(
         let extend = if steal_candidate(&bases).is_some() {
             if play.in_steal_window() {
                 let roll = cpu.roll(5.3);
-                *cpu.window_steal
-                    .get_or_insert_with(|| roll < 0.1 + 0.2 * cfg.skill)
+                let p = steal_rate(0.02 + 0.04 * cfg.skill, &score);
+                *cpu.window_steal.get_or_insert_with(|| roll < p)
             } else {
                 cpu.window_steal == Some(true)
             }
@@ -361,11 +415,9 @@ pub fn cpu_offense(
         cpu.swing_target_dt = None;
         let committed = cpu.window_steal == Some(true);
         let roll = cpu.roll(6.1);
+        let p = steal_rate(0.03 + 0.04 * cfg.skill, &score);
         let send = steal_candidate(&bases).is_some()
-            && (committed
-                || *cpu
-                    .steal_call
-                    .get_or_insert_with(|| roll < 0.2 + 0.2 * cfg.skill));
+            && (committed || *cpu.steal_call.get_or_insert_with(|| roll < p));
         let intent = intents.get_mut(team);
         intent.action = false;
         if send {
@@ -375,7 +427,18 @@ pub fn cpu_offense(
     }
     if play.phase != Phase::Pitch || cpu.decided_swing {
         cpu.window_steal = None;
-        intents.get_mut(team).action = false;
+        let intent = intents.get_mut(team);
+        intent.action = false;
+        // Once the ball is in play the held swing aim must not linger: the
+        // live-ball runner call reads the same stick
+        // (`rules::runner_call_from_aim`), so a low launch aim left in place
+        // read as "send the batter" on every hit and the CPU ran itself into
+        // OUT STRETCHING on a tenth of its plate appearances. The swing's own
+        // aim was captured with the press (`SwingCommands`), so clearing it
+        // here changes nothing about the contact.
+        if play.phase != Phase::Pitch {
+            intent.aim = Vec2::ZERO;
+        }
         return;
     }
     let Ok((ball, ball_vel)) = ball_q.single() else {
@@ -434,7 +497,8 @@ pub fn cpu_offense(
         let in_zone = cross.x.abs() < 0.35 && (0.4..=1.45).contains(&cross.y);
         let roll = cpu.roll(5.0);
         let swing = if in_zone {
-            roll < 0.5 + 0.4 * cfg.skill // usually offers at strikes
+            // Usually offers at strikes — except on the 3-0 take.
+            roll < (0.5 + 0.4 * cfg.skill) * three_ball_take_scale(score.balls, score.strikes)
         } else {
             // Rarely chases balls — and half as often when ahead in the
             // count (the patience arm of the TODO 10 package).
@@ -469,13 +533,15 @@ pub fn cpu_offense(
     cpu.decided_swing = true;
     let intent = intents.get_mut(team);
     intent.action = true;
-    // Spread the intended launch from grounders through line drives to the
-    // occasional fly, but keep the *plane flat* — the launch aim is the CPU's
-    // home-run dial (a towering uppercut clears the regulation fence even at a
-    // modest exit multiplier), so a mean well below a fly-ball angle keeps the
-    // HR rate in the balance band while still putting balls in play (see
-    // tests/balance_sim.rs). Horizontal spray is unchanged.
-    intent.aim = Vec2::new(cpu.noise(7.0) * 0.6, -0.8 + cpu.roll(9.0) * 0.85);
+    // Spread the intended launch across the whole stick (aim.y −1..1 → a
+    // −4°..32° base launch before the timing tilt tops or lifts it), so the
+    // batted-ball mix lands near the real ~40% grounders / 40% liners+flies
+    // split instead of a wall of 10°–20° line drives (the 2026-10 realism
+    // harness measured a .45 BABIP off the old narrow aim). The launch aim is
+    // the CPU's home-run dial — a towering uppercut clears the regulation
+    // fence — so HR/9 is checked in tests/balance_sim.rs. Horizontal spray is
+    // unchanged.
+    intent.aim = Vec2::new(cpu.noise(7.0) * 0.6, cpu.noise(9.0));
 }
 
 #[cfg(test)]

@@ -567,6 +567,9 @@ pub enum BannerTone {
 pub struct BallInPlayEvent {
     pub kind: rules::ContactKind,
     pub landing: Vec3,
+    /// The ball's velocity off the bat (m/s) — the infield reads a
+    /// grounder's roll path from it (`rules::ground_intercept`).
+    pub launch: Vec3,
     /// The baserunning shape of the ball off the bat (grounder / catchable fly
     /// / deep fly), for the runner rigs' break reads. Cosmetic only — the call
     /// still comes from the live-play races. Meaningful for a fair live ball.
