@@ -49,6 +49,7 @@ mod model_contract;
 mod passive_walks;
 mod pause_subs;
 mod scenarios;
+mod season;
 #[cfg(feature = "profile")]
 mod sim_profile;
 mod skeletal_switch;

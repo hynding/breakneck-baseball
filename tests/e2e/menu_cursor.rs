@@ -78,9 +78,9 @@ fn pad_cursor_changes_options_and_starts_the_focused_mode() {
         GameState::MainMenu
     );
 
-    // Rows: One Player, Two Players, Field, Innings, ... — down to Innings
-    // and step it with Right.
-    for _ in 0..3 {
+    // Rows: One Player, Two Players, Season, Field, Innings, ... — down to
+    // Innings and step it with Right.
+    for _ in 0..4 {
         tap_pad(&mut app, GamepadButton::DPadDown);
     }
     tap_pad(&mut app, GamepadButton::DPadRight);
@@ -91,7 +91,7 @@ fn pad_cursor_changes_options_and_starts_the_focused_mode() {
     );
 
     // Back up to Two Players and choose it with A.
-    for _ in 0..2 {
+    for _ in 0..3 {
         tap_pad(&mut app, GamepadButton::DPadUp);
     }
     tap_pad(&mut app, GamepadButton::South);
@@ -114,8 +114,9 @@ fn pad_steps_cpu_difficulty_into_the_game() {
         app.world().resource::<Settings>().difficulty,
         Difficulty::Normal
     );
-    // Rows: One Player, Two Players, Field, Innings, Theme, CPU difficulty.
-    for _ in 0..5 {
+    // Rows: One Player, Two Players, Season, Field, Innings, Theme,
+    // CPU difficulty.
+    for _ in 0..6 {
         tap_pad(&mut app, GamepadButton::DPadDown);
     }
     assert!(

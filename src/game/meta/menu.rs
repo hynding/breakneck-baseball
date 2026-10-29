@@ -2,7 +2,8 @@
 //!
 //! The menu gates entry into [`GameState::Playing`]: the player picks a mode
 //! (1 player vs CPU, or 2 players), a field variant (**F**), and a theme
-//! (**T**). Styling comes entirely from the active [`Theme`]; cycling either
+//! (**T**), or **3** starts/continues a short season against the CPU
+//! (`season_mode`; **L** sets its length). Styling comes entirely from the active [`Theme`]; cycling either
 //! option rebuilds the menu so the new look/labels show immediately.
 //!
 //! Every line is also a row under a focus cursor ([`MenuCursor`]), so a
@@ -15,6 +16,7 @@ use bevy::color::Alpha;
 use bevy::prelude::*;
 
 use crate::game::input::{ActiveDevice, Controllers, StickLatch, assign_controllers, menu_nav};
+use crate::game::season_mode::{self, SeasonGame};
 use crate::game::settings::{Settings, SettingsOpen};
 use crate::game::theme::Theme;
 use crate::game::ui::{OverlayPaint, overlay_card, overlay_root, z};
@@ -31,6 +33,8 @@ struct MenuUi;
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 enum MenuAction {
     Start(GameMode),
+    /// Start or continue the short season (always one player vs CPU).
+    StartSeason,
     Cycle(CycleAction),
     OpenSettings,
 }
@@ -55,6 +59,7 @@ enum CycleAction {
     Theme,
     Touch,
     Difficulty,
+    SeasonLength,
 }
 
 /// Public handle for the menu's `Update` chain so `SettingsPlugin` can order
@@ -211,6 +216,36 @@ fn build_menu(
                         ));
                     }
 
+                    // The season line: a launch row like the two above, with
+                    // the stored season's progress as its accent value.
+                    let row = rows.next().expect("unbounded row counter");
+                    card.spawn((
+                        Button,
+                        MenuAction::StartSeason,
+                        row,
+                        Text::new(format!(
+                            "{}   ",
+                            row_label("3   Season", focused(row), device)
+                        )),
+                        TextFont {
+                            font_size: 23.0,
+                            ..default()
+                        },
+                        TextColor(if focused(row) {
+                            ui.accent
+                        } else {
+                            ui.text_primary
+                        }),
+                    ))
+                    .with_child((
+                        TextSpan::new(season_mode::menu_status(settings)),
+                        TextFont {
+                            font_size: 17.0,
+                            ..default()
+                        },
+                        TextColor(ui.text_dim),
+                    ));
+
                     // Option lines: dim key/label, accent value. Each is a
                     // Button so touch (and mouse) can cycle it directly.
                     for (label, value, action) in [
@@ -238,6 +273,11 @@ fn build_menu(
                             "G   Touch swing",
                             settings.touch_scheme.label().to_string(),
                             MenuAction::Cycle(CycleAction::Touch),
+                        ),
+                        (
+                            "L   Season length",
+                            format!("{} games", settings.season_length),
+                            MenuAction::Cycle(CycleAction::SeasonLength),
                         ),
                         ("S   Settings", "open".to_string(), MenuAction::OpenSettings),
                     ] {
@@ -337,7 +377,7 @@ fn controls_hint(device: ActiveDevice) -> String {
             "D-pad / stick: move   A: choose   Left/Right: change\nStart: play   Select: settings   B: back\nIn play: stick to aim, A to pitch or swing\n{RUNNER}"
         ),
         ActiveDevice::Keyboard => format!(
-            "1 / 2: play   F I T D G: change options   S: settings\nArrows + Enter also move and choose\nIn play: WASD + Space (P1), Arrows + Right-Ctrl (P2)\n{RUNNER}{}",
+            "1 / 2: play   3: season   F I T D G L: change options   S: settings\nArrows + Enter also move and choose\nIn play: WASD + Space (P1), Arrows + Right-Ctrl (P2)\n{RUNNER}{}",
             creator_hint()
         ),
         ActiveDevice::Touch => {
@@ -404,6 +444,10 @@ fn apply_cycle(
         }
         CycleAction::Touch => settings.touch_scheme = settings.touch_scheme.next(),
         CycleAction::Difficulty => settings.difficulty = settings.difficulty.next(),
+        CycleAction::SeasonLength => {
+            settings.season_length =
+                crate::game::season::next_season_length(settings.season_length);
+        }
     }
 }
 
@@ -461,6 +505,8 @@ struct StartGame<'w, 's> {
     controllers: ResMut<'w, Controllers>,
     rules: ResMut<'w, Ruleset>,
     field: ResMut<'w, FieldSpec>,
+    settings: ResMut<'w, Settings>,
+    season_game: ResMut<'w, SeasonGame>,
     next_state: ResMut<'w, NextState<GameState>>,
     pads: Query<'w, 's, Entity, With<Gamepad>>,
 }
@@ -470,12 +516,28 @@ impl StartGame<'_, '_> {
     /// taps — including how pads are enumerated, so the two start paths can
     /// never assign controllers differently.
     fn start(&mut self, mode: GameMode) {
+        self.launch(mode, false);
+    }
+
+    /// Starts the stored season's next game (a new season when none is
+    /// running) — a one-player game the season records when it ends.
+    fn start_season(&mut self) {
+        self.launch(GameMode::OnePlayer, true);
+    }
+
+    fn launch(&mut self, mode: GameMode, season: bool) {
         // Two launchers share this seam (keys and taps run in one chain): a
         // second same-frame call must not override the mode the first
         // chose, reassigning controllers to a game nobody selected.
         if crate::game::transition_pending(&self.next_state) {
             return;
         }
+        if season {
+            season_mode::begin_season(&mut self.settings);
+        }
+        // Written on every launch, so an exhibition after a season game
+        // never inherits the flag.
+        self.season_game.0 = season;
         let pad_entities: Vec<Entity> = self.pads.iter().collect();
         self.config.mode = mode;
         *self.controllers = assign_controllers(mode, &pad_entities);
@@ -490,7 +552,8 @@ impl StartGame<'_, '_> {
 }
 
 /// Cycles the field (**F**), innings (**I**), theme (**T**), CPU
-/// difficulty (**D**) and touch swing scheme (**G**); the rebuild system picks the edit up off the
+/// difficulty (**D**), touch swing scheme (**G**) and season length (**L**);
+/// the rebuild system picks the edit up off the
 /// resource's change tick. Keyboard only: a pad changes options through the
 /// cursor ([`menu_navigate`]), so its face buttons keep their conventional
 /// roles instead of each owning an option.
@@ -501,12 +564,13 @@ fn cycle_options(
     mut settings: ResMut<Settings>,
 ) {
     // One row per hotkey: keyboard key, the cycle.
-    const HOTKEYS: [(KeyCode, CycleAction); 5] = [
+    const HOTKEYS: [(KeyCode, CycleAction); 6] = [
         (KeyCode::KeyF, CycleAction::Field),
         (KeyCode::KeyI, CycleAction::Innings),
         (KeyCode::KeyT, CycleAction::Theme),
         (KeyCode::KeyD, CycleAction::Difficulty),
         (KeyCode::KeyG, CycleAction::Touch),
+        (KeyCode::KeyL, CycleAction::SeasonLength),
     ];
     for (key, action) in HOTKEYS {
         if keyboard.just_pressed(key) {
@@ -515,9 +579,13 @@ fn cycle_options(
     }
 }
 
-/// The keyboard's direct launch keys (**1** / **2**). Pads launch through
-/// the cursor ([`menu_navigate`]).
+/// The keyboard's direct launch keys (**1** / **2**, **3** for the season).
+/// Pads launch through the cursor ([`menu_navigate`]).
 fn menu_select(keyboard: Res<ButtonInput<KeyCode>>, mut launch: StartGame) {
+    if keyboard.just_pressed(KeyCode::Digit3) || keyboard.just_pressed(KeyCode::Numpad3) {
+        launch.start_season();
+        return;
+    }
     let want_one =
         keyboard.just_pressed(KeyCode::Digit1) || keyboard.just_pressed(KeyCode::Numpad1);
     let want_two =
@@ -548,7 +616,6 @@ fn menu_navigate(
     mut latch: Local<StickLatch>,
     mut cursor: ResMut<MenuCursor>,
     mut theme: ResMut<Theme>,
-    mut settings: ResMut<Settings>,
     mut open: ResMut<SettingsOpen>,
     mut settings_cursor: ResMut<crate::game::settings::SettingsCursorRow>,
     mut launch: StartGame,
@@ -582,20 +649,21 @@ fn menu_navigate(
         return;
     };
     if start {
-        let mode = match action {
-            MenuAction::Start(mode) => mode,
-            _ => GameMode::OnePlayer,
-        };
-        launch.start(mode);
+        match action {
+            MenuAction::Start(mode) => launch.start(mode),
+            MenuAction::StartSeason => launch.start_season(),
+            _ => launch.start(GameMode::OnePlayer),
+        }
         return;
     }
     match action {
         MenuAction::Start(mode) if nav.confirm => launch.start(mode),
+        MenuAction::StartSeason if nav.confirm => launch.start_season(),
         MenuAction::OpenSettings if nav.confirm => {
             crate::game::settings::open_settings(&mut open, &mut settings_cursor);
         }
         MenuAction::Cycle(cycle) if nav.confirm || nav.left || nav.right => {
-            apply_cycle(cycle, &mut launch.config, &mut theme, &mut settings);
+            apply_cycle(cycle, &mut launch.config, &mut theme, &mut launch.settings);
         }
         _ => {}
     }
@@ -611,7 +679,6 @@ fn menu_tap(
     touches: Res<Touches>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut theme: ResMut<Theme>,
-    mut settings: ResMut<Settings>,
     mut open: ResMut<SettingsOpen>,
     mut cursor: ResMut<crate::game::settings::SettingsCursorRow>,
     mut launch: StartGame,
@@ -650,6 +717,10 @@ fn menu_tap(
                 launch.start(mode);
                 return;
             }
+            MenuAction::StartSeason => {
+                launch.start_season();
+                return;
+            }
             MenuAction::OpenSettings => {
                 // The one open transition (parks, then opens) — this path
                 // runs BEFORE the settings chain, so `toggle_settings`'
@@ -662,7 +733,7 @@ fn menu_tap(
                 return;
             }
             MenuAction::Cycle(cycle) => {
-                apply_cycle(cycle, &mut launch.config, &mut theme, &mut settings);
+                apply_cycle(cycle, &mut launch.config, &mut theme, &mut launch.settings);
                 // Stop like the arms above: ONE activation per frame is
                 // this system's rule (`Start` and `OpenSettings` already
                 // said so), and falling through made a multi-touch frame
@@ -683,7 +754,12 @@ fn spawn_game_over(
     score: Res<ScoreBoard>,
     theme: Res<Theme>,
     device: Res<ActiveDevice>,
+    season_game: Res<SeasonGame>,
+    settings: Res<Settings>,
 ) {
+    // A season game's card also carries the league table (already updated —
+    // `season_mode` records on the Playing → GameOver transition).
+    let season = settings.season.as_ref().filter(|_| season_game.0);
     // Armed alongside the card it guards, so the two can't drift apart.
     commands.insert_resource(GameOverGrace(time.elapsed_secs()));
     let ui = &theme.ui;
@@ -746,6 +822,25 @@ fn spawn_game_over(
                         },
                         TextColor(ui.text_primary),
                     ));
+                    if let Some(season) = season {
+                        card.spawn((
+                            Text::new(season.next_line()),
+                            TextFont {
+                                font_size: 22.0,
+                                ..default()
+                            },
+                            TextColor(ui.accent),
+                        ));
+                        card.spawn((
+                            Text::new(season.standings_rows().join("\n")),
+                            TextFont {
+                                font_size: 17.0,
+                                ..default()
+                            },
+                            TextColor(ui.text_primary),
+                            TextLayout::new_with_justify(Justify::Left),
+                        ));
+                    }
                     card.spawn((
                         Text::new(match *device {
                             ActiveDevice::Keyboard => "Enter  -  back to the menu",

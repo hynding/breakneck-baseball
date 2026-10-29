@@ -155,6 +155,39 @@ fn legacy_store_without_trail_fields_loads_with_defaults() {
     assert!((s.volume - 0.5).abs() < 1e-6);
 }
 
+/// A pre-season store loads with no season and the default length; a
+/// season in the store survives the round trip; corrupt season data is
+/// dropped on load instead of resetting every other option.
+#[test]
+fn season_fields_default_round_trip_and_clamp() {
+    let legacy = r#"{"batting_style":["SwingMeter","ClassicTiming"],"volume":0.5}"#;
+    let s: Settings = serde_json::from_str(legacy).unwrap();
+    assert_eq!(s.season, None);
+    assert_eq!(s.season_length, crate::game::season::DEFAULT_SEASON_LENGTH);
+
+    let mut season = crate::game::season::Season::new(1, 6);
+    season.record(3, 1);
+    let with_season = Settings {
+        season: Some(season.clone()),
+        season_length: 12,
+        ..Default::default()
+    };
+    let json = serde_json::to_string(&with_season).unwrap();
+    let back: Settings = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.clamped(), with_season);
+
+    let mut corrupt = with_season.clone();
+    corrupt.season_length = 5;
+    corrupt.season.as_mut().unwrap().length = 7;
+    let fixed = corrupt.clamped();
+    assert_eq!(fixed.season, None);
+    assert_eq!(
+        fixed.season_length,
+        crate::game::season::DEFAULT_SEASON_LENGTH
+    );
+    assert_eq!(fixed.batting_style, with_season.batting_style);
+}
+
 #[test]
 fn settings_round_trip_and_defaults() {
     let s = Settings::default();

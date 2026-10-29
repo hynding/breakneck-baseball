@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use bevy::log::warn;
 
 use crate::game::GameState;
+use crate::game::season::{self, Season};
 
 mod screen;
 pub use screen::{SettingsCursorRow, open_settings};
@@ -347,10 +348,23 @@ pub struct Settings {
     pub difficulty: Difficulty,
     /// Master volume, 0.0..=1.0, applied via [`bevy::audio::GlobalVolume`].
     pub volume: f32,
+    /// Regular-season length for the *next* short season (menu **L**; one
+    /// of [`season::SEASON_LENGTHS`]). Serde-defaulted for old stores.
+    #[serde(default = "default_season_length")]
+    pub season_length: u32,
+    /// The short season in progress (or just finished, until the next one
+    /// starts) — schedule, results and final. Lives in the settings store
+    /// so it survives a relaunch on both native and web.
+    #[serde(default)]
+    pub season: Option<Season>,
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn default_season_length() -> u32 {
+    season::DEFAULT_SEASON_LENGTH
 }
 
 impl Default for Settings {
@@ -365,6 +379,8 @@ impl Default for Settings {
             graphics: GraphicsQuality::default(),
             difficulty: Difficulty::default(),
             volume: 0.7,
+            season_length: season::DEFAULT_SEASON_LENGTH,
+            season: None,
         }
     }
 }
@@ -375,6 +391,13 @@ impl Settings {
     pub fn clamped(&self) -> Self {
         let mut result = self.clone();
         result.volume = result.volume.clamp(0.0, 1.0);
+        if !season::SEASON_LENGTHS.contains(&result.season_length) {
+            result.season_length = season::DEFAULT_SEASON_LENGTH;
+        }
+        // A season this build can't continue is dropped, not half-played.
+        if result.season.as_ref().is_some_and(|s| !s.is_valid()) {
+            result.season = None;
+        }
         result
     }
 }
