@@ -9,6 +9,7 @@ pub mod input;
 pub mod menu;
 #[cfg(feature = "debug")]
 pub mod portraits;
+pub mod season_mode;
 pub mod settings;
 pub mod subs;
 pub mod touch;

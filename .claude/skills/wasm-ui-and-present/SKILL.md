@@ -65,6 +65,17 @@ smoothing only within a shot). The strike zone (`rules::ZONE_*`) is
 drawn as a floating box; the batter finishes `BatterSwing` before the hidden run-out rig takes
 over after its `RunDelay`.
 
+## Graphics quality
+
+`src/game/present/quality.rs` resolves `Settings::graphics` (Auto/Low/Medium/High) to a
+`QualityTier` and owns MSAA on every `Camera3d`, the `DirectionalLightShadowMap` size, and the
+render scale. The main camera (`camera::MainCamera`) always renders into an offscreen image that a
+2D `UpscaleCamera` stretches over the window; that 2D camera is the pinned `IsDefaultUiCamera`, so
+UI is always full resolution. Don't move the UI between cameras at runtime (or route the main
+camera straight to the window "at 100%") — on wasm the whole UI went blank after such a switch.
+Auto: native by GPU class (discrete High, integrated Medium, software Low), desktop browser
+Medium, coarse-pointer browser or native mobile Low.
+
 ## Juice (game feel)
 
 `src/game/present/juice.rs` runs hit-stop (Solid/Perfect) and slow-mo (Perfect) by dialing
