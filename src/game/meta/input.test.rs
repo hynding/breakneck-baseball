@@ -50,3 +50,18 @@ fn player_index_maps_p1_p2_and_cpu() {
     let two = assign_controllers(GameMode::TwoPlayers, &[]);
     assert_eq!(two.player_index(Team::Away), Some(1));
 }
+
+#[test]
+fn stick_steps_once_per_push_with_hysteresis() {
+    let up = Vec2::new(0.0, 0.9);
+    // A push latches the dominant axis.
+    let latched = stick_step(IVec2::ZERO, up);
+    assert_eq!(latched, IVec2::Y);
+    // Easing off into the slack band holds the latch (no second step).
+    assert_eq!(stick_step(latched, Vec2::new(0.0, 0.45)), IVec2::Y);
+    // Back near centre unlatches, so the next push is a fresh step.
+    assert_eq!(stick_step(latched, Vec2::new(0.0, 0.1)), IVec2::ZERO);
+    // Diagonals pick the dominant axis; a weak tilt from rest does nothing.
+    assert_eq!(stick_step(IVec2::ZERO, Vec2::new(-0.8, 0.5)), -IVec2::X);
+    assert_eq!(stick_step(IVec2::ZERO, Vec2::new(0.4, 0.4)), IVec2::ZERO);
+}

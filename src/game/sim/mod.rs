@@ -5,5 +5,6 @@ pub mod coach;
 pub mod director;
 pub mod fielding;
 pub mod flow;
+pub mod physics_clock;
 pub mod runner;
 pub mod scenario;

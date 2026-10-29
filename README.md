@@ -20,14 +20,17 @@ via WebAssembly.
 
 ### Main menu
 
-| Key | Action |
-|---|---|
-| `1` / `2` | Choose one-player / two-player mode |
-| `F` | Cycle field variant |
-| `T` | Cycle theme |
-| `I` | Cycle game length (innings) |
-| `S` | Open settings (batting styles, volume) |
-| `Enter` / `Space` | Start game |
+| Action | Keyboard | Gamepad |
+|---|---|---|
+| Move the cursor | Arrow keys | D-pad / left stick |
+| Choose the focused line | `Enter` | South button (A / ✕) |
+| Change the focused option | Left / Right | D-pad / stick Left / Right |
+| Start one-player / two-player | `1` / `2` | Start (plays the focused mode; One Player from an option line) |
+| Cycle field / innings / theme / touch swing | `F` / `I` / `T` / `G` | via the cursor |
+| Settings (batting styles, volume, ...) | `S` (`Esc` closes) | Select (East / B closes) |
+
+On a touchscreen, tap any line. The on-screen hints show only the controls for
+the device you last used.
 
 ### In game
 

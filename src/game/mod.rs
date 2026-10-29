@@ -23,7 +23,7 @@ pub use self::meta::{appearance, autoplay, gear, input, menu, settings, subs, to
 #[cfg(feature = "debug")]
 pub use self::meta::{creator, debug, portraits};
 pub use self::present::{animation, audio, camera, field, fx, jersey, juice, player, quality, ui};
-pub use self::sim::{ai, ball, batting, director, fielding, flow, runner, scenario};
+pub use self::sim::{ai, ball, batting, director, fielding, flow, physics_clock, runner, scenario};
 
 use bevy::prelude::*;
 
@@ -328,6 +328,7 @@ impl Plugin for GamePlugin {
                 JuicePlugin,
                 sim::coach::CoachPlugin,
                 sim::director::DirectorPlugin,
+                physics_clock::PhysicsClockPlugin,
             ));
         #[cfg(feature = "debug")]
         app.add_plugins((

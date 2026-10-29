@@ -9,7 +9,7 @@ use bevy::color::Alpha;
 #[cfg(test)]
 use super::BattingStyle;
 use super::{Settings, SettingsOpen};
-use crate::game::input::Controllers;
+use crate::game::input::{ActiveDevice, Controllers, StickLatch, menu_nav};
 use crate::game::quality::ActiveQuality;
 use crate::game::theme::Theme;
 use crate::game::ui::{
@@ -188,6 +188,7 @@ pub(super) fn paint_settings_screen(
     // `QualityPlugin`; the real app always has it.
     quality: Option<Res<ActiveQuality>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    device: Res<ActiveDevice>,
     mut roots: Query<
         (&mut BackgroundColor, &mut Visibility),
         (With<SettingsUi>, Without<SettingsCard>),
@@ -221,8 +222,8 @@ pub(super) fn paint_settings_screen(
     let Ok((mut title_text, mut title_color)) = title.single_mut() else {
         return;
     };
-    // Everything this system writes derives from exactly these six
-    // resources (`Controllers` for the resolved touch owner — its write is
+    // Everything this system writes derives from exactly these seven
+    // resources (`ActiveDevice` for the CLOSE hint, `Controllers` for the resolved touch owner — its write is
     // guarded, so its tick flips only on real ownership changes; the
     // window's scale factor only feeds the GRAPHICS row's "% res", which
     // refreshes on the next edit or reopen), so one
@@ -234,7 +235,8 @@ pub(super) fn paint_settings_screen(
         || settings.is_changed()
         || controllers.is_changed()
         || theme.is_changed()
-        || quality.as_ref().is_some_and(Res::is_changed))
+        || quality.as_ref().is_some_and(Res::is_changed)
+        || device.is_changed())
     {
         return;
     }
@@ -310,7 +312,13 @@ pub(super) fn paint_settings_screen(
                 None => settings.graphics.label().to_string(),
             },
             ROW_VOLUME => format!("{:.0}%", settings.volume * 100.0),
-            ROW_CLOSE => "tap / Esc".to_string(),
+            // The active device's close controls only.
+            ROW_CLOSE => match *device {
+                ActiveDevice::Keyboard => "Enter / Esc",
+                ActiveDevice::Gamepad => "A / B",
+                ActiveDevice::Touch => "tap",
+            }
+            .to_string(),
             // Loud, not silent: a newly appended row without a paint arm
             // must fail here, not render CLOSE's hint text.
             row => unreachable!("unpainted settings row {row}"),
@@ -320,12 +328,9 @@ pub(super) fn paint_settings_screen(
 }
 
 /// **S** / gamepad **Select** toggles the screen open/closed; **Esc** /
-/// gamepad **East** (B) closes it while open. MainMenu only. `Select` is
-/// also `game::camera`'s duel-view toggle, and `East` is `menu.rs`'s
-/// innings-cycle key — no clash: those systems run only in `Playing`
-/// (`Select`) or are gated `.run_if(settings_closed)` (`East`), so they
-/// never fire alongside this system's `MainMenu`-only, open-state-gated
-/// handling of the same buttons.
+/// gamepad **East** (B) closes it while open — B is "back", as on every
+/// console menu. MainMenu only. `Select` is also `game::camera`'s
+/// duel-view toggle — no clash: that runs only in `Playing`.
 pub(super) fn toggle_settings(
     keyboard: Res<ButtonInput<KeyCode>>,
     pads: Query<&Gamepad>,
@@ -427,43 +432,46 @@ fn cycle_row(
     }
 }
 
-/// Up/Down (or gamepad DPad Up/Down) move the row cursor; Left/Right (or
-/// DPad Left/Right) cycle the row's value or nudge the volume (±0.1,
-/// clamped). No-op while the screen is closed.
+/// Up/Down (arrows, D-pad or left stick) move the row cursor; Left/Right
+/// cycle the row's value or nudge the volume (±0.1, clamped); **A** /
+/// Enter steps the row forward like a tap (volume wraps, CLOSE closes).
+/// No-op while the screen is closed.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn edit_settings(
     keyboard: Res<ButtonInput<KeyCode>>,
-    pads: Query<&Gamepad>,
+    pads: Query<(Entity, &Gamepad)>,
     controllers: Res<Controllers>,
+    mut latch: Local<StickLatch>,
+    mut was_open: Local<bool>,
     mut open: ResMut<SettingsOpen>,
     mut cursor: ResMut<SettingsCursorRow>,
     mut settings: ResMut<Settings>,
 ) {
+    // Read every frame so the stick latch tracks even while closed.
+    let mut nav = menu_nav(&keyboard, &pads, &mut latch);
+    let just_opened = !*was_open;
+    *was_open = open.0;
     if !open.0 {
         return;
     }
-    let up = keyboard.just_pressed(KeyCode::ArrowUp)
-        || pads.iter().any(|p| p.just_pressed(GamepadButton::DPadUp));
-    let down = keyboard.just_pressed(KeyCode::ArrowDown)
-        || pads.iter().any(|p| p.just_pressed(GamepadButton::DPadDown));
-    if up {
+    // The menu's cursor **A** on "Settings" opens this screen earlier in
+    // the same frame; that press must not also edit the parked row.
+    if just_opened {
+        nav.confirm = false;
+    }
+    if nav.up {
         cursor.0 = cursor.0.checked_sub(1).unwrap_or(ROW_LABELS.len() - 1);
     }
-    if down {
+    if nav.down {
         cursor.0 = (cursor.0 + 1) % ROW_LABELS.len();
     }
-    let left = keyboard.just_pressed(KeyCode::ArrowLeft)
-        || pads.iter().any(|p| p.just_pressed(GamepadButton::DPadLeft));
-    let right = keyboard.just_pressed(KeyCode::ArrowRight)
-        || pads
-            .iter()
-            .any(|p| p.just_pressed(GamepadButton::DPadRight));
-    if !(left || right) {
+    if !(nav.left || nav.right || nav.confirm) {
         return;
     }
     cycle_row_tracked(
         cursor.0,
-        right,
-        false,
+        nav.right || nav.confirm,
+        nav.confirm,
         &controllers,
         &mut settings,
         &mut open,

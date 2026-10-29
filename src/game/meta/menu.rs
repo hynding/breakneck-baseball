@@ -4,11 +4,17 @@
 //! (1 player vs CPU, or 2 players), a field variant (**F**), and a theme
 //! (**T**). Styling comes entirely from the active [`Theme`]; cycling either
 //! option rebuilds the menu so the new look/labels show immediately.
+//!
+//! Every line is also a row under a focus cursor ([`MenuCursor`]), so a
+//! controller drives the menu the console way: D-pad / stick moves, **A**
+//! chooses, Left/Right change an option, **Start** plays, **Select** opens
+//! settings and **B** backs out of them. The hints and hotkey labels follow
+//! the [`ActiveDevice`], so each player reads only their own controls.
 
 use bevy::color::Alpha;
 use bevy::prelude::*;
 
-use crate::game::input::{Controllers, assign_controllers};
+use crate::game::input::{ActiveDevice, Controllers, StickLatch, assign_controllers, menu_nav};
 use crate::game::settings::{Settings, SettingsOpen};
 use crate::game::theme::Theme;
 use crate::game::ui::{OverlayPaint, overlay_card, overlay_root, z};
@@ -29,6 +35,16 @@ enum MenuAction {
     OpenSettings,
 }
 
+/// A menu line's position under the focus cursor, stamped in build order —
+/// a line added to the menu becomes a cursor stop with no extra wiring.
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+struct MenuRow(usize);
+
+/// Which [`MenuRow`] the controller/keyboard cursor rests on. Kept across
+/// rebuilds and games, so after a game **A** replays the mode just played.
+#[derive(Resource, Default)]
+struct MenuCursor(usize);
+
 /// One cyclable menu option. Separate from [`MenuAction`] so
 /// [`apply_cycle`] can match exhaustively — adding an option without wiring
 /// its cycle arm is a compile error, not a silently dead tap.
@@ -42,9 +58,9 @@ enum CycleAction {
 
 /// Public handle for the menu's `Update` chain so `SettingsPlugin` can order
 /// its own hotkey systems after it: with the menu reading first, a gamepad
-/// **East** that closes the settings screen can never also be consumed as
-/// the menu's innings-cycle press in the same frame (the ambiguous ordering
-/// used to decide that per schedule build).
+/// press that changes whether the settings screen is open is read by
+/// exactly one of the two screens in a frame (the ambiguous ordering used
+/// to decide that per schedule build).
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MenuUpdateSet;
 
@@ -71,7 +87,8 @@ impl Plugin for MenuPlugin {
         // on the first Update frame — one build path, not two (an OnEnter
         // spawn was immediately torn down by the change-tick catch-up
         // rebuild on the same entry).
-        app.add_systems(OnExit(GameState::MainMenu), despawn::<MenuUi>)
+        app.init_resource::<MenuCursor>()
+            .add_systems(OnExit(GameState::MainMenu), despawn::<MenuUi>)
             .add_systems(
                 Update,
                 (
@@ -82,6 +99,7 @@ impl Plugin for MenuPlugin {
                     // rebuild system run after every mutator.
                     cycle_options.run_if(crate::game::settings::settings_closed),
                     menu_select.run_if(crate::game::settings::settings_closed),
+                    menu_navigate.run_if(crate::game::settings::settings_closed),
                     // NOT run_if-gated: a skipped system's change ticks
                     // freeze, so a press held through the settings overlay
                     // would fire the frame the screen closed. Running every
@@ -117,8 +135,18 @@ impl Plugin for MenuPlugin {
 /// Builds the full menu tree. Called by [`rebuild_menu_on_change`] when the
 /// tree is missing (menu entry) and whenever a displayed value changes (the
 /// old tree is despawned first).
-fn build_menu(commands: &mut Commands, config: &GameConfig, theme: &Theme, settings: &Settings) {
+fn build_menu(
+    commands: &mut Commands,
+    config: &GameConfig,
+    theme: &Theme,
+    settings: &Settings,
+    cursor: usize,
+    device: ActiveDevice,
+) {
     let ui = &theme.ui;
+    // Rows are numbered in spawn order; `focused` marks the cursor's row.
+    let mut rows = (0..).map(MenuRow);
+    let focused = |row: MenuRow| device != ActiveDevice::Touch && row.0 == cursor;
 
     commands
         .spawn((
@@ -164,15 +192,21 @@ fn build_menu(commands: &mut Commands, config: &GameConfig, theme: &Theme, setti
                         ),
                         ("2   Two Players", MenuAction::Start(GameMode::TwoPlayers)),
                     ] {
+                        let row = rows.next().expect("unbounded row counter");
                         card.spawn((
                             Button,
                             action,
-                            Text::new(line),
+                            row,
+                            Text::new(row_label(line, focused(row), device)),
                             TextFont {
                                 font_size: 23.0,
                                 ..default()
                             },
-                            TextColor(ui.text_primary),
+                            TextColor(if focused(row) {
+                                ui.accent
+                            } else {
+                                ui.text_primary
+                            }),
                         ));
                     }
 
@@ -199,21 +233,23 @@ fn build_menu(commands: &mut Commands, config: &GameConfig, theme: &Theme, setti
                             settings.touch_scheme.label().to_string(),
                             MenuAction::Cycle(CycleAction::Touch),
                         ),
-                        (
-                            "S   Settings",
-                            "open".to_string(),
-                            MenuAction::OpenSettings,
-                        ),
+                        ("S   Settings", "open".to_string(), MenuAction::OpenSettings),
                     ] {
+                        let row = rows.next().expect("unbounded row counter");
                         card.spawn((
                             Button,
                             action,
-                            Text::new(format!("{label}   ")),
+                            row,
+                            Text::new(format!("{}   ", row_label(label, focused(row), device))),
                             TextFont {
                                 font_size: 19.0,
                                 ..default()
                             },
-                            TextColor(ui.text_dim),
+                            TextColor(if focused(row) {
+                                ui.text_primary
+                            } else {
+                                ui.text_dim
+                            }),
                         ))
                         .with_child((
                             TextSpan::new(value),
@@ -239,10 +275,7 @@ fn build_menu(commands: &mut Commands, config: &GameConfig, theme: &Theme, setti
                         },
                     ));
                     card.spawn((
-                        Text::new(format!(
-                            "Controller: A = 1P, Start = 2P, X/B/Y cycle field/innings/theme, stick to aim\nKeyboard: WASD + Space (P1), Arrows + Right-Ctrl (P2)\nBatting: hold Down through the windup to send the runner\nTouch: pick a Touch swing scheme, tap any menu line to use it\nSettings: S / gamepad Select opens batting style & volume options{}",
-                            creator_hint()
-                        )),
+                        Text::new(controls_hint(device)),
                         TextFont {
                             // 15 px primary, not 13 px dim: this block is
                             // the only place the controls are documented
@@ -271,6 +304,41 @@ fn build_menu(commands: &mut Commands, config: &GameConfig, theme: &Theme, setti
                 },
             ));
         });
+}
+
+/// A row's label for the active device: the leading hotkey column ("F   ")
+/// is a keyboard instruction, so other devices drop it; a cursor marker
+/// pads every row when a cursor is shown (the default font is monospace,
+/// so the marker never shifts the column).
+fn row_label(label: &str, focused: bool, device: ActiveDevice) -> String {
+    let text = match device {
+        ActiveDevice::Keyboard => label,
+        _ => label.split_once("   ").map_or(label, |(_, rest)| rest),
+    };
+    match (device, focused) {
+        (ActiveDevice::Touch, _) => text.to_string(),
+        (_, true) => format!("> {text}"),
+        (_, false) => format!("  {text}"),
+    }
+}
+
+/// The control summary for the active device only — this block is the one
+/// place the controls are documented before play (TODO 75).
+fn controls_hint(device: ActiveDevice) -> String {
+    const RUNNER: &str = "Batting: hold Down through the windup to send the runner";
+    match device {
+        ActiveDevice::Gamepad => format!(
+            "D-pad / stick: move   A: choose   Left/Right: change\nStart: play   Select: settings   B: back\nIn play: stick to aim, A to pitch or swing\n{RUNNER}"
+        ),
+        ActiveDevice::Keyboard => format!(
+            "1 / 2: play   F I T G: change options   S: settings\nArrows + Enter also move and choose\nIn play: WASD + Space (P1), Arrows + Right-Ctrl (P2)\n{RUNNER}{}",
+            creator_hint()
+        ),
+        ActiveDevice::Touch => {
+            "Tap a line to choose it or change its value\nTouch swing picks how you swing on screen"
+                .to_string()
+        }
+    }
 }
 
 /// Dev-only hint line for the Creator stage (`--features debug`), appended to
@@ -305,8 +373,8 @@ fn update_controller_status(
     }
 }
 
-/// Applies one option cycle. Shared by the hotkey system and the tap system
-/// so the two input paths can never drift apart.
+/// Applies one option cycle. Shared by the hotkey, cursor and tap systems
+/// so the input paths can never drift apart.
 fn apply_cycle(
     action: CycleAction,
     config: &mut ResMut<GameConfig>,
@@ -344,12 +412,15 @@ fn apply_cycle(
 /// exactly one rebuild. Settings edits made while the overlay covers the
 /// menu rebuild as they happen — invisible, and the user-action cost class
 /// the menu already accepts per press.
+#[allow(clippy::too_many_arguments)]
 fn rebuild_menu_on_change(
     menu_q: Query<Entity, With<MenuUi>>,
     next_state: Res<NextState<GameState>>,
     config: Res<GameConfig>,
     theme: Res<Theme>,
     settings: Res<Settings>,
+    cursor: Res<MenuCursor>,
+    device: Res<ActiveDevice>,
     mut commands: Commands,
 ) {
     // The missing-tree build is unconditional — even a pending transition
@@ -362,12 +433,16 @@ fn rebuild_menu_on_change(
     let missing = menu_q.is_empty();
     if !missing
         && (crate::game::transition_pending(&next_state)
-            || !(config.is_changed() || theme.is_changed() || settings.is_changed()))
+            || !(config.is_changed()
+                || theme.is_changed()
+                || settings.is_changed()
+                || cursor.is_changed()
+                || device.is_changed()))
     {
         return;
     }
     crate::game::despawn_all(&mut commands, &menu_q);
-    build_menu(&mut commands, &config, &theme, &settings);
+    build_menu(&mut commands, &config, &theme, &settings, cursor.0, *device);
 }
 
 /// Everything launching a game mutates, bundled so `menu_select` and
@@ -407,56 +482,38 @@ impl StartGame<'_, '_> {
     }
 }
 
-/// Cycles the field (**F** / gamepad West), innings (**I** / gamepad East),
-/// theme (**T** / gamepad North), and touch swing scheme (**G**); the
-/// rebuild system picks the edit up off the resource's change tick.
+/// Cycles the field (**F**), innings (**I**), theme (**T**), and touch
+/// swing scheme (**G**); the rebuild system picks the edit up off the
+/// resource's change tick. Keyboard only: a pad changes options through the
+/// cursor ([`menu_navigate`]), so its face buttons keep their conventional
+/// roles instead of each owning an option.
 fn cycle_options(
     keyboard: Res<ButtonInput<KeyCode>>,
-    pads: Query<&Gamepad>,
     mut config: ResMut<GameConfig>,
     mut theme: ResMut<Theme>,
     mut settings: ResMut<Settings>,
 ) {
-    // One row per hotkey: keyboard key, optional pad button, the cycle.
-    const HOTKEYS: [(KeyCode, Option<GamepadButton>, CycleAction); 4] = [
-        (KeyCode::KeyF, Some(GamepadButton::West), CycleAction::Field),
-        (
-            KeyCode::KeyI,
-            Some(GamepadButton::East),
-            CycleAction::Innings,
-        ),
-        (
-            KeyCode::KeyT,
-            Some(GamepadButton::North),
-            CycleAction::Theme,
-        ),
-        (KeyCode::KeyG, None, CycleAction::Touch),
+    // One row per hotkey: keyboard key, the cycle.
+    const HOTKEYS: [(KeyCode, CycleAction); 4] = [
+        (KeyCode::KeyF, CycleAction::Field),
+        (KeyCode::KeyI, CycleAction::Innings),
+        (KeyCode::KeyT, CycleAction::Theme),
+        (KeyCode::KeyG, CycleAction::Touch),
     ];
-    for (key, pad_button, action) in HOTKEYS {
-        let pressed = keyboard.just_pressed(key)
-            || pad_button.is_some_and(|b| pads.iter().any(|p| p.just_pressed(b)));
-        if pressed {
+    for (key, action) in HOTKEYS {
+        if keyboard.just_pressed(key) {
             apply_cycle(action, &mut config, &mut theme, &mut settings);
         }
     }
 }
 
-fn menu_select(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    pads: Query<(Entity, &Gamepad)>,
-    mut launch: StartGame,
-) {
-    // Selection: keyboard digits, or a controller face button (1P) / start (2P).
-    let want_one = keyboard.just_pressed(KeyCode::Digit1)
-        || keyboard.just_pressed(KeyCode::Numpad1)
-        || pads
-            .iter()
-            .any(|(_, p)| p.just_pressed(GamepadButton::South));
-    let want_two = keyboard.just_pressed(KeyCode::Digit2)
-        || keyboard.just_pressed(KeyCode::Numpad2)
-        || pads
-            .iter()
-            .any(|(_, p)| p.just_pressed(GamepadButton::Start));
+/// The keyboard's direct launch keys (**1** / **2**). Pads launch through
+/// the cursor ([`menu_navigate`]).
+fn menu_select(keyboard: Res<ButtonInput<KeyCode>>, mut launch: StartGame) {
+    let want_one =
+        keyboard.just_pressed(KeyCode::Digit1) || keyboard.just_pressed(KeyCode::Numpad1);
+    let want_two =
+        keyboard.just_pressed(KeyCode::Digit2) || keyboard.just_pressed(KeyCode::Numpad2);
 
     let mode = if want_two {
         GameMode::TwoPlayers
@@ -467,6 +524,73 @@ fn menu_select(
     };
 
     launch.start(mode);
+}
+
+/// The cursor path (gamepad, plus keyboard arrows/Enter): Up/Down move the
+/// focus over the [`MenuRow`]s, wrapping; **A** / Enter performs the
+/// focused row's [`MenuAction`]; Left/Right step a focused option (every
+/// option only cycles forward, so both directions step it); **Start** plays
+/// — the focused mode, or One Player from an option row. **B** has nothing
+/// to back out of here; it closes the settings screen (`toggle_settings`).
+#[allow(clippy::too_many_arguments)]
+fn menu_navigate(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    pads: Query<(Entity, &Gamepad)>,
+    rows: Query<(&MenuRow, &MenuAction)>,
+    mut latch: Local<StickLatch>,
+    mut cursor: ResMut<MenuCursor>,
+    mut theme: ResMut<Theme>,
+    mut settings: ResMut<Settings>,
+    mut open: ResMut<SettingsOpen>,
+    mut settings_cursor: ResMut<crate::game::settings::SettingsCursorRow>,
+    mut launch: StartGame,
+) {
+    // Read every frame (before any early-out) so the stick latch tracks.
+    let nav = menu_nav(&keyboard, &pads, &mut latch);
+    let start = pads
+        .iter()
+        .any(|(_, p)| p.just_pressed(GamepadButton::Start));
+    // A launch already decided this frame (`menu_select`, earlier in the
+    // chain) must not be followed by an option edit — see `menu_tap`.
+    if !(nav.any() || start) || crate::game::transition_pending(&launch.next_state) {
+        return;
+    }
+    let count = rows.iter().count();
+    if count == 0 {
+        return;
+    }
+    let mut row = cursor.0.min(count - 1);
+    if nav.up {
+        row = row.checked_sub(1).unwrap_or(count - 1);
+    }
+    if nav.down {
+        row = (row + 1) % count;
+    }
+    // Guarded: the cursor's change tick triggers a menu rebuild.
+    if cursor.0 != row {
+        cursor.0 = row;
+    }
+    let Some(action) = rows.iter().find_map(|(r, a)| (r.0 == row).then_some(*a)) else {
+        return;
+    };
+    if start {
+        let mode = match action {
+            MenuAction::Start(mode) => mode,
+            _ => GameMode::OnePlayer,
+        };
+        launch.start(mode);
+        return;
+    }
+    match action {
+        MenuAction::Start(mode) if nav.confirm => launch.start(mode),
+        MenuAction::OpenSettings if nav.confirm => {
+            crate::game::settings::open_settings(&mut open, &mut settings_cursor);
+        }
+        MenuAction::Cycle(cycle) if nav.confirm || nav.left || nav.right => {
+            apply_cycle(cycle, &mut launch.config, &mut theme, &mut settings);
+        }
+        _ => {}
+    }
 }
 
 /// The touch/mouse path: a pressed menu line performs its [`MenuAction`].
@@ -550,6 +674,7 @@ fn spawn_game_over(
     time: Res<Time<Real>>,
     score: Res<ScoreBoard>,
     theme: Res<Theme>,
+    device: Res<ActiveDevice>,
 ) {
     // Armed alongside the card it guards, so the two can't drift apart.
     commands.insert_resource(GameOverGrace(time.elapsed_secs()));
@@ -614,7 +739,11 @@ fn spawn_game_over(
                         TextColor(ui.text_primary),
                     ));
                     card.spawn((
-                        Text::new("Enter / A / tap the card  -  back to the menu"),
+                        Text::new(match *device {
+                            ActiveDevice::Keyboard => "Enter  -  back to the menu",
+                            ActiveDevice::Gamepad => "A  -  back to the menu",
+                            ActiveDevice::Touch => "Tap the card  -  back to the menu",
+                        }),
                         TextFont {
                             font_size: 17.0,
                             ..default()
@@ -684,3 +813,7 @@ fn game_over_restart(
 fn despawn<T: Component>(mut commands: Commands, query: Query<Entity, With<T>>) {
     crate::game::despawn_all(&mut commands, &query);
 }
+
+#[cfg(test)]
+#[path = "menu.test.rs"]
+mod tests;
