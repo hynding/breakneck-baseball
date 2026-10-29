@@ -170,6 +170,7 @@ fn throw_target_gizmo(
     bases: Res<crate::game::rules::Bases>,
     ruleset: Res<crate::game::variant::Ruleset>,
     field: Res<crate::game::variant::FieldSpec>,
+    score: Res<crate::game::ScoreBoard>,
     time: Res<Time>,
     ball: Query<&Transform, With<crate::game::ball::Baseball>>,
     mut gizmos: Gizmos,
@@ -187,6 +188,7 @@ fn throw_target_gizmo(
         race,
         &bases,
         play.runners_going(),
+        score.outs,
         &field,
         &ruleset.pace,
     );

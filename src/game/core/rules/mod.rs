@@ -109,7 +109,8 @@ pub const ZONE_LOW: f32 = RIG_KNEE_M - 0.05;
 pub const ZONE_HIGH: f32 = (RIG_SHOULDER_TOP_M + RIG_PANTS_TOP_M) / 2.0;
 
 /// A caught fly at least this far out (scaled by [`FieldSpec::hit_scale`])
-/// gives runners time to tag up and advance.
+/// lets the runner on second tag and take third. The runner on third races
+/// the throw home instead ([`read_tag_up`]).
 const TAG_UP_MIN_DIST: f32 = 65.0;
 
 // ── Live-play race constants ──────────────────────────────────────────────────
@@ -139,6 +140,20 @@ pub(crate) const HIT_AND_RUN_JUMP: f32 = 1.6;
 pub(crate) const STRETCH_GRACE: f32 = 0.9;
 /// Bang-bang margin: ties and near-ties go to the runner.
 pub(crate) const RUNNER_MARGIN: f32 = 0.35;
+/// A runner aboard is this fraction of a base leg off his bag when the ball
+/// is put in play (primary lead plus the shuffle of the secondary lead), so
+/// his extra-base read starts that far down the line.
+pub(crate) const SECONDARY_LEAD_FRAC: f32 = 0.16;
+/// A play at a bag no force covers needs a tag: the receiver gloves the
+/// throw and still has to put it on the sliding runner.
+pub(crate) const TAG_APPLY: f32 = 0.3;
+/// How far a losing race a runner (and his coach) will still gamble on when
+/// reading for the extra base or tagging from third — the band where the
+/// throw cuts him down.
+pub(crate) const SEND_AGGRESSION: f32 = 0.3;
+/// A throw arriving more than this long after a sent runner isn't worth
+/// making: the fielder throws ahead of the batter instead.
+pub(crate) const THROW_CONTEST: f32 = 0.8;
 /// Gathers beyond this radius (scaled by hit_scale) concede first base — the
 /// out at first is only contested on infield balls. Sized to the grass line,
 /// ~95 ft from the mound centre (per docs/BASEBALL.md "Dirt, grass, and
@@ -250,13 +265,17 @@ impl BattingOrder {
     }
 }
 
-/// Flavour of an out. `Fly::deep` also drives the tag-up rule.
+/// Flavour of an out. `Fly` carries the tag-up plays it allows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutKind {
     Ground,
     Fly {
-        /// Deep enough for runners to tag up (see [`TAG_UP_MIN_DIST`]).
+        /// Deep enough for the runner on second to tag and take third (see
+        /// [`TAG_UP_MIN_DIST`]).
         deep: bool,
+        /// The runner on third's tag-up race against the throw home (see
+        /// [`read_tag_up`]).
+        tag: TagUp,
     },
     Pop,
     /// A pop-up caught in foul territory.
@@ -285,7 +304,26 @@ pub enum Outcome {
     },
     /// A clean hit worth this many bases (1 = single … up to the base count).
     Hit(u32),
+    /// A hit worth `hit` bases on which the lead runner aboard (from 0-indexed
+    /// base `runner`) read the play and went for one base more than the hit
+    /// gave him — `safe` there, or cut down by the throw (one out). See
+    /// [`read_extra_base`].
+    ExtraBase {
+        hit: u32,
+        runner: usize,
+        safe: bool,
+    },
     HomeRun,
+}
+
+/// The runner on third's play on a caught fly: no attempt, tagged and
+/// scored, or tagged and thrown out at the plate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum TagUp {
+    #[default]
+    Hold,
+    Scores,
+    ThrownOut,
 }
 
 /// The batting side's call on a live ball, read at resolution: send the
