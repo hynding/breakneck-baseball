@@ -14,12 +14,10 @@ use crate::game::{GameState, ScoreBoard};
 const RIG_Y: f32 = 0.6;
 /// Where a new runner starts (the batter's box).
 const PLATE_START: Vec3 = Vec3::new(0.7, RIG_Y, 0.0);
-/// Leadoff distances off the bag toward the next base (metres): the normal
-/// lead every runner takes, and the stretched lead that arms the early break.
-const LEAD_NORMAL: f32 = 2.2;
-const LEAD_EXTENDED: f32 = 4.5;
-/// Shuffle speed for taking / retreating from a lead.
-const LEAD_SPEED: f32 = 2.6;
+/// Shuffle speed for taking / retreating from a lead — the same pace the
+/// rules grow it at, so the rig stands where the steal race says he is
+/// (`LeadState::lead_m`).
+const LEAD_SPEED: f32 = rules::LEAD_SHUFFLE_SPEED;
 /// Distance from the bag at which an arriving runner drops into the slide.
 const SLIDE_RANGE: f32 = 2.2;
 
@@ -199,12 +197,7 @@ fn take_leadoffs(
                 intent.speed = ruleset.pace.runner_speed;
                 continue;
             }
-            let dist = if lead.extended {
-                LEAD_EXTENDED
-            } else {
-                LEAD_NORMAL
-            };
-            bag + dir * dist
+            bag + dir * lead.lead_m
         } else {
             bag
         };

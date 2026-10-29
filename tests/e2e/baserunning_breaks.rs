@@ -27,8 +27,9 @@ use common::{DriveGame, headless_app, run_until, start_game};
 const STAGE_FRAMES: u64 = 15_000;
 
 /// A rig that has broken this far (metres, horizontal) off a bag has clearly
-/// left it — comfortably past the normal pre-pitch lead (`LEAD_NORMAL` = 2.2 m
-/// in `runner.rs`), so a lead alone can never trip the assertion.
+/// left it — comfortably past the normal pre-pitch lead
+/// (`rules::LEAD_NORMAL_M` = 2.2 m), so a lead alone can never trip the
+/// assertion.
 const BROKEN_OFF_BAG: f32 = 2.5;
 
 #[derive(Resource, Default)]

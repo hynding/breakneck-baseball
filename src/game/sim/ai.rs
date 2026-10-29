@@ -417,7 +417,7 @@ pub fn cpu_offense(
 
     // Reset the per-pitch decisions before each delivery. In the steal
     // window the AI occasionally stretches the lead — the early break: a
-    // guaranteed jump on the pitch, bought at pickoff risk — and, once
+    // longer lead and a first-movement jump, bought at pickoff risk — and, once
     // committed, keeps the lead stretched after the window closes so the
     // gamble actually cashes in at the delivery. A vanished candidate (the
     // runner was picked off) drops the plan.
@@ -429,7 +429,7 @@ pub fn cpu_offense(
         let extend = if steal_candidate(&bases).is_some() {
             if play.in_steal_window() {
                 let roll = cpu.roll(5.3);
-                let p = steal_rate(0.012 + 0.024 * cfg.skill, &score);
+                let p = steal_rate(0.015 + 0.024 * cfg.skill, &score);
                 *cpu.window_steal.get_or_insert(roll < p)
             } else {
                 cpu.window_steal == Some(true)
@@ -457,12 +457,18 @@ pub fn cpu_offense(
         cpu.swing_target_dt = None;
         let committed = cpu.window_steal == Some(true);
         let roll = cpu.roll(6.1);
-        let p = steal_rate(0.018 + 0.024 * cfg.skill, &score);
+        let p = steal_rate(0.012 + 0.024 * cfg.skill, &score);
         let send = steal_candidate(&bases).is_some()
             && (committed || *cpu.steal_call.get_or_insert(roll < p));
+        // A straight steal goes when the runner reads the delivery: a beat
+        // into the wind-up, sooner for a sharper runner. That beat is his
+        // jump in the steal race (`rules::steal_race`), so the CPU's jumps
+        // vary pitch to pitch instead of all landing on the first frame.
+        let read = cpu.roll(6.7) * (0.15 - 0.1 * cfg.skill);
+        let going = committed || play.windup_fraction().is_some_and(|f| f >= read);
         let intent = intents.get_mut(team);
         intent.action = false;
-        if send {
+        if send && going {
             intent.aim = Vec2::new(0.0, -1.0);
         }
         return;
