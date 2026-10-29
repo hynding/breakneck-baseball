@@ -126,18 +126,18 @@ impl<'a, 'w> Umpire<'a, 'w> {
         call
     }
 
-    /// Resolves a sent runner once the catcher has the ball: the jump beats
-    /// the throw on off-speed pitches, a fastball cuts the runner down.
+    /// Resolves a sent runner once the catcher has the ball: the runner's
+    /// jump and lead against the delivery, the catcher's transfer on where
+    /// the pitch crossed, and his throw (`rules::steal_race`).
     pub(super) fn resolve_steal(&mut self, play: &Play) {
-        let off_speed = play.pitch.kind != Some(rules::PitchKind::Fastball);
+        let attempt = rules::StealAttempt {
+            kind: play.pitch.kind.unwrap_or(rules::PitchKind::Fastball),
+            crossing: play.pitch.crossing,
+            break_fraction: play.duel.break_fraction,
+            lead_m: play.duel.jump_lead_m,
+        };
         let before = self.score.outs;
-        match rules::attempt_steal(
-            self.score,
-            self.bases,
-            self.rules,
-            off_speed,
-            play.duel.big_jump,
-        ) {
+        match rules::attempt_steal(self.score, self.bases, self.rules, &attempt) {
             StealResult::Stolen { .. } => self.announce("STOLEN BASE!", BannerTone::Good),
             StealResult::Caught => self.announce_out("CAUGHT STEALING", BannerTone::Bad, before),
             StealResult::NoRunner => {}

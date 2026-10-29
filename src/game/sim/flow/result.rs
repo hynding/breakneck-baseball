@@ -99,8 +99,8 @@ pub(super) fn result_phase(
     play.pitch.swing = None;
     play.pitch.whiff = None;
     play.duel.armed = false;
-    play.duel.big_jump = false;
-    play.duel.window_lead = false;
+    play.duel.break_fraction = 0.0;
+    play.duel.jump_lead_m = rules::LEAD_NORMAL_M;
     play.pitch.taken = false;
     play.live.pending_call = None;
     play.live.wall_called = false;
@@ -111,6 +111,7 @@ pub(super) fn result_phase(
     // A runner in stealing position opens the duel window for the next at-bat.
     play.duel.hold = steal_window_for(&bases, &rules_res);
     lead.extended = false;
+    lead.lead_m = rules::LEAD_NORMAL_M;
 }
 
 /// Ends the pitch or play into its result pause: the hold `pace` gives

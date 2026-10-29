@@ -203,6 +203,33 @@ occupied behind the lead runner (`rules::is_forced`). With two outs a force out
 ends the inning the instant it is recorded, so no run scores on the play
 (Baseball Rules Academy).
 
+## Stolen-base timing (mlb.com Statcast glossary, Bill James Online, Wikipedia "Pop time")
+
+A steal is a race of two stopwatches that both start at the pitcher's first
+movement:
+
+| Clock | Typical MLB time | In the game (`rules::steal_race`) |
+|---|---|---|
+| Pitcher, first move → catcher's glove ("time to plate") | 1.3 s good, 1.5 s+ slow | 0.92 s move + flight at the pitch's own speed: fastball 1.36 s, changeup 1.49 s |
+| Catcher's pop time to second (glove to the fielder's glove) | ~2.0 s average, 1.85 s elite | 0.7 s exchange + 38.8 m at 29.8 m/s = 2.00 s |
+| Pop time to third | ~1.6–1.7 s | same arm over 27.4 m = 1.62 s |
+| Runner, first move → second base | ~3.3–3.5 s average, ~3.1 s elite | 0.30 s overhead + (27.4 m − lead) at 8.2 m/s; 3.38 s from a normal lead |
+| Sprint speed | ~27 ft/s (8.2 m/s) MLB average | `RUNNER_SPRINT_SPEED` |
+
+The coaches' "3.3 rule": a battery whose time to plate plus pop time is
+under ~3.3 s throws out most runners; over ~3.4 s the runner is usually safe.
+The game sits an average runner (3.38 s) just behind a fastball (3.36 s) and
+ahead of every off-speed pitch, so the jump (when he breaks during the
+wind-up, `LATE_BREAK_SECS`), the lead he built during the pre-pitch duel,
+and a pitch the catcher has to dig out of the dirt decide it. A runner on
+second takes a longer, unheld secondary lead (+2.5 m in the game). MLB
+caught-stealing rate is ~20–25% of attempts.
+
+Pickoffs: a pitcher's move and throw to first take ~0.8 s glove to tag;
+a runner on a normal lead dives back in time, one leaning several feet
+further is caught (`rules::attempt_pickoff` races `PICKOFF_THROW_SECS` against
+`dive_back_secs`).
+
 ## Rules modeled elsewhere
 
 Count thresholds (4 balls / 3 strikes / 3 outs), the strike zone, tag-ups,
@@ -227,3 +254,7 @@ CLAUDE.md's architecture notes for how each maps.
 - [Baseball Rules Academy — 2.01 Layout of the field](https://baseballrulesacademy.com/official-rule/mlb/2-01-layout-field/) (line width, materials)
 - [Bat Flip Sports — How to chalk a baseball field like a pro](https://batflipsports.com/how-to-chalk-a-baseball-field/) (2–4 in chalk-line width)
 - [Fox Valley Paint — How to stripe a baseball field like a pro](https://foxvalleypaint.com/how-to-stripe-a-baseball-field/) (practical ~4 in foul-line width)
+- [MLB.com — Pop Time (Statcast glossary)](https://www.mlb.com/glossary/statcast/pop-time)
+- [Wikipedia — Pop time](https://en.wikipedia.org/wiki/Pop_time)
+- [Bill James Online — Timing pitchers and catchers to prevent stolen bases](https://www.billjamesonline.com/timing_pitchers_and_catchers_to_prevent_stolen_bases_/?F_All=y)
+- [Lee Judge — How to steal a base](https://leejudge.substack.com/p/how-to-steal-a-base)

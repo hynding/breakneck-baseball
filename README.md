@@ -10,7 +10,7 @@ via WebAssembly.
 
 - Full nine-inning (or 1/3/5-inning) games: 1P vs CPU, or 2P on one keyboard / two gamepads
 - A five-pitch arsenal with Magnus-effect ball flight, selected by aim at release
-- The steal duel: stretch a lead for a guaranteed jump — at pickoff risk
+- The steal duel: a runner-vs-catcher race — stretch a lead for a better jump, at pickoff risk
 - Advanced rules: tag-ups, double plays, dropped third strike, HBP, caught pops
 - Four duel-view camera framings plus a broadcast chase camera
 - Procedurally synthesized audio (no sound assets), themable teams and fields
@@ -50,9 +50,13 @@ aiming high *means* throwing the heater upstairs.
 opposite field).
 
 **The steal window** — before the wind-up, the offense can hold aim toward the
-next base to stretch the lead runner off the bag: held through the window, it
-buys a guaranteed jump on the pitch. The defense can answer with a pickoff
-throw (action during the window) — get caught stretched and you're picked off.
+next base to stretch the lead runner off the bag: the longer it is held during
+the window, the longer the lead and the better the jump. Every steal is a race
+— the runner's jump and sprint against the pitcher's delivery and the
+catcher's pop time — so a send on first movement beats an off-speed pitch, a
+fastball cuts down a runner from a normal lead, and a pitch in the dirt gives
+him the base. The defense can answer with a pickoff throw (action during the
+window) — catch a runner who has hung out on a long lead and he's out.
 
 ## Building
 

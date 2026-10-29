@@ -143,7 +143,7 @@ pub(super) fn reset_flow(
     *play = Play::default();
     bases.reset_for(field.base_count());
     *order = BattingOrder::default();
-    lead.extended = false;
+    *lead = LeadState::default();
 }
 
 // ── PrePitch: the leadoff duel, then the defense aims and releases ────────────
@@ -171,16 +171,16 @@ pub(super) fn pre_pitch(
     play.duel.pickoff_cooldown.tick(time.delta());
 
     // The offense works the lead: holding Down stretches the lead runner off
-    // the bag — the guaranteed steal jump, bought at pickoff risk.
+    // the bag — a longer lead for the steal race, bought at pickoff risk.
     let offense = intents.get(score.batting_team());
     lead.extended = wants_send(offense.aim) && rules::steal_candidate(&bases).is_some();
 
     let intent = intents.get(score.fielding_team());
     if play.in_steal_window() {
-        // Only a stretch *held through* the window (while the pickoff threat
-        // is live) earns the guaranteed jump at delivery — retreating to the
-        // bag forfeits it, so a one-frame pulse can't bank a risk-free jump.
-        play.duel.window_lead = lead.extended;
+        // The lead only grows while the pickoff threat is live, and shuffles
+        // back once the stretch is let go — so a one-frame pulse can't bank
+        // a risk-free jump, and a bluff takes as long to undo as to make.
+        lead.lead_m = rules::shuffle_lead(lead.lead_m, lead.extended, time.delta_secs());
         // The duel window: the ball is held. A defensive action here is a
         // pickoff throw at the leading runner, not a pitch — one throw per
         // reload, so a held button can't spam the bag.
@@ -188,7 +188,7 @@ pub(super) fn pre_pitch(
             play.duel.pickoff_cooldown =
                 Timer::from_seconds(rules_res.pace.pickoff_cooldown_secs, TimerMode::Once);
             let outs_before = score.outs;
-            match rules::attempt_pickoff(&mut score, &mut bases, &rules_res, lead.extended) {
+            match rules::attempt_pickoff(&mut score, &mut bases, &rules_res, lead.lead_m) {
                 rules::PickoffResult::PickedOff { .. } => {
                     // The out count follows the call (the rules zero it as
                     // they change sides, so a third out reads as the side).
@@ -214,6 +214,11 @@ pub(super) fn pre_pitch(
         }
         return;
     }
+    // After the window a held stretch keeps the lead it built (no pickoff
+    // threat, no growth); a released one shuffles back.
+    if !lead.extended {
+        lead.lead_m = rules::shuffle_lead(lead.lead_m, false, time.delta_secs());
+    }
 
     if intent.action {
         play.pitch.pending = Some((intent.aim, rules::PitchKind::from_aim(intent.aim)));
@@ -223,13 +228,12 @@ pub(super) fn pre_pitch(
         play.resolved = false;
         play.pitch.taken = false;
         play.pitch.presentational_catch = false;
-        // A lead still stretched at first movement sends the runner with the
-        // delivery. It's only the no-throw-beats-it jump when the stretch
-        // was made during the window — that's the extension that paid the
-        // pickoff risk; stretching only after the window is a late break.
+        // A lead still stretched at first movement sends the runner on first
+        // movement — the best break there is. How long that lead is (built
+        // during the window, at pickoff risk) is the rest of his jump.
         if lead.extended {
             play.duel.armed = true;
-            play.duel.big_jump = play.duel.window_lead;
+            play.duel.break_fraction = 0.0;
         }
         for pitcher in &pitcher_q {
             commands
@@ -289,7 +293,7 @@ pub(super) fn wind_up(
         return;
     }
     // Holding the stick down through the delivery sends the lead runner (the
-    // late break: a classic race against the catcher, no guaranteed jump).
+    // late break: the later in the windup he goes, the worse his jump).
     // Nobody in a position to steal means nobody is going. HELD is literal —
     // evidence from more than one instant: a touch tap's position aim (a
     // low swing tap) lands for exactly one frame, and latching off it sent
@@ -301,6 +305,11 @@ pub(super) fn wind_up(
     let send_now = wants_send(intents.get(score.batting_team()).aim)
         && rules::steal_candidate(&bases).is_some();
     if send_now && (play.duel.send_prev || lead.extended) {
+        // The jump is set by when he went: on first movement is clean, a
+        // send as the ball leaves the hand is a late break.
+        if !play.duel.armed {
+            play.duel.break_fraction = play.timer.fraction();
+        }
         play.duel.armed = true;
         lead.extended = true;
     }
@@ -321,6 +330,7 @@ pub(super) fn wind_up(
             spin: kind.spin(),
         });
         play.pitch.kind = Some(kind);
+        play.duel.jump_lead_m = lead.lead_m;
         play.phase = Phase::Pitch;
     }
 }
