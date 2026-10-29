@@ -552,7 +552,8 @@ impl StartGame<'_, '_> {
 }
 
 /// Cycles the field (**F**), innings (**I**), theme (**T**), CPU
-/// difficulty (**D**) and touch swing scheme (**G**); the rebuild system picks the edit up off the
+/// difficulty (**D**), touch swing scheme (**G**) and season length (**L**);
+/// the rebuild system picks the edit up off the
 /// resource's change tick. Keyboard only: a pad changes options through the
 /// cursor ([`menu_navigate`]), so its face buttons keep their conventional
 /// roles instead of each owning an option.
