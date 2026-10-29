@@ -79,6 +79,29 @@ fn trail_style_and_color_cycle_and_wrap() {
     assert_eq!(TrailColor::Ember.prev(), TrailColor::Frost);
 }
 
+#[test]
+fn graphics_quality_cycles_and_wraps() {
+    let mut q = GraphicsQuality::Auto;
+    let mut seen = Vec::new();
+    for _ in 0..4 {
+        seen.push(q);
+        q = q.next();
+    }
+    assert_eq!(q, GraphicsQuality::Auto, "four nexts wrap back to Auto");
+    assert_eq!(
+        seen,
+        [
+            GraphicsQuality::Auto,
+            GraphicsQuality::Low,
+            GraphicsQuality::Medium,
+            GraphicsQuality::High
+        ]
+    );
+    for q in seen {
+        assert_eq!(q.next().prev(), q);
+    }
+}
+
 /// A pre-trail settings store (no trail fields) must still load — the
 /// new fields are serde-defaulted, not a breaking schema change that
 /// would silently reset every player's existing choices.
@@ -90,6 +113,11 @@ fn legacy_store_without_trail_fields_loads_with_defaults() {
     assert_eq!(s.trail_color, TrailColor::Ember);
     assert!(s.show_strike_zone, "zone overlay defaults on");
     assert!(!s.reduce_motion, "full motion defaults on");
+    assert_eq!(
+        s.graphics,
+        GraphicsQuality::Auto,
+        "quality defaults to Auto"
+    );
     assert_eq!(s.batting_style[0], BattingStyle::SwingMeter);
     assert!((s.volume - 0.5).abs() < 1e-6);
 }

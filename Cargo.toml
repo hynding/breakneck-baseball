@@ -18,6 +18,11 @@ bevy = { version = "0.17", features = ["wav"] }
 # 3D physics (features are target-specific, see below)
 bevy_rapier3d = { version = "0.32", features = ["debug-render-3d"] }
 
+# The GPU adapter's device type (discrete/integrated/software) for the Auto
+# graphics-quality heuristic — Bevy exposes the adapter info but doesn't
+# re-export wgpu's `DeviceType`. Same version Bevy already pulls in.
+wgpu-types = { version = "26", default-features = false }
+
 # Serialization (used by Settings)
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
