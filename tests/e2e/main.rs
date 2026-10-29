@@ -44,6 +44,7 @@ mod gltf_rig;
 mod home_run_moment;
 mod identity;
 mod matrix;
+mod menu_cursor;
 mod model_contract;
 mod passive_walks;
 mod pause_subs;

@@ -187,8 +187,17 @@ impl Plugin for InputPlugin {
             // Owned and initialized here (the seam that consumes it); the
             // touch module is its writer.
             .init_resource::<TouchIntent>()
+            .init_resource::<ActiveDevice>()
             // Rebuild intents early each frame so all gameplay systems see them.
             .add_systems(PreUpdate, gather_intents)
+            // In `Update`, not `PreUpdate`: synthetic presses (the Director's
+            // `DriveGame` seam, which tests and autoplay use) land after
+            // `PreUpdate`, and must count as use too. Before the menu, so a
+            // press flips the hints the same frame the menu reads it.
+            .add_systems(
+                Update,
+                track_active_device.before(crate::game::menu::MenuUpdateSet),
+            )
             // Hotplug rewrites `Controllers`, which the AI and fielding read
             // — pinned first in the gameplay pipeline so the trajectory never
             // depends on an ambiguity tie-break (see `GameplayOrder`).
@@ -464,6 +473,160 @@ fn handle_gamepad_hotplug(
             }
         }
     }
+}
+
+// ── Active device & menu navigation ───────────────────────────────────────────
+
+/// The device the player last pressed something on — what the menus'
+/// on-screen instructions describe, so a pad player isn't reading keyboard
+/// hotkeys (and a phone player neither). Display only: it never decides who
+/// controls a team ([`Controllers`] does).
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ActiveDevice {
+    Keyboard,
+    Gamepad,
+    Touch,
+}
+
+impl Default for ActiveDevice {
+    fn default() -> Self {
+        if primary_pointer_is_coarse() {
+            ActiveDevice::Touch
+        } else {
+            ActiveDevice::Keyboard
+        }
+    }
+}
+
+/// Whether the browser reports a finger as its primary pointer — the
+/// pre-first-touch guess, so a phone's first menu already shows tap hints
+/// (a touchscreen laptop's primary pointer stays `fine`).
+#[cfg(target_arch = "wasm32")]
+fn primary_pointer_is_coarse() -> bool {
+    web_sys::window()
+        .and_then(|w| w.match_media("(pointer: coarse)").ok().flatten())
+        .is_some_and(|q| q.matches())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn primary_pointer_is_coarse() -> bool {
+    false
+}
+
+/// Follows the last-used device. A newly connected pad counts as use, so a
+/// console boot with a pad but no press yet shows pad hints. The mouse
+/// never counts: browsers synthesize mouse clicks from taps, which would
+/// flip a phone back to keyboard hints after every touch. The left stick
+/// doesn't either — a resting stick's drift, or one held while typing,
+/// would flicker the hints; its presses still count through the buttons.
+fn track_active_device(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    touches: Res<Touches>,
+    pads: Query<&Gamepad>,
+    added_pads: Query<(), Added<Gamepad>>,
+    mut device: ResMut<ActiveDevice>,
+) {
+    let used = if touches.any_just_pressed() {
+        ActiveDevice::Touch
+    } else if keyboard.get_just_pressed().next().is_some() {
+        ActiveDevice::Keyboard
+    } else if !added_pads.is_empty() || pads.iter().any(|p| p.get_just_pressed().next().is_some()) {
+        ActiveDevice::Gamepad
+    } else {
+        return;
+    };
+    device.set_if_neq(used);
+}
+
+/// One frame of cursor-menu input: the conventional roles shared by every
+/// cursor screen (the main menu, the settings screen). Keyboard arrows and
+/// Enter ride along so keyboard players get the same cursor.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct MenuNav {
+    pub up: bool,
+    pub down: bool,
+    pub left: bool,
+    pub right: bool,
+    /// Gamepad **South** (A) or Enter — activate the focused row.
+    pub confirm: bool,
+}
+
+impl MenuNav {
+    pub fn any(self) -> bool {
+        self != MenuNav::default()
+    }
+}
+
+/// Left-stick deflection that counts as a menu step, and the slack it must
+/// fall back under before the next one (hysteresis, so a stick resting
+/// near the threshold can't chatter).
+const STICK_ENGAGE: f32 = 0.6;
+const STICK_RELEASE: f32 = 0.3;
+
+/// Per-pad left-stick latch: a stick push is one step, not one per frame.
+/// Held as a system `Local` by each cursor screen.
+#[derive(Default)]
+pub(crate) struct StickLatch(Vec<(Entity, IVec2)>);
+
+/// The latched stick direction after this frame's reading: a dominant axis
+/// past [`STICK_ENGAGE`] latches its sign, a stick back inside
+/// [`STICK_RELEASE`] unlatches, and anything between holds the latch.
+pub(crate) fn stick_step(latched: IVec2, stick: Vec2) -> IVec2 {
+    let (ax, ay) = (stick.x.abs(), stick.y.abs());
+    if ax.max(ay) >= STICK_ENGAGE {
+        if ax >= ay {
+            IVec2::new(stick.x.signum() as i32, 0)
+        } else {
+            IVec2::new(0, stick.y.signum() as i32)
+        }
+    } else if ax.max(ay) < STICK_RELEASE {
+        IVec2::ZERO
+    } else {
+        latched
+    }
+}
+
+/// Reads this frame's [`MenuNav`] from the keyboard and every pad's D-pad,
+/// left stick and A button.
+pub(crate) fn menu_nav(
+    keyboard: &ButtonInput<KeyCode>,
+    pads: &Query<(Entity, &Gamepad)>,
+    latch: &mut StickLatch,
+) -> MenuNav {
+    let pad = |b: GamepadButton| pads.iter().any(|(_, p)| p.just_pressed(b));
+    let mut nav = MenuNav {
+        up: keyboard.just_pressed(KeyCode::ArrowUp) || pad(GamepadButton::DPadUp),
+        down: keyboard.just_pressed(KeyCode::ArrowDown) || pad(GamepadButton::DPadDown),
+        left: keyboard.just_pressed(KeyCode::ArrowLeft) || pad(GamepadButton::DPadLeft),
+        right: keyboard.just_pressed(KeyCode::ArrowRight) || pad(GamepadButton::DPadRight),
+        confirm: keyboard.just_pressed(KeyCode::Enter)
+            || keyboard.just_pressed(KeyCode::NumpadEnter)
+            || pad(GamepadButton::South),
+    };
+    // Unplugged pads drop out of the latch.
+    latch.0.retain(|(e, _)| pads.contains(*e));
+    for (entity, gamepad) in pads {
+        let slot = match latch.0.iter().position(|(e, _)| *e == entity) {
+            Some(i) => i,
+            None => {
+                latch.0.push((entity, IVec2::ZERO));
+                latch.0.len() - 1
+            }
+        };
+        let before = latch.0[slot].1;
+        let after = stick_step(before, gamepad.left_stick());
+        latch.0[slot].1 = after;
+        if after != before {
+            match (after.x, after.y) {
+                (0, 1) => nav.up = true,
+                (0, -1) => nav.down = true,
+                (-1, 0) => nav.left = true,
+                (1, 0) => nav.right = true,
+                _ => {}
+            }
+        }
+    }
+    nav
 }
 
 /// Assigns input sources to teams given the chosen mode and the currently
