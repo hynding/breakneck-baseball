@@ -145,3 +145,113 @@ fn a_pitcher_challenges_a_hitter_who_never_offers() {
         assert_eq!(taker_scatter_scale(true, balls, 2), 1.0);
     }
 }
+
+// ── Count-aware pitch calling ─────────────────────────────────────────────
+
+/// Share of `kind` in a count's call table.
+fn share(balls: u32, strikes: u32, kind: PitchKind) -> f32 {
+    let mix = pitch_mix(balls, strikes);
+    let i = ARSENAL.iter().position(|k| *k == kind).unwrap();
+    mix[i] / mix.iter().sum::<f32>()
+}
+
+#[test]
+fn the_call_follows_the_count() {
+    use PitchKind::*;
+    // Behind: the heater (MLB throws a fastball 70%+ of the time at 3-0,
+    // 3-1 and 2-0, per docs/BASEBALL.md).
+    for (b, s) in [(3, 0), (3, 1), (2, 0)] {
+        assert!(
+            share(b, s, Fastball) + share(b, s, Sinker) >= 0.7,
+            "{b}-{s}"
+        );
+    }
+    // Ahead: breaking balls make up the bulk of the put-away calls.
+    for (b, s) in [(0, 2), (1, 2)] {
+        assert!(
+            share(b, s, Slider) + share(b, s, Curveball) >= 0.4,
+            "{b}-{s}"
+        );
+        assert!(share(b, s, Fastball) < share(0, 0, Fastball), "{b}-{s}");
+    }
+    // Every count stays a real mix, never a single pitch.
+    for b in 0..=3 {
+        for s in 0..=2 {
+            assert!(share(b, s, Fastball) < 0.85, "{b}-{s}");
+            assert!(share(b, s, Changeup) <= 0.2, "{b}-{s}");
+        }
+    }
+}
+
+#[test]
+fn call_pitch_spans_the_table() {
+    // A fine sweep of rolls reproduces the weights (and the top of the
+    // range never falls off the end of the table).
+    for (b, s) in [(0, 0), (3, 0), (0, 2)] {
+        let n = 10_000;
+        for kind in ARSENAL {
+            let hits = (0..n)
+                .filter(|i| call_pitch(*i as f32 / n as f32, b, s) == kind)
+                .count();
+            let got = hits as f32 / n as f32;
+            assert!((got - share(b, s, kind)).abs() < 0.002, "{b}-{s} {kind:?}");
+        }
+        call_pitch(0.999_999, b, s);
+    }
+}
+
+#[test]
+fn the_pitch_called_is_the_pitch_thrown() {
+    // Whatever the scatter and the count, the aim decodes back to the
+    // called kind — scatter used to turn a third of all pitches into
+    // changeups.
+    let steps = 12;
+    for kind in ARSENAL {
+        for ix in -steps..=steps {
+            for iy in -steps..=steps {
+                let scatter = Vec2::new(ix as f32, iy as f32 * 0.5) * (0.9 / steps as f32);
+                for balls in 0..=3 {
+                    for chase in [false, true] {
+                        let aim = pitch_aim(kind, scatter, balls, chase);
+                        assert_eq!(
+                            PitchKind::from_aim(aim),
+                            kind,
+                            "{scatter} b={balls} {chase}"
+                        );
+                        assert!(aim.x >= -0.45, "never aimed at the batter: {aim}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn chase_pitches_only_with_the_hitter_in_a_hole() {
+    // ...and the hitter in the hole expands his zone to meet them.
+    assert!(two_strike_chase_scale(2) > 1.0);
+    assert_eq!(two_strike_chase_scale(1), 1.0);
+    assert!(chase_rate(0, 2) > chase_rate(1, 2));
+    assert!(chase_rate(1, 2) > 0.0);
+    for (b, s) in [(0, 0), (0, 1), (2, 2), (3, 2), (3, 0)] {
+        assert_eq!(chase_rate(b, s), 0.0, "{b}-{s}");
+    }
+    // The chase heater sits above where the regular one does.
+    let fb = pitch_aim(PitchKind::Fastball, Vec2::ZERO, 0, false);
+    let up = pitch_aim(PitchKind::Fastball, Vec2::ZERO, 0, true);
+    assert!(up.y > fb.y);
+}
+
+#[test]
+fn a_hitter_who_never_offers_gets_strikes_from_two_balls() {
+    // The call goes straight at a statue from two balls — but only one who
+    // has stood through two whole plate appearances already; a patient
+    // hitter taking to 2-0 keeps the mix.
+    assert!(grooves_for_taker(false, 2, 2));
+    assert!(!grooves_for_taker(false, 1, 3));
+    assert!(!grooves_for_taker(false, 2, 1));
+    assert!(!grooves_for_taker(true, 5, 3));
+    // The scatter pull waits for two strikes as well.
+    assert!(!challenges_taker(false, 2, 1));
+    assert!(challenges_taker(false, 2, 2));
+}
