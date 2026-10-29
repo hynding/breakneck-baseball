@@ -255,6 +255,60 @@ impl GraphicsQuality {
     }
 }
 
+/// How tough the CPU opponent plays — the menu face of
+/// [`crate::game::ai::CpuConfig::skill`], a stepped slider rather than a raw
+/// float so every level is a value the economy has been exercised at.
+/// `Normal` is the skill the balance sim and every e2e suite play at, so the
+/// default changes nothing; the other steps sit evenly either side of it.
+/// The CPU-vs-CPU economy can't arbitrate this one — `skill` sharpens both
+/// CPU teams at once — so the steps are about how hard the CPU is for a
+/// human, not about the league average.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum Difficulty {
+    Easy,
+    #[default]
+    Normal,
+    Hard,
+    Expert,
+}
+
+impl Difficulty {
+    pub fn label(self) -> &'static str {
+        match self {
+            Difficulty::Easy => "Easy",
+            Difficulty::Normal => "Normal",
+            Difficulty::Hard => "Hard",
+            Difficulty::Expert => "Expert",
+        }
+    }
+
+    /// The `CpuConfig::skill` this step plays at (0.0 = easy, 1.0 = tough).
+    /// Expert stops short of 1.0: at 1.0 the CPU hitter never chases and
+    /// its pitcher's scatter bottoms out, which reads as a machine.
+    pub fn skill(self) -> f32 {
+        match self {
+            Difficulty::Easy => 0.15,
+            Difficulty::Normal => 0.4,
+            Difficulty::Hard => 0.65,
+            Difficulty::Expert => 0.9,
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Difficulty::Easy => Difficulty::Normal,
+            Difficulty::Normal => Difficulty::Hard,
+            Difficulty::Hard => Difficulty::Expert,
+            Difficulty::Expert => Difficulty::Easy,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        // 3 nexts = 1 prev in a 4-cycle.
+        self.next().next().next()
+    }
+}
+
 /// Everything the player can configure. Persisted on every change.
 #[derive(Resource, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Settings {
@@ -287,6 +341,10 @@ pub struct Settings {
     /// the device's tier instead of resetting every option).
     #[serde(default)]
     pub graphics: GraphicsQuality,
+    /// CPU opponent difficulty (serde-defaulted to Normal so old stores
+    /// keep the skill they have always played against).
+    #[serde(default)]
+    pub difficulty: Difficulty,
     /// Master volume, 0.0..=1.0, applied via [`bevy::audio::GlobalVolume`].
     pub volume: f32,
 }
@@ -305,6 +363,7 @@ impl Default for Settings {
             show_strike_zone: true,
             reduce_motion: false,
             graphics: GraphicsQuality::default(),
+            difficulty: Difficulty::default(),
             volume: 0.7,
         }
     }
