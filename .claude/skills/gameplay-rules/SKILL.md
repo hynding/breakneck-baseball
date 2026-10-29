@@ -26,10 +26,10 @@ before changing behavior — most "bugs" here are deliberate design.
 1. **Steal window** — whenever `rules::steal_candidate` says a runner can steal, each at-bat opens
    a window (`Ruleset::steal_window_secs`; `Play::in_steal_window`) gating the pitch. Offense holds
    Down to stretch the lead (`LeadState`); while extended, a defensive action press is a pickoff
-   (`rules::attempt_pickoff`, on a reload cooldown). Only a lead stretched *during* the window
-   (`window_lead`) earns `big_jump` — the steal no pitch beats. Late breaks keep the classic
-   off-speed-safe / fastball-out race. Dropped third = curveball in the dirt; catcher's throw
-   wins vs fastball.
+   (`rules::attempt_pickoff`, on a reload cooldown) racing the runner's dive back from
+   `LeadState::lead_m`. The lead only grows during the window. A steal is a timed race
+   (`rules::steal_race`): break timing in the windup + sprint from the lead vs. pitch-kind
+   delivery + catcher transfer (low/wide crossing) + pop time. Dropped third = curveball in the dirt.
 2. **Pitch** — five-pitch arsenal by dominant held-aim axis at release (`PitchKind::from_aim`):
    up fastball, down curveball, left slider, right sinker, neutral changeup. Untouched pitches end
    in the mitt: `flow::catcher_receives` (skips balls in the dirt) fires `PitchCaughtEvent`.

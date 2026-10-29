@@ -27,7 +27,8 @@
 use bevy::prelude::*;
 
 use crate::game::ai::{
-    CpuConfig, CpuState, cpu_defense, cpu_offense, reset_cpu_clock, tick_cpu_clock,
+    CpuConfig, CpuState, apply_difficulty, cpu_defense, cpu_offense, reset_cpu_clock,
+    tick_cpu_clock,
 };
 use crate::game::rules::{self, Bases, BattingOrder, Outcome};
 use crate::game::variant::Ruleset;
@@ -270,13 +271,14 @@ struct DuelState {
     /// one-frame position aim (a low swing tap) send a runner nobody
     /// called.
     send_prev: bool,
-    /// The armed steal broke from an extended pre-pitch lead — a jump no
-    /// throw beats (the pickoff was the defense's counter).
-    big_jump: bool,
-    /// The lead was stretched *during* the steal window — the only extension
-    /// that earns the guaranteed jump, because it was the only one exposed
-    /// to the pickoff. Stretching after the window is a plain late break.
-    window_lead: bool,
+    /// How far into the wind-up the runner broke (0 = on first movement,
+    /// or already going from a stretched lead) — the jump half of the steal
+    /// race (`rules::steal_race`).
+    break_fraction: f32,
+    /// The lead the runner broke from, snapshotted at release — the other
+    /// half of his jump. Only a lead stretched during the window (while the
+    /// pickoff threat was live) is longer than normal.
+    jump_lead_m: f32,
     /// The pre-pitch steal window: while running, the pitch is gated and the
     /// leadoff/pickoff duel is live. Zero-length when nobody can steal.
     hold: Timer,
@@ -289,8 +291,8 @@ impl Default for DuelState {
         Self {
             armed: false,
             send_prev: false,
-            big_jump: false,
-            window_lead: false,
+            break_fraction: 0.0,
+            jump_lead_m: rules::LEAD_NORMAL_M,
             // Zero-length until `steal_window_for` sizes it at the reset.
             hold: Timer::from_seconds(0.0, TimerMode::Once),
             pickoff_cooldown: Timer::from_seconds(0.0, TimerMode::Once),
@@ -343,18 +345,39 @@ impl Play {
 
     /// Whether the pre-pitch steal window is still open: the pitch is held,
     /// leads may stretch, and a defensive action is a pickoff throw.
+    /// How far through the wind-up the delivery is (0..1), while winding
+    /// up — when a send goes decides the runner's jump.
+    pub fn windup_fraction(&self) -> Option<f32> {
+        (self.phase == Phase::WindUp).then(|| self.timer.fraction())
+    }
+
     pub fn in_steal_window(&self) -> bool {
         !self.duel.hold.is_finished()
     }
 
     /// The hit the umpire has already decided but not yet announced (the
-    /// throw is still in the air): `Some(bases)` lets the runner rigs break
-    /// for the bases they've earned while the play finishes.
-    pub fn pending_hit(&self) -> Option<u32> {
+    /// throw is still in the air): `Some((bases, extra))` lets the runner
+    /// rigs break for the bases they've earned while the play finishes —
+    /// `extra` names the runner (by origin base) going for one more, and
+    /// whether he makes it.
+    pub fn pending_hit(&self) -> Option<(u32, Option<(usize, bool)>)> {
         match self.live.pending_call {
-            Some(Outcome::Hit(n)) => Some(n),
+            Some(Outcome::Hit(n)) => Some((n, None)),
+            Some(Outcome::ExtraBase { hit, runner, safe }) => Some((hit, Some((runner, safe)))),
             _ => None,
         }
+    }
+
+    /// Whether the decided-but-unannounced call is a caught fly with the
+    /// runner on third tagging: he breaks for the plate on the throw.
+    pub fn pending_tag_up(&self) -> bool {
+        matches!(
+            self.live.pending_call,
+            Some(Outcome::Out(rules::OutKind::Fly {
+                tag: rules::TagUp::Scores | rules::TagUp::ThrownOut,
+                ..
+            }))
+        )
     }
 
     /// The most recent judged swing's quality this at-bat (any swing), or
@@ -521,11 +544,24 @@ impl Play {
 }
 
 /// The live leadoff state, shared with the runner visuals and the CPU: the
-/// offense holding Down stretches the lead runner off the bag — arming the
-/// guaranteed steal jump, and offering the pickoff.
-#[derive(Resource, Default)]
+/// offense holding Down stretches the lead runner off the bag — a longer lead
+/// for the steal race, and a longer dive back on a pickoff.
+#[derive(Resource)]
 pub struct LeadState {
     pub extended: bool,
+    /// How far off the bag the lead runner stands (regulation metres): it
+    /// shuffles out while a stretch is held during the steal window and back
+    /// once it is let go (`rules::shuffle_lead`).
+    pub lead_m: f32,
+}
+
+impl Default for LeadState {
+    fn default() -> Self {
+        Self {
+            extended: false,
+            lead_m: rules::LEAD_NORMAL_M,
+        }
+    }
 }
 
 impl Default for Play {
@@ -679,7 +715,7 @@ impl Plugin for FlowPlugin {
             .add_message::<PlayBanner>()
             .add_systems(
                 crate::game::game_start(),
-                (pitch::reset_flow, reset_cpu_clock),
+                (pitch::reset_flow, reset_cpu_clock, apply_difficulty),
             )
             .add_systems(
                 Update,

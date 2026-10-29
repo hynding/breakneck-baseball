@@ -7,7 +7,7 @@ use crate::game::variant::{FieldSpec, PaceTuning, Ruleset};
 
 use super::{
     AIM_DEADZONE, Bases, INFIELD_GATHER_RADIUS, OutKind, Outcome, POP_RADIUS, RunnerCall,
-    TAG_UP_MIN_DIST, is_fair,
+    TAG_UP_MIN_DIST, TagUp, is_fair,
 };
 
 /// Whether the runner on (0-indexed) `base` is *forced* to advance: every base
@@ -18,20 +18,130 @@ pub fn is_forced(bases: &Bases, base: usize) -> bool {
     (0..base).all(|b| bases.is_occupied(b))
 }
 
-/// The out recorded when the ball is caught on the fly at `pos`.
-pub fn resolve_catch(pos: Vec3, field: &FieldSpec) -> OutKind {
+/// The out recorded when the ball is caught on the fly at `pos`, with the
+/// runner on third's tag-up read against the throw home ([`read_tag_up`]).
+/// `outs` is the count before the catch; `runners_going` (the hit-and-run
+/// flag) means the runners are doubled off instead — nobody tags.
+pub fn resolve_catch(
+    pos: Vec3,
+    bases: &Bases,
+    outs: u32,
+    runners_going: bool,
+    field: &FieldSpec,
+    rules: &Ruleset,
+) -> OutKind {
     if !is_fair(pos, field) {
         return OutKind::FoulPop;
     }
     let dist = Vec2::new(pos.x, pos.z).length();
     let s = field.hit_scale;
     if dist < POP_RADIUS * s {
-        OutKind::Pop
-    } else {
-        OutKind::Fly {
-            deep: dist >= TAG_UP_MIN_DIST * s,
-        }
+        return OutKind::Pop;
     }
+    let tag = if runners_going {
+        TagUp::Hold
+    } else {
+        read_tag_up(pos, bases, outs, field, rules)
+    };
+    OutKind::Fly {
+        deep: dist >= TAG_UP_MIN_DIST * s,
+        tag,
+    }
+}
+
+/// The runner on third's tag-up on a fly caught at `pos`. He retouches the
+/// bag timed to the catch (a running start, no reaction) and races the
+/// outfielder's throw home, which still needs the tag put on. He goes when
+/// the race is no worse than the send gamble (`send_aggression_secs`) —
+/// scoring if he really beats it, thrown out in the gamble's band. With two
+/// out the catch ends the inning, so nobody tags. Per docs/BASEBALL.md
+/// ("Fewer than two outs, deep fly — tag up").
+pub fn read_tag_up(
+    pos: Vec3,
+    bases: &Bases,
+    outs: u32,
+    field: &FieldSpec,
+    rules: &Ruleset,
+) -> TagUp {
+    let n = field.base_count();
+    if n == 0 || !bases.is_occupied(n - 1) || outs + 1 >= rules.counts.outs_per_half {
+        return TagUp::Hold;
+    }
+    let pace = &rules.pace;
+    let leg = field.base_positions.first().map_or(27.43, |b| b.length());
+    let runner_at = leg / pace.runner_speed;
+    let throw_at = pace.throw_transfer_secs
+        + Vec2::new(pos.x, pos.z).length() / pace.throw_speed
+        + pace.tag_apply_secs;
+    if runner_at <= throw_at + pace.runner_margin_secs {
+        TagUp::Scores
+    } else if runner_at <= throw_at + pace.runner_margin_secs + pace.send_aggression_secs {
+        TagUp::ThrownOut
+    } else {
+        TagUp::Hold
+    }
+}
+
+/// One runner aboard reading a hit for a base more than it gives him.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ExtraBaseRead {
+    /// His origin base (0-indexed).
+    pub from: usize,
+    /// The extra bag he reads for (0-indexed; `base_count()` = home).
+    pub to: usize,
+    /// He goes for it (the race is no worse than his send gamble).
+    pub go: bool,
+    /// He beats a throw to that bag.
+    pub beats_throw: bool,
+    /// A throw to that bag arrives in time to be worth making.
+    pub contested: bool,
+}
+
+/// The lead runner's read on a `hit_bases` hit gathered at `pos`,
+/// `gather_time` seconds after contact: the most advanced runner the hit
+/// doesn't already score reads whether one more base (second to home on a
+/// single, first to third, first to home on a double) beats the throw there.
+/// He starts from his secondary lead, breaking at the bat with two out and a
+/// reaction later otherwise; the throw needs its transfer, flight and the
+/// tag. `None` with nobody to read, or on a hit-and-run, whose jump already
+/// bought the runners their extra base. The real-game benchmark is MLB's
+/// ~41% extra bases taken (docs/BASEBALL.md "Taking the extra base").
+#[allow(clippy::too_many_arguments)]
+pub fn read_extra_base(
+    pos: Vec3,
+    gather_time: f32,
+    bases: &Bases,
+    hit_bases: u32,
+    outs: u32,
+    runners_going: bool,
+    field: &FieldSpec,
+    pace: &PaceTuning,
+) -> Option<ExtraBaseRead> {
+    if runners_going {
+        return None;
+    }
+    let n = field.base_count();
+    let hit = hit_bases as usize;
+    let from = (0..n)
+        .rev()
+        .find(|&b| bases.is_occupied(b) && b + hit < n)?;
+    let to = from + hit + 1;
+    let leg = field.base_positions.first().map_or(27.43, |b| b.length());
+    let start = if outs >= 2 { 0.0 } else { pace.reaction_secs };
+    let runner_at = start + leg * ((hit + 1) as f32 - pace.secondary_lead_frac) / pace.runner_speed;
+    let bag = home_or_base(to, field);
+    let throw_at = gather_time
+        + pace.throw_transfer_secs
+        + Vec2::new(bag.x - pos.x, bag.z - pos.z).length() / pace.throw_speed
+        + pace.tag_apply_secs;
+    let beats_throw = runner_at <= throw_at + pace.runner_margin_secs;
+    Some(ExtraBaseRead {
+        from,
+        to,
+        go: runner_at <= throw_at + pace.runner_margin_secs + pace.send_aggression_secs,
+        beats_throw,
+        contested: throw_at <= runner_at + pace.throw_contest_secs,
+    })
 }
 
 /// The batter-vs-throw race once a fair ball is gathered at `pos`,
@@ -81,15 +191,20 @@ pub fn resolve_gathered(
 /// the throw goes ahead of the batter to the bag he will end on — first on a
 /// single (the conventional play), second on a stand-up double, and so on —
 /// so the defense visibly makes the attempt even on a conceded hit.
-/// `runners_going` marks a hit-and-run jump, which takes the runner forces
-/// off the table. 0-indexed into `base_positions`; `base_count()` means home
-/// plate (bases loaded, force at the plate). Pure choreography guidance —
-/// the call itself comes from [`resolve_thrown`].
+/// When the lead runner reads the hit for an extra base ([`read_extra_base`])
+/// and the throw there is close enough to contest, the throw goes to his bag
+/// instead — the play at the plate. `runners_going` marks a hit-and-run
+/// jump, which takes the runner forces off the table; `outs` is the count
+/// before the play. 0-indexed into `base_positions`; `base_count()` means
+/// home plate (bases loaded, force at the plate). Pure choreography
+/// guidance — the call itself comes from [`resolve_thrown`].
+#[allow(clippy::too_many_arguments)]
 pub fn throw_target(
     pos: Vec3,
     gather_time: f32,
     bases: &Bases,
     runners_going: bool,
+    outs: u32,
     field: &FieldSpec,
     pace: &PaceTuning,
 ) -> usize {
@@ -105,13 +220,15 @@ pub fn throw_target(
     };
     let base_pos = |b: usize| home_or_base(b, field);
 
-    // Take the biggest force out the throw still beats. The batter never
-    // has the jump, so first base races on the standing-start clock.
+    // Take the biggest force out the throw still beats — only ever an
+    // infield play, as in [`resolve_thrown`]. The batter never has the
+    // jump, so first base races on the standing-start clock.
+    let infield = Vec2::new(pos.x, pos.z).length() < INFIELD_GATHER_RADIUS * field.hit_scale;
     let batter_at = forced_runner_at(leg, false, pace);
     let mut b = lead_force(bases, field);
     loop {
         let clock = if b == 0 { batter_at } else { runner_at };
-        if clock > throw_at(base_pos(b)) + pace.runner_margin_secs {
+        if infield && clock > throw_at(base_pos(b)) + pace.runner_margin_secs {
             return b;
         }
         if b == 0 {
@@ -128,6 +245,21 @@ pub fn throw_target(
             let mut n = 1;
             while n < field.base_count() && safe(n + 1) {
                 n += 1;
+            }
+            // A runner sent for the extra base draws the throw when it
+            // can still get him — the close play at the plate.
+            let read = read_extra_base(
+                pos,
+                gather_time,
+                bases,
+                n as u32,
+                outs,
+                runners_going,
+                field,
+                pace,
+            );
+            if let Some(read) = read.filter(|r| r.go && r.contested) {
+                return read.to;
             }
             return n - 1;
         }
@@ -183,7 +315,10 @@ fn lead_force(bases: &Bases, field: &FieldSpec) -> usize {
 /// whose behaviour this reproduces exactly for a prompt neutral throw to
 /// first with empty bases. `runner_call` is the batting side's say: `Send`
 /// stretches for one extra base against a softer race (cut down trying if it
-/// fails), `Hold` pulls up a base early.
+/// fails), `Hold` pulls up a base early. On a clean hit the lead runner
+/// aboard reads for one base more ([`read_extra_base`]); a throw to that bag
+/// races him ([`Outcome::ExtraBase`]), a throw anywhere else concedes it.
+/// `outs` is the count before the play.
 #[allow(clippy::too_many_arguments)]
 pub fn resolve_thrown(
     pos: Vec3,
@@ -191,6 +326,7 @@ pub fn resolve_thrown(
     target: usize,
     bases: &Bases,
     runners_going: bool,
+    outs: u32,
     runner_call: RunnerCall,
     field: &FieldSpec,
     rules: &Ruleset,
@@ -248,7 +384,7 @@ pub fn resolve_thrown(
     while n < field.base_count() && safe(n + 1) {
         n += 1;
     }
-    match runner_call {
+    let hit = match runner_call {
         // Sent for one more: a softer race (the ball is usually elsewhere),
         // but getting it wrong is an out on the bases.
         RunnerCall::Send if n < field.base_count() => {
@@ -258,14 +394,34 @@ pub fn resolve_thrown(
                     + rules.pace.runner_margin_secs
                     + rules.pace.stretch_grace_secs
             {
-                Outcome::Hit(n as u32 + 1)
+                n as u32 + 1
             } else {
-                Outcome::Out(OutKind::Stretching { advanced: n as u32 })
+                return Outcome::Out(OutKind::Stretching { advanced: n as u32 });
             }
         }
         // Held up: bank the sure bases (never less than the single).
-        RunnerCall::Hold => Outcome::Hit((n as u32 - 1).max(1)),
-        _ => Outcome::Hit(n as u32),
+        RunnerCall::Hold => (n as u32 - 1).max(1),
+        _ => n as u32,
+    };
+    // The lead runner's read: he goes on what he sees at the throw, and
+    // only a throw to his bag can get him.
+    let read = read_extra_base(
+        pos,
+        throw_time,
+        bases,
+        hit,
+        outs,
+        runners_going,
+        field,
+        &rules.pace,
+    );
+    match read.filter(|r| r.go) {
+        Some(read) => Outcome::ExtraBase {
+            hit,
+            runner: read.from,
+            safe: target != read.to || read.beats_throw,
+        },
+        None => Outcome::Hit(hit),
     }
 }
 

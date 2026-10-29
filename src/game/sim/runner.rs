@@ -14,12 +14,10 @@ use crate::game::{GameState, ScoreBoard};
 const RIG_Y: f32 = 0.6;
 /// Where a new runner starts (the batter's box).
 const PLATE_START: Vec3 = Vec3::new(0.7, RIG_Y, 0.0);
-/// Leadoff distances off the bag toward the next base (metres): the normal
-/// lead every runner takes, and the stretched lead that arms the early break.
-const LEAD_NORMAL: f32 = 2.2;
-const LEAD_EXTENDED: f32 = 4.5;
-/// Shuffle speed for taking / retreating from a lead.
-const LEAD_SPEED: f32 = 2.6;
+/// Shuffle speed for taking / retreating from a lead — the same pace the
+/// rules grow it at, so the rig stands where the steal race says he is
+/// (`LeadState::lead_m`).
+const LEAD_SPEED: f32 = rules::LEAD_SHUFFLE_SPEED;
 /// Distance from the bag at which an arriving runner drops into the slide.
 const SLIDE_RANGE: f32 = 2.2;
 
@@ -199,12 +197,7 @@ fn take_leadoffs(
                 intent.speed = ruleset.pace.runner_speed;
                 continue;
             }
-            let dist = if lead.extended {
-                LEAD_EXTENDED
-            } else {
-                LEAD_NORMAL
-            };
-            bag + dir * dist
+            bag + dir * lead.lead_m
         } else {
             bag
         };
@@ -493,7 +486,8 @@ fn tick_run_delays(
 /// real runner rounding first while the outfielder's throw comes in, and the
 /// runners aboard sprint (or score) ahead of the announcement. When the call
 /// applies, [`sync_runners`] finds every rig already on (or heading to) its
-/// base and has nothing left to move.
+/// base and has nothing left to move. A caught fly the runner on third tags
+/// on ([`Play::pending_tag_up`]) sends him home the same way.
 #[allow(clippy::type_complexity)]
 fn run_out_pending_call(
     play: Res<Play>,
@@ -503,7 +497,27 @@ fn run_out_pending_call(
     mut runners: Query<(Entity, &mut Runner), Without<BatterGhost>>,
     mut commands: Commands,
 ) {
-    let Some(hit_bases) = play.pending_hit() else {
+    if play.pending_tag_up() {
+        // The runner on third tagged on the catch: retouch, then the dash
+        // home against the throw. Either way he leaves the bag for good.
+        if *handled {
+            return;
+        }
+        *handled = true;
+        let last = field.base_count().saturating_sub(1);
+        for (entity, runner) in &runners {
+            if runner.base == last {
+                let mut waypoints = vec![base_pos(&field, last)];
+                waypoints.extend(path_home(&field, last));
+                commands
+                    .entity(entity)
+                    .insert((BasePath { waypoints, next: 0 }, DespawnAtPathEnd))
+                    .remove::<Runner>();
+            }
+        }
+        return;
+    }
+    let Some((hit_bases, extra)) = play.pending_hit() else {
         *handled = false;
         return;
     };
@@ -514,9 +528,12 @@ fn run_out_pending_call(
     let count = field.base_count();
     let jump = play.runners_going() as usize;
 
-    // Runners aboard take the bases the decided call gives them.
+    // Runners aboard take the bases the decided call gives them; the one
+    // reading for the extra base goes one further — and a runner cut down
+    // there leaves the field at the bag.
     for (entity, mut runner) in &mut runners {
-        let dest = runner.base + hit_bases as usize + jump;
+        let reading = extra.filter(|&(from, _)| from == runner.base);
+        let dest = runner.base + hit_bases as usize + jump + reading.is_some() as usize;
         if dest >= count {
             commands.entity(entity).insert((
                 BasePath {
@@ -526,6 +543,17 @@ fn run_out_pending_call(
                 DespawnAtPathEnd,
             ));
             commands.entity(entity).remove::<Runner>();
+        } else if matches!(reading, Some((_, false))) {
+            commands
+                .entity(entity)
+                .insert((
+                    BasePath {
+                        waypoints: path_between(&field, Some(runner.base), dest),
+                        next: 0,
+                    },
+                    DespawnAtPathEnd,
+                ))
+                .remove::<Runner>();
         } else {
             commands.entity(entity).insert(BasePath {
                 waypoints: path_between(&field, Some(runner.base), dest),

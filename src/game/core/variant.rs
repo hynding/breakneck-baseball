@@ -12,6 +12,11 @@ use bevy::prelude::{Reflect, Resource};
 
 use crate::game::rules::{HALF_DIAGONAL, PITCH_DISTANCE};
 
+/// Standard-park set depth of the second baseman and shortstop: 44.5 m along
+/// the plate axis at ±7 m, ~45 m (148 ft) from home — MLB second basemen set
+/// 145–159 ft deep, per docs/BASEBALL.md.
+const MIDDLE_INFIELD_DEPTH: f32 = 44.5;
+
 /// Countable-rule knobs read by the rules engine and game flow, grouped so
 /// the debug inspector renders each group as its own collapsible section.
 #[derive(Resource, Clone, Debug, Reflect)]
@@ -62,6 +67,10 @@ impl Ruleset {
         diff!(pace.hit_and_run_jump_secs);
         diff!(pace.stretch_grace_secs);
         diff!(pace.runner_margin_secs);
+        diff!(pace.secondary_lead_frac);
+        diff!(pace.tag_apply_secs);
+        diff!(pace.send_aggression_secs);
+        diff!(pace.throw_contest_secs);
         diff!(pace.result_secs);
         diff!(pace.ball_result_secs);
         diff!(pace.strike_result_secs);
@@ -166,6 +175,16 @@ pub struct PaceTuning {
     /// Bang-bang margin: ties and near-ties go to the runner — was
     /// `rules::RUNNER_MARGIN`.
     pub runner_margin_secs: f32,
+    /// How far (as a fraction of a base leg) a runner aboard is off his bag
+    /// at contact — where his extra-base read starts.
+    pub secondary_lead_frac: f32,
+    /// Time to put a tag on a runner at a bag no force covers.
+    pub tag_apply_secs: f32,
+    /// How far a losing race a runner still gambles on when reading for the
+    /// extra base or tagging from third.
+    pub send_aggression_secs: f32,
+    /// The latest (behind a sent runner) a throw still goes to his bag.
+    pub throw_contest_secs: f32,
     /// Seconds the result banner lingers after a batted ball's call (and a
     /// pickoff) before the next pitch — was `flow::RESULT_SECS`. The pitch
     /// results have their own holds below (TODO 101); [`Self::result_secs_for`]
@@ -209,6 +228,10 @@ impl Default for PaceTuning {
             hit_and_run_jump_secs: rules::HIT_AND_RUN_JUMP,
             stretch_grace_secs: rules::STRETCH_GRACE,
             runner_margin_secs: rules::RUNNER_MARGIN,
+            secondary_lead_frac: rules::SECONDARY_LEAD_FRAC,
+            tag_apply_secs: rules::TAG_APPLY,
+            send_aggression_secs: rules::SEND_AGGRESSION,
+            throw_contest_secs: rules::THROW_CONTEST,
             result_secs: flow::RESULT_SECS,
             ball_result_secs: flow::BALL_RESULT_SECS,
             strike_result_secs: flow::STRIKE_RESULT_SECS,
@@ -417,12 +440,20 @@ impl VariantId {
                 fielder_positions: vec![
                     Vec3::new(0.0, 0.0, -1.5),                           // catcher
                     Vec3::new(-HALF_DIAGONAL, 0.0, HALF_DIAGONAL - 3.0), // first base
-                    Vec3::new(-7.0, 0.0, HALF_DIAGONAL * 2.0 - 3.0),     // second base
-                    Vec3::new(7.0, 0.0, HALF_DIAGONAL * 2.0 - 3.0),      // shortstop
-                    Vec3::new(HALF_DIAGONAL, 0.0, HALF_DIAGONAL - 3.0),  // third base
-                    Vec3::new(40.0, 0.0, 85.0), // left field (screen left = +X)
-                    Vec3::new(0.0, 0.0, 110.0), // centre field
-                    Vec3::new(-40.0, 0.0, 85.0), // right field
+                    // Middle infielders play on the outfield grass behind
+                    // the bag, ~148 ft (45 m) deep per docs/BASEBALL.md —
+                    // in front of the base path they could not get back on
+                    // the soft flares that dropped behind them.
+                    Vec3::new(-7.0, 0.0, MIDDLE_INFIELD_DEPTH), // second base
+                    Vec3::new(7.0, 0.0, MIDDLE_INFIELD_DEPTH),  // shortstop
+                    Vec3::new(HALF_DIAGONAL, 0.0, HALF_DIAGONAL - 3.0), // third base
+                    // MLB-average outfield depth, per docs/BASEBALL.md:
+                    // corners ~294 ft (89.6 m), centre 318 ft (96.9 m). The
+                    // old 94 m / 110 m spots left a 30 m hole behind the
+                    // infield that turned bloops into doubles.
+                    Vec3::new(38.2, 0.0, 81.1), // left field (screen left = +X)
+                    Vec3::new(0.0, 0.0, 96.9),  // centre field
+                    Vec3::new(-38.2, 0.0, 81.1), // right field
                 ],
                 // A full crew: behind the plate, outside each line at first
                 // and third, and behind the keystone for the middle.

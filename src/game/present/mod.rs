@@ -6,4 +6,5 @@ pub mod fx;
 pub mod jersey;
 pub mod juice;
 pub mod player;
+pub mod quality;
 pub mod ui;

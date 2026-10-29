@@ -335,6 +335,7 @@ struct Aggregate {
     hbp_pct: f64,
     pitches_per_pa: f64,
     babip: f64,
+    doubles_per9: f64,
     pickoffs_per9: f64,
     caught_stealing_per9: f64,
 }
@@ -371,6 +372,7 @@ fn run_sim(n: u32) -> Aggregate {
         hbp_pct: 100.0 * s(|g| g.hbp) as f64 / pa,
         pitches_per_pa: s(|g| g.pitches) as f64 / pa,
         babip: s(|g| g.hits) as f64 / in_play as f64,
+        doubles_per9: per9(s(|g| g.doubles)),
         pickoffs_per9: per9(s(|g| g.picked_off)),
         caught_stealing_per9: per9(s(|g| g.caught_stealing)),
     };
@@ -383,7 +385,7 @@ fn run_sim(n: u32) -> Aggregate {
          --- PA outcomes: BB={} HBP={} hits={} HR={} battedOut={} DP={} FC={} K={} (sum={} vs PA={})\n\
          --- pitch events: fouls={} calledStrike={} whiff={}\n\
          --- economy: BB%={:.1} (target 6..11)  HBP%={:.1} (target 0..2)  pitches/PA={:.2} (target 3.3..4.3)\n\
-         ---          BABIP={:.3} (target .240..340)  hits 1B/2B/3B={}/{}/{}\n\
+         ---          BABIP={:.3} (target .250..330)  hits 1B/2B/3B={}/{}/{}  2B/9={:.2} (target 1.0..2.5)\n\
          --- running/9: SB={:.2} CS={:.2} (target 0..1) pickoffs={:.2} (target 0..0.6)",
         agg.n,
         agg.k_pct,
@@ -414,6 +416,7 @@ fn run_sim(n: u32) -> Aggregate {
         s(|g| g.singles),
         s(|g| g.doubles),
         s(|g| g.triples),
+        agg.doubles_per9,
         per9(s(|g| g.stolen)),
         agg.caught_stealing_per9,
         agg.pickoffs_per9,
@@ -471,6 +474,10 @@ fn run_sim(n: u32) -> Aggregate {
 // BB% 7.0), and the nine-inning harness 4.8 R/G, 1.06 HR/G, BB 6.9%,
 // K 14.8%, median homer 405 ft. K% sits nearer its floor than before: the
 // edge pitches the mix now calls are mostly taken balls.
+// The follow-up outfield-range fix (fielders at MLB depth) re-measured runs/9
+// 3.4, HR/9 0.8, K% 14.9, BABIP .301, doubles/9 2.4 (from 5.6 / 1.1 / 14.0 /
+// .367 / 4.6; the realism harness reads 4.15 R/G and 0.31 doubles per single,
+// MLB 4.45 and 0.30).
 //
 //  * K% 11..27 — was 13..27, anchored to obs 17.2..21.9 with ±~4 of margin
 //    each side (a chaotic game moves it ~0.3). The retune reads 14.0..15.3
@@ -501,9 +508,17 @@ fn run_sim(n: u32) -> Aggregate {
 //  * pitches/PA 2.9..4.5 — nominal 3.3..4.3 (MLB 3.87), live 3.3. Floor 2.9
 //    catches the swing-at-everything hitter (first-pitch hacking ended a
 //    quarter of PAs on one pitch).
-//  * BABIP .220..=.400 — nominal .250..340 (MLB .291), live .367 (still high:
-//    doubles run 2× MLB — a P1 outfield-range task). Ceiling .400 catches the
-//    .45–.60 of grounders skipping through / catcher-gloved fouls.
+//  * BABIP .220..=.360 — nominal .250..330 (MLB .291), live .301 since the
+//    2026-10 outfield-range fix (outfielders and middle infielders at MLB
+//    depth, per docs/BASEBALL.md; before it .367, the soft flares dropping in
+//    behind a 36 m-deep second baseman). Ceiling .360 sits ~2σ (N=40 has
+//    ~240 balls in play, σ≈.03) above the live value and trips the old .367.
+//  * doubles/9 0.5..=3.5 — nominal 1.0..2.5 (MLB 1.57 per team-game), live
+//    2.4, before the outfield-range fix 4.6 (a 110 m-deep centre fielder let
+//    every gap bloop roll for two). Ceiling 3.5 is ~2σ above live (21
+//    doubles at N=40) and trips the old 4.6; floor 0.5 catches outfielders
+//    that cut off everything (a fly-ball re-pick experiment read 0.14
+//    doubles per single in the realism harness).
 //  * CS/9 0..1.6 and pickoffs/9 0..1.5 — nominal 0..1 / 0..0.6 (MLB 0.2 /
 //    0.05), live 0.2 / 0.6. These are the "CPU runs itself out of innings"
 //    guards: the study measured 3.5× MLB steals and 40× MLB pickoffs.
@@ -513,7 +528,8 @@ const HR9_BAND: std::ops::RangeInclusive<f64> = 0.6..=2.2; // nominal 0.5..2.5
 const BB_PCT_BAND: std::ops::RangeInclusive<f64> = 5.0..=13.0; // nominal 6..11
 const HBP_PCT_BAND: std::ops::RangeInclusive<f64> = 0.0..=2.5; // nominal 0..2
 const PITCHES_PER_PA_BAND: std::ops::RangeInclusive<f64> = 2.9..=4.5; // nominal 3.3..4.3
-const BABIP_BAND: std::ops::RangeInclusive<f64> = 0.22..=0.40; // nominal .250..340
+const BABIP_BAND: std::ops::RangeInclusive<f64> = 0.22..=0.36; // nominal .250..330
+const DOUBLES9_BAND: std::ops::RangeInclusive<f64> = 0.5..=3.5; // nominal 1.0..2.5
 const CS9_BAND: std::ops::RangeInclusive<f64> = 0.0..=1.6; // nominal 0..1
 const PICKOFFS9_BAND: std::ops::RangeInclusive<f64> = 0.0..=1.5; // nominal 0..0.6
 
@@ -536,7 +552,7 @@ fn assert_bands(agg: &Aggregate) {
         agg.hr_per9,
         HR9_BAND,
     );
-    let checks: [(&str, f64, &std::ops::RangeInclusive<f64>, &str); 6] = [
+    let checks: [(&str, f64, &std::ops::RangeInclusive<f64>, &str); 7] = [
         ("BB%", agg.bb_pct, &BB_PCT_BAND, "6..11"),
         ("HBP%", agg.hbp_pct, &HBP_PCT_BAND, "0..2"),
         (
@@ -545,7 +561,8 @@ fn assert_bands(agg: &Aggregate) {
             &PITCHES_PER_PA_BAND,
             "3.3..4.3",
         ),
-        ("BABIP", agg.babip, &BABIP_BAND, ".250..340"),
+        ("BABIP", agg.babip, &BABIP_BAND, ".250..330"),
+        ("doubles/9", agg.doubles_per9, &DOUBLES9_BAND, "1.0..2.5"),
         ("CS/9", agg.caught_stealing_per9, &CS9_BAND, "0..1"),
         ("pickoffs/9", agg.pickoffs_per9, &PICKOFFS9_BAND, "0..0.6"),
     ];

@@ -15,12 +15,17 @@ alone gates nothing), every new at-bat opens a **steal window** (`Ruleset::steal
 default 1.5 s; `Play::in_steal_window`): the pitch is gated while the leadoff duel runs. The
 offense holding Down stretches the lead runner's lead (`LeadState`, mirrored by the runner rigs
 as a real walk off the bag); while extended, a defensive action press is a **pickoff** throw
-(`rules::attempt_pickoff`: out if extended, safe dive-back otherwise, on a reload cooldown so a
-held button can't spam the bag; a pickoff out takes the normal result pause, after which runners
-still aboard earn a fresh window). Only a lead stretched *during* the window (`window_lead` — the
-stretch that was actually exposed to the pickoff) earns `big_jump`, the steal no pitch beats, at
-delivery; stretching after the window closes, or arming with Down during the windup only, is a
-late break that keeps the classic off-speed-safe/fastball-out race. The CPU plays both sides of
+(`rules::attempt_pickoff`: the throw's `PICKOFF_THROW_SECS` against `rules::dive_back_secs` from
+`LeadState::lead_m` — a fresh stretch gets back, one hung out past ~3.6 m is out; on a reload
+cooldown so a held button can't spam the bag; a pickoff out takes the normal result pause, after
+which runners still aboard earn a fresh window). The lead only grows (`rules::shuffle_lead`)
+while a stretch is held *during* the window — the stretch actually exposed to the pickoff — and
+shuffles back when released. A sent runner is a **race** (`rules::steal_race`, numbers in
+docs/BASEBALL.md "Stolen-base timing"): his clock is the break (`DuelState::break_fraction`, how far
+into the windup the send landed; 0 when he went from a stretched lead) plus the sprint from his
+lead (snapshotted at release); the defense's is the pitch kind's delivery time plus the catcher's
+transfer (a low/wide crossing adds time) and pop time to second or third. A clean break beats
+off-speed; a fastball beats a normal lead; a full stretched lead beats anything. The CPU plays both sides of
 the window with hash-noise decisions in `src/game/sim/ai.rs`.
 
 Untouched pitches really end in the mitt: `flow::catcher_receives` stops the ball at the
@@ -54,6 +59,17 @@ balance matches the pre-hold model. Force plays race honestly in `resolve_thrown
 later bag relays to first and either turns two (`Outcome::DoublePlay`, with the relay leg
 choreographed) or concedes the batter (`Outcome::FieldersChoice`) — grounder double plays are
 never awarded by fiat, and a hit-and-run jump takes the runner forces off the table.
+
+Runners aboard read the play too. On a clean hit the lead runner the hit doesn't
+already score reads for one base more (`rules::read_extra_base` — from his secondary
+lead, breaking on contact with two out); when he goes and the throw can still contest
+it, `throw_target` throws to his bag — the play at the plate — and `resolve_thrown`
+races him there (`Outcome::ExtraBase { safe }`), while a throw anywhere else concedes
+the base. On a caught fly with fewer than two out, the runner on third tags and races
+the throw home (`rules::read_tag_up` → `OutKind::Fly { tag }`); fielding throws home
+after the transfer and flow holds the call as `pending_call` until the throw arrives,
+exactly like a decided gather throw. Both reads go when the race is no worse than
+`PaceTuning::send_aggression_secs`, so a band of sends get cut down.
 
 The batting side has a live say too (`RunnerCall`, read from held aim at resolution): Down sends
 the batter for the extra base (cut down `Stretching` if the race is lost), Up holds him a base

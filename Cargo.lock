@@ -1786,6 +1786,7 @@ dependencies = [
  "serde_json",
  "wasm-bindgen",
  "web-sys",
+ "wgpu-types",
 ]
 
 [[package]]

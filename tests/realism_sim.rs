@@ -15,6 +15,7 @@ use breakneck_baseball::game::flow::{
     BallInPlayEvent, ContactEvent, LiveBallEvent, Play, PlayBanner,
 };
 use breakneck_baseball::game::input::{Controllers, InputSource};
+use breakneck_baseball::game::player::Fielder;
 use breakneck_baseball::game::rules::{Bases, BattingOrder};
 use breakneck_baseball::game::{GameState, ScoreBoard, Team};
 
@@ -52,7 +53,18 @@ fn log_events(
     mut live: MessageReader<LiveBallEvent>,
     mut coach: MessageReader<CoachFindingEvent>,
     mut log: ResMut<Log>,
+    fielders: Query<(&Fielder, &Transform)>,
 ) {
+    let mut fl: Vec<(usize, Vec3)> = fielders
+        .iter()
+        .map(|(f, t)| (f.index, t.translation))
+        .collect();
+    fl.sort_by_key(|x| x.0);
+    let fpos = fl
+        .iter()
+        .map(|(_, p)| format!("[{:.1},{:.1}]", p.x, p.z))
+        .collect::<Vec<_>>()
+        .join(",");
     let t = time.elapsed_secs_f64();
     let b = (0..3)
         .map(|i| if bases.is_occupied(i) { '1' } else { '0' })
@@ -149,7 +161,7 @@ fn log_events(
             &mut log,
             "bip",
             format!(
-                ",\"kind\":\"{:?}\",\"class\":\"{:?}\",\"land\":[{:.2},{:.2},{:.2}]",
+                ",\"kind\":\"{:?}\",\"class\":\"{:?}\",\"land\":[{:.2},{:.2},{:.2}],\"f\":[{fpos}]",
                 e.kind, e.contact_class, e.landing.x, e.landing.y, e.landing.z
             ),
         );
@@ -161,7 +173,7 @@ fn log_events(
                 pos.x, pos.y, pos.z
             ),
             LiveBallEvent::Landed { pos } => format!(
-                ",\"ev\":\"landed\",\"pos\":[{:.2},{:.2},{:.2}]",
+                ",\"ev\":\"landed\",\"pos\":[{:.2},{:.2},{:.2}],\"f\":[{fpos}]",
                 pos.x, pos.y, pos.z
             ),
             LiveBallEvent::Thrown {

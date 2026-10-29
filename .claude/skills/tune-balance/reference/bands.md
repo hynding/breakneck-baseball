@@ -27,6 +27,13 @@ If this file and the test disagree, the test wins — update this file.
 > BABIP .367, CS/9 0.2, pickoffs/9 0.6. `tests/realism_sim.rs` (ignored,
 > nine-inning, JSONL events) is the harness those numbers were tuned against.
 
+> 2026-10-29 (outfield range, P1 of the study): the defense set too deep in centre (110 m vs
+> MLB 96.9) and too shallow up the middle (2B/SS 36 m vs MLB ~45), so soft flares fell in
+> behind the infield and gap bloops rolled for doubles. Fielders now set at MLB-average depth
+> (`variant.rs`, per docs/BASEBALL.md). Measured at N=40 (one process): runs/9 3.4, HR/9 0.8,
+> K% 14.9, BB% 7.5, BABIP .301, doubles/9 2.4. BABIP ceiling tightened .400 → .360 and a
+> doubles/9 band added; both trip on the pre-fix economy (.367, 4.6).
+
 ## Asserted bands (N=40, `balance_bands_hold`)
 
 | Signal | Asserted band | Nominal target | Measured (N=40) |
@@ -37,7 +44,8 @@ If this file and the test disagree, the test wins — update this file.
 | BB% (walks / PA) | 5.0 ..= 13.0 | 6..11 | 8.2 |
 | HBP% | 0.0 ..= 2.5 | 0..2 | 0.0 |
 | pitches / PA | 2.9 ..= 4.5 | 3.3..4.3 | 3.3 |
-| BABIP | .220 ..= .400 | .250..340 | .367 |
+| BABIP | .220 ..= .360 | .250..330 | .301 (pre-range-fix .367) |
+| doubles / team / 9 | 0.5 ..= 3.5 | 1.0..2.5 | 2.4 (pre-range-fix 4.6) |
 | CS / team / 9 | 0.0 ..= 1.6 | 0..1 | 0.2 |
 | pickoffs / team / 9 | 0.0 ..= 1.5 | 0..0.6 | 0.6 |
 
