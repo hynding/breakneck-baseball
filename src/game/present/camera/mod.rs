@@ -215,19 +215,17 @@ impl Plugin for CameraPlugin {
 
 // ── Startup ───────────────────────────────────────────────────────────────────
 
+/// The persistent gameplay camera spawned at `Startup` — as opposed to the
+/// dev Creator's preview camera or `game::quality`'s upscale camera.
+#[derive(Component)]
+pub struct MainCamera;
+
 fn spawn_camera(mut commands: Commands) {
-    // Explicit anti-aliasing choice per target (was the implicit Bevy
-    // default, Sample4 everywhere): 4x holds on native GPUs; on
-    // wasm/WebGL2 the MSAA resolve is a measurable per-frame cost at
-    // stadium resolution, so the web build takes 2x — edges on the blocky
-    // art style read nearly the same and the resolve is half the work.
-    #[cfg(not(target_arch = "wasm32"))]
-    let msaa = Msaa::Sample4;
-    #[cfg(target_arch = "wasm32")]
-    let msaa = Msaa::Sample2;
+    // MSAA isn't chosen here: `game::quality` sets it from the graphics
+    // quality tier before the camera's first extract, and keeps it in sync.
     commands.spawn((
         Camera3d::default(),
-        msaa,
+        MainCamera,
         Transform::from_translation(BROADCAST_EYE).looking_at(BROADCAST_HOME_TARGET, Vec3::Y),
         Projection::Perspective(PerspectiveProjection {
             fov: BROADCAST_FOV,

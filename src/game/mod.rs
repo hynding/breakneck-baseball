@@ -9,7 +9,7 @@ pub mod model_assets;
 pub mod present;
 pub mod sim;
 
-pub use self::core::{roster, rules, theme, variant};
+pub use self::core::{roster, rules, season, theme, variant};
 
 /// The Coach facade: the pure expectation checks (`core::coach`) and the
 /// sim-side observer that samples the world for them (`sim::coach`) share
@@ -19,10 +19,10 @@ pub mod coach {
     pub use super::core::coach::*;
     pub use super::sim::coach::*;
 }
-pub use self::meta::{appearance, autoplay, gear, input, menu, settings, subs, touch};
+pub use self::meta::{appearance, autoplay, gear, input, menu, season_mode, settings, subs, touch};
 #[cfg(feature = "debug")]
 pub use self::meta::{creator, debug, portraits};
-pub use self::present::{animation, audio, camera, field, fx, jersey, juice, player, ui};
+pub use self::present::{animation, audio, camera, field, fx, jersey, juice, player, quality, ui};
 pub use self::sim::{ai, ball, batting, director, fielding, flow, physics_clock, runner, scenario};
 
 use bevy::prelude::*;
@@ -324,6 +324,8 @@ impl Plugin for GamePlugin {
                 GearPlugin,
                 SubsPlugin,
                 settings::SettingsPlugin,
+                season_mode::SeasonModePlugin,
+                quality::QualityPlugin,
                 JuicePlugin,
                 sim::coach::CoachPlugin,
                 sim::director::DirectorPlugin,

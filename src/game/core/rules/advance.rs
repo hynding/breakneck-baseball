@@ -3,7 +3,7 @@
 
 use crate::game::ScoreBoard;
 
-use super::{Bases, reset_count};
+use super::{Bases, TagUp, reset_count};
 
 /// Advances runners for a clean hit where everyone moves up `hit_bases`.
 /// `hit_bases` may exceed the base count by one (a home run clears the field
@@ -110,20 +110,54 @@ pub(super) fn advance_trailing(bases: &mut Bases) -> u32 {
     runs
 }
 
-/// Tag-up on a deep fly: the runner on the last base scores and the runner
-/// one behind moves up. Trailing runners hold. Returns runs scored.
-pub(super) fn tag_up(bases: &mut Bases) -> u32 {
+/// Tag-ups on a caught fly: the runner on the last base scores or is cut
+/// down at the plate per his race (`tag`), and on a `deep` fly the runner one
+/// behind moves up into a vacated last base. Trailing runners hold. Returns
+/// (runs scored, runners thrown out).
+pub(super) fn tag_up(bases: &mut Bases, deep: bool, tag: TagUp) -> (u32, u32) {
     let n = bases.count();
     let mut runs = 0;
-    if n >= 1 && bases.is_occupied(n - 1) {
+    let mut outs = 0;
+    if n >= 1 && bases.is_occupied(n - 1) && tag != TagUp::Hold {
         bases.set(n - 1, false);
-        runs += 1;
+        if tag == TagUp::Scores {
+            runs += 1;
+        } else {
+            outs += 1;
+        }
     }
-    if n >= 2 && bases.is_occupied(n - 2) {
+    if deep && n >= 2 && bases.is_occupied(n - 2) && !bases.is_occupied(n - 1) {
         bases.set(n - 2, false);
         bases.set(n - 1, true);
     }
-    runs
+    (runs, outs)
+}
+
+/// Advances runners for a hit worth `hit_bases` on which the runner from
+/// `reader` tried for one base more: he takes it when `safe` (scoring past
+/// the last base) and is removed otherwise; everyone else, batter included,
+/// takes exactly `hit_bases`. Returns (runs scored, runners thrown out).
+pub(super) fn advance_extra_base(
+    bases: &mut Bases,
+    hit_bases: u32,
+    reader: usize,
+    safe: bool,
+) -> (u32, u32) {
+    let n = bases.count();
+    let reader_on = bases.is_occupied(reader);
+    bases.set(reader, false);
+    let mut runs = advance_hit_with_jump(bases, hit_bases, false);
+    let mut outs = 0;
+    if reader_on {
+        if !safe {
+            outs += 1;
+        } else if reader + hit_bases as usize + 1 >= n {
+            runs += 1;
+        } else {
+            bases.set(reader + hit_bases as usize + 1, true);
+        }
+    }
+    (runs, outs)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

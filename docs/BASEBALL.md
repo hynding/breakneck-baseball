@@ -171,6 +171,30 @@ runner-rig choreography — never the call):
 5. **The batter always runs on contact** (fair-ball assumption); the engine
    resets him on a foul.
 
+**Taking the extra base.** On a clean hit the lead runner the hit doesn't
+already score reads whether to take one base more: second to home or first to
+third on a single, first to home on a double. MLB runners take the extra base
+about 41% of the time they have the chance (Baseball-Reference's league XBT%).
+The game models it as a race (`rules::read_extra_base`): the runner starts from
+his secondary lead (`PaceTuning::secondary_lead_frac`, about 15 ft), a reaction
+behind the bat with fewer than two out and on contact with two; the throw to
+his bag needs its transfer, flight, and the tag (`tag_apply_secs`). He goes
+when the race is no worse than a small gamble (`send_aggression_secs`), so a
+band of sends lose — the close play at the plate. The fielder throws to his bag
+when the throw can still get there in time to matter (`throw_contest_secs`),
+otherwise ahead of the batter.
+
+**Tagging from third.** Per the tag-up rule above, long flies score the runner
+and short ones rarely see an attempt "due to the high risk of being thrown
+out". The game races it (`rules::read_tag_up`): the runner retouches timed to
+the catch and runs 90 ft at sprint speed (about 3.7 s); the throw home needs
+its transfer, flight and the tag. With the default pace the break-even is a
+catch about 68 m (~220 ft) out — deeper flies are sacrifice flies, shallower
+ones hold, and the ones just short are where runners get thrown out (the same
+gamble band). The
+runner on second still takes third on a deep fly (`TAG_UP_MIN_DIST`) when the
+runner ahead has left the bag.
+
 **Force play:** "When a runner is bumped over to the next base by the advancing
 batter or by another runner who was bumped by the advancing batter, that runner
 is considered to have been forced to advance." The batter-runner always forces
@@ -199,6 +223,33 @@ ends the inning the instant it is recorded, so no run scores on the play
   triples: **0.30 doubles per single, 1.57 doubles per team-game**
   (Baseball-Reference league batting table).
 
+## Stolen-base timing (mlb.com Statcast glossary, Bill James Online, Wikipedia "Pop time")
+
+A steal is a race of two stopwatches that both start at the pitcher's first
+movement:
+
+| Clock | Typical MLB time | In the game (`rules::steal_race`) |
+|---|---|---|
+| Pitcher, first move → catcher's glove ("time to plate") | 1.3 s good, 1.5 s+ slow | 0.92 s move + flight at the pitch's own speed: fastball 1.36 s, changeup 1.49 s |
+| Catcher's pop time to second (glove to the fielder's glove) | ~2.0 s average, 1.85 s elite | 0.7 s exchange + 38.8 m at 29.8 m/s = 2.00 s |
+| Pop time to third | ~1.6–1.7 s | same arm over 27.4 m = 1.62 s |
+| Runner, first move → second base | ~3.3–3.5 s average, ~3.1 s elite | 0.30 s overhead + (27.4 m − lead) at 8.2 m/s; 3.38 s from a normal lead |
+| Sprint speed | ~27 ft/s (8.2 m/s) MLB average | `RUNNER_SPRINT_SPEED` |
+
+The coaches' "3.3 rule": a battery whose time to plate plus pop time is
+under ~3.3 s throws out most runners; over ~3.4 s the runner is usually safe.
+The game sits an average runner (3.38 s) just behind a fastball (3.36 s) and
+ahead of every off-speed pitch, so the jump (when he breaks during the
+wind-up, `LATE_BREAK_SECS`), the lead he built during the pre-pitch duel,
+and a pitch the catcher has to dig out of the dirt decide it. A runner on
+second takes a longer, unheld secondary lead (+2.5 m in the game). MLB
+caught-stealing rate is ~20–25% of attempts.
+
+Pickoffs: a pitcher's move and throw to first take ~0.8 s glove to tag;
+a runner on a normal lead dives back in time, one leaning several feet
+further is caught (`rules::attempt_pickoff` races `PICKOFF_THROW_SECS` against
+`dive_back_secs`).
+
 ## Rules modeled elsewhere
 
 Count thresholds (4 balls / 3 strikes / 3 outs), the strike zone, tag-ups,
@@ -216,6 +267,7 @@ CLAUDE.md's architecture notes for how each maps.
 - [Turface Athletics — Field layouts & dimensions](https://www.turface.com/education/resource-library/baseball-softball-field-layouts-dimensions)
 - [Mighty Grass — Baseball field dimensions guide](https://www.mightygrass.com/baseball-field-dimensions-guide/)
 - [Wikipedia — Tag up](https://en.wikipedia.org/wiki/Tag_up)
+- [Baseball-Reference — Baserunning stats (XBT%, league average 41%)](https://www.baseball-reference.com/blog/archives/10867.html)
 - [Baseball Training World — The 9 fundamentals of base running](https://baseballtrainingworld.com/the-9-fundamentals-of-base-running-in-baseball/)
 - [QC Baseball — Baserunning: tagging up](http://www.qcbaseball.com/skills/baserunning-tagging-up.aspx)
 - [Baseball Rules Academy — 5.06 Running the bases](https://baseballrulesacademy.com/official-rule/mlb/5-06-running-the-bases/)
@@ -228,3 +280,7 @@ CLAUDE.md's architecture notes for how each maps.
 - [Wikipedia — Batted ball](https://en.wikipedia.org/wiki/Batted_ball)
 - [Baseball-Reference — 2024 AL team batting](https://www.baseball-reference.com/leagues/AL/2024.shtml)
 - [Baseball Prospectus — The rise of the rover (2B depth, Statcast)](https://www.baseballprospectus.com/news/article/31983/rubbing-mud-the-rise-of-the-rover-and-the-fall-of-dozier)
+- [MLB.com — Pop Time (Statcast glossary)](https://www.mlb.com/glossary/statcast/pop-time)
+- [Wikipedia — Pop time](https://en.wikipedia.org/wiki/Pop_time)
+- [Bill James Online — Timing pitchers and catchers to prevent stolen bases](https://www.billjamesonline.com/timing_pitchers_and_catchers_to_prevent_stolen_bases_/?F_All=y)
+- [Lee Judge — How to steal a base](https://leejudge.substack.com/p/how-to-steal-a-base)
