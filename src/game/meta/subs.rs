@@ -24,6 +24,7 @@ use bevy::window::{WindowFocused, WindowOccluded};
 
 use crate::game::ball::{Baseball, InFlight};
 use crate::game::flow::{BannerTone, Phase, Play, PlayBanner};
+use crate::game::input::ActiveDevice;
 use crate::game::roster::{Rosters, TeamRoster};
 use crate::game::rules::LINEUP_SIZE;
 use crate::game::settings::Settings;
@@ -59,6 +60,24 @@ const CONTROLS_TEXT: &str = "P1: WASD + Space   P2: Arrows + Right-Ctrl   Pad: s
      Batting: Down = send, Up = hold   Esc/P: Subs   C: Camera (orbit: Shift+move/QE, Shift+R reset)   V: At-bat view   \
      Touch: drag = aim, 2nd finger = action, tap position = swing (pick a scheme with G on the menu)";
 
+/// The dialog's text on a touchscreen: the keyboard and pad bindings above
+/// are noise to a phone player, who has neither.
+const TOUCH_CONTROLS_TEXT: &str = "Drag to aim - a second finger pitches or throws   \
+     Batting: the Touch swing scheme you picked on the menu (tap, flick, hold or zone pad)   \
+     II: pause / resume";
+
+/// The dialog text for the device in use.
+fn controls_text(device: ActiveDevice) -> &'static str {
+    match device {
+        ActiveDevice::Touch => TOUCH_CONTROLS_TEXT,
+        ActiveDevice::Keyboard | ActiveDevice::Gamepad => CONTROLS_TEXT,
+    }
+}
+
+/// Bench players get one tappable line each, up to this many; a longer
+/// bench's extras stay reachable with Left/Right.
+const BENCH_SLOTS: usize = 8;
+
 /// One line of the board, painted by [`update_board`].
 #[derive(Component)]
 struct SubsLine(SubsLineKind);
@@ -69,7 +88,11 @@ enum SubsLineKind {
     LineupHeader,
     Row(usize),
     BenchHeader,
-    Bench,
+    /// One bench player, tappable to pick them.
+    BenchSlot(usize),
+    /// The tappable swap row: puts the picked bench player in the picked
+    /// slot (Enter / A on the keyboard and pad).
+    Swap,
     /// The strike-zone overlay toggle's live state ("STRIKE ZONE: ON").
     ZoneToggle,
     /// The tappable quit row — without it a touch-only player could pause
@@ -188,7 +211,8 @@ impl Plugin for SubsPlugin {
                 // after the chrome release pass — both write
                 // `TouchGestures`, and release-then-bind is the coherent
                 // order (unordered, the pair was a per-build tie-break).
-                tap_quit_row
+                (tap_quit_row, tap_board)
+                    .chain()
                     .before(PauseInputSet)
                     .after(crate::game::touch::paused_pause_region_taps)
                     .run_if(in_state(GameState::Paused)),
@@ -201,7 +225,7 @@ impl Plugin for SubsPlugin {
                 // [ TAP QUIT AGAIN TO CONFIRM ] prompt appeared on the
                 // arming frame or one frame later was a per-build
                 // tie-break — the class this repo pins with edges.
-                (update_board, update_controls_dialog).after(PauseInputSet),
+                (update_board, update_controls_dialog, fit_board_layout).after(PauseInputSet),
             );
     }
 }
@@ -436,10 +460,12 @@ fn press_quit(menu: &mut SubsMenu, next_state: &mut NextState<GameState>) {
 /// other key cancels an armed Q — without it, a touch-only player who
 /// accidentally armed had no way to back out (their next quit-row tap,
 /// however much later, confirmed).
+#[allow(clippy::too_many_arguments)]
 fn tap_quit_row(
     interactions: Query<&Interaction, (Changed<Interaction>, With<SubsQuitButton>)>,
     row_geometry: Query<(&ComputedNode, &UiGlobalTransform), With<SubsQuitButton>>,
     touches: Res<Touches>,
+    ui_scale: Res<UiScale>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut gestures: ResMut<crate::game::touch::TouchGestures>,
     mut menu: ResMut<SubsMenu>,
@@ -459,7 +485,7 @@ fn tap_quit_row(
     if interactions.is_empty() && !crate::game::input::pointer_pressed(&touches, &mouse) {
         return;
     }
-    // ONE scan (`touched_node_ids` — the same containment body every
+    // ONE scan (`touched_rect_ids` — the same containment body every
     // hit-test site shares): the accept test and the chrome binding see
     // identical fingers, or a press could be accepted whose finger is
     // never bound (the adoptable-stick class the binding exists to stop).
@@ -468,7 +494,10 @@ fn tap_quit_row(
     let mut touched_row = false;
     let mut claimed_elsewhere = false;
     if let Ok((node, transform)) = row_geometry.single() {
-        for id in crate::game::input::touched_node_ids(&touches, node, transform) {
+        for id in crate::game::input::touched_rect_ids(
+            &touches,
+            crate::game::input::node_screen_rect(node, transform, &ui_scale),
+        ) {
             // A finger the pause claim already bound this frame belongs to
             // the pause button (it runs first, and since the button draws
             // ABOVE the board — tier 31 over 30 — it visually owns any
@@ -511,6 +540,76 @@ fn tap_quit_row(
     press_quit(&mut menu, &mut next_state);
 }
 
+/// The touch/mouse path through the rest of the board (the quit row has
+/// its own, [`tap_quit_row`]): a starter's line picks the slot, a bench
+/// player's line picks them, the swap row swaps, the lineup header switches
+/// team, and the strike-zone line toggles it — what Up/Down, Left/Right,
+/// Enter, T and Z do in [`board_controls`]. Touch rides raw hit-tests and
+/// the mouse rides `Interaction`, as on every tap surface
+/// (`input::mouse_pressed_on`); one action per frame.
+#[allow(clippy::too_many_arguments)]
+fn tap_board(
+    lines: Query<(Entity, &SubsLine, &ComputedNode, &UiGlobalTransform), With<Button>>,
+    interactions: Query<&Interaction, (Changed<Interaction>, With<Button>)>,
+    touches: Res<Touches>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    ui_scale: Res<UiScale>,
+    mut gestures: ResMut<crate::game::touch::TouchGestures>,
+    mut menu: ResMut<SubsMenu>,
+    mut rosters: ResMut<Rosters>,
+    mut settings: ResMut<Settings>,
+    next_state: Res<NextState<GameState>>,
+) {
+    // O(1) early-out on the no-input frame, before any geometry work; and a
+    // quit or resume already decided this frame owns it.
+    if (interactions.is_empty() && !crate::game::input::pointer_pressed(&touches, &mouse))
+        || crate::game::transition_pending(&next_state)
+    {
+        return;
+    }
+    for (entity, line, node, transform) in &lines {
+        let rect = crate::game::input::node_screen_rect(node, transform, &ui_scale);
+        // A finger the pause button (or the quit row) already bound is
+        // theirs: on a narrow screen the button can overlap a board line.
+        let finger = crate::game::input::touched_rect_ids(&touches, rect)
+            .find(|&id| !gestures.is_chrome_finger(id));
+        if finger.is_none()
+            && !crate::game::input::mouse_pressed_on(
+                &mouse,
+                interactions.get(entity).ok().into_iter(),
+            )
+        {
+            continue;
+        }
+        let roster = rosters.team(menu.team);
+        match line.0 {
+            SubsLineKind::Row(i) if i < roster.lineup.len() => menu.slot = i,
+            SubsLineKind::BenchSlot(i) if i < roster.bench.len() => menu.bench = i,
+            SubsLineKind::Swap => {
+                let (slot, bench) = (menu.slot, menu.bench);
+                rosters.team_mut(menu.team).substitute(slot, bench);
+            }
+            SubsLineKind::LineupHeader => {
+                menu.team = menu.team.other();
+                menu.slot = 0;
+                menu.bench = 0;
+            }
+            SubsLineKind::ZoneToggle => settings.show_strike_zone = !settings.show_strike_zone,
+            // A blank line (past a short lineup or bench) has no size, so
+            // only a stale frame could land here; nothing to do.
+            _ => continue,
+        }
+        // Bound like the quit row's fingers, so one still held through
+        // the resume can't be adopted as the stick.
+        if let Some(id) = finger {
+            gestures.bind_chrome_finger(id);
+        }
+        // Engagement, like any board keypress (see `auto_resume_on_refocus`).
+        menu.auto_paused = false;
+        return;
+    }
+}
+
 /// Builds the board once at game start, hidden: every element painted with a
 /// nonzero-alpha colour so the wasm extractor keeps it forever.
 fn spawn_board(mut commands: Commands, theme: Res<Theme>) {
@@ -548,18 +647,46 @@ fn spawn_board(mut commands: Commands, theme: Res<Theme>) {
                             TextColor(ui.text_primary),
                         )
                     };
-                    let mut line = |kind: SubsLineKind, size: f32| {
-                        card.spawn(line_bundle(kind, size));
+                    // The board lines a tap or click acts on (see
+                    // `tap_board`): full card width, so a finger needn't
+                    // land on the glyphs.
+                    let tappable = |kind: SubsLineKind, size: f32| {
+                        (
+                            line_bundle(kind, size),
+                            Button,
+                            TextLayout::new_with_justify(Justify::Center),
+                            Node {
+                                align_self: AlignSelf::Stretch,
+                                ..default()
+                            },
+                        )
                     };
-                    line(SubsLineKind::Title, 30.0);
-                    line(SubsLineKind::LineupHeader, 14.0);
+                    card.spawn(line_bundle(SubsLineKind::Title, 30.0));
+                    card.spawn(tappable(SubsLineKind::LineupHeader, 14.0));
                     for i in 0..LINEUP_SIZE as usize {
-                        line(SubsLineKind::Row(i), 18.0);
+                        card.spawn(tappable(SubsLineKind::Row(i), 18.0));
                     }
-                    line(SubsLineKind::BenchHeader, 14.0);
-                    line(SubsLineKind::Bench, 17.0);
-                    line(SubsLineKind::ZoneToggle, 14.0);
-                    line(SubsLineKind::Hint, 13.0);
+                    card.spawn(line_bundle(SubsLineKind::BenchHeader, 14.0));
+                    card.spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        flex_wrap: FlexWrap::Wrap,
+                        justify_content: JustifyContent::Center,
+                        column_gap: Val::Px(14.0),
+                        row_gap: Val::Px(4.0),
+                        max_width: Val::Px(560.0),
+                        ..default()
+                    })
+                    .with_children(|bench| {
+                        for i in 0..BENCH_SLOTS {
+                            bench.spawn((line_bundle(SubsLineKind::BenchSlot(i), 17.0), Button));
+                        }
+                    });
+                    card.spawn(tappable(SubsLineKind::Swap, 16.0));
+                    card.spawn(tappable(SubsLineKind::ZoneToggle, 14.0));
+                    card.spawn((
+                        line_bundle(SubsLineKind::Hint, 13.0),
+                        TextLayout::new_with_justify(Justify::Center),
+                    ));
                     // The one board row that must be reachable by touch: a
                     // Button (single-finger taps and the mouse both route
                     // through bevy_ui `Interaction` fine — the multi-touch
@@ -579,6 +706,10 @@ fn spawn_board(mut commands: Commands, theme: Res<Theme>) {
                     ControlsDialog,
                     KeepAliveUi,
                     Node {
+                        // The reference width on a desktop, capped to the
+                        // window on a phone so the lines wrap instead of
+                        // running off both edges.
+                        width: Val::Percent(94.0),
                         max_width: Val::Px(760.0),
                         padding: UiRect::axes(Val::Px(20.0), Val::Px(12.0)),
                         border: UiRect::all(Val::Px(1.5)),
@@ -605,6 +736,33 @@ fn spawn_board(mut commands: Commands, theme: Res<Theme>) {
         });
 }
 
+/// Lays the board and the controls dialog side by side on a short
+/// landscape screen (a phone held sideways): stacked, the two run taller
+/// than the window and the dialog was squashed to one clipped line.
+/// Guarded, so a steady window never dirties the root's layout.
+fn fit_board_layout(
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    mut roots: Query<&mut Node, With<SubsUi>>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let size = window.size();
+    // Below the height the UI was designed for, `ui::fit_ui_scale` is
+    // already shrinking everything; side by side buys the rest back.
+    let want = if size.x > size.y && size.y < crate::game::ui::DESIGN_SIZE.y {
+        FlexDirection::Row
+    } else {
+        FlexDirection::Column
+    };
+    for mut node in &mut roots {
+        if node.flex_direction != want {
+            node.flex_direction = want;
+            node.column_gap = Val::Px(16.0);
+        }
+    }
+}
+
 /// Paints the board while paused and blanks it (alpha kept nonzero) in every
 /// other state — the show/hide-by-mutation pattern the HUD uses.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
@@ -614,6 +772,7 @@ fn update_board(
     rosters: Res<Rosters>,
     settings: Res<Settings>,
     theme: Res<Theme>,
+    device: Res<ActiveDevice>,
     added: Query<(), Added<SubsLine>>,
     mut roots: Query<(&mut BackgroundColor, &mut Visibility), (With<SubsUi>, Without<SubsCard>)>,
     mut cards: Query<(&mut BackgroundColor, &mut BorderColor), With<SubsCard>>,
@@ -623,6 +782,7 @@ fn update_board(
         || menu.is_changed()
         || rosters.is_changed()
         || settings.is_changed()
+        || device.is_changed()
         || !added.is_empty();
     if !repaint {
         return;
@@ -659,7 +819,7 @@ fn update_board(
     for (line, mut text, mut color) in &mut lines {
         // One blanking path: hidden board, or a row with nothing to show.
         let Some((value, tint)) = visible
-            .then(|| board_line(line.0, &menu, roster, &settings, ui))
+            .then(|| board_line(line.0, &menu, roster, &settings, *device, ui))
             .flatten()
         else {
             set_text_if_neq(&mut text, "");
@@ -681,12 +841,22 @@ fn board_line(
     menu: &SubsMenu,
     roster: &TeamRoster,
     settings: &Settings,
+    device: ActiveDevice,
     ui: &UiTheme,
 ) -> Option<(String, Color)> {
+    let touch = device == ActiveDevice::Touch;
     let (value, tint) = match kind {
         SubsLineKind::Title => ("PAUSED".to_string(), ui.accent),
         SubsLineKind::LineupHeader => (
-            format!("SUBSTITUTIONS - {} LINEUP", menu.team.label()),
+            if touch {
+                format!(
+                    "SUBSTITUTIONS - {} LINEUP  (tap for {})",
+                    menu.team.label(),
+                    menu.team.other().label()
+                )
+            } else {
+                format!("SUBSTITUTIONS - {} LINEUP", menu.team.label())
+            },
             ui.text_dim,
         ),
         SubsLineKind::Row(i) => {
@@ -700,25 +870,34 @@ fn board_line(
             )
         }
         SubsLineKind::BenchHeader => ("BENCH".to_string(), ui.text_dim),
-        SubsLineKind::Bench => {
-            let value = if roster.bench.is_empty() {
-                "(empty)".to_string()
-            } else {
-                roster
-                    .bench
-                    .iter()
-                    .enumerate()
-                    .map(|(i, p)| {
-                        if i == menu.bench {
-                            format!("[{} #{}]", p.name, p.number)
-                        } else {
-                            format!(" {} #{} ", p.name, p.number)
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join("  ")
+        SubsLineKind::BenchSlot(i) => {
+            // The first slot says so when there is nobody to bring in.
+            let Some(player) = roster.bench.get(i) else {
+                return (i == 0 && roster.bench.is_empty())
+                    .then(|| ("(empty)".to_string(), ui.text_dim));
             };
-            (value, ui.text_primary)
+            if i == menu.bench {
+                (format!("[{} #{}]", player.name, player.number), ui.accent)
+            } else {
+                (
+                    format!(" {} #{} ", player.name, player.number),
+                    ui.text_primary,
+                )
+            }
+        }
+        SubsLineKind::Swap => {
+            let (Some(incoming), Some(outgoing)) =
+                (roster.bench.get(menu.bench), roster.lineup.get(menu.slot))
+            else {
+                return None;
+            };
+            (
+                format!(
+                    "[ SWAP IN {} #{} FOR {} #{} ]",
+                    incoming.name, incoming.number, outgoing.name, outgoing.number
+                ),
+                ui.text_primary,
+            )
         }
         SubsLineKind::ZoneToggle => (
             format!(
@@ -752,6 +931,11 @@ fn board_line(
                         .to_string(),
                     ui.tone_bad,
                 )
+            } else if touch {
+                (
+                    "Tap a starter, then a bench player, then SWAP   II resumes".to_string(),
+                    ui.text_dim,
+                )
             } else {
                 (
                 "Up/Down slot   Left/Right bench   Enter/A swap   T/Y team   Z zone   Q quit   Esc/P/Start resume"
@@ -769,10 +953,11 @@ fn board_line(
 fn update_controls_dialog(
     state: Res<State<GameState>>,
     theme: Res<Theme>,
+    device: Res<ActiveDevice>,
     mut cards: Query<(&mut BackgroundColor, &mut BorderColor), With<ControlsDialog>>,
     mut text: Query<&mut Text, With<ControlsText>>,
 ) {
-    if !state.is_changed() {
+    if !(state.is_changed() || device.is_changed()) {
         return;
     }
     let ui = &theme.ui;
@@ -789,7 +974,7 @@ fn update_controls_dialog(
     }
     for mut text in &mut text {
         **text = if visible {
-            CONTROLS_TEXT.to_string()
+            controls_text(*device).to_string()
         } else {
             String::new()
         };

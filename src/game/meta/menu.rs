@@ -163,10 +163,13 @@ fn build_menu(
         ))
         .with_children(|screen| {
             screen
+                // No row gap: the rows carry it as padding (see
+                // `row_node`), so the card's width and height are all
+                // tappable; the other lines' margins keep the old spacing.
                 .spawn(overlay_card(
                     OverlayPaint::Opaque,
                     Vec2::new(44.0, 30.0),
-                    13.0,
+                    0.0,
                     ui,
                 ))
                 .with_children(|card| {
@@ -177,6 +180,11 @@ fn build_menu(
                             ..default()
                         },
                         TextColor(ui.accent),
+                        TextLayout::new_with_justify(Justify::Center),
+                        Node {
+                            margin: UiRect::bottom(Val::Px(ROW_GAP_PX)),
+                            ..default()
+                        },
                     ));
                     card.spawn((
                         Text::new("backyard arcade baseball"),
@@ -186,7 +194,7 @@ fn build_menu(
                         },
                         TextColor(ui.text_dim),
                         Node {
-                            margin: UiRect::bottom(Val::Px(10.0)),
+                            margin: UiRect::bottom(Val::Px(10.0 + ROW_GAP_PX / 2.0)),
                             ..default()
                         },
                     ));
@@ -213,6 +221,7 @@ fn build_menu(
                             } else {
                                 ui.text_primary
                             }),
+                            row_node(),
                         ));
                     }
 
@@ -236,6 +245,7 @@ fn build_menu(
                         } else {
                             ui.text_primary
                         }),
+                        row_node(),
                     ))
                     .with_child((
                         TextSpan::new(season_mode::menu_status(settings)),
@@ -296,6 +306,7 @@ fn build_menu(
                             } else {
                                 ui.text_dim
                             }),
+                            row_node(),
                         ))
                         .with_child((
                             TextSpan::new(value),
@@ -316,7 +327,7 @@ fn build_menu(
                         },
                         TextColor(ui.count_ball),
                         Node {
-                            margin: UiRect::top(Val::Px(10.0)),
+                            margin: UiRect::top(Val::Px(10.0 + ROW_GAP_PX / 2.0)),
                             ..default()
                         },
                     ));
@@ -331,6 +342,10 @@ fn build_menu(
                         },
                         TextColor(ui.text_primary),
                         TextLayout::new_with_justify(Justify::Center),
+                        Node {
+                            margin: UiRect::top(Val::Px(ROW_GAP_PX)),
+                            ..default()
+                        },
                     ));
                 });
 
@@ -350,6 +365,24 @@ fn build_menu(
                 },
             ));
         });
+}
+
+/// The spacing between menu lines.
+const ROW_GAP_PX: f32 = 13.0;
+
+/// A tappable menu line's layout: the card's full width, with the line
+/// spacing split above and below as padding, so a tap anywhere on the
+/// card's list lands on the nearest line instead of a dead gap — on a
+/// phone the lines are only a few millimetres tall.
+fn row_node() -> (Node, TextLayout) {
+    (
+        Node {
+            align_self: AlignSelf::Stretch,
+            padding: UiRect::vertical(Val::Px(ROW_GAP_PX / 2.0)),
+            ..default()
+        },
+        TextLayout::new_with_justify(Justify::Center),
+    )
 }
 
 /// A row's label for the active device: the leading hotkey column ("F   ")
@@ -680,6 +713,7 @@ fn menu_tap(
     buttons: Query<(Entity, &MenuAction, &ComputedNode, &UiGlobalTransform), With<Button>>,
     interactions: Query<&Interaction, (Changed<Interaction>, With<Button>)>,
     touches: Res<Touches>,
+    ui_scale: Res<UiScale>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut theme: ResMut<Theme>,
     mut open: ResMut<SettingsOpen>,
@@ -710,8 +744,7 @@ fn menu_tap(
             entity,
             &touches,
             &mouse,
-            node,
-            transform,
+            crate::game::input::node_screen_rect(node, transform, &ui_scale),
         ) {
             continue;
         }
@@ -883,6 +916,7 @@ fn game_over_restart(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     card: Query<(&ComputedNode, &UiGlobalTransform), With<GameOverCard>>,
+    ui_scale: Res<UiScale>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     if time.elapsed_secs() - grace.0 < GAME_OVER_GRACE_SECS {
@@ -890,17 +924,16 @@ fn game_over_restart(
     }
     // Pointer dismissal must land ON the card (see [`GameOverCard`]).
     // Lazy (a closure, short-circuited by the keyboard/pad arms), and
-    // `pointer_on_node` alone: it already requires a just-pressed touch or
+    // `pointer_on_rect` alone: it already requires a just-pressed touch or
     // click, so a separate `pointer_pressed` pre-check would be a second
     // spelling of the same press condition — two encodings that can drift.
     let pointer_on_card = || {
         card.single().is_ok_and(|(node, transform)| {
-            crate::game::input::pointer_on_node(
+            crate::game::input::pointer_on_rect(
                 &touches,
                 &mouse,
                 windows.single().ok(),
-                node,
-                transform,
+                crate::game::input::node_screen_rect(node, transform, &ui_scale),
             )
         })
     };

@@ -327,6 +327,35 @@ pub(super) fn update_duel_panels(
     }
 }
 
+/// The pill's width cap in a landscape window: narrow enough to clear the
+/// corner cards that share its height (TODO 66).
+const PILL_MAX_WIDTH_LANDSCAPE: f32 = 60.0;
+/// …and in portrait, where the corner cards sit above and below the pill's
+/// line: at 60% of a phone's width the longer calls ("SWING & MISS")
+/// wrapped to two lines and ran into the contact stamp below.
+const PILL_MAX_WIDTH_PORTRAIT: f32 = 94.0;
+
+/// Widens the banner pill's cap in portrait windows (see the constants).
+/// Guarded, so a steady window never dirties the pill's layout.
+pub(super) fn fit_banner_width(
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    mut pills: Query<&mut Node, With<BannerPill>>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let want = Val::Percent(if window.height() > window.width() {
+        PILL_MAX_WIDTH_PORTRAIT
+    } else {
+        PILL_MAX_WIDTH_LANDSCAPE
+    });
+    for mut node in &mut pills {
+        if node.max_width != want {
+            node.max_width = want;
+        }
+    }
+}
+
 /// Paints the pill and its text for the latest banner event.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn show_banner(
