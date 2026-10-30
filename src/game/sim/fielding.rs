@@ -50,6 +50,11 @@ pub(crate) struct ActivePlay {
     state: PlayState,
     /// Base index (`base_count()` = home) → the fielder sent to cover it.
     cover: Vec<(usize, Entity)>,
+    /// The fielder with the ball in his glove — set by a catch, a gather, or
+    /// a received throw, cleared the moment it leaves his hand. While set,
+    /// [`carry_possessed_ball`] keeps the ball with him so a dead ball never
+    /// lies on the grass where it was fielded.
+    possessor: Option<Entity>,
 }
 
 impl ActivePlay {
@@ -239,6 +244,7 @@ fn assign_on_contact(
             chaser,
             bounced: false,
         };
+        active.possessor = None;
     }
 }
 
@@ -302,6 +308,7 @@ fn chase_and_gather(
                 intent.target = None;
             }
             reports.write(LiveBallEvent::Caught { pos: ball_pos });
+            active.possessor = Some(chaser);
             // The same tag-up read flow calls: a runner tagging from third
             // draws the throw home.
             let tagging = matches!(
@@ -372,6 +379,7 @@ fn chase_and_gather(
             race_time: play.since_contact(time.elapsed_secs()),
             tag_throw: false,
         };
+        active.possessor = Some(chaser);
     } else if let Ok((_, tf, mut intent)) = fielders.get_mut(chaser) {
         // Get in front of it: aim for the spot on its roll where the chaser
         // meets the ball, falling back to the ball itself once it has slowed
@@ -423,7 +431,7 @@ fn hold_and_throw(
 
     // The ball sits in the holder's glove while the decision is made.
     if let Ok((_, holder_tf)) = fielders.get(holder) {
-        ball_tf.translation = holder_tf.translation + Vec3::Y * 0.5;
+        ball_tf.translation = glove_spot(holder_tf);
     }
     ball_vel.linvel = Vec3::ZERO;
     ball_vel.angvel = Vec3::ZERO;
@@ -512,6 +520,7 @@ fn hold_and_throw(
         catcher: receiver.unwrap_or(holder),
         relay_to,
     };
+    active.possessor = None;
 }
 
 /// The throw arrives: the receiver stops the ball dead — or, on a double
@@ -577,7 +586,42 @@ fn receive_throw(
     ball_vel.angvel = Vec3::ZERO;
     commands.entity(ball_entity).remove::<InFlight>();
     active.state = PlayState::Done;
+    active.possessor = Some(catcher);
     reports.write(LiveBallEvent::Settled);
+}
+
+/// Where a fielder holds the ball: up at his glove, above the rig root.
+fn glove_spot(fielder_tf: &Transform) -> Vec3 {
+    fielder_tf.translation + Vec3::Y * 0.5
+}
+
+/// A possessed ball goes where its fielder goes. Without this a caught fly or
+/// a received throw was only stopped dead: the dynamic body then dropped onto
+/// the grass and lay there, in plain view, while the fielder jogged back to
+/// his spot holding nothing. Runs through the result pause too (the fielder
+/// carries it off); once the next pitch is being set up the ball belongs to
+/// the mound reset, so possession lapses.
+fn carry_possessed_ball(
+    play: Res<Play>,
+    mut active: ResMut<ActivePlay>,
+    mut ball_q: Query<(&mut Transform, &mut Velocity), With<Baseball>>,
+    fielders: FielderSpots,
+) {
+    let Some(holder) = active.possessor else {
+        return;
+    };
+    if !matches!(play.phase, Phase::InPlay | Phase::Result) {
+        active.possessor = None;
+        return;
+    }
+    let (Ok((mut ball_tf, mut ball_vel)), Ok((_, holder_tf))) =
+        (ball_q.single_mut(), fielders.get(holder))
+    else {
+        return;
+    };
+    ball_tf.translation = glove_spot(holder_tf);
+    ball_vel.linvel = Vec3::ZERO;
+    ball_vel.angvel = Vec3::ZERO;
 }
 
 /// A human defense steers the chaser directly: while the stick is deflected
@@ -655,6 +699,7 @@ fn return_to_spots(
 fn reset_active(mut active: ResMut<ActivePlay>) {
     active.state = PlayState::Idle;
     active.cover.clear();
+    active.possessor = None;
 }
 
 pub struct FieldingPlugin;
@@ -672,6 +717,7 @@ impl Plugin for FieldingPlugin {
                     hold_and_throw,
                     receive_throw,
                     return_to_spots,
+                    carry_possessed_ball,
                 )
                     .chain()
                     .in_set(crate::game::GameplayOrder::Fielding)
