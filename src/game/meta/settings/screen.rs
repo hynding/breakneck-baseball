@@ -49,6 +49,10 @@ pub(super) struct SettingsRowText;
 #[derive(Component)]
 pub(super) struct SettingsRowIndex(usize);
 
+/// The vertical spacing between settings lines, carried as each line's
+/// padding rather than a card row gap so no gap is dead to a tap.
+const ROW_PAD_PX: f32 = 10.0;
+
 /// Which row the cursor is on (0..ROW_LABELS.len()).
 #[derive(Resource, Default)]
 pub struct SettingsCursorRow(usize);
@@ -134,7 +138,9 @@ pub(super) fn spawn_settings_screen(mut commands: Commands, theme: Res<Theme>) {
             root.spawn((
                 SettingsCard,
                 KeepAliveUi,
-                overlay_card(OverlayPaint::Hidden, Vec2::new(40.0, 28.0), 10.0, ui),
+                // No row gap: the rows' own padding spaces them, so the
+                // whole card height is tappable (see `row_part`).
+                overlay_card(OverlayPaint::Hidden, Vec2::new(40.0, 28.0), 0.0, ui),
             ))
             .with_children(|card| {
                 card.spawn((
@@ -145,13 +151,20 @@ pub(super) fn spawn_settings_screen(mut commands: Commands, theme: Res<Theme>) {
                         ..default()
                     },
                     TextColor(ui.accent),
+                    Node {
+                        margin: UiRect::bottom(Val::Px(ROW_PAD_PX)),
+                        ..default()
+                    },
                 ));
                 // The ONE row-part bundle: label and value are two entities
                 // making up one tappable row, so both carry `Button` and
                 // the row index (a touch anywhere on the row selects and
                 // cycles it). One body, so a component every part needs
                 // can't reach one and miss the other — leaving a row half
-                // that renders but never taps.
+                // that renders but never taps. Each part spans the card's
+                // width and splits the old row gap as padding, so a finger
+                // that lands between the words, or between two lines,
+                // still hits a row.
                 let row_part = |i: usize, font_size: f32, color: Color| {
                     (
                         Button,
@@ -162,6 +175,12 @@ pub(super) fn spawn_settings_screen(mut commands: Commands, theme: Res<Theme>) {
                             ..default()
                         },
                         TextColor(color),
+                        TextLayout::new_with_justify(Justify::Center),
+                        Node {
+                            align_self: AlignSelf::Stretch,
+                            padding: UiRect::vertical(Val::Px(ROW_PAD_PX / 2.0)),
+                            ..default()
+                        },
                     )
                 };
                 for i in 0..ROW_LABELS.len() {
@@ -276,14 +295,13 @@ pub(super) fn paint_settings_screen(
     set_text_if_neq(&mut title_text, "SETTINGS");
     set_color_if_neq(&mut title_color, ui.accent);
     for (label, mut text, mut color) in &mut labels {
-        let marker = if cursor.0 == label.0 { "> " } else { "  " };
+        // No cursor on touch: a finger taps rows directly, and a ">" left
+        // on the last-tapped row read as a controller focus nobody has.
+        let focused = *device != ActiveDevice::Touch && cursor.0 == label.0;
+        let marker = if focused { "> " } else { "  " };
         let want = format!("{marker}{}", ROW_LABELS[label.0]);
         set_text_if_neq(&mut text, &want);
-        let want_color = if cursor.0 == label.0 {
-            ui.accent
-        } else {
-            ui.text_primary
-        };
+        let want_color = if focused { ui.accent } else { ui.text_primary };
         set_color_if_neq(&mut color, want_color);
     }
     for (row, mut text) in &mut values {
@@ -519,6 +537,7 @@ pub(super) fn tap_settings_row(
     rows: Query<(Entity, &SettingsRowIndex, &ComputedNode, &UiGlobalTransform), With<Button>>,
     interactions: Query<&Interaction, (Changed<Interaction>, With<Button>)>,
     touches: Res<Touches>,
+    ui_scale: Res<UiScale>,
     mouse: Res<ButtonInput<MouseButton>>,
     controllers: Res<Controllers>,
     mut open: ResMut<SettingsOpen>,
@@ -540,8 +559,7 @@ pub(super) fn tap_settings_row(
             entity,
             &touches,
             &mouse,
-            node,
-            transform,
+            crate::game::input::node_screen_rect(node, transform, &ui_scale),
         ) {
             continue;
         }

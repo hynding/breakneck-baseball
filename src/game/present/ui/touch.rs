@@ -50,6 +50,18 @@ pub(super) enum TouchLabel {
 #[derive(Component)]
 pub(super) struct TouchPauseButton;
 
+/// The hint line's container, moved by [`paint_touch_overlay`] for the
+/// window's orientation.
+#[derive(Component)]
+pub(super) struct TouchHintRow;
+
+/// Where the hint line sits in a portrait window, in UI pixels from the
+/// top: below the duel card, which fills the top-right corner there and
+/// leaves no room beside the minimap.
+const PORTRAIT_HINT_TOP_PX: f32 = 205.0;
+/// …and in landscape, the strip between the top corner cards.
+const LANDSCAPE_HINT_TOP_PX: f32 = 6.0;
+
 /// The overlay's last-painted appearance key, ON the overlay root — not in
 /// system `Local`s, whose lifetime is the system's: caches that outlived
 /// the between-games despawn/respawn shipped a never-repainted fresh tree
@@ -59,6 +71,8 @@ pub(super) struct TouchPauseButton;
 #[derive(Component, Default)]
 pub(super) struct LastPainted {
     size: Vec2,
+    /// The [`UiScale`] the geometry was converted at (see [`paint_region`]).
+    ui_scale: f32,
     shown: Option<(bool, bool)>,
     line: &'static str,
 }
@@ -142,9 +156,10 @@ pub(super) fn spawn_touch_overlay(mut commands: Commands, theme: Res<Theme>) {
                 // no paint system ever re-touches (only its Text child is)
                 // — the exact shape the wasm keep-alive rule covers.
                 super::KeepAliveUi,
+                TouchHintRow,
                 Node {
                     position_type: PositionType::Absolute,
-                    top: Val::Px(6.0),
+                    top: Val::Px(LANDSCAPE_HINT_TOP_PX),
                     left: Val::Percent(20.0),
                     width: Val::Percent(60.0),
                     justify_content: JustifyContent::Center,
@@ -258,12 +273,16 @@ fn paint_region(
     bg: &mut BackgroundColor,
     border: &mut BorderColor,
     rect: Rect,
+    ui_scale: f32,
     (fill, stroke): (Color, Color),
 ) {
-    node.left = Val::Px(rect.min.x);
-    node.top = Val::Px(rect.min.y);
-    node.width = Val::Px(rect.width());
-    node.height = Val::Px(rect.height());
+    // `rect` is in window pixels (the translator hit-tests touches there);
+    // `Val::Px` is in UI units, which `UiScale` multiplies back up.
+    let ui_scale = ui_scale.max(f32::EPSILON);
+    node.left = Val::Px(rect.min.x / ui_scale);
+    node.top = Val::Px(rect.min.y / ui_scale);
+    node.width = Val::Px(rect.width() / ui_scale);
+    node.height = Val::Px(rect.height() / ui_scale);
     // Plain writes, not `set_if_neq`: the caller's `&mut` reborrow of the
     // query's `Mut` already marked these components changed, so an inner
     // guard could not spare a tick — unlike the settings painter, which
@@ -286,6 +305,7 @@ pub(super) fn paint_touch_overlay(
     score: Res<ScoreBoard>,
     play: Res<crate::game::flow::Play>,
     theme: Res<Theme>,
+    ui_scale: Res<UiScale>,
     gestures: Res<crate::game::touch::TouchGestures>,
     mut last: Query<&mut LastPainted, With<TouchOverlay>>,
     mut regions: Query<(
@@ -295,6 +315,7 @@ pub(super) fn paint_touch_overlay(
         &mut BorderColor,
     )>,
     mut labels: Query<(&TouchLabel, &mut Text)>,
+    mut hint_rows: Query<&mut Node, (With<TouchHintRow>, Without<TouchChrome>)>,
 ) {
     let Ok(window) = windows.single() else {
         return;
@@ -338,6 +359,7 @@ pub(super) fn paint_touch_overlay(
     // a real state, so its first paint always fires — no respawn repair
     // query needed (see [`LastPainted`]).
     if !(last.size != size
+        || last.ui_scale != ui_scale.0
         || last.shown != Some((show_zone_pad, show_pause))
         || last.line != line
         || theme.is_changed())
@@ -346,11 +368,20 @@ pub(super) fn paint_touch_overlay(
     }
     *last = LastPainted {
         size,
+        ui_scale: ui_scale.0,
         shown: Some((show_zone_pad, show_pause)),
         line,
     };
     let ui = &theme.ui;
     let hidden = (hidden_tint(ui.panel_bg), hidden_tint(ui.accent));
+    let hint_top = Val::Px(if size.y > size.x {
+        PORTRAIT_HINT_TOP_PX
+    } else {
+        LANDSCAPE_HINT_TOP_PX
+    });
+    for mut node in &mut hint_rows {
+        node.top = hint_top;
+    }
 
     for (kind, mut node, mut bg, mut border) in &mut regions {
         let (rect, shown) = match kind {
@@ -372,6 +403,7 @@ pub(super) fn paint_touch_overlay(
             &mut bg,
             &mut border,
             rect,
+            ui_scale.0,
             shown.unwrap_or(hidden),
         );
     }

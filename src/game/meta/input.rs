@@ -255,34 +255,17 @@ pub(crate) fn gather_intents(
 }
 
 /// Whether any of this frame's touchdowns landed inside a laid-out UI
-/// node's rect — the raw sibling of the `Interaction` path, for targets
-/// that must accept instantaneous taps (down+up in one frame batch never
-/// becomes `Pressed`) and second-finger taps (bevy_ui attributes
-/// multi-touch presses to the FIRST held finger). One encoding of the
-/// physical-layout→logical-touch math, so a DPI or Bevy-upgrade fix can't
-/// reach one hit-test site and miss the other.
-pub(crate) fn touched_node(
-    touches: &Touches,
-    node: &ComputedNode,
-    transform: &UiGlobalTransform,
-) -> bool {
-    touched_node_ids(touches, node, transform).next().is_some()
-}
-
-/// [`touched_node`]'s id-yielding form, for callers that must also act on
-/// the fingers (the quit row binds them into the chrome registry) —
-/// layered on [`touched_rect_ids`] so the containment scan has ONE body.
-pub(crate) fn touched_node_ids<'a>(
-    touches: &'a Touches,
-    node: &ComputedNode,
-    transform: &UiGlobalTransform,
-) -> impl Iterator<Item = u64> + 'a {
-    touched_rect_ids(touches, node_screen_rect(node, transform))
+/// node's rect ([`node_screen_rect`]) — the raw sibling of the
+/// `Interaction` path, for targets that must accept instantaneous taps
+/// (down+up in one frame batch never becomes `Pressed`) and second-finger
+/// taps (bevy_ui attributes multi-touch presses to the FIRST held finger).
+pub(crate) fn touched_rect(touches: &Touches, rect: Rect) -> bool {
+    touched_rect_ids(touches, rect).next().is_some()
 }
 
 /// The containment scan's rect-space core — ONE body, so a DPI or upgrade
 /// fix to `Touch::position` handling reaches every hit-test site: the
-/// node-based tests above AND the translator's hand-computed chrome rect
+/// node-based surfaces AND the translator's hand-computed chrome rect
 /// (`touch::claim_pause_region_taps`), whose drawn and claimed regions
 /// must never disagree with the node surfaces'.
 pub(crate) fn touched_rect_ids(touches: &Touches, rect: Rect) -> impl Iterator<Item = u64> + '_ {
@@ -292,51 +275,56 @@ pub(crate) fn touched_rect_ids(touches: &Touches, rect: Rect) -> impl Iterator<I
         .map(|t| t.id())
 }
 
-/// A laid-out UI node's on-screen rect in LOGICAL pixels (the space touch
-/// positions and the window cursor report in) — the one encoding of the
-/// physical-layout conversion, shared by the touch and mouse hit-tests.
+/// A laid-out UI node's on-screen rect in LOGICAL window pixels (the space
+/// touch positions and the window cursor report in) — the one encoding of
+/// the physical-layout conversion, shared by the touch and mouse hit-tests.
 ///
 /// Takes the node's [`UiGlobalTransform`], never `GlobalTransform`: since
 /// Bevy 0.17 UI nodes carry only the former, so a `GlobalTransform` query
 /// over Buttons silently matches nothing — every tap and click surface was
 /// dead on the web until this changed (guard: `tests/e2e/menu_tap.rs`).
-pub(crate) fn node_screen_rect(node: &ComputedNode, transform: &UiGlobalTransform) -> Rect {
-    let scale = node.inverse_scale_factor();
+/// And it needs the [`UiScale`]: a node's `inverse_scale_factor` undoes the
+/// window's DPI *times* the UI scale, which lands in UI units — off from
+/// window pixels whenever `ui::fit_ui_scale` shrinks the UI for a phone.
+pub(crate) fn node_screen_rect(
+    node: &ComputedNode,
+    transform: &UiGlobalTransform,
+    ui_scale: &UiScale,
+) -> Rect {
+    let scale = node.inverse_scale_factor() * ui_scale.0;
     Rect::from_center_size(transform.translation * scale, node.size() * scale)
 }
 
-/// Whether EITHER pointing device pressed inside a laid-out node this
-/// frame: a raw touchdown ([`touched_node`]) or a mouse click at the
+/// Whether EITHER pointing device pressed inside a laid-out node's rect
+/// this frame: a raw touchdown ([`touched_rect`]) or a mouse click at the
 /// window cursor — the one home for the mouse half of the containment
 /// math, beside its touch sibling (the game-over card consumes it).
-pub(crate) fn pointer_on_node(
+pub(crate) fn pointer_on_rect(
     touches: &Touches,
     mouse: &ButtonInput<MouseButton>,
     window: Option<&Window>,
-    node: &ComputedNode,
-    transform: &UiGlobalTransform,
+    rect: Rect,
 ) -> bool {
-    touched_node(touches, node, transform)
+    touched_rect(touches, rect)
         || (mouse.just_pressed(MouseButton::Left)
             && window
                 .and_then(Window::cursor_position)
-                .is_some_and(|p| node_screen_rect(node, transform).contains(p)))
+                .is_some_and(|p| rect.contains(p)))
 }
 
 /// One Button's activation this frame: the bevy_ui `Interaction` edge for
-/// the MOUSE ([`mouse_pressed_on`]), or a raw touchdown inside the
-/// laid-out rect for TOUCH — one bool, so a press tripping both halves
-/// still activates once.
+/// the MOUSE ([`mouse_pressed_on`]), or a raw touchdown inside its
+/// [`node_screen_rect`] for TOUCH — one bool, so a press tripping both
+/// halves still activates once.
 pub(crate) fn button_pressed(
     interactions: &Query<&Interaction, (Changed<Interaction>, With<Button>)>,
     entity: Entity,
     touches: &Touches,
     mouse: &ButtonInput<MouseButton>,
-    node: &ComputedNode,
-    transform: &UiGlobalTransform,
+    rect: Rect,
 ) -> bool {
     mouse_pressed_on(mouse, interactions.get(entity).ok().into_iter())
-        || touched_node(touches, node, transform)
+        || touched_rect(touches, rect)
 }
 
 /// The MOUSE half of a Button activation: a real mouse press this frame

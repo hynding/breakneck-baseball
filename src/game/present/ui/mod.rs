@@ -11,11 +11,13 @@ use crate::game::theme::UiTheme;
 
 mod banner;
 mod curtain;
+mod fit;
 mod hud;
 mod touch;
 mod walkup;
 
 pub use curtain::{CurtainRoot, WipeLabel};
+pub use fit::DESIGN_SIZE;
 pub use walkup::{WalkUpLine, WalkUpText};
 
 use banner::{
@@ -310,7 +312,8 @@ impl Plugin for UiPlugin {
             .init_resource::<BannerFollowUp>()
             .init_resource::<StampFadeAt>()
             .init_resource::<SpeedFadeAt>()
-            .init_resource::<Curtain>();
+            .init_resource::<Curtain>()
+            .add_systems(First, fit::fit_ui_scale);
         #[cfg(target_arch = "wasm32")]
         app.add_systems(Update, keep_ui_roots_alive);
         app.add_systems(
@@ -341,6 +344,7 @@ impl Plugin for UiPlugin {
                 update_base_ring,
                 update_duel_panels,
                 show_banner,
+                banner::fit_banner_width,
                 swap_banner_follow_up,
                 fade_banner,
                 show_contact_stamp,
