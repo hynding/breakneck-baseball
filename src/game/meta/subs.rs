@@ -438,7 +438,7 @@ fn press_quit(menu: &mut SubsMenu, next_state: &mut NextState<GameState>) {
 /// however much later, confirmed).
 fn tap_quit_row(
     interactions: Query<&Interaction, (Changed<Interaction>, With<SubsQuitButton>)>,
-    row_geometry: Query<(&ComputedNode, &GlobalTransform), With<SubsQuitButton>>,
+    row_geometry: Query<(&ComputedNode, &UiGlobalTransform), With<SubsQuitButton>>,
     touches: Res<Touches>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut gestures: ResMut<crate::game::touch::TouchGestures>,

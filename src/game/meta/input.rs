@@ -264,7 +264,7 @@ pub(crate) fn gather_intents(
 pub(crate) fn touched_node(
     touches: &Touches,
     node: &ComputedNode,
-    transform: &GlobalTransform,
+    transform: &UiGlobalTransform,
 ) -> bool {
     touched_node_ids(touches, node, transform).next().is_some()
 }
@@ -275,7 +275,7 @@ pub(crate) fn touched_node(
 pub(crate) fn touched_node_ids<'a>(
     touches: &'a Touches,
     node: &ComputedNode,
-    transform: &GlobalTransform,
+    transform: &UiGlobalTransform,
 ) -> impl Iterator<Item = u64> + 'a {
     touched_rect_ids(touches, node_screen_rect(node, transform))
 }
@@ -295,12 +295,14 @@ pub(crate) fn touched_rect_ids(touches: &Touches, rect: Rect) -> impl Iterator<I
 /// A laid-out UI node's on-screen rect in LOGICAL pixels (the space touch
 /// positions and the window cursor report in) — the one encoding of the
 /// physical-layout conversion, shared by the touch and mouse hit-tests.
-pub(crate) fn node_screen_rect(node: &ComputedNode, transform: &GlobalTransform) -> Rect {
+///
+/// Takes the node's [`UiGlobalTransform`], never `GlobalTransform`: since
+/// Bevy 0.17 UI nodes carry only the former, so a `GlobalTransform` query
+/// over Buttons silently matches nothing — every tap and click surface was
+/// dead on the web until this changed (guard: `tests/e2e/menu_tap.rs`).
+pub(crate) fn node_screen_rect(node: &ComputedNode, transform: &UiGlobalTransform) -> Rect {
     let scale = node.inverse_scale_factor();
-    Rect::from_center_size(
-        transform.translation().truncate() * scale,
-        node.size() * scale,
-    )
+    Rect::from_center_size(transform.translation * scale, node.size() * scale)
 }
 
 /// Whether EITHER pointing device pressed inside a laid-out node this
@@ -312,7 +314,7 @@ pub(crate) fn pointer_on_node(
     mouse: &ButtonInput<MouseButton>,
     window: Option<&Window>,
     node: &ComputedNode,
-    transform: &GlobalTransform,
+    transform: &UiGlobalTransform,
 ) -> bool {
     touched_node(touches, node, transform)
         || (mouse.just_pressed(MouseButton::Left)
@@ -331,7 +333,7 @@ pub(crate) fn button_pressed(
     touches: &Touches,
     mouse: &ButtonInput<MouseButton>,
     node: &ComputedNode,
-    transform: &GlobalTransform,
+    transform: &UiGlobalTransform,
 ) -> bool {
     mouse_pressed_on(mouse, interactions.get(entity).ok().into_iter())
         || touched_node(touches, node, transform)

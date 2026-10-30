@@ -516,7 +516,7 @@ fn cycle_row_tracked(
 /// (the CLOSE row closes the screen). Runs only while the screen is open.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn tap_settings_row(
-    rows: Query<(Entity, &SettingsRowIndex, &ComputedNode, &GlobalTransform), With<Button>>,
+    rows: Query<(Entity, &SettingsRowIndex, &ComputedNode, &UiGlobalTransform), With<Button>>,
     interactions: Query<&Interaction, (Changed<Interaction>, With<Button>)>,
     touches: Res<Touches>,
     mouse: Res<ButtonInput<MouseButton>>,

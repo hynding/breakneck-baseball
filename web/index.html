@@ -34,6 +34,10 @@
             display: block;
             width: 100vw;
             height: 100vh;
+            /* Mobile browsers size 100vh to the viewport with the toolbars
+               hidden, so the canvas ran under Safari's bottom bar and cut
+               off the bottom HUD; dvh tracks the visible area. */
+            height: 100dvh;
             touch-action: none;
             -webkit-touch-callout: none;
             -webkit-user-select: none;

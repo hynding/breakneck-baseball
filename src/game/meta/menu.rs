@@ -401,6 +401,7 @@ fn creator_hint() -> &'static str {
 
 fn update_controller_status(
     pads: Query<(), With<Gamepad>>,
+    device: Res<ActiveDevice>,
     mut query: Query<&mut Text, With<ControllerStatus>>,
 ) {
     // The two common counts are static strings, so menu frames stay
@@ -410,6 +411,8 @@ fn update_controller_status(
     // and its `Added`-repair query shipped a B0001 on first authoring —
     // the derived form has nothing to invalidate.
     let msg: std::borrow::Cow<'static, str> = match pads.iter().count() {
+        // A phone has no keyboard to fall back to.
+        0 if *device == ActiveDevice::Touch => "Touch controls active".into(),
         0 => "No controllers detected - keyboard fallback active".into(),
         1 => "1 controller connected".into(),
         n => format!("{n} controllers connected").into(),
@@ -674,7 +677,7 @@ fn menu_navigate(
 /// can't reach the menu through the overlay.
 #[allow(clippy::too_many_arguments)]
 fn menu_tap(
-    buttons: Query<(Entity, &MenuAction, &ComputedNode, &GlobalTransform), With<Button>>,
+    buttons: Query<(Entity, &MenuAction, &ComputedNode, &UiGlobalTransform), With<Button>>,
     interactions: Query<&Interaction, (Changed<Interaction>, With<Button>)>,
     touches: Res<Touches>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -879,7 +882,7 @@ fn game_over_restart(
     touches: Res<Touches>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    card: Query<(&ComputedNode, &GlobalTransform), With<GameOverCard>>,
+    card: Query<(&ComputedNode, &UiGlobalTransform), With<GameOverCard>>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     if time.elapsed_secs() - grace.0 < GAME_OVER_GRACE_SECS {
