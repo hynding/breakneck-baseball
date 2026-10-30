@@ -45,6 +45,7 @@ mod home_run_moment;
 mod identity;
 mod matrix;
 mod menu_cursor;
+mod menu_tap;
 mod model_contract;
 mod passive_walks;
 mod pause_subs;
