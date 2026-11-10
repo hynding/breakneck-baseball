@@ -46,6 +46,7 @@ struct Pressed(bool);
 #[derive(Resource, Default)]
 struct Banners(Vec<String>);
 
+#[allow(clippy::too_many_arguments)]
 fn drive(
     state: Res<State<GameState>>,
     thumbs: Res<Thumbs>,

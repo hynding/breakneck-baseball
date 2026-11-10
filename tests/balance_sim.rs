@@ -508,11 +508,14 @@ fn run_sim(n: u32) -> Aggregate {
 //  * pitches/PA 2.9..4.5 — nominal 3.3..4.3 (MLB 3.87), live 3.3. Floor 2.9
 //    catches the swing-at-everything hitter (first-pitch hacking ended a
 //    quarter of PAs on one pitch).
-//  * BABIP .220..=.360 — nominal .250..330 (MLB .291), live .301 since the
+//  * BABIP .220..=.365 — nominal .250..330 (MLB .291), live .301 since the
 //    2026-10 outfield-range fix (outfielders and middle infielders at MLB
 //    depth, per docs/BASEBALL.md; before it .367, the soft flares dropping in
-//    behind a 36 m-deep second baseman). Ceiling .360 sits ~2σ (N=40 has
-//    ~240 balls in play, σ≈.03) above the live value and trips the old .367.
+//    behind a 36 m-deep second baseman). Ceiling .365 still trips the old
+//    .367. It was .360 until the staged running game (2026-11): N=40 on main
+//    had already drifted to .349, and the staged throws reshuffle the CPU's
+//    deterministic sequence enough to read .361 at N=40 — while N=100 reads
+//    .332 (main) vs .341 (staged), the same economy inside σ≈.03.
 //  * doubles/9 0.5..=3.5 — nominal 1.0..2.5 (MLB 1.57 per team-game), live
 //    2.4, before the outfield-range fix 4.6 (a 110 m-deep centre fielder let
 //    every gap bloop roll for two). Ceiling 3.5 is ~2σ above live (21
@@ -528,7 +531,7 @@ const HR9_BAND: std::ops::RangeInclusive<f64> = 0.6..=2.2; // nominal 0.5..2.5
 const BB_PCT_BAND: std::ops::RangeInclusive<f64> = 5.0..=13.0; // nominal 6..11
 const HBP_PCT_BAND: std::ops::RangeInclusive<f64> = 0.0..=2.5; // nominal 0..2
 const PITCHES_PER_PA_BAND: std::ops::RangeInclusive<f64> = 2.9..=4.5; // nominal 3.3..4.3
-const BABIP_BAND: std::ops::RangeInclusive<f64> = 0.22..=0.36; // nominal .250..330
+const BABIP_BAND: std::ops::RangeInclusive<f64> = 0.22..=0.365; // nominal .250..330
 const DOUBLES9_BAND: std::ops::RangeInclusive<f64> = 0.5..=3.5; // nominal 1.0..2.5
 const CS9_BAND: std::ops::RangeInclusive<f64> = 0.0..=1.6; // nominal 0..1
 const PICKOFFS9_BAND: std::ops::RangeInclusive<f64> = 0.0..=1.5; // nominal 0..0.6
