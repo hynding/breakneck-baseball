@@ -234,6 +234,9 @@ pub struct CoachSnapshot {
     pub time: f32,
     pub phase: CoachPhase,
     pub in_steal_window: bool,
+    /// A running-game throw (pickoff / catcher's throw on a steal) is being
+    /// staged: one fielder is legitimately off his spot covering the bag.
+    pub duel_throw: bool,
     /// A decided call is waiting for its announcement (throw in the air).
     pub pending_call: bool,
     pub runners_settled: bool,

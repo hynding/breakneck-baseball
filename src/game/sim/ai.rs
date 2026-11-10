@@ -503,14 +503,22 @@ pub fn cpu_defense(
 
     // Only act while waiting to pitch; keep the button released otherwise.
     if play.phase != Phase::PrePitch {
-        intents.get_mut(team).action = false;
+        let intent = intents.get_mut(team);
+        intent.action = false;
+        intent.secondary = false;
         cpu.pitch_delay.reset();
         return;
     }
+    intents.get_mut(team).secondary = false;
+    // A pickoff throw in the air: wait for the tag.
+    if play.duel_throw().is_some() {
+        intents.get_mut(team).action = false;
+        return;
+    }
 
-    // The steal window: the ball is held, and pressing action would be a
-    // pickoff throw. Mostly the CPU just waits it out — but a runner
-    // stretching his lead draws the occasional throw over.
+    // The steal window: the ball is held. Mostly the CPU just waits it out
+    // — but a runner stretching his lead draws the occasional throw over
+    // (the running-game button).
     if play.in_steal_window() {
         let intent = intents.get_mut(team);
         intent.action = false;
@@ -520,7 +528,7 @@ pub fn cpu_defense(
             // made 2.1 pickoffs per team-game, ~40× MLB's 0.05; 0.25 still
             // picked off 0.7 a game.)
             let p = (0.06 + 0.1 * cfg.skill) * time.delta_secs();
-            intent.action = cpu.frame_roll(3.9) < p;
+            intent.secondary = cpu.frame_roll(3.9) < p;
         }
         // Re-arm only a short post-window beat instead of the full
         // 0.7-1.2 s wait: the old full reset stacked on the 1.5 s window

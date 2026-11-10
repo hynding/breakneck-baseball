@@ -16,9 +16,9 @@ use bevy_rapier3d::prelude::Velocity;
 
 use crate::game::animation::{AnimClip, MoveIntent, Playing};
 use crate::game::ball::{BALL_DRAG_FACTOR, Baseball, InFlight, MAGNUS_FACTOR};
-use crate::game::flow::{BallInPlayEvent, LiveBallEvent, Phase, Play};
+use crate::game::flow::{BallInPlayEvent, DuelThrowKind, LiveBallEvent, Phase, Play};
 use crate::game::input::{Controllers, InputSource, Intents};
-use crate::game::player::Fielder;
+use crate::game::player::{CatcherRole, Fielder, Pitcher};
 use crate::game::rules;
 use crate::game::variant::{FieldSpec, Ruleset};
 use crate::game::{GameState, ScoreBoard};
@@ -696,6 +696,104 @@ fn return_to_spots(
     }
 }
 
+/// The running-game throw's choreography, as `flow` stages it: the thrower
+/// winds into the throw (the pitcher's spin move on a pickoff, the
+/// catcher's pop on a steal), the nearest fielder (never the catcher) breaks
+/// for the bag and takes the throw there, and once the call is made he
+/// jogs back to his spot. The thrower's clip and the cover's chosen entity
+/// are keyed per throw, so each starts exactly once.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+fn cover_duel_throw(
+    play: Res<Play>,
+    field: Res<FieldSpec>,
+    ruleset: Res<Ruleset>,
+    mut cover: Local<Option<(usize, DuelThrowKind, Entity)>>,
+    mut gloved: Local<bool>,
+    mut fielders: Query<
+        (
+            Entity,
+            &Fielder,
+            &Transform,
+            &mut MoveIntent,
+            Has<CatcherRole>,
+        ),
+        Without<Pitcher>,
+    >,
+    pitchers: Query<Entity, With<Pitcher>>,
+    mut commands: Commands,
+) {
+    let Some(throw) = play.duel_throw() else {
+        // The throw is over: send the cover man home.
+        if let Some((_, _, entity)) = cover.take() {
+            if let Ok((_, fielder, _, mut intent, _)) = fielders.get_mut(entity) {
+                if let Some(spot) = field.fielder_positions.get(fielder.index) {
+                    intent.target = Some(*spot);
+                    intent.speed = RETURN_SPEED;
+                }
+            }
+        }
+        *gloved = false;
+        return;
+    };
+    let key = (throw.target, throw.kind);
+    if cover.is_none_or(|(t, k, _)| (t, k) != key) {
+        // A fresh throw: the thrower goes into his throw, and the fielder
+        // nearest the bag (the first baseman holding the runner, the middle
+        // infielder covering second) breaks for it.
+        match throw.kind {
+            DuelThrowKind::Pickoff => {
+                for pitcher in &pitchers {
+                    commands
+                        .entity(pitcher)
+                        .insert(Playing::new(AnimClip::ThrowRelease));
+                }
+            }
+            DuelThrowKind::Steal => {
+                for (entity, _, _, _, catcher) in &fielders {
+                    if catcher {
+                        commands
+                            .entity(entity)
+                            .insert(Playing::new(AnimClip::ThrowRelease));
+                    }
+                }
+            }
+        }
+        let bag = cover_pos(&field, throw.target);
+        let nearest = fielders
+            .iter()
+            .filter(|(_, _, _, _, catcher)| !catcher)
+            .min_by(|a, b| {
+                horizontal_distance(a.2.translation, bag)
+                    .total_cmp(&horizontal_distance(b.2.translation, bag))
+            })
+            .map(|(entity, ..)| entity);
+        *cover = nearest.map(|entity| (key.0, key.1, entity));
+        *gloved = false;
+    }
+    let Some((_, _, entity)) = *cover else {
+        return;
+    };
+    let Ok((_, fielder, _, mut intent, _)) = fielders.get_mut(entity) else {
+        return;
+    };
+    if throw.landed {
+        if !*gloved {
+            *gloved = true;
+            commands
+                .entity(entity)
+                .insert(Playing::new(AnimClip::GloveUp));
+        }
+        // The tag is down — jog back while the call plays out.
+        if let Some(spot) = field.fielder_positions.get(fielder.index) {
+            intent.target = Some(*spot);
+            intent.speed = RETURN_SPEED;
+        }
+        return;
+    }
+    intent.target = Some(cover_pos(&field, throw.target));
+    intent.speed = ruleset.pace.fielder_speed;
+}
+
 fn reset_active(mut active: ResMut<ActivePlay>) {
     active.state = PlayState::Idle;
     active.cover.clear();
@@ -717,6 +815,7 @@ impl Plugin for FieldingPlugin {
                     hold_and_throw,
                     receive_throw,
                     return_to_spots,
+                    cover_duel_throw,
                     carry_possessed_ball,
                 )
                     .chain()

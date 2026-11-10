@@ -14,7 +14,25 @@ fn cues(phase: Phase) -> ShotCues {
         strikeout: false,
         thrown_base: None,
         descending_to: None,
+        duel_throw_base: None,
     }
+}
+
+/// A pickoff in the duel and the catcher's throw in the result pause both
+/// cut to the bag the ball is going to — over the duel, the gloved-pitch
+/// hold, even strike three's reaction cam (the throw is the play).
+#[test]
+fn a_running_game_throw_takes_the_base_cam() {
+    let mut duel = cues(Phase::PrePitch);
+    duel.duel_throw_base = Some(0);
+    assert_eq!(pick_shot(&duel, None), Shot::BaseCam(0));
+    let mut steal = cues(Phase::Result);
+    steal.pitch_gloved = true;
+    steal.strikeout = true;
+    steal.duel_throw_base = Some(1);
+    assert_eq!(pick_shot(&steal, None), Shot::BaseCam(1));
+    steal.duel_throw_base = None;
+    assert_eq!(pick_shot(&steal, None), Shot::ReactionCam);
 }
 
 /// Strike three's pause takes the reaction cam even though the pitch was

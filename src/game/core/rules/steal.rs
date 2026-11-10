@@ -232,6 +232,72 @@ pub enum PickoffResult {
     NoRunner,
 }
 
+/// Whether a pickoff throw at a runner `lead_m` off the bag beats his dive
+/// back — the same race [`attempt_pickoff`] runs, asked without applying it,
+/// so the throw can be *decided* as it leaves the hand and *called* as it
+/// lands (the runner's dive and the ball's flight are staged in between).
+pub fn pickoff_beats_runner(lead_m: f32) -> bool {
+    dive_back_secs(lead_m) > PICKOFF_THROW_SECS
+}
+
+/// Whether the sent runner would beat the throw — [`attempt_steal`]'s race
+/// asked without applying it (`None`: nobody in a position to steal).
+pub fn steal_would_succeed(bases: &Bases, attempt: &StealAttempt) -> Option<bool> {
+    steal_candidate(bases).map(|runner| steal_race(runner, attempt).safe())
+}
+
+/// The visible staging of a throw at a bag during the running game: the
+/// beat before the ball leaves the hand (the pitcher's spin move, the
+/// catcher's exchange) and its flight to the bag, in seconds.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ThrowTiming {
+    pub release_secs: f32,
+    pub flight_secs: f32,
+}
+
+impl ThrowTiming {
+    /// Release to tag, start to finish.
+    pub fn total_secs(self) -> f32 {
+        self.release_secs + self.flight_secs
+    }
+}
+
+/// The pickoff throw as staged: the whole [`PICKOFF_THROW_SECS`] race split
+/// into the spin move and the flight.
+pub fn pickoff_throw_timing() -> ThrowTiming {
+    let release_secs = 0.3;
+    ThrowTiming {
+        release_secs,
+        flight_secs: PICKOFF_THROW_SECS - release_secs,
+    }
+}
+
+/// The catcher's throw on a steal of the bag after `runner` (0-indexed), as
+/// staged once the pitch is in the mitt: his exchange, then the throw at
+/// [`CATCHER_THROW_SPEED`] — the long throw to second, the short one to
+/// third (the same distances [`steal_race`] times).
+pub fn steal_throw_timing(runner: usize) -> ThrowTiming {
+    let throw_m = if runner == 0 {
+        2.0 * HALF_DIAGONAL
+    } else {
+        BASE_DISTANCE_M
+    };
+    ThrowTiming {
+        release_secs: CATCHER_EXCHANGE_SECS,
+        flight_secs: throw_m / CATCHER_THROW_SPEED,
+    }
+}
+
+/// A bag as the announcer says it (0-indexed; anything past third is home).
+pub fn base_name(base: usize) -> &'static str {
+    match base {
+        0 => "1ST",
+        1 => "2ND",
+        2 => "3RD",
+        _ => "HOME",
+    }
+}
+
 /// Resolves a pickoff throw at the lead eligible runner: a race between the
 /// throw ([`PICKOFF_THROW_SECS`]) and his dive back from `lead_m`. A normal
 /// lead is always back in time; a stretch only gets caught once it has
@@ -246,13 +312,19 @@ pub fn attempt_pickoff(
     let Some(runner) = steal_candidate(bases) else {
         return PickoffResult::NoRunner;
     };
-    if dive_back_secs(lead_m) > PICKOFF_THROW_SECS {
-        bases.set(runner, false);
-        charge_out(score, bases, rules);
+    if pickoff_beats_runner(lead_m) {
+        retire_runner(score, bases, rules, runner);
         PickoffResult::PickedOff { base: runner }
     } else {
         PickoffResult::SafeBack
     }
+}
+
+/// Takes the runner on `base` off the bases and charges the out (the
+/// batter's count stands) — a pickoff or caught stealing called at the tag.
+pub fn retire_runner(score: &mut ScoreBoard, bases: &mut Bases, rules: &Ruleset, base: usize) {
+    bases.set(base, false);
+    charge_out(score, bases, rules);
 }
 
 /// Removes the runner who was sent, caught off base when the ball was

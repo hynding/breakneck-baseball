@@ -13,6 +13,7 @@ mod banner;
 mod curtain;
 mod fit;
 mod hud;
+mod run_game;
 mod touch;
 mod walkup;
 
@@ -87,6 +88,13 @@ pub struct ContactStampText;
 /// tests can read its `Text`.
 #[derive(Component)]
 pub struct PitchSpeedText;
+
+/// The running-game prompt along the top during the duel ("E  PICKOFF",
+/// "R-SHIFT  STEAL", "STEAL ON!"), painted at spawn and shown by text
+/// mutation only, like [`ContactStampText`]. Public so e2e tests can read
+/// its `Text`.
+#[derive(Component)]
+pub struct RunGameHintText;
 
 /// Root of one of the two duel cards flanking the catcher's-eye pitch view.
 #[derive(Component)]
@@ -351,6 +359,7 @@ impl Plugin for UiPlugin {
                 fade_contact_stamp,
                 show_pitch_speed,
                 fade_pitch_speed,
+                run_game::update_run_game_hint,
                 paint_walkup_card,
                 clear_read_outs_on_result_exit,
                 drive_curtain,

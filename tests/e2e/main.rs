@@ -50,6 +50,7 @@ mod menu_tap;
 mod model_contract;
 mod passive_walks;
 mod pause_subs;
+mod running_game;
 mod scenarios;
 mod season;
 #[cfg(feature = "profile")]

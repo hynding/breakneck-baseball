@@ -44,7 +44,7 @@ If this file and the test disagree, the test wins — update this file.
 | BB% (walks / PA) | 5.0 ..= 13.0 | 6..11 | 8.2 |
 | HBP% | 0.0 ..= 2.5 | 0..2 | 0.0 |
 | pitches / PA | 2.9 ..= 4.5 | 3.3..4.3 | 3.3 |
-| BABIP | .220 ..= .360 | .250..330 | .301 (pre-range-fix .367) |
+| BABIP | .220 ..= .365 | .250..330 | .341 at N=100 (main .332; pre-range-fix .367) |
 | doubles / team / 9 | 0.5 ..= 3.5 | 1.0..2.5 | 2.4 (pre-range-fix 4.6) |
 | CS / team / 9 | 0.0 ..= 1.6 | 0..1 | 0.2 |
 | pickoffs / team / 9 | 0.0 ..= 1.5 | 0..0.6 | 0.6 |

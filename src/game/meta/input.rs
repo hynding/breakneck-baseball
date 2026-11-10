@@ -23,6 +23,9 @@ use crate::game::Team;
 ///   `action` releases the pitch.
 /// - **Offense (batting):** `aim` steers the swing direction (pull/center/oppo),
 ///   `action` swings.
+///
+/// `secondary` is the running-game button on both sides: the defense's
+/// pickoff throw, the offense's steal call.
 #[derive(Clone, Copy, Default, Debug, PartialEq)]
 pub struct TeamIntent {
     /// Directional aim, components in −1.0..=1.0.
@@ -32,6 +35,10 @@ pub struct TeamIntent {
     /// Primary button is currently held (the Swing Meter's load state —
     /// `action` is the edge, this is the level).
     pub action_held: bool,
+    /// Secondary button was pressed this frame — the running game: a
+    /// pickoff throw on defense, a steal call on offense (E / Right-Shift /
+    /// pad East).
+    pub secondary: bool,
     /// Absolute zone-plane cursor (world x / height, meters), for devices
     /// that aim by position rather than velocity — today the Zone Pad touch
     /// scheme. `None` for sticks/keys; the PCI adapter snaps to it when set.
@@ -50,6 +57,7 @@ impl TeamIntent {
         }
         self.action |= preferred.action;
         self.action_held |= preferred.action_held;
+        self.secondary |= preferred.secondary;
         self.cursor = preferred.cursor.or(self.cursor);
     }
 }
@@ -97,9 +105,9 @@ impl Intents {
 /// are unavailable.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KeyScheme {
-    /// WASD + Space.
+    /// WASD + Space (E: pickoff / steal).
     Primary,
-    /// Arrow keys + Right-Control.
+    /// Arrow keys + Right-Control (Right-Shift: pickoff / steal).
     Secondary,
 }
 
@@ -114,6 +122,23 @@ impl KeyScheme {
         match team {
             Team::Home => KeyScheme::Primary,
             Team::Away => KeyScheme::Secondary,
+        }
+    }
+
+    /// The scheme's running-game key (pickoff on defense, steal on offense):
+    /// E sits beside WASD, Right-Shift above the arrows' Right-Ctrl.
+    pub fn secondary_key(self) -> KeyCode {
+        match self {
+            KeyScheme::Primary => KeyCode::KeyE,
+            KeyScheme::Secondary => KeyCode::ShiftRight,
+        }
+    }
+
+    /// The running-game key as the HUD names it.
+    pub fn secondary_label(self) -> &'static str {
+        match self {
+            KeyScheme::Primary => "E",
+            KeyScheme::Secondary => "R-SHIFT",
         }
     }
 }
@@ -172,6 +197,17 @@ impl Controllers {
             (_, InputSource::Cpu) => None,
             (Team::Home, _) => Some(0),
             (Team::Away, _) => Some(1),
+        }
+    }
+
+    /// What the HUD calls this team's running-game button (pickoff / steal),
+    /// or `None` for the CPU. A pad-owned slot names the pad's East face
+    /// button (the keyboard stays live underneath).
+    pub fn secondary_label(&self, team: Team) -> Option<&'static str> {
+        match self.source(team) {
+            InputSource::Cpu => None,
+            InputSource::Keyboard(scheme) => Some(scheme.secondary_label()),
+            InputSource::Gamepad(_) => Some("B"),
         }
     }
 }
@@ -370,6 +406,7 @@ fn gamepad_intent(pad: &Gamepad) -> TeamIntent {
         aim,
         action: pad.just_pressed(GamepadButton::South),
         action_held: pad.pressed(GamepadButton::South),
+        secondary: pad.just_pressed(GamepadButton::East),
         // Struct-update: channels a physical device can never produce (the
         // absolute cursor) stay at their defaults without a per-channel
         // edit at every constructor.
@@ -394,6 +431,7 @@ fn keyboard_intent(keyboard: &ButtonInput<KeyCode>, scheme: KeyScheme) -> TeamIn
             KeyCode::ControlRight,
         ),
     };
+    let secondary = scheme.secondary_key();
 
     let mut aim = Vec2::ZERO;
     if keyboard.pressed(up) {
@@ -416,6 +454,7 @@ fn keyboard_intent(keyboard: &ButtonInput<KeyCode>, scheme: KeyScheme) -> TeamIn
         aim: aim.clamp_length_max(1.0),
         action: keyboard.just_pressed(action),
         action_held: keyboard.pressed(action),
+        secondary: keyboard.just_pressed(secondary),
         ..default()
     }
 }

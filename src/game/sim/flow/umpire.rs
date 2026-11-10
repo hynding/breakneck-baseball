@@ -130,17 +130,54 @@ impl<'a, 'w> Umpire<'a, 'w> {
     /// jump and lead against the delivery, the catcher's transfer on where
     /// the pitch crossed, and his throw (`rules::steal_race`).
     pub(super) fn resolve_steal(&mut self, play: &Play) {
-        let attempt = rules::StealAttempt {
+        let attempt = Self::steal_attempt(play);
+        let before = self.score.outs;
+        let runner = rules::steal_candidate(self.bases);
+        match rules::attempt_steal(self.score, self.bases, self.rules, &attempt) {
+            StealResult::Stolen { base } => {
+                self.banner.write(
+                    PlayBanner::new("STOLEN BASE!", BannerTone::Good)
+                        .with_follow_up(format!("SAFE AT {}", rules::base_name(base))),
+                );
+            }
+            StealResult::Caught => {
+                let bag = rules::base_name(runner.map_or(1, |r| r + 1));
+                self.announce_out(format!("CAUGHT STEALING {bag}"), BannerTone::Bad, before);
+            }
+            StealResult::NoRunner => {}
+        }
+    }
+
+    /// Calls a pickoff throw at the tag: the runner on `runner` was decided
+    /// `safe` (back in ahead of the ball) or out as the throw left the
+    /// pitcher's hand. Returns whether he was retired.
+    pub(super) fn call_pickoff(&mut self, runner: usize, safe: bool) -> bool {
+        let bag = rules::base_name(runner);
+        if safe {
+            self.announce(format!("SAFE AT {bag}"), BannerTone::Info);
+            return false;
+        }
+        let before = self.score.outs;
+        rules::retire_runner(self.score, self.bases, self.rules, runner);
+        self.announce_out(format!("PICKED OFF AT {bag}!"), BannerTone::Bad, before);
+        true
+    }
+
+    /// Whether the runner sent on this pitch beats the catcher's throw —
+    /// the race [`Self::resolve_steal`] will apply at the tag, asked as the
+    /// throw starts (`None`: nobody is in a position to steal).
+    pub(super) fn steal_preview(&self, play: &Play) -> Option<(usize, bool)> {
+        let runner = rules::steal_candidate(self.bases)?;
+        let safe = rules::steal_would_succeed(self.bases, &Self::steal_attempt(play))?;
+        Some((runner, safe))
+    }
+
+    fn steal_attempt(play: &Play) -> rules::StealAttempt {
+        rules::StealAttempt {
             kind: play.pitch.kind.unwrap_or(rules::PitchKind::Fastball),
             crossing: play.pitch.crossing,
             break_fraction: play.duel.break_fraction,
             lead_m: play.duel.jump_lead_m,
-        };
-        let before = self.score.outs;
-        match rules::attempt_steal(self.score, self.bases, self.rules, &attempt) {
-            StealResult::Stolen { .. } => self.announce("STOLEN BASE!", BannerTone::Good),
-            StealResult::Caught => self.announce_out("CAUGHT STEALING", BannerTone::Bad, before),
-            StealResult::NoRunner => {}
         }
     }
 

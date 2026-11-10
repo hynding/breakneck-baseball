@@ -10,9 +10,11 @@ use crate::game::GameState;
 use crate::game::settings::PitchTrailStyle;
 
 mod particles;
+mod throw;
 mod trail;
 
 pub use particles::FireworkSpark;
+pub use throw::{DuelThrowBall, throw_arc};
 pub use trail::TrailMote;
 
 use particles::{
@@ -66,6 +68,7 @@ impl Plugin for FxPlugin {
                     tick_particles,
                     pitch_trail,
                     tick_trail,
+                    throw::stage_duel_throw,
                 )
                     .run_if(in_state(GameState::Playing)),
             );

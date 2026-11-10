@@ -11,7 +11,7 @@ use crate::game::{GameplayEntity, ScoreBoard};
 
 use super::{
     BannerPill, BannerText, BaseIndicator, ContactStampText, CountDot, CountKind, InningText,
-    MeterFill, PitchSpeedText, ScoreText, hidden_tint,
+    MeterFill, PitchSpeedText, RunGameHintText, ScoreText, hidden_tint,
 };
 
 // ── Build the UI tree ─────────────────────────────────────────────────────────
@@ -272,6 +272,33 @@ pub(super) fn spawn_hud(
                 Text::new(""),
                 TextFont {
                     font_size: 24.0,
+                    ..default()
+                },
+                TextColor(ui.text_primary),
+            ));
+        });
+    // The running-game prompt (pickoff / steal buttons): same bare-text
+    // idiom, high and centred, clear of the base ring (top-left) and the
+    // banner pill (26%).
+    commands
+        .spawn((
+            GameplayEntity,
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Percent(13.0),
+                left: Val::Px(0.0),
+                width: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.01)),
+        ))
+        .with_children(|wrap| {
+            wrap.spawn((
+                RunGameHintText,
+                Text::new(""),
+                TextFont {
+                    font_size: 20.0,
                     ..default()
                 },
                 TextColor(ui.text_primary),

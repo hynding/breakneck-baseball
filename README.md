@@ -38,6 +38,7 @@ the device you last used.
 |---|---|---|---|
 | Aim | `WASD` | Arrow keys | Left stick / D-pad |
 | Action (pitch / swing) | `Space` | `Right Ctrl` | South button (A / ✕) |
+| Running game (pickoff / steal) | `E` | `Right Shift` | East button (B / ○) |
 | Camera framing | `V` (cycles four duel views) | — | — |
 | Pause / substitution board | `Esc` | `Esc` | Start |
 
@@ -49,14 +50,27 @@ aiming high *means* throwing the heater upstairs.
 **Batting** — time the swing with action; aim pulls the ball (pull / center /
 opposite field).
 
-**The steal window** — before the wind-up, the offense can hold aim toward the
-next base to stretch the lead runner off the bag: the longer it is held during
-the window, the longer the lead and the better the jump. Every steal is a race
-— the runner's jump and sprint against the pitcher's delivery and the
-catcher's pop time — so a send on first movement beats an off-speed pitch, a
-fastball cuts down a runner from a normal lead, and a pitch in the dirt gives
-him the base. The defense can answer with a pickoff throw (action during the
-window) — catch a runner who has hung out on a long lead and he's out.
+**The running game** — whenever a runner can steal, the pitcher holds the ball
+for a short window before the wind-up. A pitch press during it isn't lost: the
+pitch goes the moment the window closes.
+
+- *Offense:* press the running-game button to **call a steal** — the runner
+  stretches his lead and goes on the pitcher's first movement. Press it during
+  the wind-up instead and he goes late, with a worse jump. Holding aim toward
+  the next base still stretches the lead without committing (a bluff).
+- *Defense:* press the running-game button to **throw over**. The pitcher spins
+  and throws, the nearest fielder takes it at the bag, and the runner dives
+  back; the call ("SAFE AT 1ST" / "PICKED OFF AT 1ST!") lands with the ball.
+  A runner on a normal lead always gets back; one who has hung out on a long
+  lead (a called steal, a stretch) is out.
+
+Every steal is a race — the runner's jump and sprint against the pitcher's
+delivery and the catcher's pop time — so a send on first movement beats an
+off-speed pitch, a fastball cuts down a runner from a normal lead, and a pitch
+in the dirt gives him the base. The catcher's throw is played out after the
+catch: the runner slides, the ball arrives, and only then is the call made.
+A prompt at the top of the screen names each human side's button while the
+running game is on.
 
 ## Building
 

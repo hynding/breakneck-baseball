@@ -284,6 +284,107 @@ struct DuelState {
     hold: Timer,
     /// Reload time between pickoff throws.
     pickoff_cooldown: Timer,
+    /// A pitch press that landed while the window still held the ball: it
+    /// is thrown the moment the window closes instead of being swallowed
+    /// (the pickoff lives on its own button now, so a press here only ever
+    /// means "pitch").
+    pitch_queued: bool,
+    /// A throw at a bag in the running game — a pickoff, or the catcher's
+    /// throw on a steal — staged from release to tag.
+    throw: Option<DuelThrow>,
+}
+
+/// Which running-game throw is in the air.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DuelThrowKind {
+    /// The pitcher throws over to the runner's own bag.
+    Pickoff,
+    /// The catcher throws to the bag the runner is stealing.
+    Steal,
+}
+
+/// A running-game throw, *decided* as it starts (the pure race in
+/// `rules::pickoff_beats_runner` / `rules::steal_would_succeed`) and
+/// *called* — the rules applied, the banner raised — when it lands, so the
+/// runner's dive or slide and the ball's flight are seen before the call.
+#[derive(Clone, Debug)]
+struct DuelThrow {
+    kind: DuelThrowKind,
+    /// The runner's bag when the throw started (0-indexed).
+    runner: usize,
+    timing: rules::ThrowTiming,
+    /// Release → tag.
+    clock: Timer,
+    /// The runner beats the throw.
+    safe: bool,
+    /// The tag has landed and the call is made.
+    landed: bool,
+    /// After the tag: how long the shot holds on the bag before the duel
+    /// resumes (pickoffs only — a steal holds through its result pause).
+    linger: Timer,
+}
+
+/// Seconds a safe pickoff holds the base shot after the tag before the duel
+/// resumes.
+const PICKOFF_LINGER_SECS: f32 = 1.0;
+
+impl DuelThrow {
+    fn new(kind: DuelThrowKind, runner: usize, timing: rules::ThrowTiming, safe: bool) -> Self {
+        Self {
+            kind,
+            runner,
+            timing,
+            clock: Timer::from_seconds(timing.total_secs(), TimerMode::Once),
+            safe,
+            landed: false,
+            linger: Timer::from_seconds(PICKOFF_LINGER_SECS, TimerMode::Once),
+        }
+    }
+
+    /// The bag the throw goes to.
+    fn target(&self) -> usize {
+        match self.kind {
+            DuelThrowKind::Pickoff => self.runner,
+            DuelThrowKind::Steal => self.runner + 1,
+        }
+    }
+}
+
+/// A read-only view of the running-game throw for presentation and the
+/// rigs: who throws where, how far along it is, and how it comes out.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DuelThrowView {
+    pub kind: DuelThrowKind,
+    /// The runner's bag when the throw started (0-indexed).
+    pub runner: usize,
+    /// The bag the ball is thrown to (0-indexed).
+    pub target: usize,
+    /// Seconds since the throw started (the spin move / exchange first).
+    pub elapsed_secs: f32,
+    pub timing: rules::ThrowTiming,
+    /// The runner beats the throw (decided at the start).
+    pub safe: bool,
+    /// The tag has landed and the call is made.
+    pub landed: bool,
+}
+
+impl DuelThrowView {
+    /// Seconds until the ball reaches the bag (0 once it has).
+    pub fn remaining_secs(&self) -> f32 {
+        (self.timing.total_secs() - self.elapsed_secs).max(0.0)
+    }
+
+    /// The ball's progress along its flight, 0 at release to 1 at the bag
+    /// (0 through the spin move / exchange).
+    pub fn flight_fraction(&self) -> f32 {
+        ((self.elapsed_secs - self.timing.release_secs) / self.timing.flight_secs.max(1e-3))
+            .clamp(0.0, 1.0)
+    }
+
+    /// Whether the ball has left the thrower's hand.
+    pub fn released(&self) -> bool {
+        self.elapsed_secs >= self.timing.release_secs
+    }
 }
 
 impl Default for DuelState {
@@ -296,6 +397,8 @@ impl Default for DuelState {
             // Zero-length until `steal_window_for` sizes it at the reset.
             hold: Timer::from_seconds(0.0, TimerMode::Once),
             pickoff_cooldown: Timer::from_seconds(0.0, TimerMode::Once),
+            pitch_queued: false,
+            throw: None,
         }
     }
 }
@@ -353,6 +456,25 @@ impl Play {
 
     pub fn in_steal_window(&self) -> bool {
         !self.duel.hold.is_finished()
+    }
+
+    /// The running-game throw being staged — a pickoff during the duel, or
+    /// the catcher's throw on a steal during the result pause — if any.
+    pub fn duel_throw(&self) -> Option<DuelThrowView> {
+        self.duel.throw.as_ref().map(|t| DuelThrowView {
+            kind: t.kind,
+            runner: t.runner,
+            target: t.target(),
+            elapsed_secs: t.clock.elapsed_secs(),
+            timing: t.timing,
+            safe: t.safe,
+            landed: t.landed,
+        })
+    }
+
+    /// Whether a pitch press is waiting for the steal window to close.
+    pub fn pitch_queued(&self) -> bool {
+        self.duel.pitch_queued
     }
 
     /// The hit the umpire has already decided but not yet announced (the
@@ -445,7 +567,12 @@ impl Play {
             Some(beat) if beat.dips() => beat.curtain_secs(),
             _ => 0.0,
         };
-        self.timer.duration().as_secs_f32() + curtain
+        // A steal's throw holds the pause until its tag, then re-arms it.
+        let throw = match &self.duel.throw {
+            Some(t) if t.kind == DuelThrowKind::Steal => t.timing.total_secs(),
+            _ => 0.0,
+        };
+        self.timer.duration().as_secs_f32() + curtain + throw
     }
 
     /// Whether the walk-up between plate appearances is on: the ball is
@@ -549,6 +676,10 @@ impl Play {
 #[derive(Resource)]
 pub struct LeadState {
     pub extended: bool,
+    /// The offense called a steal with the running-game button: the runner
+    /// stretches his lead and goes on first movement. Latched until the
+    /// pitch is thrown (or a pickoff throw sends him back to the bag).
+    pub called: bool,
     /// How far off the bag the lead runner stands (regulation metres): it
     /// shuffles out while a stretch is held during the steal window and back
     /// once it is let go (`rules::shuffle_lead`).
@@ -559,6 +690,7 @@ impl Default for LeadState {
     fn default() -> Self {
         Self {
             extended: false,
+            called: false,
             lead_m: rules::LEAD_NORMAL_M,
         }
     }
@@ -740,6 +872,7 @@ impl Plugin for FlowPlugin {
                     live::in_play,
                     live::announce_wall_bang,
                     live::resolve_live_play,
+                    pitch::steal_throw,
                     result::result_phase,
                 )
                     .chain()
