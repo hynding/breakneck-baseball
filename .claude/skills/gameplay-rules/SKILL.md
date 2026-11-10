@@ -24,10 +24,18 @@ before changing behavior — most "bugs" here are deliberate design.
 ## The at-bat loop
 
 1. **Steal window** — whenever `rules::steal_candidate` says a runner can steal, each at-bat opens
-   a window (`Ruleset::steal_window_secs`; `Play::in_steal_window`) gating the pitch. Offense holds
-   Down to stretch the lead (`LeadState`); while extended, a defensive action press is a pickoff
-   (`rules::attempt_pickoff`, on a reload cooldown) racing the runner's dive back from
-   `LeadState::lead_m`. The lead only grows during the window. A steal is a timed race
+   a window (`Ruleset::steal_window_secs`; `Play::in_steal_window`) gating the pitch — a pitch press
+   inside it is queued (`Play::pitch_queued`) and thrown when it closes. The running game lives on
+   its own button (`TeamIntent::secondary`: E / Right-Shift / pad East; Director `Second`): the
+   offense's press latches a steal call (`LeadState::called` — stretched lead, first-movement break;
+   pressed in the windup = late break), holding Down still stretches without committing; the
+   defense's press (any PrePitch frame, reload cooldown) throws over. Running-game throws are
+   **decided at the throw, called at the tag**: `Play::duel_throw` (`DuelThrowKind::Pickoff` in
+   PrePitch — the duel freezes while it flies; `Steal` in Result, started at the catch, holding the
+   pause until `pitch::steal_throw` applies `resolve_steal`) carries the pure verdict
+   (`rules::pickoff_beats_runner` / `steal_would_succeed`) and staging (`rules::ThrowTiming`);
+   runner pacing, the cover fielder, the stand-in ball (`fx::DuelThrowBall`) and the base cam all
+   read it. The lead only grows during the window and resets to normal after a pickoff throw. A steal is a timed race
    (`rules::steal_race`): break timing in the windup + sprint from the lead vs. pitch-kind
    delivery + catcher transfer (low/wide crossing) + pop time. Dropped third = curveball in the dirt.
 2. **Pitch** — five-pitch arsenal by dominant held-aim axis at release (`PitchKind::from_aim`):

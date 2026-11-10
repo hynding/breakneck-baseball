@@ -428,6 +428,12 @@ impl Coach {
     }
 
     pub(super) fn check_idle(&mut self, s: &CoachSnapshot, out: &mut Vec<CoachFinding>) {
+        if s.duel_throw {
+            // The cover man is at the bag for the throw: the jog-back clock
+            // starts over from wherever everyone stands once it's done.
+            self.arm_idle_deadlines(s);
+            return;
+        }
         for &(index, deadline) in &self.play.idle_deadlines {
             if s.time <= deadline || self.play.idle_flagged.contains(&index) {
                 continue;

@@ -158,8 +158,11 @@ pub enum Condition {
 pub enum ScriptAction {
     /// Hold the stick at (x, y) — pitch aim, swing aim, lead stretch.
     Aim { x: f32, y: f32 },
-    /// Raw action edge (pitch release, pickoff, PCI/Classic press).
+    /// Raw action edge (pitch release, PCI/Classic press).
     Press,
+    /// Raw secondary edge — the running-game button: a pickoff throw on
+    /// defense, a steal call on offense.
+    Second,
     /// Raw action level (the Swing Meter's load, without the edge).
     HoldPress,
     /// Style-aware swing commit: the director synthesizes whatever input
@@ -432,6 +435,7 @@ fn direct(
                     intent.action_held = true;
                 }
                 ScriptAction::HoldPress => intent.action_held = true,
+                ScriptAction::Second => intent.secondary = true,
                 ScriptAction::Swing => swing_now = true,
                 ScriptAction::Cursor { x, y } => intent.cursor = Some(Vec2::new(x, y)),
                 ScriptAction::ThrowTo(base) => {

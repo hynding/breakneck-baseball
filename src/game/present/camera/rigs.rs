@@ -166,6 +166,9 @@ pub(super) struct ShotCues {
     /// The chasing fielder, when the ball is in the air and coming down —
     /// the fielder cam's subject.
     pub descending_to: Option<Entity>,
+    /// The bag a running-game throw (a pickoff, the catcher's throw on a
+    /// steal) is staged at, while it is (`Play::duel_throw`).
+    pub duel_throw_base: Option<usize>,
 }
 
 /// Which shot the play wants right now. `current` is the shot on screen: a
@@ -173,6 +176,12 @@ pub(super) struct ShotCues {
 /// call is announced in the shot the play ended on (SAFE! at the bag, OUT
 /// over the fielder) instead of cutting away to a wide hold.
 pub(super) fn pick_shot(cues: &ShotCues, current: Option<Shot>) -> Shot {
+    // A running-game throw is the play: the call lands at the bag, so
+    // that's where the camera is — the runner diving back or sliding in, the
+    // cover man, the incoming ball.
+    if let Some(base) = cues.duel_throw_base {
+        return Shot::BaseCam(base);
+    }
     match cues.phase {
         Phase::PrePitch if cues.walkup => Shot::WalkUp,
         Phase::PrePitch | Phase::WindUp | Phase::Pitch => Shot::Duel(cues.view),
@@ -375,6 +384,7 @@ pub(super) fn broadcast_camera(
         strikeout: play.result_beat() == Some(ResultBeat::Strikeout),
         thrown_base: rig.thrown_base,
         descending_to,
+        duel_throw_base: play.duel_throw().map(|t| t.target),
     };
     let shot = pick_shot(&cues, rig.shot);
 

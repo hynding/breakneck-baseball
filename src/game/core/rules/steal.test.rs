@@ -288,3 +288,63 @@ fn pickoff_third_out_retires_the_side() {
     assert!(!score.top_of_inning, "half-inning flips on the third out");
     assert_eq!(bases, empty());
 }
+
+// ── Decided at the throw, called at the tag ──────────────────────────────
+
+#[test]
+fn the_pickoff_preview_matches_the_applied_call() {
+    for lead in [LEAD_NORMAL_M, 3.0, 3.7, LEAD_MAX_M] {
+        let mut score = ScoreBoard::default();
+        let mut bases = with(&[0]);
+        let applied = attempt_pickoff(&mut score, &mut bases, &std_rules(), lead);
+        assert_eq!(
+            pickoff_beats_runner(lead),
+            matches!(applied, PickoffResult::PickedOff { .. }),
+            "lead {lead}"
+        );
+    }
+}
+
+#[test]
+fn the_steal_preview_matches_the_applied_call() {
+    for kind in [
+        PitchKind::Fastball,
+        PitchKind::Curveball,
+        PitchKind::Changeup,
+        PitchKind::Slider,
+        PitchKind::Sinker,
+    ] {
+        let attempt = on(kind);
+        let bases = with(&[0]);
+        let preview = steal_would_succeed(&bases, &attempt);
+        let mut applied_bases = bases.clone();
+        let applied = attempt_steal(
+            &mut ScoreBoard::default(),
+            &mut applied_bases,
+            &std_rules(),
+            &attempt,
+        );
+        assert_eq!(
+            preview,
+            Some(matches!(applied, StealResult::Stolen { .. })),
+            "{kind:?}"
+        );
+    }
+    assert_eq!(
+        steal_would_succeed(&empty(), &on(PitchKind::Fastball)),
+        None
+    );
+}
+
+#[test]
+fn staged_throws_fit_their_races() {
+    // The pickoff's staging is the race's own clock, split.
+    assert!((pickoff_throw_timing().total_secs() - PICKOFF_THROW_SECS).abs() < 1e-6);
+    // The catcher's pop to second is the ~2.0 s average; third is shorter.
+    let second = steal_throw_timing(0).total_secs();
+    let third = steal_throw_timing(1).total_secs();
+    assert!((1.9..=2.1).contains(&second), "pop to second {second}");
+    assert!(third < second);
+    assert_eq!(base_name(0), "1ST");
+    assert_eq!(base_name(3), "HOME");
+}

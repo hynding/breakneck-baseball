@@ -39,6 +39,11 @@ pub(super) fn result_phase(
     if play.phase != Phase::Result {
         return;
     }
+    // A steal's throw is still in the air: the call isn't made yet, so the
+    // pause can't run down (`pitch::steal_throw` re-arms it at the tag).
+    if play.duel.throw.as_ref().is_some_and(|t| !t.landed) {
+        return;
+    }
     if !play.timer.tick(time.delta()).is_finished() {
         return;
     }
@@ -101,6 +106,8 @@ pub(super) fn result_phase(
     play.duel.armed = false;
     play.duel.break_fraction = 0.0;
     play.duel.jump_lead_m = rules::LEAD_NORMAL_M;
+    play.duel.throw = None;
+    play.duel.pitch_queued = false;
     play.pitch.taken = false;
     play.live.pending_call = None;
     play.live.wall_called = false;
@@ -111,6 +118,7 @@ pub(super) fn result_phase(
     // A runner in stealing position opens the duel window for the next at-bat.
     play.duel.hold = steal_window_for(&bases, &rules_res);
     lead.extended = false;
+    lead.called = false;
     lead.lead_m = rules::LEAD_NORMAL_M;
 }
 

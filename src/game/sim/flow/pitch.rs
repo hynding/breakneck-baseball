@@ -16,8 +16,8 @@ use super::live::wants_send;
 use super::result::end_pitch;
 use super::umpire::Umpire;
 use super::{
-    BallInPlayEvent, BannerTone, CURTAIN_SECS, ContactEvent, LeadState, Phase, PitchCaughtEvent,
-    Play, PlayBanner, ResultBeat,
+    BallInPlayEvent, CURTAIN_SECS, ContactEvent, LeadState, Phase, PitchCaughtEvent, Play,
+    PlayBanner, ResultBeat,
 };
 
 // ── Tuning constants ──────────────────────────────────────────────────────────
@@ -167,50 +167,65 @@ pub(super) fn pre_pitch(
     if walk_up(&mut play, &intents, &score, time.delta()) {
         return;
     }
-    play.duel.hold.tick(time.delta());
     play.duel.pickoff_cooldown.tick(time.delta());
 
-    // The offense works the lead: holding Down stretches the lead runner off
-    // the bag — a longer lead for the steal race, bought at pickoff risk.
+    // A pickoff in the air freezes the duel: the window's clock stops, no
+    // pitch, no lead growth — the runner is diving back (`runner`), the
+    // cover man is at the bag (`fielding`). The call lands with the ball.
+    if play.duel.throw.is_some() {
+        let mut ump = Umpire::new(&mut score, &mut bases, &rules_res, &mut banner);
+        if pickoff_in_flight(&mut play, &mut ump, time.delta()) {
+            end_pitch(&mut play, &rules_res.pace, ResultBeat::Pickoff);
+        }
+        // Diving back cancels any called steal: he's on the bag now.
+        lead.lead_m = rules::LEAD_NORMAL_M;
+        lead.extended = false;
+        lead.called = false;
+        return;
+    }
+    play.duel.hold.tick(time.delta());
+
+    let candidate = rules::steal_candidate(&bases);
+    // The offense works the lead: the running-game button calls a steal
+    // (latched — the runner stretches and goes on first movement), and
+    // holding Down stretches the lead runner off the bag as a bluff or a
+    // jump — a longer lead for the steal race, bought at pickoff risk.
     let offense = intents.get(score.batting_team());
-    lead.extended = wants_send(offense.aim) && rules::steal_candidate(&bases).is_some();
+    if offense.secondary && candidate.is_some() {
+        lead.called = true;
+    }
+    lead.called &= candidate.is_some();
+    lead.extended = (wants_send(offense.aim) || lead.called) && candidate.is_some();
 
     let intent = intents.get(score.fielding_team());
+    // The defense's running-game button throws over to the lead runner's
+    // bag — any time before the delivery, one throw per reload, so a held
+    // button can't spam the bag. The race is decided as the ball leaves
+    // and called when it lands.
+    if intent.secondary && play.duel.pickoff_cooldown.is_finished() {
+        if let Some(runner) = candidate {
+            play.duel.pickoff_cooldown =
+                Timer::from_seconds(rules_res.pace.pickoff_cooldown_secs, TimerMode::Once);
+            play.duel.throw = Some(super::DuelThrow::new(
+                super::DuelThrowKind::Pickoff,
+                runner,
+                rules::pickoff_throw_timing(),
+                !rules::pickoff_beats_runner(lead.lead_m),
+            ));
+            play.duel.pitch_queued = false;
+            return;
+        }
+    }
+
     if play.in_steal_window() {
         // The lead only grows while the pickoff threat is live, and shuffles
         // back once the stretch is let go — so a one-frame pulse can't bank
         // a risk-free jump, and a bluff takes as long to undo as to make.
         lead.lead_m = rules::shuffle_lead(lead.lead_m, lead.extended, time.delta_secs());
-        // The duel window: the ball is held. A defensive action here is a
-        // pickoff throw at the leading runner, not a pitch — one throw per
-        // reload, so a held button can't spam the bag.
-        if intent.action && play.duel.pickoff_cooldown.is_finished() {
-            play.duel.pickoff_cooldown =
-                Timer::from_seconds(rules_res.pace.pickoff_cooldown_secs, TimerMode::Once);
-            let outs_before = score.outs;
-            match rules::attempt_pickoff(&mut score, &mut bases, &rules_res, lead.lead_m) {
-                rules::PickoffResult::PickedOff { .. } => {
-                    // The out count follows the call (the rules zero it as
-                    // they change sides, so a third out reads as the side).
-                    let outs = if score.outs > outs_before {
-                        score.outs
-                    } else {
-                        rules_res.counts.outs_per_half
-                    };
-                    banner.write(
-                        PlayBanner::new("PICKED OFF!", BannerTone::Bad)
-                            .with_follow_up(format!("OUT {outs}")),
-                    );
-                    // A pickoff out is a play: it takes the same result
-                    // pause as any other out (banner linger + runners
-                    // settling) before the next window can open.
-                    end_pitch(&mut play, &rules_res.pace, ResultBeat::Pickoff);
-                }
-                rules::PickoffResult::SafeBack => {
-                    banner.write(PlayBanner::new("BACK IN TIME", BannerTone::Info));
-                }
-                rules::PickoffResult::NoRunner => {}
-            }
+        // The duel window: the ball is held. A pitch press here is kept and
+        // thrown the moment the window closes — never swallowed.
+        if intent.action {
+            play.duel.pitch_queued = true;
         }
         return;
     }
@@ -220,7 +235,8 @@ pub(super) fn pre_pitch(
         lead.lead_m = rules::shuffle_lead(lead.lead_m, false, time.delta_secs());
     }
 
-    if intent.action {
+    if intent.action || play.duel.pitch_queued {
+        play.duel.pitch_queued = false;
         play.pitch.pending = Some((intent.aim, rules::PitchKind::from_aim(intent.aim)));
         play.phase = Phase::WindUp;
         play.timer = Timer::from_seconds(AnimClip::WindUp.duration(), TimerMode::Once);
@@ -241,6 +257,27 @@ pub(super) fn pre_pitch(
                 .insert(Playing::then(AnimClip::WindUp, AnimClip::ThrowRelease));
         }
     }
+}
+
+/// Ticks a pickoff throw: at the tag the decided race is applied and
+/// called ("PICKED OFF AT 1ST!" / "SAFE AT 1ST"), then a safe runner's bag
+/// holds the shot a beat before the duel resumes. Returns whether the
+/// throw retired the runner (the caller ends the pitch into its pause).
+fn pickoff_in_flight(play: &mut Play, ump: &mut Umpire, dt: std::time::Duration) -> bool {
+    let Some(throw) = play.duel.throw.as_mut() else {
+        return false;
+    };
+    if !throw.landed {
+        if !throw.clock.tick(dt).is_finished() {
+            return false;
+        }
+        throw.landed = true;
+        return ump.call_pickoff(throw.runner, throw.safe);
+    }
+    if throw.linger.tick(dt).is_finished() {
+        play.duel.throw = None;
+    }
+    false
 }
 
 /// The walk-up hold (TODO 103): while the incoming batter is introduced the
@@ -301,10 +338,14 @@ pub(super) fn wind_up(
     // (`windup_send_prev`) or the pre-pitch lead was stretched coming in
     // (`lead.extended` — the same held-Down, so a one-frame wind-up on a
     // hitching tab still honors a hold that predates it). Real holds span
-    // both; a one-frame blip has neither.
-    let send_now = wants_send(intents.get(score.batting_team()).aim)
-        && rules::steal_candidate(&bases).is_some();
-    if send_now && (play.duel.send_prev || lead.extended) {
+    // both; a one-frame blip has neither. The running-game button is a
+    // deliberate press, not a position read, so one frame of it is a call:
+    // a steal called in the windup goes now, on a late break.
+    let offense = intents.get(score.batting_team());
+    let can_go = rules::steal_candidate(&bases).is_some();
+    let send_now = wants_send(offense.aim) && can_go;
+    let called_now = offense.secondary && can_go;
+    if called_now || (send_now && (play.duel.send_prev || lead.extended)) {
         // The jump is set by when he went: on first movement is clean, a
         // send as the ball leaves the hand is a late break.
         if !play.duel.armed {
@@ -312,6 +353,7 @@ pub(super) fn wind_up(
         }
         play.duel.armed = true;
         lead.extended = true;
+        lead.called |= called_now;
     }
     play.duel.send_prev = send_now;
     if play.timer.tick(time.delta()).is_finished() {
@@ -574,7 +616,7 @@ fn judge_take(
     // A walk is a dead ball (runners advance freely); otherwise a sent runner
     // has to beat the catcher's throw.
     if play.duel.armed && !walked {
-        ump.resolve_steal(play);
+        start_steal_throw(play, ump);
     }
     beat
 }
@@ -600,9 +642,62 @@ fn judge_whiff(
     }
     // The catcher has the ball: a sent runner must survive the throw.
     if play.duel.armed {
-        ump.resolve_steal(play);
+        start_steal_throw(play, ump);
     }
     ResultBeat::for_strike(call)
+}
+
+/// The catcher has the pitch and a runner is going: the throw to the bag
+/// starts now — its race decided here, called at the tag by
+/// [`steal_throw`], so the throw and the slide are seen before the call.
+fn start_steal_throw(play: &mut Play, ump: &Umpire) {
+    if let Some((runner, safe)) = ump.steal_preview(play) {
+        play.duel.throw = Some(super::DuelThrow::new(
+            super::DuelThrowKind::Steal,
+            runner,
+            rules::steal_throw_timing(runner),
+            safe,
+        ));
+    }
+}
+
+/// The result pause holds the call on screen at least this long once a
+/// steal's tag lands, whatever beat the pitch itself earned (a taken ball's
+/// pause is otherwise only a blink).
+const STEAL_CALL_HOLD_SECS: f32 = 1.4;
+
+/// The catcher's throw on a steal, during the result pause: at the tag the
+/// steal race is applied and called ("STOLEN BASE!" / "CAUGHT STEALING
+/// 2ND"), and the pause re-arms so the call gets its own beat.
+pub(super) fn steal_throw(
+    time: Res<Time>,
+    mut play: ResMut<Play>,
+    mut score: ResMut<ScoreBoard>,
+    mut bases: ResMut<Bases>,
+    rules_res: Res<Ruleset>,
+    mut banner: MessageWriter<PlayBanner>,
+) {
+    if play.phase != Phase::Result {
+        return;
+    }
+    let Some(throw) = play.duel.throw.as_mut() else {
+        return;
+    };
+    if throw.kind != super::DuelThrowKind::Steal || throw.landed {
+        return;
+    }
+    if !throw.clock.tick(time.delta()).is_finished() {
+        return;
+    }
+    throw.landed = true;
+    let mut ump = Umpire::new(&mut score, &mut bases, &rules_res, &mut banner);
+    ump.resolve_steal(&play);
+    let beat = play.beat.unwrap_or(ResultBeat::Strike);
+    let hold = rules_res
+        .pace
+        .result_secs_for(beat)
+        .max(STEAL_CALL_HOLD_SECS);
+    play.timer = Timer::from_seconds(hold, TimerMode::Once);
 }
 
 /// Where a ball that left the bat goes next: only a ball over the fence is

@@ -326,6 +326,7 @@ fn build_snapshot(
         time: now,
         phase,
         in_steal_window: facts.play.in_steal_window(),
+        duel_throw: facts.play.duel_throw().is_some(),
         pending_call: facts.play.pending_call().is_some(),
         runners_settled: facts.settled.0,
         untouched_pitch_result,

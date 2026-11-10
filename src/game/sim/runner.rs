@@ -4,7 +4,10 @@
 use bevy::prelude::*;
 
 use crate::game::animation::{AnimClip, MoveIntent, Playing};
-use crate::game::flow::{BallInPlayEvent, LeadState, LiveBallEvent, Phase, Play, ResultBeat};
+use crate::game::flow::{
+    BallInPlayEvent, DuelThrowKind, DuelThrowView, LeadState, LiveBallEvent, Phase, Play,
+    ResultBeat,
+};
 use crate::game::player::{BATTER_STAND_X, Batter, RigModel, RigUnit, TeamPalette, spawn_rig};
 use crate::game::rules::{self, Bases, ContactKind, RunnerBreak};
 use crate::game::variant::{FieldSpec, Ruleset};
@@ -168,9 +171,15 @@ fn track_settled(paths: Query<(), With<BasePath>>, mut settled: ResMut<RunnersSe
 
 /// Leadoffs: during the pre-pitch duel and the delivery, the lead eligible
 /// runner shuffles off the bag — a normal lead, stretched while the offense
-/// holds Down ([`LeadState`]), and a full sprint for the next bag once the
-/// steal is on and the pitch is in the air. Everyone else stays planted, and
-/// rigs already running a base path are left alone.
+/// holds Down or has called a steal ([`LeadState`]), and a full sprint for
+/// the next bag once the steal is on and the pitch is in the air. Everyone
+/// else stays planted, and rigs already running a base path are left alone.
+///
+/// A running-game throw takes the thrown-at runner over: on a pickoff he
+/// dives back for his bag, on the catcher's throw he races for the next
+/// one — each paced to reach the bag just ahead of the ball when the race
+/// (already decided by `flow`) says safe, and just behind it when out, so
+/// the call that lands with the ball is the one the screen showed.
 #[allow(clippy::type_complexity)]
 fn take_leadoffs(
     play: Res<Play>,
@@ -179,20 +188,49 @@ fn take_leadoffs(
     field: Res<FieldSpec>,
     ruleset: Res<Ruleset>,
     mut runners: Query<
-        (&Runner, &Transform, &mut MoveIntent),
+        (
+            Entity,
+            &Runner,
+            &Transform,
+            &mut MoveIntent,
+            Option<&Playing>,
+        ),
         (Without<BasePath>, Without<Breaking>),
     >,
+    mut commands: Commands,
 ) {
     let dueling = play.phase.pre_contact();
     let candidate = rules::steal_candidate(&bases);
-    for (runner, tf, mut intent) in &mut runners {
+    let throw = play.duel_throw();
+    for (entity, runner, tf, mut intent, playing) in &mut runners {
         let bag = base_pos(&field, runner.base);
+        if let Some(throw) = throw.filter(|t| t.runner == runner.base) {
+            if throw.landed {
+                // The call is in: a safe pickoff stands on his bag until
+                // the duel resumes; everything else is `sync_runners`'.
+                if throw.kind == DuelThrowKind::Steal || !throw.safe {
+                    continue;
+                }
+            } else {
+                let goal = base_pos(&field, throw.target);
+                race_the_throw(
+                    entity,
+                    tf,
+                    &mut intent,
+                    playing,
+                    goal,
+                    &throw,
+                    &mut commands,
+                );
+                continue;
+            }
+        }
         let target = if dueling && Some(runner.base) == candidate {
             let next = base_pos(&field, runner.base + 1);
             let dir = (next - bag).normalize_or_zero();
             if play.phase == Phase::Pitch && play.runners_going() {
-                // He's off with the pitch — the resolution at the catcher
-                // will repath him (safe) or send him off (caught).
+                // He's off with the pitch — the catcher's throw (above)
+                // or the call on a ball in play repaths him from here.
                 intent.target = Some(next);
                 intent.speed = ruleset.pace.runner_speed;
                 continue;
@@ -207,6 +245,67 @@ fn take_leadoffs(
         }
     }
 }
+
+/// How far ahead of the ball (safe) or behind it (out) the runner reaches
+/// the bag on a running-game throw — a visible margin, not a photo finish.
+const THROW_RACE_MARGIN_SECS: f32 = 0.12;
+/// The thrown-at runner never moves slower than a jog nor faster than a
+/// flat-out sprint, whatever the race asks of him.
+const THROW_RACE_SPEED: std::ops::RangeInclusive<f32> = 2.0..=11.0;
+/// From this far out the runner leaves his feet: a dive back on a pickoff,
+/// a slide into the bag on a steal.
+const THROW_RACE_DIVE_RANGE: f32 = 1.8;
+
+/// Paces one runner against a running-game throw toward `goal` and drops
+/// him into the dive (pickoff) or slide (steal) for the last stretch.
+fn race_the_throw(
+    entity: Entity,
+    tf: &Transform,
+    intent: &mut MoveIntent,
+    playing: Option<&Playing>,
+    goal: Vec3,
+    throw: &DuelThrowView,
+    commands: &mut Commands,
+) {
+    let mut to = goal - tf.translation;
+    to.y = 0.0;
+    let dist = to.length();
+    let arrive_in = if throw.safe {
+        throw.remaining_secs() - THROW_RACE_MARGIN_SECS
+    } else {
+        throw.remaining_secs() + THROW_RACE_MARGIN_SECS
+    };
+    let speed =
+        (dist / arrive_in.max(0.05)).clamp(*THROW_RACE_SPEED.start(), *THROW_RACE_SPEED.end());
+    intent.target = Some(goal);
+    intent.speed = speed;
+    let clip = match throw.kind {
+        DuelThrowKind::Pickoff => AnimClip::Dive,
+        DuelThrowKind::Steal => AnimClip::Slide,
+    };
+    let already = playing.is_some_and(|p| p.clip == clip);
+    if dist < THROW_RACE_DIVE_RANGE && !already {
+        commands.entity(entity).insert(Playing::new(clip));
+    }
+}
+
+/// Where a runner retired on the bases walks off: a few metres off his bag,
+/// away from the middle of the diamond, before he leaves the field.
+fn walk_off_spot(field: &FieldSpec, bag: Vec3) -> Vec3 {
+    let mid = Vec3::new(
+        0.0,
+        bag.y,
+        field.base_positions.iter().map(|b| b.z).sum::<f32>()
+            / field.base_positions.len().max(1) as f32,
+    );
+    let out = Vec3::new(bag.x - mid.x, 0.0, bag.z - mid.z).normalize_or(Vec3::NEG_X);
+    bag + out * RETIRED_WALK_M
+}
+
+/// How far the retired runner walks off before leaving.
+const RETIRED_WALK_M: f32 = 5.0;
+/// His walk, as a fraction of `pace.runner_speed`.
+const RETIRED_WALK_SPEED: f32 = 0.35;
 
 /// Drops an arriving runner into the slide for the last couple of metres of
 /// the final leg of his path — pure presentation on top of the same
@@ -247,6 +346,7 @@ fn slide_into_base(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn sync_runners(
     bases: Res<Bases>,
+    play: Res<Play>,
     field: Res<FieldSpec>,
     score: Res<ScoreBoard>,
     rig_model: Option<Res<RigModel>>,
@@ -334,9 +434,28 @@ pub(crate) fn sync_runners(
     // TODO 89).
     let half_flipped = last_half.is_some_and(|h| h != score.top_of_inning);
     *last_half = Some(score.top_of_inning);
+    // The runner a pickoff or the catcher's throw just retired walks off his
+    // bag instead of jogging home like a run that scored.
+    let retired = play
+        .duel_throw()
+        .filter(|t| t.landed && !t.safe)
+        .map(|t| t.runner);
     for (entity, from) in pool {
         if half_flipped {
             commands.entity(entity).despawn();
+            continue;
+        }
+        if retired == Some(from) {
+            let bag = base_pos(&field, from);
+            commands.entity(entity).insert((
+                BasePath {
+                    waypoints: vec![walk_off_spot(&field, bag)],
+                    next: 0,
+                },
+                DespawnAtPathEnd,
+                PathSpeed(RETIRED_WALK_SPEED),
+            ));
+            commands.entity(entity).remove::<Runner>();
             continue;
         }
         commands.entity(entity).insert((

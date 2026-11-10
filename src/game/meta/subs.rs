@@ -56,7 +56,7 @@ struct ControlsText;
 /// now only surfaced while paused.
 const CONTROLS_TEXT: &str = "P1: WASD + Space   P2: Arrows + Right-Ctrl   Pad: stick + A   \
      Pitch & Swing: A/Space   Fielding: aim steers, base dir + A/Space throws   \
-     Runners: hold Down = lead & steal (window: defense A = pickoff)   \
+     Running game: E / Right-Shift / pad B = pickoff (defense) or steal (offense); hold Down = stretch the lead   \
      Batting: Down = send, Up = hold   Esc/P: Subs   C: Camera (orbit: Shift+move/QE, Shift+R reset)   V: At-bat view   \
      Touch: drag = aim, 2nd finger = action, tap position = swing (pick a scheme with G on the menu)";
 

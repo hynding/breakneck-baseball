@@ -7,6 +7,7 @@ fn snap(time: f32, phase: CoachPhase) -> CoachSnapshot {
         time,
         phase,
         in_steal_window: false,
+        duel_throw: false,
         pending_call: false,
         runners_settled: true,
         untouched_pitch_result: false,
