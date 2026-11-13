@@ -115,6 +115,7 @@ pub(super) fn spawn_landing_ring(
 #[allow(clippy::type_complexity)]
 pub(super) fn update_landing_ring(
     play: Res<Play>,
+    wind: Res<rules::Wind>,
     ball_q: Query<(&Transform, &Velocity), (With<Baseball>, With<InFlight>, Without<LandingRing>)>,
     mut ring_q: Query<(&mut Transform, &mut Visibility), With<LandingRing>>,
 ) {
@@ -138,6 +139,7 @@ pub(super) fn update_landing_ring(
         vel.angvel,
         BALL_DRAG_FACTOR,
         MAGNUS_FACTOR,
+        wind.0,
     );
     if Vec2::new(landing.x, landing.z).length() < RING_HOME_SUPPRESS_M {
         if *visibility != Visibility::Hidden {

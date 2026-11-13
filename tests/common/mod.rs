@@ -242,6 +242,9 @@ fn build_headless_app(cfg: HeadlessConfig) -> App {
         // `JuiceDisabled` pattern: off by default for every headless test,
         // removed explicitly by the one test that exercises fidgets.
         .insert_resource(breakneck_baseball::game::animation::FidgetsDisabled)
+        // No wind: scripted batted balls are aimed at set fielders' spots
+        // (see `flow::CalmWind`). The economy sims remove it.
+        .insert_resource(breakneck_baseball::game::flow::CalmWind)
         // Mute the harness: `DefaultPlugins` keeps `AudioPlugin` (only
         // window/render/winit are stripped), so at a real volume every
         // headless run plays the synthesized crowd/cracks through the

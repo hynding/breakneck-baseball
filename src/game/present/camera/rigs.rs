@@ -341,6 +341,7 @@ pub(super) fn broadcast_camera(
     view: Res<DuelView>,
     kick: Res<CameraKick>,
     active: Res<ActivePlay>,
+    wind: Res<rules::Wind>,
     mut live: MessageReader<LiveBallEvent>,
     ball_q: BallQuery,
     rigs: Query<&Transform, (Without<Baseball>, Without<Camera3d>)>,
@@ -404,6 +405,7 @@ pub(super) fn broadcast_camera(
                 vel.angvel,
                 BALL_DRAG_FACTOR,
                 MAGNUS_FACTOR,
+                wind.0,
             );
             let focus = Vec3::new(landing.x, 1.0, landing.z);
             // Keep the ball's flight in frame: a high fly pulls the look-at

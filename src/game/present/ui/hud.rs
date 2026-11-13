@@ -11,7 +11,7 @@ use crate::game::{GameplayEntity, ScoreBoard};
 
 use super::{
     BannerPill, BannerText, BaseIndicator, ContactStampText, CountDot, CountKind, InningText,
-    MeterFill, PitchSpeedText, RunGameHintText, ScoreText, hidden_tint,
+    MeterFill, PitchSpeedText, RunGameHintText, ScoreText, WindText, hidden_tint,
 };
 
 // ── Build the UI tree ─────────────────────────────────────────────────────────
@@ -107,6 +107,15 @@ pub(super) fn spawn_hud(
                             ..default()
                         },
                         TextColor(ui.text_primary),
+                    ));
+                    card.spawn((
+                        WindText,
+                        Text::new(""),
+                        TextFont {
+                            font_size: 13.0,
+                            ..default()
+                        },
+                        TextColor(ui.text_dim),
                     ));
 
                     // Count row: classic B / S / O indicator lights. The dot counts
@@ -382,6 +391,19 @@ pub(super) fn update_score_text(
     }
     for mut text in &mut query {
         **text = format!("AWAY {}   HOME {}", score.away_runs, score.home_runs);
+    }
+}
+
+/// The day's wind, as the broadcast reads it (`rules::wind_report`).
+pub(super) fn update_wind_text(
+    wind: Res<crate::game::rules::Wind>,
+    mut query: Query<&mut Text, With<WindText>>,
+) {
+    let report = crate::game::rules::wind_report(wind.0);
+    for mut text in &mut query {
+        if text.0 != report {
+            text.0 = report.clone();
+        }
     }
 }
 

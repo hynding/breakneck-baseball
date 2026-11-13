@@ -62,6 +62,7 @@ fn pulled_liner_predicts_foul_forward() {
         rules::hit_spin(velocity),
         breakneck_baseball::game::ball::BALL_DRAG_FACTOR,
         breakneck_baseball::game::ball::MAGNUS_FACTOR,
+        Vec3::ZERO,
     );
     let kind = rules::classify_contact(landing, &field);
     assert_eq!(

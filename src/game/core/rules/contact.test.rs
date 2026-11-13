@@ -16,6 +16,7 @@ fn deep_drive_over_the_fence_is_a_home_run() {
         hit_spin(vel),
         BALL_DRAG_FACTOR,
         crate::game::ball::MAGNUS_FACTOR,
+        Vec3::ZERO,
     );
     assert_eq!(
         classify_contact(landing, &std_field()),
@@ -31,6 +32,7 @@ fn balls_short_of_the_fence_stay_live() {
         hit_spin(vel),
         BALL_DRAG_FACTOR,
         crate::game::ball::MAGNUS_FACTOR,
+        Vec3::ZERO,
     );
     assert_eq!(
         classify_contact(landing, &std_field()),
@@ -41,7 +43,7 @@ fn balls_short_of_the_fence_stay_live() {
 #[test]
 fn pulled_way_foul_projects_foul() {
     // Mostly sideways: |x| > z → outside the standard 45° fair wedge.
-    let (landing, _) = predict_landing(Vec3::new(30.0, 8.0, 5.0), Vec3::ZERO, 0.0, 0.0);
+    let (landing, _) = predict_landing(Vec3::new(30.0, 8.0, 5.0), Vec3::ZERO, 0.0, 0.0, Vec3::ZERO);
     assert_eq!(
         classify_contact(landing, &std_field()),
         ContactKind::Live { fair: false }
@@ -60,6 +62,7 @@ fn flight(launch_deg: f32, speed: f32, spray_deg: f32) -> (Vec3, f32) {
         hit_spin(vel),
         BALL_DRAG_FACTOR,
         crate::game::ball::MAGNUS_FACTOR,
+        Vec3::ZERO,
     )
 }
 
@@ -359,6 +362,7 @@ fn perfect_carry_ft(dt_ms: f32, aim: Vec2) -> f32 {
         hit_spin(v),
         BALL_DRAG_FACTOR,
         crate::game::ball::MAGNUS_FACTOR,
+        Vec3::ZERO,
     );
     Vec2::new(landing.x, landing.z).length() / 0.3048
 }

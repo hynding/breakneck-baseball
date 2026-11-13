@@ -271,6 +271,7 @@ fn chase_and_gather(
     ruleset: Res<Ruleset>,
     bases: Res<rules::Bases>,
     score: Res<ScoreBoard>,
+    wind: Res<rules::Wind>,
     mut ball_q: Query<(Entity, &Transform, &mut Velocity), With<Baseball>>,
     mut fielders: Query<(Entity, &Transform, &mut MoveIntent), With<Fielder>>,
     mut reports: MessageWriter<LiveBallEvent>,
@@ -360,6 +361,7 @@ fn chase_and_gather(
             ball_vel.angvel,
             BALL_DRAG_FACTOR,
             MAGNUS_FACTOR,
+            wind.0,
         );
         if let Ok((_, _, mut intent)) = fielders.get_mut(chaser) {
             intent.target = Some(cap_inside_fence(landing, &field, INTERCEPT_FENCE_MARGIN));

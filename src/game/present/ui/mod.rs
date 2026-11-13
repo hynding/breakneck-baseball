@@ -29,7 +29,7 @@ use banner::{
 use curtain::{Curtain, drive_curtain, spawn_curtain};
 use hud::{
     spawn_hud, update_base_ring, update_count_dots, update_inning_text, update_meter_bar,
-    update_score_text,
+    update_score_text, update_wind_text,
 };
 use walkup::{paint_walkup_card, spawn_walkup_card};
 
@@ -40,6 +40,11 @@ struct InningText;
 
 #[derive(Component)]
 struct ScoreText;
+
+/// The scoreboard's wind line ("WIND 8 OUT TO LF"). Public so e2e tests can
+/// read it.
+#[derive(Component)]
+pub struct WindText;
 
 /// Which at-bat counter a dot belongs to.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -347,6 +352,7 @@ impl Plugin for UiPlugin {
             (
                 update_inning_text,
                 update_score_text,
+                update_wind_text,
                 update_count_dots,
                 update_meter_bar,
                 update_base_ring,

@@ -94,3 +94,32 @@ fn plate_appearance_ends_on_strikeout_walk_and_batted_ball() {
     assert!(Play::test_walkup().walkup_active());
     assert!(!Play::default().walkup_active());
 }
+
+#[test]
+fn the_days_wind_is_light_to_brisk_from_anywhere() {
+    let mph = |w: Vec3| w.length() / rules::MPS_PER_MPH;
+    assert!((mph(wind_from(0.0, 0.3)) - 2.0).abs() < 1e-3);
+    assert!((mph(wind_from(1.0, 0.3)) - 14.0).abs() < 1e-3);
+    // Mostly light: the median draw is 5 mph.
+    assert!((mph(wind_from(0.5, 0.0)) - 5.0).abs() < 1e-3);
+    // Direction spans the compass, and the wind is always horizontal.
+    let out = wind_from(0.7, 0.0);
+    let left = wind_from(0.7, 0.25);
+    assert!(out.z > 0.0 && out.x.abs() < 1e-3);
+    assert!(left.x > 0.0 && left.z.abs() < 1e-3);
+    assert_eq!(wind_from(0.4, 0.6).y, 0.0);
+}
+
+#[test]
+fn calm_wind_keeps_the_day_still() {
+    let mut app = App::new();
+    app.init_resource::<Time>()
+        .insert_resource(rules::Wind(Vec3::X))
+        .insert_resource(CalmWind)
+        .add_systems(Update, draw_wind);
+    app.update();
+    assert_eq!(app.world().resource::<rules::Wind>().0, Vec3::ZERO);
+    app.world_mut().remove_resource::<CalmWind>();
+    app.update();
+    assert_ne!(app.world().resource::<rules::Wind>().0, Vec3::ZERO);
+}

@@ -394,6 +394,7 @@ pub(super) fn pitch_live(
     mut contact_ev: MessageWriter<ContactEvent>,
     mut banner: MessageWriter<PlayBanner>,
     mut order: ResMut<BattingOrder>,
+    wind: Res<rules::Wind>,
     #[cfg(feature = "debug")] forced: Res<crate::game::debug::ForcedContact>,
 ) {
     if play.phase != Phase::Pitch || play.resolved {
@@ -503,6 +504,7 @@ pub(super) fn pitch_live(
                     rules::hit_spin(velocity),
                     crate::game::ball::BALL_DRAG_FACTOR,
                     crate::game::ball::MAGNUS_FACTOR,
+                    wind.0,
                 );
                 let kind = rules::classify_contact(landing, &field);
                 let contact_class = rules::contact_class(landing, hang_time, &field);

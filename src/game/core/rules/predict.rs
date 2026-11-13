@@ -2,6 +2,7 @@
 //! numeric flight prediction for a batted ball.
 
 use bevy::math::{Vec2, Vec3};
+use bevy::prelude::Resource;
 
 use crate::game::variant::{FieldSpec, PaceTuning};
 
@@ -21,6 +22,64 @@ pub fn fence_at(pos: Vec3, field: &FieldSpec) -> f32 {
     let cos_half = field.fair_half_angle.cos();
     let centeredness = (((pos.z / dist.max(0.001)) - cos_half) / (1.0 - cos_half)).clamp(0.0, 1.0);
     field.fence_line + (field.fence_center - field.fence_line) * centeredness
+}
+
+// ── Wind ──────────────────────────────────────────────────────────────────────
+
+/// The wind over the field this game: world metres per second, horizontal
+/// (+Z blows out to centre, +X toward left field). Zero is a calm day.
+/// Drawn at game start by `flow`; every flight — the live ball and every
+/// prediction of it — reads the same value, so the fielders, the camera
+/// and the home-run call all see the ball the wind actually carries.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq)]
+pub struct Wind(pub Vec3);
+
+/// The air's grip on a ball in a moving air mass. The game's own drag
+/// ([`crate::game::ball::BALL_DRAG_FACTOR`]) is tuned far below real air
+/// for the arcade flight, so the wind gets its own coupling, sized to the
+/// real rule of thumb: about 3 ft of carry per mph of tail wind on a
+/// 400 ft fly, and a bit less taken off by the same wind blowing in (per
+/// docs/BASEBALL.md, "Wind").
+pub const WIND_DRAG: f32 = 0.004;
+
+/// The extra acceleration the wind puts on a ball moving at `vel`: the
+/// change in drag from moving through moving air, to first order in the
+/// wind — `k·(|v|·w + (v̂·w)·v)`. A tail wind pushes the ball along, a head
+/// wind holds it up, a cross wind drifts it sideways.
+pub fn wind_accel(vel: Vec3, wind: Vec3) -> Vec3 {
+    let speed = vel.length();
+    if speed < 1e-3 || wind == Vec3::ZERO {
+        return Vec3::ZERO;
+    }
+    WIND_DRAG * (speed * wind + (vel.dot(wind) / speed) * vel)
+}
+
+/// Metres per second in a mile per hour.
+pub const MPS_PER_MPH: f32 = 0.44704;
+
+/// How the broadcast reads a wind: speed in whole mph and where it blows,
+/// from the plate's point of view ("OUT TO LF", "IN FROM CF", "L TO R").
+/// Under 2 mph is calm.
+pub fn wind_report(wind: Vec3) -> String {
+    let mph = (Vec2::new(wind.x, wind.z).length() / MPS_PER_MPH).round() as u32;
+    if mph < 2 {
+        return "WIND CALM".to_string();
+    }
+    // Compass from the plate: 0° = out to centre (+Z), 90° = toward left
+    // field (+X, screen left), in 45° sectors.
+    let deg = wind.x.atan2(wind.z).to_degrees();
+    let sector = ((deg + 360.0 + 22.5) / 45.0) as usize % 8;
+    let dir = [
+        "OUT TO CF",
+        "OUT TO LF",
+        "R TO L",
+        "IN FROM RF",
+        "IN FROM CF",
+        "IN FROM LF",
+        "L TO R",
+        "OUT TO RF",
+    ][sector];
+    format!("WIND {mph} {dir}")
 }
 
 /// Time for a fielder at `from` to reach `landing`, first step included.
@@ -130,17 +189,24 @@ fn roll_intercept(
 }
 
 /// Numerically integrates a batted ball's flight from contact height with the
-/// same gravity + drag + Magnus model the live ball uses (`ball::apply_drag`,
-/// `ball::apply_magnus`), returning the landing point (y = 0) and hang time.
+/// same gravity + drag + Magnus + wind model the live ball uses
+/// (`ball::apply_drag`, `ball::apply_magnus`, [`wind_accel`]), returning the landing point (y = 0) and hang time.
 /// This is what fielder choreography chases — the *visual* ball's touchdown,
 /// not the balance-tuned range in [`classify_batted_ball`].
-pub fn predict_landing(vel: Vec3, spin: Vec3, drag_factor: f32, magnus_factor: f32) -> (Vec3, f32) {
+pub fn predict_landing(
+    vel: Vec3,
+    spin: Vec3,
+    drag_factor: f32,
+    magnus_factor: f32,
+    wind: Vec3,
+) -> (Vec3, f32) {
     predict_landing_from(
         Vec3::new(0.0, CONTACT_HEIGHT, 0.0),
         vel,
         spin,
         drag_factor,
         magnus_factor,
+        wind,
     )
 }
 
@@ -152,6 +218,7 @@ pub fn predict_landing_from(
     spin: Vec3,
     drag_factor: f32,
     magnus_factor: f32,
+    wind: Vec3,
 ) -> (Vec3, f32) {
     let mut pos = start;
     let mut v = vel;
@@ -161,6 +228,7 @@ pub fn predict_landing_from(
         let speed = v.length();
         v += -drag_factor * speed * v * dt;
         v += magnus_factor * spin.cross(v) * dt;
+        v += wind_accel(v, wind) * dt;
         v.y -= GRAVITY * dt;
         pos += v * dt;
         t += dt;

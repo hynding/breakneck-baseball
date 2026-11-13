@@ -220,6 +220,9 @@ fn play_one(game_index: u32, innings: u32) -> Vec<String> {
         ..Default::default()
     });
     app.add_systems(DriveGame, log_events);
+    // Play in the weather a real game gets (the harness calms it).
+    app.world_mut()
+        .remove_resource::<breakneck_baseball::game::flow::CalmWind>();
     for _ in 0..game_index * 37 {
         app.update();
     }
@@ -241,11 +244,15 @@ fn play_one(game_index: u32, innings: u32) -> Vec<String> {
     }
     let s = app.world().resource::<ScoreBoard>();
     let s = (s.inning, s.top_of_inning, s.home_runs, s.away_runs);
+    let wind = app
+        .world()
+        .resource::<breakneck_baseball::game::rules::Wind>()
+        .0;
     let t = app.world().resource::<Time<Virtual>>().elapsed_secs_f64();
     let mut lines = std::mem::take(&mut app.world_mut().resource_mut::<Log>().lines);
     lines.push(format!(
-        "{{\"g\":{game_index},\"k\":\"game_end\",\"frames\":{},\"t\":{t:.2},\"inn\":{},\"top\":{},\"h\":{},\"a\":{},\"over\":{}}}",
-        frames.unwrap_or(0), s.0, s.1, s.2, s.3, frames.is_some()
+        "{{\"g\":{game_index},\"k\":\"game_end\",\"frames\":{},\"t\":{t:.2},\"inn\":{},\"top\":{},\"h\":{},\"a\":{},\"over\":{},\"wind\":[{:.2},{:.2}]}}",
+        frames.unwrap_or(0), s.0, s.1, s.2, s.3, frames.is_some(), wind.x, wind.z
     ));
     lines
 }

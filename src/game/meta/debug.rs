@@ -110,6 +110,7 @@ fn zone_gizmo(state: Res<DebugState>, mut gizmos: Gizmos) {
 
 fn trajectory_gizmo(
     state: Res<DebugState>,
+    wind: Res<crate::game::rules::Wind>,
     ball: Query<(&Transform, &bevy_rapier3d::prelude::Velocity), With<crate::game::ball::InFlight>>,
     mut gizmos: Gizmos,
 ) {
@@ -126,6 +127,7 @@ fn trajectory_gizmo(
         vel.angvel,
         BALL_DRAG_FACTOR,
         MAGNUS_FACTOR,
+        wind.0,
     );
     // A sightline + landing circle reads the play; exact touchdown already
     // lives in `game::fx`'s landing ring.

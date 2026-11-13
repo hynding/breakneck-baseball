@@ -242,6 +242,10 @@ fn play_one_game(game_index: u32) -> GameStats {
     ));
     app.init_resource::<SimTally>();
     app.add_systems(DriveGame, tally);
+    // The economy is measured in the weather a real game gets (the harness
+    // calms it for scripted e2e play).
+    app.world_mut()
+        .remove_resource::<breakneck_baseball::game::flow::CalmWind>();
 
     // Decorrelate this game's AI noise from the others by advancing the shared
     // virtual clock a distinct, coarsely-spaced amount while still on the menu.

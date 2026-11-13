@@ -841,6 +841,44 @@ fn sync_batter(
     }
 }
 
+// ── Weather ───────────────────────────────────────────────────────────────────
+
+/// Keeps every game calm ([`rules::Wind`] stays zero). Every headless test
+/// harness inserts it — scripted e2e batted balls are aimed at a set
+/// fielder's spot, and a breeze would carry them off it — and the sims that
+/// measure the economy (`balance_sim`, `realism_sim`) remove it so they
+/// play in the weather a real game gets.
+#[derive(Resource, Default)]
+pub struct CalmWind;
+
+/// The wind for a game from two uniform draws in 0..1: 2–14 mph, mostly
+/// light (2 + 12·u², 6 mph on average — MLB parks' season-average
+/// game-time winds run from about 2.5 to 12 mph, per docs/BASEBALL.md
+/// "Wind"), from any direction.
+pub(crate) fn wind_from(u_speed: f32, u_dir: f32) -> Vec3 {
+    let mph = 2.0 + 12.0 * u_speed.clamp(0.0, 1.0).powi(2);
+    let theta = std::f32::consts::TAU * u_dir;
+    Vec3::new(theta.sin(), 0.0, theta.cos()) * mph * rules::MPS_PER_MPH
+}
+
+/// Draws the day's wind as a game starts. Deterministic for a given game
+/// count and start time, so a headless sim replays exactly.
+fn draw_wind(
+    mut wind: ResMut<rules::Wind>,
+    calm: Option<Res<CalmWind>>,
+    time: Res<Time>,
+    mut games: Local<u32>,
+) {
+    *games += 1;
+    if calm.is_some() {
+        *wind = rules::Wind::default();
+        return;
+    }
+    let seed = *games as f32 * 7.31 + time.elapsed_secs() * 0.37;
+    let u = |k: f32| crate::game::ai::hash01(seed + k);
+    *wind = rules::Wind(wind_from(u(0.0), u(3.7)));
+}
+
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
 /// Marks the flow chain below — `pre_pitch`, `wind_up`, `pitch_live`,
@@ -874,7 +912,12 @@ impl Plugin for FlowPlugin {
             .add_message::<PlayBanner>()
             .add_systems(
                 crate::game::game_start(),
-                (pitch::reset_flow, reset_cpu_clock, apply_difficulty),
+                (
+                    pitch::reset_flow,
+                    reset_cpu_clock,
+                    apply_difficulty,
+                    draw_wind,
+                ),
             )
             .add_systems(
                 Update,

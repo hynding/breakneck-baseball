@@ -320,6 +320,22 @@ only occasionally misjudging it.
   shipped starting nine averages 50, so the league economy stays where the
   balance sim tuned it while individual runners differ.
 
+## Wind (The Hardball Times; MLB.com Statcast)
+
+- A steady tail or head wind changes the distance of a long fly ball by
+  **three to four feet for every mph** (David Kagan, The Hardball Times, "The
+  Physics of Which Way the Wind Blows"); Alan Nathan puts 5 mph behind a ball
+  at nearly 19 ft of extra carry (MLB.com, "Wind effect"). A 17 mph wind in
+  one Statcast example cost a fly 40 ft.
+- Season-average game-time winds by park (2015 box scores) ran from about
+  2.5 mph (Safeco Field) to 12.4 mph (Marlins Park), 0 under a roof.
+- Modeled as `rules::Wind` (drawn per game, 2–14 mph from any direction,
+  6 mph on average) and `rules::wind_accel`, whose coupling `WIND_DRAG` gives
+  a 400 ft fly about +32 ft for 10 mph blowing out, −29 ft blowing in and
+  ~13 ft of drift across. The live ball and every landing prediction
+  integrate the same term; the scoreboard reads the wind like a broadcast
+  ("WIND 8 OUT TO LF").
+
 ## Rules modeled elsewhere
 
 Count thresholds (4 balls / 3 strikes / 3 outs), the strike zone, tag-ups,
@@ -362,3 +378,5 @@ CLAUDE.md's architecture notes for how each maps.
 - [FanGraphs — Scouting Explained: The 20-80 Scouting Scale](https://blogs.fangraphs.com/scouting-explained-the-20-80-scouting-scale)
 - [MLB.com — Sprint Speed metric now tracks baserunners](https://mlb.com/news/statcast-sprint-speed-tracks-baserunner-speed-c238268162)
 - [MLB.com — Sprint speed shows fastest at each position](https://www.mlb.com/news/sprint-speed-shows-fastest-at-each-position-c238290228)
+- [The Hardball Times — The physics of which way the wind blows](https://tht.fangraphs.com/the-physics-of-which-way-the-wind-blows/)
+- [MLB.com — Wind effect: these ballparks, players were most impacted by the weather](https://www.mlb.com/news/the-big-impact-of-wind-on-baseball-outcomes)

@@ -133,7 +133,8 @@ pub struct BallPlugin;
 
 impl Plugin for BallPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<PitchEvent>()
+        app.init_resource::<crate::game::rules::Wind>()
+            .add_message::<PitchEvent>()
             .add_message::<HitEvent>()
             .add_message::<WallBangEvent>()
             .add_systems(crate::game::game_start(), spawn_ball)
@@ -258,13 +259,21 @@ fn apply_hit(
 /// Applies a simplified quadratic aerodynamic drag every physics frame.
 ///
 /// `F_drag = -drag_factor × |v|² × v̂`
-fn apply_drag(mut query: FlyingBallMut, time: Res<Time>) {
+///
+/// Airborne, the wind adds its own push ([`crate::game::rules::wind_accel`],
+/// the same term every landing prediction integrates); a ball on the grass
+/// is left to the rolling resistance below.
+fn apply_drag(mut query: FlyingBallMut, time: Res<Time>, wind: Res<crate::game::rules::Wind>) {
     let dt = time.delta_secs();
     for (transform, mut vel) in &mut query {
         let speed = vel.linvel.length();
         if speed > 0.0 {
             let drag = -BALL_DRAG_FACTOR * speed * speed * vel.linvel / speed;
             vel.linvel += drag * dt;
+        }
+        if transform.translation.y > BALL_RADIUS * 3.0 {
+            let push = crate::game::rules::wind_accel(vel.linvel, wind.0);
+            vel.linvel += push * dt;
         }
         // Rolling resistance: once the ball is down and barely bouncing,
         // bleed horizontal speed so grounders die instead of rolling forever.
