@@ -286,6 +286,24 @@ a runner on a normal lead dives back in time, one leaning several feet
 further is caught (`rules::attempt_pickoff` races `PICKOFF_THROW_SECS` against
 `dive_back_secs`).
 
+## Player ratings (FanGraphs, Statcast sprint speed)
+
+- Scouts grade every tool on the **20–80 scale**: 50 is major-league average,
+  and each 10 points is roughly one standard deviation, so 60 is "plus", 70
+  "plus-plus" and 80 elite; 20–30 is well below average (FanGraphs, "Scouting
+  Explained: The 20-80 Scouting Scale").
+- **Sprint speed** (Statcast, feet per second in a runner's fastest one-second
+  window): the MLB average is about **27 ft/s**, 30+ is elite ("bolt"
+  territory), and the slowest regulars sit near 23 ft/s. That spread is about
+  1.5 ft/s per standard deviation — roughly **6% of average per 10 grade
+  points**. Catchers and first basemen are the slowest positions; center
+  fielders and shortstops the fastest (mlb.com, "Sprint Speed metric now
+  tracks baserunners"; "Sprint speed shows fastest at each position").
+- Modeled as `rules::Runner::speed_factor` (1 + 0.006 per grade point from
+  50, clamped to 20–80): a 30 runs at 88% of average, a 70 at 112%. Each
+  shipped starting nine averages 50, so the league economy stays where the
+  balance sim tuned it while individual runners differ.
+
 ## Rules modeled elsewhere
 
 Count thresholds (4 balls / 3 strikes / 3 outs), the strike zone, tag-ups,
@@ -323,3 +341,6 @@ CLAUDE.md's architecture notes for how each maps.
 - [Wikipedia — Pop time](https://en.wikipedia.org/wiki/Pop_time)
 - [Bill James Online — Timing pitchers and catchers to prevent stolen bases](https://www.billjamesonline.com/timing_pitchers_and_catchers_to_prevent_stolen_bases_/?F_All=y)
 - [Lee Judge — How to steal a base](https://leejudge.substack.com/p/how-to-steal-a-base)
+- [FanGraphs — Scouting Explained: The 20-80 Scouting Scale](https://blogs.fangraphs.com/scouting-explained-the-20-80-scouting-scale)
+- [MLB.com — Sprint Speed metric now tracks baserunners](https://mlb.com/news/statcast-sprint-speed-tracks-baserunner-speed-c238268162)
+- [MLB.com — Sprint speed shows fastest at each position](https://www.mlb.com/news/sprint-speed-shows-fastest-at-each-position-c238290228)
