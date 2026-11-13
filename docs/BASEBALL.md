@@ -332,7 +332,9 @@ only occasionally misjudging it.
 - Modeled as `rules::Wind` (drawn per game, 2–14 mph from any direction,
   6 mph on average) and `rules::wind_accel`, whose coupling `WIND_DRAG` gives
   a 400 ft fly about +32 ft for 10 mph blowing out, −29 ft blowing in and
-  ~13 ft of drift across. The live ball and every landing prediction
+  ~13 ft of drift across. Only batted balls feel it: a crosswind moves a
+  real pitch about an inch, and the game's coupling, sized for a 4-second
+  fly, plunked batters when it touched pitches. The live ball and every landing prediction
   integrate the same term; the scoreboard reads the wind like a broadcast
   ("WIND 8 OUT TO LF").
 
