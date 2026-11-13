@@ -186,6 +186,7 @@ fn throw_target_gizmo(
     let target = crate::game::rules::throw_target(
         tf.translation,
         race,
+        0.0,
         &bases,
         play.runners_going(),
         score.outs,

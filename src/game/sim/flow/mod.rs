@@ -761,6 +761,9 @@ pub enum LiveBallEvent {
         pos: Vec3,
         base: usize,
         race_time: f32,
+        /// When the ball first touched down, on the contact clock (0 if it
+        /// never did) — where a runner held halfway starts his read.
+        landed_secs: f32,
     },
     /// The thrown ball (relay leg included) has been received and the play
     /// is physically dead — the cue [`resolve_live_play`] waits for before

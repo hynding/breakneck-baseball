@@ -180,6 +180,7 @@ fn log_events(
                 pos,
                 base,
                 race_time,
+                ..
             } => format!(
                 ",\"ev\":\"thrown\",\"pos\":[{:.2},{:.2},{:.2}],\"base\":{base},\"race\":{race_time:.2}",
                 pos.x, pos.y, pos.z

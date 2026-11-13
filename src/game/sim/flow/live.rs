@@ -123,11 +123,13 @@ pub(super) fn resolve_live_play(
                 pos,
                 base,
                 race_time,
+                landed_secs,
             } => {
                 let call = rules::runner_call_from_aim(intents.get(score.batting_team()).aim);
                 let outcome = rules::resolve_thrown(
                     pos,
                     race_time,
+                    landed_secs,
                     base,
                     &bases,
                     play.runners_going(),

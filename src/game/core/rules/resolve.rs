@@ -6,8 +6,8 @@ use bevy::math::{Vec2, Vec3};
 use crate::game::variant::{FieldSpec, PaceTuning, Ruleset};
 
 use super::{
-    AIM_DEADZONE, Bases, INFIELD_GATHER_RADIUS, OutKind, Outcome, POP_RADIUS, RunnerCall,
-    TAG_UP_MIN_DIST, TagUp, is_fair,
+    AIM_DEADZONE, Bases, HALFWAY_FRAC, INFIELD_GATHER_RADIUS, OutKind, Outcome, POP_RADIUS,
+    RunnerCall, TAG_UP_MIN_DIST, TagUp, is_fair,
 };
 
 /// Whether the runner on (0-indexed) `base` is *forced* to advance: every base
@@ -102,14 +102,18 @@ pub struct ExtraBaseRead {
 /// doesn't already score reads whether one more base (second to home on a
 /// single, first to third, first to home on a double) beats the throw there.
 /// He starts from his secondary lead, breaking at the bat with two out and a
-/// reaction later otherwise; the throw needs its transfer, flight and the
-/// tag. `None` with nobody to read, or on a hit-and-run, whose jump already
+/// reaction later otherwise — except that with fewer than two out a ball
+/// in the air holds him halfway until it drops (`landed_secs`, the first
+/// touchdown on the contact clock; a grounder's comes almost at once), per
+/// docs/BASEBALL.md "Baserunning after contact". The throw needs its
+/// transfer, flight and the tag. `None` with nobody to read, or on a hit-and-run, whose jump already
 /// bought the runners their extra base. The real-game benchmark is MLB's
 /// ~41% extra bases taken (docs/BASEBALL.md "Taking the extra base").
 #[allow(clippy::too_many_arguments)]
 pub fn read_extra_base(
     pos: Vec3,
     gather_time: f32,
+    landed_secs: f32,
     bases: &Bases,
     hit_bases: u32,
     outs: u32,
@@ -127,18 +131,38 @@ pub fn read_extra_base(
         .find(|&b| bases.is_occupied(b) && b + hit < n)?;
     let to = from + hit + 1;
     let leg = field.base_positions.first().map_or(27.43, |b| b.length());
-    let start = if outs >= 2 { 0.0 } else { pace.reaction_secs };
-    let runner_at = start + leg * ((hit + 1) as f32 - pace.secondary_lead_frac) / pace.runner_speed;
+    let to_go = (hit + 1) as f32;
+    let runner_at = if outs >= 2 {
+        // Two out: he runs on contact, whatever the ball does.
+        leg * (to_go - pace.secondary_lead_frac) / pace.runner_speed
+    } else {
+        // Fewer than two out he breaks a reaction after the bat — but on a
+        // ball in the air only as far as halfway, where he can still get
+        // back if it's caught, and he goes on from there once it drops.
+        let on_contact =
+            pace.reaction_secs + leg * (to_go - pace.secondary_lead_frac) / pace.runner_speed;
+        let from_halfway =
+            landed_secs + pace.reaction_secs + leg * (to_go - HALFWAY_FRAC) / pace.runner_speed;
+        on_contact.max(from_halfway)
+    };
     let bag = home_or_base(to, field);
     let throw_at = gather_time
         + pace.throw_transfer_secs
         + Vec2::new(bag.x - pos.x, bag.z - pos.z).length() / pace.throw_speed
         + pace.tag_apply_secs;
     let beats_throw = runner_at <= throw_at + pace.runner_margin_secs;
+    // "Never make the first or third out at third base": with nobody or two
+    // out, a runner headed for third goes only on a race he wins — the
+    // gamble is for home, or for third with one out (docs/BASEBALL.md).
+    let gamble = if to == 2 && outs != 1 {
+        0.0
+    } else {
+        pace.send_aggression_secs
+    };
     Some(ExtraBaseRead {
         from,
         to,
-        go: runner_at <= throw_at + pace.runner_margin_secs + pace.send_aggression_secs,
+        go: runner_at <= throw_at + pace.runner_margin_secs + gamble,
         beats_throw,
         contested: throw_at <= runner_at + pace.throw_contest_secs,
     })
@@ -202,6 +226,7 @@ pub fn resolve_gathered(
 pub fn throw_target(
     pos: Vec3,
     gather_time: f32,
+    landed_secs: f32,
     bases: &Bases,
     runners_going: bool,
     outs: u32,
@@ -251,6 +276,7 @@ pub fn throw_target(
             let read = read_extra_base(
                 pos,
                 gather_time,
+                landed_secs,
                 bases,
                 n as u32,
                 outs,
@@ -323,6 +349,7 @@ fn lead_force(bases: &Bases, field: &FieldSpec) -> usize {
 pub fn resolve_thrown(
     pos: Vec3,
     throw_time: f32,
+    landed_secs: f32,
     target: usize,
     bases: &Bases,
     runners_going: bool,
@@ -408,6 +435,7 @@ pub fn resolve_thrown(
     let read = read_extra_base(
         pos,
         throw_time,
+        landed_secs,
         bases,
         hit,
         outs,
