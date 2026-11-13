@@ -35,6 +35,7 @@ use crate::game::rules::{self, Bases, BattingOrder, Outcome};
 use crate::game::variant::Ruleset;
 use crate::game::{GameState, Team};
 
+mod bullpen;
 mod live;
 mod pitch;
 mod result;
@@ -229,6 +230,10 @@ struct PitchState {
     /// The kind of the pitch currently in flight (set at release). Drives the
     /// dropped-third-strike and steal resolutions.
     kind: Option<rules::PitchKind>,
+    /// The fraction of release speed the pitch in flight lost to the
+    /// pitcher's fatigue ([`crate::game::fatigue::velocity_scale`]); 0 for a
+    /// fresh arm.
+    speed_fade: f32,
     /// A swing the batter has committed to but whose bat hasn't come
     /// through the zone yet: the press starts the swing, and the judgement
     /// waits [`pitch::SWING_CONTACT_SECS`] for the bat to arrive — so the
@@ -551,6 +556,12 @@ impl Play {
     /// release and after the PrePitch reset) — the speed read-out's source.
     pub fn pitch_kind(&self) -> Option<rules::PitchKind> {
         self.pitch.kind
+    }
+
+    /// The pitch in flight's release-speed multiplier from the pitcher's
+    /// fatigue (1.0 for a fresh arm) — the radar gun reads it.
+    pub fn pitch_fatigue_scale(&self) -> f32 {
+        1.0 - self.pitch.speed_fade
     }
 
     /// Which beat the current result pause is showing (`None` outside a
@@ -929,6 +940,7 @@ impl Plugin for FlowPlugin {
             .init_resource::<CpuConfig>()
             .init_resource::<CpuState>()
             .init_resource::<Mojo>()
+            .init_resource::<crate::game::fatigue::Fatigue>()
             .add_message::<BallInPlayEvent>()
             .add_message::<LiveBallEvent>()
             .add_message::<PitchCaughtEvent>()
@@ -956,6 +968,7 @@ impl Plugin for FlowPlugin {
                 // restores that same-frame delivery). It still reads
                 // `cpu_offense`'s intent write from earlier this frame.
                 (
+                    bullpen::cpu_bullpen,
                     sync_batter,
                     tick_cpu_clock,
                     cpu_defense,
