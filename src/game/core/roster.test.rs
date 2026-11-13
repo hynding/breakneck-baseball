@@ -141,5 +141,13 @@ fn the_shipped_lineups_average_out_to_a_league_average_runner() {
             assert_eq!(total, 50 * group.len() as u32);
         }
         assert!(roster.lineup.iter().any(|c| c.ratings.speed != 50));
+        // The top of the order too: the balance sim plays one-inning games,
+        // where the first few hitters take most of the plate appearances,
+        // so a slow top of the lineup would skew its economy.
+        let top: u32 = roster.lineup[..4]
+            .iter()
+            .map(|c| c.ratings.speed as u32)
+            .sum();
+        assert_eq!(top, 200);
     }
 }
