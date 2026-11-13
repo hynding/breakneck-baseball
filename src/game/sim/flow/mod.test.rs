@@ -94,3 +94,55 @@ fn plate_appearance_ends_on_strikeout_walk_and_batted_ball() {
     assert!(Play::test_walkup().walkup_active());
     assert!(!Play::default().walkup_active());
 }
+
+/// Drives [`track_mojo`] through a few hand-made plate appearances.
+#[test]
+fn track_mojo_scores_each_finished_plate_appearance() {
+    let mut app = App::new();
+    app.insert_resource(crate::game::ScoreBoard {
+        inning: 1,
+        top_of_inning: true,
+        ..Default::default()
+    })
+    .init_resource::<BattingOrder>()
+    .init_resource::<Mojo>()
+    .add_systems(Update, track_mojo);
+    app.update(); // the watch starts on the leadoff hitter
+
+    // Leadoff single: the order moves on with no out made.
+    app.world_mut()
+        .resource_mut::<BattingOrder>()
+        .advance(Team::Away);
+    app.update();
+    // Second batter grounds out.
+    app.world_mut()
+        .resource_mut::<crate::game::ScoreBoard>()
+        .outs = 1;
+    app.world_mut()
+        .resource_mut::<BattingOrder>()
+        .advance(Team::Away);
+    app.update();
+    // A runner is caught stealing: an out, but no PA finished.
+    app.world_mut()
+        .resource_mut::<crate::game::ScoreBoard>()
+        .outs = 2;
+    app.update();
+    // Third batter homers (two runs).
+    app.world_mut()
+        .resource_mut::<crate::game::ScoreBoard>()
+        .away_runs = 2;
+    app.world_mut()
+        .resource_mut::<BattingOrder>()
+        .advance(Team::Away);
+    app.update();
+
+    let mojo = app.world().resource::<Mojo>();
+    assert!(mojo.batter(Team::Away, 1) > 0.0, "the single");
+    assert!(mojo.batter(Team::Away, 2) < 0.0, "the groundout");
+    assert!(
+        mojo.batter(Team::Away, 3) > mojo.batter(Team::Away, 1),
+        "the homer beats the single"
+    );
+    assert_eq!(mojo.batter(Team::Away, 4), 0.0);
+    assert!(mojo.pitcher(Team::Home) < 0.0);
+}
