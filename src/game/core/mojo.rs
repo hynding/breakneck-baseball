@@ -14,7 +14,7 @@
 //! graded — a confident hitter facing a rattled pitcher squares up a ball
 //! he would have just missed, and the other way round. It applies to human
 //! and CPU swings alike. The deltas are sized so an average hitter's
-//! successes and failures balance (≈30% reach base), keeping the league
+//! successes and failures balance (about a third reach base), keeping the league
 //! economy where the balance sim tuned it.
 
 use bevy::prelude::Resource;
@@ -39,9 +39,13 @@ pub const MOJO_REACHED: f32 = 0.25;
 /// Each run the play drove in, on top (at most [`MOJO_MAX_RUNS`] counted).
 pub const MOJO_PER_RUN: f32 = 0.1;
 const MOJO_MAX_RUNS: u32 = 4;
-/// A batter making an out. With ~30% of PAs reaching base, 0.3 × 0.25 is
-/// about 0.7 × 0.11 — an average hitter drifts nowhere.
-pub const MOJO_OUT: f32 = -0.11;
+/// A batter making an out. Sized so an average hitter drifts nowhere: he
+/// reaches about a third of the time (OBP ≈ .32 in the realism harness,
+/// MLB ≈ .315) and drives in ~0.11 runs a PA, so 0.32 × 0.25 + 0.011 ≈
+/// 0.68 × 0.135. A positive drift here would lift every hitter over every
+/// pitcher and inflate the whole economy (a −0.11 out cost +0.35 runs per
+/// team-game in the harness).
+pub const MOJO_OUT: f32 = -0.135;
 /// The pitcher moves the opposite way at this fraction of the batter's
 /// swing — he faces every batter, so each PA counts for less.
 pub const MOJO_PITCHER_SHARE: f32 = 0.5;

@@ -27,22 +27,24 @@ fn a_streak_heats_a_batter_and_cools_the_pitcher() {
 
 #[test]
 fn an_average_hitter_drifts_nowhere() {
-    // Three-for-ten, over and over: averaged over a cycle the score sits
-    // near even rather than ratcheting either way — for him and for the
-    // pitcher he faces.
+    // An OBP-.320 hitter who drives in a run every ninth PA, over and over:
+    // averaged over a cycle his score sits near even rather than ratcheting
+    // either way — and so does the pitcher he faces.
     let mut m = Mojo::default();
     let (mut bat, mut pitch) = (0.0, 0.0);
-    for cycle in 0..30 {
-        for i in 0..10 {
-            m.record(Team::Home, 1, if i % 3 == 0 && i < 9 { HIT } else { OUT });
-            if cycle == 29 {
-                bat += m.batter(Team::Home, 1) / 10.0;
-                pitch += m.pitcher(Team::Away) / 10.0;
-            }
+    let pa = |i: u32| PaResult {
+        reached: i % 25 < 8,
+        runs: u32::from(i % 9 == 4),
+    };
+    for i in 0..2250 {
+        m.record(Team::Home, 1, pa(i));
+        if i >= 2025 {
+            bat += m.batter(Team::Home, 1) / 225.0;
+            pitch += m.pitcher(Team::Away) / 225.0;
         }
     }
-    assert!(bat.abs() < 0.1, "batter mean {bat}");
-    assert!(pitch.abs() < 0.1, "pitcher mean {pitch}");
+    assert!(bat.abs() < 0.05, "batter mean {bat}");
+    assert!(pitch.abs() < 0.05, "pitcher mean {pitch}");
 }
 
 #[test]
