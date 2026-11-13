@@ -286,6 +286,7 @@ fn build_snapshot(
         && state.crossing.is_some()
         && !state.contacted
         && !dropped_third
+        && !facts.play.pitch_got_away()
         && !hbp
         && !dirt;
 

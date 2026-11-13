@@ -115,6 +115,7 @@ pub(super) fn result_phase(
     play.live.last_contact_quality = None;
     play.live.last_outcome = None;
     play.pitch.last_strike_call = None;
+    play.pitch.got_away = false;
     // A runner in stealing position opens the duel window for the next at-bat.
     play.duel.hold = steal_window_for(&bases, &rules_res);
     lead.extended = false;

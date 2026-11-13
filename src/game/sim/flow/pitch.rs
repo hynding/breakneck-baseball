@@ -565,7 +565,8 @@ pub(super) fn pitch_live(
             // Swinging through a curveball in the dirt with first base
             // open: the catcher can't hold strike three and the batter
             // runs.
-            judge_whiff(&mut play, &mut ump, &mut order, batter)
+            let cross = play.pitch.crossing.unwrap_or(Vec2::new(pos.x, pos.y));
+            judge_whiff(cross, &mut play, &mut ump, &mut order, batter)
         } else {
             let cross = play.pitch.crossing.unwrap_or(Vec2::new(pos.x, pos.y));
             judge_take(cross, &mut play, &mut ump, &mut order, batter)
@@ -613,17 +614,37 @@ fn judge_take(
     if pa_over {
         order.advance(batter);
     }
-    // A walk is a dead ball (runners advance freely); otherwise a sent runner
-    // has to beat the catcher's throw.
+    // A walk is a dead ball (runners advance freely). Otherwise a pitch
+    // that got by the catcher moves everyone up, and a sent runner who
+    // still has to beat a throw is the steal.
+    if !walked && got_away(cross, play, ump) {
+        return beat;
+    }
     if play.duel.armed && !walked {
         start_steal_throw(play, ump);
     }
     beat
 }
 
+/// A taken or missed pitch that crossed past the catcher's reach with
+/// runners aboard ([`rules::gets_by_catcher`]): the wild pitch. The ball
+/// plays to the backstop instead of the mitt, and there is no steal throw —
+/// the runners are already moving up. `false` (nothing happens) with the
+/// bases empty, or once the call ended the half-inning.
+fn got_away(cross: Vec2, play: &mut Play, ump: &mut Umpire) -> bool {
+    if !rules::gets_by_catcher(cross) || !ump.runners_aboard() {
+        return false;
+    }
+    ump.wild_pitch();
+    play.pitch.taken = false;
+    play.pitch.got_away = true;
+    true
+}
+
 /// A swing and miss. The at-bat may end here (a strikeout, or a dropped third
 /// the batter runs out); the caller ends the pitch either way.
 fn judge_whiff(
+    cross: Vec2,
     play: &mut Play,
     ump: &mut Umpire,
     order: &mut BattingOrder,
@@ -639,6 +660,11 @@ fn judge_whiff(
     play.pitch.taken = call != StrikeCall::DroppedThird;
     if call != StrikeCall::Strike {
         order.advance(batter);
+    }
+    // The dropped third already plays the ball loose; any other miss can
+    // still get by the catcher.
+    if call != StrikeCall::DroppedThird && got_away(cross, play, ump) {
+        return ResultBeat::for_strike(call);
     }
     // The catcher has the ball: a sent runner must survive the throw.
     if play.duel.armed {
@@ -756,6 +782,7 @@ fn settle_batted_ball(
 #[allow(clippy::type_complexity)]
 pub(super) fn catcher_receives(
     mut play: ResMut<Play>,
+    bases: Res<Bases>,
     catchers: Query<(Entity, &Transform), (With<CatcherRole>, Without<Baseball>)>,
     mut ball_q: Query<
         (Entity, &mut Transform, &mut Velocity, &mut Visibility),
@@ -816,6 +843,10 @@ pub(super) fn catcher_receives(
         let cross = play.pitch.crossing.unwrap_or(Vec2::new(pos.x, pos.y));
         if rules::hits_batter(cross) {
             return; // headed for an HBP call: stays visible, plays through
+        }
+        let runners = (0..bases.count()).any(|b| bases.is_occupied(b));
+        if runners && rules::gets_by_catcher(cross) {
+            return; // the wild pitch: it skips past him to the backstop
         }
         *vis = Visibility::Hidden;
         play.pitch.presentational_catch = true;
