@@ -516,6 +516,10 @@ fn run_sim(n: u32) -> Aggregate {
 //    had already drifted to .349, and the staged throws reshuffle the CPU's
 //    deterministic sequence enough to read .361 at N=40 — while N=100 reads
 //    .332 (main) vs .341 (staged), the same economy inside σ≈.03.
+//    2026-11-13 (CPU launch aim pushed out of the line-drive band,
+//    `ai::launch_aim_y`): N=40 .361 → .308, N=100 .341 → .321; the
+//    nine-inning harness reads .291 (MLB .291), singles 15.8% of PAs (was
+//    17.8%). The ceiling stays: the old N=100 economy reads under it.
 //  * doubles/9 0.5..=3.5 — nominal 1.0..2.5 (MLB 1.57 per team-game), live
 //    2.4, before the outfield-range fix 4.6 (a 110 m-deep centre fielder let
 //    every gap bloop roll for two). Ceiling 3.5 is ~2σ above live (21

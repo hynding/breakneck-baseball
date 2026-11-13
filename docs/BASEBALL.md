@@ -254,6 +254,14 @@ reads like baseball without changing the timing windows or contact rates.
   BABIP is ~.290. The 2024 AL hit 12,692 singles, 3,808 doubles and 337
   triples: **0.30 doubles per single, 1.57 doubles per team-game**
   (Baseball-Reference league batting table).
+- The batted-ball *mix* matters as much as the per-type rates: MLB balls in
+  play split roughly 43% grounders, 21–25% line drives and 35% flies, about a
+  tenth of the flies infield pops (FanGraphs league batted-ball stats;
+  Statcast's launch-angle bins, line drive = 10°–25°, read the high end). A
+  game that sends too much contact out at a line-drive angle inflates singles
+  even with every per-type rate right, because medium liners drop in between
+  the infield and the outfield. The CPU's launch aim (`ai::launch_aim_y`) is
+  shaped against this mix.
 
 ## Stolen-base timing (mlb.com Statcast glossary, Bill James Online, Wikipedia "Pop time")
 

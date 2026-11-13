@@ -253,3 +253,23 @@ fn a_hitter_who_never_offers_gets_strikes_from_two_balls() {
     assert!(!challenges_taker(false, 2, 1));
     assert!(challenges_taker(false, 2, 2));
 }
+
+#[test]
+fn the_cpu_launch_aim_thins_the_line_drive_band() {
+    // aim.y maps to a base launch of −4° + 36°·(y/2 + ½), so a 10°–25° line
+    // drive is aim.y ≈ −0.22..0.61. A uniform aim put ~46% of swings there.
+    let n = 2000;
+    let aims: Vec<f32> = (0..=n)
+        .map(|i| launch_aim_y(-1.0 + 2.0 * i as f32 / n as f32))
+        .collect();
+    let liners = aims.iter().filter(|y| (-0.22..0.61).contains(*y)).count();
+    let share = liners as f32 / aims.len() as f32;
+    assert!(share < 0.40, "line-drive share {share}");
+    // Choppers at the bottom, and the fly side stops short of the stick top
+    // the human keeps for home runs.
+    assert!((launch_aim_y(-1.0) + 1.0).abs() < 1e-6);
+    let top = aims.iter().copied().fold(f32::MIN, f32::max);
+    assert!(top < 0.8 && top > 0.7, "top {top}");
+    // Monotone: a higher draw never aims lower.
+    assert!(aims.windows(2).all(|w| w[1] >= w[0]));
+}

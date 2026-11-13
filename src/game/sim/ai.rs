@@ -782,15 +782,25 @@ pub fn cpu_offense(
     cpu.decided_swing = true;
     let intent = intents.get_mut(team);
     intent.action = true;
-    // Spread the intended launch from choppers through line drives to flies
-    // (aim.y −1.0..0.8 → a −4°..28° base launch before the timing tilt tops
-    // or lifts it), so the batted-ball mix lands near the real ~40% grounders
-    // / 40% liners+flies split instead of a wall of 10°–20° line drives (the
-    // 2026-10 realism harness measured a .45 BABIP off the old narrow aim).
+    // The intended launch (see `launch_aim_y`) and a horizontal spray.
     // The launch aim is the CPU's home-run dial — a towering uppercut clears
     // the regulation fence — so the top of the stick is left to humans and
-    // HR/9 is checked in tests/balance_sim.rs. Horizontal spray is unchanged.
-    intent.aim = Vec2::new(cpu.noise(7.0) * 0.6, cpu.noise(9.0) * 0.9 - 0.1);
+    // HR/9 is checked in tests/balance_sim.rs.
+    intent.aim = Vec2::new(cpu.noise(7.0) * 0.6, launch_aim_y(cpu.noise(9.0)));
+}
+
+/// The CPU batter's launch aim (stick y) from a draw `u` in −1..1: from
+/// choppers (−1.0, a −4° base launch before the timing tilt) to flies (0.75,
+/// ~27°). Pushed out toward both ends (`|u|^0.6`) rather than uniform: a
+/// uniform aim put ~46% of contact at a 10°–25° line-drive launch, where
+/// medium contact drops in between the infield and the outfield — 37% of
+/// balls in play were liners (MLB ~25%), so singles ran 17.8% of PAs and
+/// BABIP .334 in the nine-inning harness (MLB ~14% and .291). The fly side
+/// stops short of the old 0.8 top: the extra flies at 0.8 lifted homers to
+/// 1.7 a team-game.
+fn launch_aim_y(u: f32) -> f32 {
+    let reach = if u > 0.0 { 0.85 } else { 0.9 };
+    u.signum() * u.abs().powf(0.6) * reach - 0.1
 }
 
 #[cfg(test)]
