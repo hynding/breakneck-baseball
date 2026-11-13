@@ -180,7 +180,14 @@ his secondary lead (`PaceTuning::secondary_lead_frac`, about 15 ft), a reaction
 behind the bat with fewer than two out and on contact with two; the throw to
 his bag needs its transfer, flight, and the tag (`tag_apply_secs`). He goes
 when the race is no worse than a small gamble (`send_aggression_secs`), so a
-band of sends lose — the close play at the plate. The fielder throws to his bag
+band of sends lose — the close play at the plate. Going to third the gamble is
+smaller: the coaching rule is "never make the first or third out at third
+base" (the runner is already in scoring position at second, and with two out
+a hit scores him from there anyway), so with nobody or two out he goes for
+third only on a race he wins. With fewer than two out he also only gets that
+read once the ball drops if it was hit in the air: he holds halfway until then
+(rule 3 above). MLB runners go first to third on about 28% of singles where
+they have the chance (Baseball-Reference baserunning splits). The fielder throws to his bag
 when the throw can still get there in time to matter (`throw_contest_secs`),
 otherwise ahead of the batter.
 

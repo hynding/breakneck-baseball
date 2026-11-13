@@ -120,6 +120,7 @@ fn bases_empty_throws_to_first() {
         throw_target(
             Vec3::new(0.0, 0.0, 7.0),
             1.2,
+            0.0,
             &empty(),
             false,
             0,
@@ -138,6 +139,7 @@ fn runner_on_first_takes_the_force_at_second() {
         throw_target(
             Vec3::new(0.0, 0.0, 30.0),
             1.2,
+            0.0,
             &with(&[0]),
             false,
             0,
@@ -155,6 +157,7 @@ fn runner_on_second_is_not_forced() {
         throw_target(
             Vec3::new(0.0, 0.0, 30.0),
             1.2,
+            0.0,
             &with(&[1]),
             false,
             0,
@@ -172,6 +175,7 @@ fn bases_loaded_forces_the_play_at_home() {
         throw_target(
             Vec3::new(-5.0, 0.0, 10.0),
             0.8,
+            0.0,
             &loaded(),
             false,
             0,
@@ -190,6 +194,7 @@ fn late_gather_falls_back_to_first() {
         throw_target(
             Vec3::new(0.0, 0.0, 60.0),
             6.0,
+            0.0,
             &with(&[0]),
             false,
             0,
@@ -208,6 +213,7 @@ fn outfield_double_draws_the_throw_to_second() {
         throw_target(
             Vec3::new(0.0, 0.0, 110.0),
             6.5,
+            0.0,
             &empty(),
             false,
             0,
@@ -225,11 +231,11 @@ fn hit_and_run_jump_takes_the_force_off_the_table() {
     // the smart throw goes to first instead.
     let pos = Vec3::new(0.0, 0.0, 20.0);
     assert_eq!(
-        throw_target(pos, 1.2, &with(&[0]), false, 0, &std_field(), &pace()),
+        throw_target(pos, 1.2, 0.0, &with(&[0]), false, 0, &std_field(), &pace()),
         1
     );
     assert_eq!(
-        throw_target(pos, 1.2, &with(&[0]), true, 0, &std_field(), &pace()),
+        throw_target(pos, 1.2, 0.0, &with(&[0]), true, 0, &std_field(), &pace()),
         0
     );
 }
@@ -237,7 +243,18 @@ fn hit_and_run_jump_takes_the_force_off_the_table() {
 // ── Thrown-ball resolution ────────────────────────────────────────────────
 
 fn neutral(pos: Vec3, t: f32, target: usize, bases: &Bases, f: &FieldSpec, r: &Ruleset) -> Outcome {
-    resolve_thrown(pos, t, target, bases, false, 0, RunnerCall::Neutral, f, r)
+    resolve_thrown(
+        pos,
+        t,
+        0.0,
+        target,
+        bases,
+        false,
+        0,
+        RunnerCall::Neutral,
+        f,
+        r,
+    )
 }
 
 #[test]
@@ -350,6 +367,7 @@ fn hit_and_run_beats_the_force_at_second() {
         resolve_thrown(
             Vec3::new(0.0, 0.0, 28.0),
             1.2,
+            0.0,
             1,
             &with(&[0]),
             true,
@@ -371,6 +389,7 @@ fn sent_batter_is_cut_down_stretching() {
         resolve_thrown(
             Vec3::new(0.0, 0.0, 60.0),
             3.5,
+            0.0,
             0,
             &empty(),
             false,
@@ -390,6 +409,7 @@ fn sent_batter_stretches_a_double_into_a_triple() {
         resolve_thrown(
             Vec3::new(0.0, 0.0, 110.0),
             6.5,
+            0.0,
             0,
             &empty(),
             false,
@@ -408,6 +428,7 @@ fn held_batter_banks_the_single() {
     let neutral_bases = match resolve_thrown(
         Vec3::new(0.0, 0.0, 110.0),
         6.5,
+        0.0,
         0,
         &empty(),
         false,
@@ -423,6 +444,7 @@ fn held_batter_banks_the_single() {
         resolve_thrown(
             Vec3::new(0.0, 0.0, 110.0),
             6.5,
+            0.0,
             0,
             &empty(),
             false,
@@ -469,16 +491,36 @@ fn runner_on_second_reads_a_single_for_home() {
     // slower one still scores him.
     let (f, p) = (std_field(), pace());
     let pos = Vec3::new(0.0, 0.0, 60.0);
-    let read = |t: f32| read_extra_base(pos, t, &with(&[1]), 1, 1, false, &f, &p).unwrap();
+    let read = |t: f32| read_extra_base(pos, t, 0.0, &with(&[1]), 1, 1, false, &f, &p).unwrap();
     assert!(!read(3.0).go);
     let close = read(3.5);
     assert_eq!((close.from, close.to), (1, f.base_count()));
     assert!(close.go && !close.beats_throw && close.contested);
     assert!(read(4.0).go && read(4.0).beats_throw);
     // Nobody to read: the runner from third scores on the single anyway.
-    assert!(read_extra_base(pos, 4.0, &with(&[2]), 1, 1, false, &f, &p).is_none());
+    assert!(read_extra_base(pos, 4.0, 0.0, &with(&[2]), 1, 1, false, &f, &p).is_none());
     // The hit-and-run jump already bought the extra base.
-    assert!(read_extra_base(pos, 4.0, &with(&[1]), 1, 1, true, &f, &p).is_none());
+    assert!(read_extra_base(pos, 4.0, 0.0, &with(&[1]), 1, 1, true, &f, &p).is_none());
+}
+
+#[test]
+fn a_ball_in_the_air_holds_the_runner_halfway_until_it_drops() {
+    // Runner on first, one out, a single gathered in right-centre: off a
+    // grounder through the hole he reads third; off a fly that dropped in
+    // late he was holding halfway and stops at second. With two out he
+    // ran on contact either way.
+    let (f, p) = (std_field(), pace());
+    let pos = Vec3::new(-20.0, 0.0, 70.0);
+    let read = |landed: f32, outs| {
+        read_extra_base(pos, 4.2, landed, &with(&[0]), 1, outs, false, &f, &p).unwrap()
+    };
+    assert_eq!(read(0.3, 1).to, 2);
+    assert!(read(0.3, 1).go);
+    assert!(!read(3.0, 1).go);
+    assert!(read(3.0, 2).go);
+    // A quick liner that is down before he would have reached halfway
+    // anyway costs him nothing.
+    assert_eq!(read(1.0, 1), read(0.3, 1));
 }
 
 #[test]
@@ -486,7 +528,7 @@ fn two_outs_send_the_runner_on_contact() {
     // The same gather that holds him with one out sends him with two.
     let (f, p) = (std_field(), pace());
     let pos = Vec3::new(0.0, 0.0, 60.0);
-    let read = |outs| read_extra_base(pos, 3.2, &with(&[1]), 1, outs, false, &f, &p).unwrap();
+    let read = |outs| read_extra_base(pos, 3.2, 0.0, &with(&[1]), 1, outs, false, &f, &p).unwrap();
     assert!(!read(1).go);
     assert!(read(2).go);
 }
@@ -498,7 +540,10 @@ fn close_play_at_the_plate_draws_the_throw_home() {
     let pos = Vec3::new(0.0, 0.0, 60.0);
     let bases = with(&[1]);
     // Contestable: the throw goes home and cuts him down.
-    assert_eq!(throw_target(pos, 3.5, &bases, false, 1, &f, &r.pace), home);
+    assert_eq!(
+        throw_target(pos, 3.5, 0.0, &bases, false, 1, &f, &r.pace),
+        home
+    );
     assert_eq!(
         neutral_outs(pos, 3.5, home, &bases, 1, &f, &r),
         Outcome::ExtraBase {
@@ -508,7 +553,10 @@ fn close_play_at_the_plate_draws_the_throw_home() {
         }
     );
     // He beats it: still a play at the plate, and he's safe.
-    assert_eq!(throw_target(pos, 4.0, &bases, false, 1, &f, &r.pace), home);
+    assert_eq!(
+        throw_target(pos, 4.0, 0.0, &bases, false, 1, &f, &r.pace),
+        home
+    );
     assert_eq!(
         neutral_outs(pos, 4.0, home, &bases, 1, &f, &r),
         Outcome::ExtraBase {
@@ -518,7 +566,10 @@ fn close_play_at_the_plate_draws_the_throw_home() {
         }
     );
     // Hopelessly late: the throw goes ahead of the batter, conceding the run.
-    assert_eq!(throw_target(pos, 5.5, &bases, false, 1, &f, &r.pace), 0);
+    assert_eq!(
+        throw_target(pos, 5.5, 0.0, &bases, false, 1, &f, &r.pace),
+        0
+    );
     assert_eq!(
         neutral_outs(pos, 5.5, 0, &bases, 1, &f, &r),
         Outcome::ExtraBase {
@@ -562,6 +613,7 @@ fn neutral_outs(
     resolve_thrown(
         pos,
         t,
+        0.0,
         target,
         bases,
         false,

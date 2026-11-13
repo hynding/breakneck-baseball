@@ -144,6 +144,11 @@ pub(crate) const RUNNER_MARGIN: f32 = 0.35;
 /// is put in play (primary lead plus the shuffle of the secondary lead), so
 /// his extra-base read starts that far down the line.
 pub(crate) const SECONDARY_LEAD_FRAC: f32 = 0.16;
+/// How far toward the next bag (fraction of a base leg) a runner goes on a
+/// ball in the air with fewer than two out: halfway, where he can still get
+/// back if it's caught (docs/BASEBALL.md, "Fewer than two outs, catchable
+/// fly — go halfway"). His extra-base read restarts from here once it drops.
+pub(crate) const HALFWAY_FRAC: f32 = 0.5;
 /// A play at a bag no force covers needs a tag: the receiver gloves the
 /// throw and still has to put it on the sliding runner.
 pub(crate) const TAG_APPLY: f32 = 0.3;

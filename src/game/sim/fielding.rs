@@ -55,6 +55,10 @@ pub(crate) struct ActivePlay {
     /// [`carry_possessed_ball`] keeps the ball with him so a dead ball never
     /// lies on the grass where it was fielded.
     possessor: Option<Entity>,
+    /// When the live ball first touched down, on the contact clock — a
+    /// runner holding halfway on a ball in the air goes from there once it
+    /// drops (`rules::read_extra_base`). Cleared on every new contact.
+    landed_at: Option<f32>,
 }
 
 impl ActivePlay {
@@ -245,6 +249,7 @@ fn assign_on_contact(
             bounced: false,
         };
         active.possessor = None;
+        active.landed_at = None;
     }
 }
 
@@ -340,6 +345,7 @@ fn chase_and_gather(
         // First bounce: the fair/foul call point; from here it's a ground ball.
         if ball_pos.y < BOUNCE_HEIGHT && ball_vel.linvel.y <= 0.0 {
             reports.write(LiveBallEvent::Landed { pos: ball_pos });
+            active.landed_at = Some(play.since_contact(time.elapsed_secs()));
             active.state = PlayState::Chasing {
                 chaser,
                 bounced: true,
@@ -444,6 +450,7 @@ fn hold_and_throw(
         None
     };
     let going = play.runners_going();
+    let landed = active.landed_at.unwrap_or(0.0);
     let (base, throw_time) = if tag_throw {
         if now - held_at < ruleset.pace.throw_transfer_secs {
             return;
@@ -455,6 +462,7 @@ fn hold_and_throw(
         let target = rules::throw_target(
             ball_tf.translation,
             race_time,
+            landed,
             &bases,
             going,
             score.outs,
@@ -474,6 +482,7 @@ fn hold_and_throw(
             rules::resolve_thrown(
                 ball_tf.translation,
                 throw_time,
+                landed,
                 base,
                 &bases,
                 going,
@@ -515,6 +524,7 @@ fn hold_and_throw(
         pos: from,
         base,
         race_time: throw_time,
+        landed_secs: landed,
     });
     active.state = PlayState::Thrown {
         catcher: receiver.unwrap_or(holder),
