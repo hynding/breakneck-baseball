@@ -16,6 +16,7 @@ fn back_texture_draws_name_and_number_pixels() {
         name: "OKAFOR".to_string(),
         number: 23,
         appearance: Default::default(),
+        ratings: Default::default(),
     };
     let image = build_texture(&card, JerseyFace::Back, [255, 255, 255, 255]);
     let data = image.data.expect("cpu image data");
@@ -33,6 +34,7 @@ fn number_texture_scales_single_digits_up() {
         name: "PYE".to_string(),
         number: 8,
         appearance: Default::default(),
+        ratings: Default::default(),
     };
     let one = build_texture(&card, JerseyFace::Number, [255, 255, 255, 255]);
     let lit = one

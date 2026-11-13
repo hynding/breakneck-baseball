@@ -101,6 +101,16 @@ enum Breaking {
 #[derive(Component)]
 struct PathSpeed(f32);
 
+/// The player's own sprint speed, a multiple of `pace.runner_speed` — his
+/// [`rules::Runner::speed_factor`], stamped when the rig takes the basepath
+/// so it runs the race the rules timed. Missing reads as average (1.0).
+#[derive(Component, Clone, Copy)]
+struct Legs(f32);
+
+fn legs(l: Option<&Legs>) -> f32 {
+    l.map_or(1.0, |l| l.0)
+}
+
 /// Dead-ball advances (walks, post-call shuffles) hustle rather than jog.
 const DEAD_BALL_ADVANCE_SPEED: f32 = 1.5;
 /// The home-run trot: brisk enough that the lap ends near the result pause
@@ -138,18 +148,19 @@ fn advance_paths(
             &mut MoveIntent,
             Option<&DespawnAtPathEnd>,
             Option<&PathSpeed>,
+            Option<&Legs>,
         ),
         Without<RunDelay>,
     >,
     mut commands: Commands,
 ) {
-    for (entity, mut path, mut intent, despawn, speed) in &mut movers {
+    for (entity, mut path, mut intent, despawn, speed, l) in &mut movers {
         if intent.target.is_some() {
             continue;
         }
         if path.next < path.waypoints.len() {
             intent.target = Some(path.waypoints[path.next]);
-            intent.speed = ruleset.pace.runner_speed * speed.map_or(1.0, |s| s.0);
+            intent.speed = ruleset.pace.runner_speed * speed.map_or(1.0, |s| s.0) * legs(l);
             path.next += 1;
         } else if despawn.is_some() {
             commands.entity(entity).despawn();
@@ -194,6 +205,7 @@ fn take_leadoffs(
             &Transform,
             &mut MoveIntent,
             Option<&Playing>,
+            Option<&Legs>,
         ),
         (Without<BasePath>, Without<Breaking>),
     >,
@@ -202,7 +214,7 @@ fn take_leadoffs(
     let dueling = play.phase.pre_contact();
     let candidate = rules::steal_candidate(&bases);
     let throw = play.duel_throw();
-    for (entity, runner, tf, mut intent, playing) in &mut runners {
+    for (entity, runner, tf, mut intent, playing, l) in &mut runners {
         let bag = base_pos(&field, runner.base);
         if let Some(throw) = throw.filter(|t| t.runner == runner.base) {
             if throw.landed {
@@ -232,7 +244,7 @@ fn take_leadoffs(
                 // He's off with the pitch — the catcher's throw (above)
                 // or the call on a ball in play repaths him from here.
                 intent.target = Some(next);
-                intent.speed = ruleset.pace.runner_speed;
+                intent.speed = ruleset.pace.runner_speed * legs(l);
                 continue;
             }
             bag + dir * lead.lead_m
@@ -411,6 +423,7 @@ pub(crate) fn sync_runners(
         let entity = spawn_rig(&mut commands, &rig_model, RigUnit::Batter, mats, start, 1.0);
         commands.entity(entity).insert((
             Runner { base: target },
+            Legs(bases.speed_factor(target)),
             BasePath {
                 waypoints: path_between(&field, None, target),
                 next: 0,
@@ -480,6 +493,7 @@ fn batter_runs(
     mut events: MessageReader<BallInPlayEvent>,
     field: Res<FieldSpec>,
     score: Res<ScoreBoard>,
+    bases: Res<Bases>,
     rig_model: Option<Res<RigModel>>,
     palette: Option<Res<TeamPalette>>,
     assets: Option<Res<crate::game::jersey::JerseyAssets>>,
@@ -529,6 +543,7 @@ fn batter_runs(
             DespawnAtPathEnd,
             RunDelay(Timer::from_seconds(delay, TimerMode::Once)),
             Visibility::Hidden,
+            Legs(bases.batter().speed_factor()),
         ));
         if ghost {
             commands.entity(entity).insert(BatterGhost);
@@ -796,9 +811,18 @@ fn read_break_reads(
 fn drive_breaks(
     field: Res<FieldSpec>,
     ruleset: Res<Ruleset>,
-    mut runners: Query<(&Runner, &Breaking, &Transform, &mut MoveIntent), Without<BasePath>>,
+    mut runners: Query<
+        (
+            &Runner,
+            &Breaking,
+            &Transform,
+            &mut MoveIntent,
+            Option<&Legs>,
+        ),
+        Without<BasePath>,
+    >,
 ) {
-    for (runner, breaking, tf, mut intent) in &mut runners {
+    for (runner, breaking, tf, mut intent, l) in &mut runners {
         let bag = base_pos(&field, runner.base);
         let next = next_bag_pos(&field, runner.base);
         let target = match breaking {
@@ -808,7 +832,7 @@ fn drive_breaks(
         };
         if (tf.translation - target).length() > 0.25 {
             intent.target = Some(target);
-            intent.speed = ruleset.pace.runner_speed;
+            intent.speed = ruleset.pace.runner_speed * legs(l);
         }
     }
 }

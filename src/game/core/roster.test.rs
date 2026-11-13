@@ -128,3 +128,26 @@ fn jersey_names_fit_the_procedural_font() {
         assert!(card.number < 100, "two digits max on the back");
     }
 }
+
+#[test]
+fn the_shipped_lineups_average_out_to_a_league_average_runner() {
+    // Ratings spread the runners out without moving the economy the
+    // balance sim tuned at "everyone is a 50" — each starting nine (and
+    // each bench) averages exactly 50 speed.
+    let r = Rosters::default();
+    for roster in [&r.home, &r.away] {
+        for group in [&roster.lineup, &roster.bench] {
+            let total: u32 = group.iter().map(|c| c.ratings.speed as u32).sum();
+            assert_eq!(total, 50 * group.len() as u32);
+        }
+        assert!(roster.lineup.iter().any(|c| c.ratings.speed != 50));
+        // The top of the order too: the balance sim plays one-inning games,
+        // where the first few hitters take most of the plate appearances,
+        // so a slow top of the lineup would skew its economy.
+        let top: u32 = roster.lineup[..4]
+            .iter()
+            .map(|c| c.ratings.speed as u32)
+            .sum();
+        assert_eq!(top, 200);
+    }
+}

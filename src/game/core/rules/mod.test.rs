@@ -51,3 +51,17 @@ fn rules_sources_draw_no_randomness() {
     }
     assert!(scanned >= 5, "expected the rules sources under {dir:?}");
 }
+
+#[test]
+fn speed_grades_scale_sprint_speed_around_the_average() {
+    // 50 is today's runner; each 10 grade points is one MLB sprint-speed
+    // standard deviation (~6%), and grades off the 20–80 scale clamp.
+    assert_eq!(Runner::AVERAGE.speed_factor(), 1.0);
+    let f = |speed| Runner { speed }.speed_factor();
+    assert!((f(60) - 1.06).abs() < 1e-6);
+    assert!((f(40) - 0.94).abs() < 1e-6);
+    assert_eq!(f(99), f(80));
+    assert_eq!(f(0), f(20));
+    // An empty base reads as an average runner.
+    assert_eq!(Bases::default().speed_factor(0), 1.0);
+}

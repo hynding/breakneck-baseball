@@ -176,13 +176,42 @@ pub fn mound_reset_pos(pitch_distance: f32) -> Vec3 {
 
 // ── Data ──────────────────────────────────────────────────────────────────────
 
-/// Occupancy of the bases, in running order (index 0 = first base). All
-/// runners belong to the batting team, so a boolean per base is enough. The
-/// base count comes from the field variant. Used by base-running rules and
-/// the HUD diamond.
+/// One player on the bases (or the batter, who becomes one on contact): what
+/// the races need to know about him. `speed` is a 20–80 scouting grade, 50
+/// the league average (per docs/BASEBALL.md, "Player ratings").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Runner {
+    pub speed: u8,
+}
+
+impl Runner {
+    /// A league-average runner — what every runner was before ratings, and
+    /// what [`Bases::set`] still places.
+    pub const AVERAGE: Runner = Runner { speed: 50 };
+
+    /// His sprint speed as a multiple of the league average: each 10 grade
+    /// points is one standard deviation of MLB sprint speed, about 6% (27
+    /// ft/s average, σ ≈ 1.5 ft/s), so a 20 runs at 82% and an 80 at 118%.
+    pub fn speed_factor(self) -> f32 {
+        1.0 + (self.speed.clamp(20, 80) as f32 - 50.0) * 0.006
+    }
+}
+
+impl Default for Runner {
+    fn default() -> Self {
+        Runner::AVERAGE
+    }
+}
+
+/// Who is on the bases, in running order (index 0 = first base). All
+/// runners belong to the batting team. The base count comes from the field
+/// variant. Also holds the batter at the plate, who becomes a runner on
+/// contact, so a race can time him at his own speed. Used by base-running
+/// rules and the HUD diamond.
 #[derive(Resource, Clone, Debug, PartialEq, Eq)]
 pub struct Bases {
-    occupied: Vec<bool>,
+    runners: Vec<Option<Runner>>,
+    batter: Runner,
 }
 
 impl Default for Bases {
@@ -196,36 +225,71 @@ impl Bases {
     /// Empty bases for a field with `count` bases (excluding home).
     pub fn new(count: usize) -> Self {
         Self {
-            occupied: vec![false; count],
+            runners: vec![None; count],
+            batter: Runner::AVERAGE,
         }
     }
 
     /// Number of bases on this field.
     pub fn count(&self) -> usize {
-        self.occupied.len()
+        self.runners.len()
     }
 
     /// Is the (0-indexed) base occupied? Out-of-range reads are just empty.
     pub fn is_occupied(&self, base: usize) -> bool {
-        self.occupied.get(base).copied().unwrap_or(false)
+        self.runner(base).is_some()
     }
 
-    /// Sets one base's occupancy. Out-of-range writes are ignored.
+    /// The runner on the (0-indexed) base, if any.
+    pub fn runner(&self, base: usize) -> Option<Runner> {
+        self.runners.get(base).copied().flatten()
+    }
+
+    /// The speed factor ([`Runner::speed_factor`]) of the runner on `base`,
+    /// or of an average runner when it is empty.
+    pub fn speed_factor(&self, base: usize) -> f32 {
+        self.runner(base).unwrap_or_default().speed_factor()
+    }
+
+    /// Sets one base's occupancy, placing a league-average runner — the
+    /// scenario/debug seam. Rules move real runners with [`Self::put`] and
+    /// [`Self::take`]. Out-of-range writes are ignored.
     pub fn set(&mut self, base: usize, occupied: bool) {
-        if let Some(slot) = self.occupied.get_mut(base) {
-            *slot = occupied;
+        self.put(base, occupied.then_some(Runner::AVERAGE));
+    }
+
+    /// Puts `runner` on `base` (or empties it). Out-of-range writes are
+    /// ignored.
+    pub fn put(&mut self, base: usize, runner: Option<Runner>) {
+        if let Some(slot) = self.runners.get_mut(base) {
+            *slot = runner;
         }
+    }
+
+    /// Takes the runner off `base`, leaving it empty.
+    pub fn take(&mut self, base: usize) -> Option<Runner> {
+        self.runners.get_mut(base).and_then(Option::take)
+    }
+
+    /// The batter at the plate.
+    pub fn batter(&self) -> Runner {
+        self.batter
+    }
+
+    /// A new batter steps in.
+    pub fn set_batter(&mut self, batter: Runner) {
+        self.batter = batter;
     }
 
     /// Empties every base, keeping the base count.
     pub fn clear(&mut self) {
-        self.occupied.fill(false);
+        self.runners.fill(None);
     }
 
     /// Empties the bases *and* adopts a (possibly different) base count.
     pub fn reset_for(&mut self, count: usize) {
-        self.occupied.clear();
-        self.occupied.resize(count, false);
+        self.runners.clear();
+        self.runners.resize(count, None);
     }
 }
 
