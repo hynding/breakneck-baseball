@@ -44,6 +44,14 @@ If this file and the test disagree, the test wins — update this file.
 > K% 14.0, runs/9 3.56, HR/9 1.08, 2B/9 1.57, pitches/PA 3.16. Raising exit speed instead
 > (`EXIT_PEAK` 31 → 33.5) was tried and is the wrong lever: BABIP .399, 3.8 HR a team-game.
 
+> 2026-11-13 (pickoffs): the CPU runner stretched his lead to the full 4.5 m whenever he
+> stretched, past the 3.6 m he can dive back from, so any throw over got him: 1.12 pickoffs/9
+> at N=40, 0.33 a team-game in the nine-inning harness (MLB ~0.05). He now stops at
+> `rules::safe_lead_m` and only misreads it now and then (`ai::stretch_target_m`); the CPU
+> pitcher throws over much more at a lead past the line than short of it
+> (`ai::pickoff_throw_rate`). N=40 reads 0.0, the harness 0.02 a team-game. The pickoff
+> ceiling tightened 1.5 → 0.6.
+
 ## Asserted bands (N=40, `balance_bands_hold`)
 
 | Signal | Asserted band | Nominal target | Measured (N=40) |
@@ -57,7 +65,7 @@ If this file and the test disagree, the test wins — update this file.
 | BABIP | .220 ..= .365 | .250..330 | .321 at N=100, .308 at N=40 (before the 2026-11 launch-aim fix .341 / .361) |
 | doubles / team / 9 | 0.5 ..= 3.5 | 1.0..2.5 | 2.4 (pre-range-fix 4.6) |
 | CS / team / 9 | 0.0 ..= 1.6 | 0..1 | 0.2 |
-| pickoffs / team / 9 | 0.0 ..= 1.5 | 0..0.6 | 0.6 |
+| pickoffs / team / 9 | 0.0 ..= 0.6 | 0..0.2 | 0.0 (main before the 2026-11 runner-lead fix: 1.12) |
 
 Asserted bands are wider than nominal on purpose: they're sized to the measured per-process
 spread plus margin for a binary-layout shift, so a seed change can nudge the mean but never

@@ -277,7 +277,12 @@ caught-stealing rate is ~20–25% of attempts.
 Pickoffs: a pitcher's move and throw to first take ~0.8 s glove to tag;
 a runner on a normal lead dives back in time, one leaning several feet
 further is caught (`rules::attempt_pickoff` races `PICKOFF_THROW_SECS` against
-`dive_back_secs`).
+`dive_back_secs`). Successful pickoffs are rare in MLB — about one every
+twenty team-games (~0.05 per team per 9), and fewer since the 2023
+disengagement limit — because runners lead out to the line they can get back
+from and no further; pitchers throw over far more often than they get anyone.
+The CPU runner models that by stretching to `rules::safe_lead_m` (3.6 m) and
+only occasionally misjudging it.
 
 ## Rules modeled elsewhere
 
@@ -296,6 +301,7 @@ CLAUDE.md's architecture notes for how each maps.
 - [Turface Athletics — Field layouts & dimensions](https://www.turface.com/education/resource-library/baseball-softball-field-layouts-dimensions)
 - [Mighty Grass — Baseball field dimensions guide](https://www.mightygrass.com/baseball-field-dimensions-guide/)
 - [Wikipedia — Tag up](https://en.wikipedia.org/wiki/Tag_up)
+- [CBS Sports — Fewer and more-efficient pickoffs under the new rules](https://www.cbssports.com/mlb/news/four-under-the-radar-effects-of-mlbs-new-rules-including-fewer-and-more-efficient-pickoffs)
 - [Baseball-Reference — Baserunning stats (XBT%, league average 41%)](https://www.baseball-reference.com/blog/archives/10867.html)
 - [Baseball Training World — The 9 fundamentals of base running](https://baseballtrainingworld.com/the-9-fundamentals-of-base-running-in-baseball/)
 - [QC Baseball — Baserunning: tagging up](http://www.qcbaseball.com/skills/baserunning-tagging-up.aspx)

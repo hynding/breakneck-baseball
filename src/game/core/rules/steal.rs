@@ -232,6 +232,14 @@ pub enum PickoffResult {
     NoRunner,
 }
 
+/// The longest lead a runner can take and still beat a pickoff throw back
+/// to the bag: past it, [`pickoff_beats_runner`] is true. A smart runner
+/// stretches up to this line and no further — which is why MLB runners are
+/// picked off about once every twenty team-games (per docs/BASEBALL.md).
+pub fn safe_lead_m() -> f32 {
+    (PICKOFF_THROW_SECS - PICKOFF_REACTION_SECS) * DIVE_BACK_SPEED
+}
+
 /// Whether a pickoff throw at a runner `lead_m` off the bag beats his dive
 /// back — the same race [`attempt_pickoff`] runs, asked without applying it,
 /// so the throw can be *decided* as it leaves the hand and *called* as it
