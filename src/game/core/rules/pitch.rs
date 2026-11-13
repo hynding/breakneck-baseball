@@ -37,6 +37,23 @@ impl PitchKind {
         }
     }
 
+    /// What a broadcast radar gun shows for this kind at the nominal pace:
+    /// the MLB average release speed (per docs/BASEBALL.md, "Pitch speeds").
+    /// The flight itself runs slower ([`Self::speed`], ~20% under MLB on the
+    /// heater) so a human can read the pitch; the read-out speaks the
+    /// league's language instead, and the order is the league's too — the
+    /// in-game changeup is the slowest pitch, but a real one is thrown
+    /// harder than a curve. Presentation only: nothing in the rules reads it.
+    pub fn broadcast_mph(self) -> f32 {
+        match self {
+            PitchKind::Fastball => 94.0,
+            PitchKind::Sinker => 93.0,
+            PitchKind::Slider => 86.0,
+            PitchKind::Changeup => 86.0,
+            PitchKind::Curveball => 80.0,
+        }
+    }
+
     pub fn spin(self) -> Vec3 {
         match self {
             PitchKind::Fastball => Vec3::new(20.0, 0.0, 0.0),

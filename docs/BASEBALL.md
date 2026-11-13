@@ -215,6 +215,17 @@ The game has no cutter or splitter, and its control scheme ties a pitch's
 kind to its held aim (`rules::PitchKind::from_aim`), so the slider lives on
 the inside edge and the sinker on the outside one.
 
+## Pitch speeds (RotoWire velocity tables; Baseball Savant)
+
+MLB average release speeds in the Statcast era: four-seam fastball ~94 mph,
+sinker ~93, changeup ~86, slider ~86, curveball ~80. The game throws slower
+than that so a human can read the pitch (`rules::PitchKind::speed`: heater
+38 m/s = 85 mph, changeup 29 m/s = 65 mph), and its changeup is its slowest
+pitch where a real one is thrown harder than a curve. The speed read-out by
+the plate shows the league numbers instead (`PitchKind::broadcast_mph`, give
+or take two mph pitch to pitch, scaled by the pace dial), so the broadcast
+reads like baseball without changing the timing windows or contact rates.
+
 ## Home run distance (Sports Illustrated, Statcast)
 
 - A typical big-league homer travels about 400 ft.
@@ -295,6 +306,7 @@ CLAUDE.md's architecture notes for how each maps.
 - [Baseball Rules Academy — 2.01 Layout of the field](https://baseballrulesacademy.com/official-rule/mlb/2-01-layout-field/) (line width, materials)
 - [Bat Flip Sports — How to chalk a baseball field like a pro](https://batflipsports.com/how-to-chalk-a-baseball-field/) (2–4 in chalk-line width)
 - [Fox Valley Paint — How to stripe a baseball field like a pro](https://foxvalleypaint.com/how-to-stripe-a-baseball-field/) (practical ~4 in foul-line width)
+- [Baseball Savant — pitch arsenal velocity leaderboard](https://baseballsavant.mlb.com/leaderboard/pitch-arsenals)
 - [RotoWire — MLB pitch speed and usage, 2002 to 2025](https://www.rotowire.com/baseball/article/mlb-pitch-speed-and-usage-2002-to-2025-94262)
 - [FanGraphs — Checking in on the hitter's count](https://blogs.fangraphs.com/checking-in-on-the-hitters-count) (70%+ fastballs at 3-0, 3-1, 2-0)
 - [Sports Illustrated — The farthest and hardest-hit home runs of 2024](https://www.si.com/mlb/2024-mlb-season-home-runs-farthest-hardest-hit)
