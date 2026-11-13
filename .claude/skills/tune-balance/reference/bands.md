@@ -34,6 +34,16 @@ If this file and the test disagree, the test wins — update this file.
 > K% 14.9, BB% 7.5, BABIP .301, doubles/9 2.4. BABIP ceiling tightened .400 → .360 and a
 > doubles/9 band added; both trip on the pre-fix economy (.367, 4.6).
 
+> 2026-11-13 (singles): the CPU's launch aim was uniform over −4°..28°, so ~46% of its
+> contact left at a 10°–25° line-drive angle, where medium contact drops in between the
+> infield and the outfield (37% liners vs MLB ~25%). `ai::launch_aim_y` pushes the aim out
+> toward choppers and flies, with the fly side stopping at ~27° (0.8 put homers at 1.7 a
+> team-game). Nine-inning harness, 24 games: std BABIP .334 → .291, singles 17.8% → 15.8% of
+> PAs, doubles 2.15 → 1.44 a team-game, HR 1.04 → 1.29, runs 4.00 → 3.77. Balance sim
+> N=40: BABIP .361 → .308, K% 13.0, runs/9 3.04, HR/9 1.01, 2B/9 1.69; N=100: BABIP .321,
+> K% 14.0, runs/9 3.56, HR/9 1.08, 2B/9 1.57, pitches/PA 3.16. Raising exit speed instead
+> (`EXIT_PEAK` 31 → 33.5) was tried and is the wrong lever: BABIP .399, 3.8 HR a team-game.
+
 ## Asserted bands (N=40, `balance_bands_hold`)
 
 | Signal | Asserted band | Nominal target | Measured (N=40) |
@@ -44,7 +54,7 @@ If this file and the test disagree, the test wins — update this file.
 | BB% (walks / PA) | 5.0 ..= 13.0 | 6..11 | 8.2 |
 | HBP% | 0.0 ..= 2.5 | 0..2 | 0.0 |
 | pitches / PA | 2.9 ..= 4.5 | 3.3..4.3 | 3.3 |
-| BABIP | .220 ..= .365 | .250..330 | .341 at N=100 (main .332; pre-range-fix .367) |
+| BABIP | .220 ..= .365 | .250..330 | .321 at N=100, .308 at N=40 (before the 2026-11 launch-aim fix .341 / .361) |
 | doubles / team / 9 | 0.5 ..= 3.5 | 1.0..2.5 | 2.4 (pre-range-fix 4.6) |
 | CS / team / 9 | 0.0 ..= 1.6 | 0..1 | 0.2 |
 | pickoffs / team / 9 | 0.0 ..= 1.5 | 0..0.6 | 0.6 |
