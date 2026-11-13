@@ -1,5 +1,5 @@
-//! The walk-up card (TODO 103): the incoming batter's name, number, and
-//! lineup slot, shown beside the walk-up shot while `Play::walkup_active`.
+//! The walk-up card (TODO 103): the incoming batter's name, number,
+//! lineup slot and mojo, shown beside the walk-up shot while `Play::walkup_active`.
 //! Painted at spawn with the near-invisible tint and shown by mutating its
 //! children — the wasm UI rule (see [`hidden_tint`]) — and, on top of that,
 //! `Visibility::Hidden` while off: the tint alone read as a ghost card over
@@ -8,6 +8,7 @@
 use bevy::prelude::*;
 
 use crate::game::flow::Play;
+use crate::game::mojo::{Mojo, MojoLevel};
 use crate::game::roster::Rosters;
 use crate::game::rules::{BattingOrder, LINEUP_SIZE};
 use crate::game::theme::Theme;
@@ -29,6 +30,8 @@ pub enum WalkUpLine {
     Name,
     Number,
     Slot,
+    /// His mojo ([`crate::game::mojo`]), named and toned.
+    Mojo,
 }
 
 pub(super) fn spawn_walkup_card(mut commands: Commands, theme: Res<Theme>) {
@@ -60,6 +63,7 @@ pub(super) fn spawn_walkup_card(mut commands: Commands, theme: Res<Theme>) {
                 (WalkUpLine::Name, 30.0),
                 (WalkUpLine::Number, 22.0),
                 (WalkUpLine::Slot, 14.0),
+                (WalkUpLine::Mojo, 16.0),
             ] {
                 card.spawn((
                     WalkUpText(line),
@@ -75,11 +79,13 @@ pub(super) fn spawn_walkup_card(mut commands: Commands, theme: Res<Theme>) {
 }
 
 /// Fills the card while the walk-up is on, blanks it otherwise.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn paint_walkup_card(
     play: Res<Play>,
     score: Res<ScoreBoard>,
     order: Res<BattingOrder>,
     rosters: Res<Rosters>,
+    mojo: Option<Res<Mojo>>,
     theme: Res<Theme>,
     mut cards: Query<(&mut BackgroundColor, &mut BorderColor, &mut Visibility), With<WalkUpCard>>,
     mut lines: Query<(&WalkUpText, &mut Text, &mut TextColor)>,
@@ -125,6 +131,17 @@ pub(super) fn paint_walkup_card(
                     format!("{}  -  AB {slot}/{LINEUP_SIZE}", batting.label()),
                     ui.text_dim,
                 ),
+                WalkUpLine::Mojo => {
+                    let score = mojo.as_ref().map_or(0.0, |m| m.batter(batting, slot));
+                    let level = MojoLevel::of(score);
+                    let tint = match level {
+                        MojoLevel::OnFire => ui.tone_epic,
+                        MojoLevel::Hot => ui.tone_good,
+                        MojoLevel::Even => ui.text_dim,
+                        MojoLevel::Cold | MojoLevel::IceCold => ui.tone_info,
+                    };
+                    (format!("MOJO  {}", level.label()), tint)
+                }
             }
         };
         set_text_if_neq(&mut text, &value);

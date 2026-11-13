@@ -30,6 +30,7 @@ use crate::game::ai::{
     CpuConfig, CpuState, apply_difficulty, cpu_defense, cpu_offense, reset_cpu_clock,
     tick_cpu_clock,
 };
+use crate::game::mojo::{Mojo, PaResult};
 use crate::game::rules::{self, Bases, BattingOrder, Outcome};
 use crate::game::variant::Ruleset;
 use crate::game::{GameState, Team};
@@ -841,6 +842,66 @@ fn sync_batter(
     }
 }
 
+/// What [`track_mojo`] remembers between frames: whose plate appearance
+/// is on, and the half-inning, outs and runs as of last frame.
+#[derive(Clone, Copy, PartialEq)]
+struct PaWatch {
+    team: Team,
+    slot: u32,
+    half: (u32, bool),
+    outs: u32,
+    runs: u32,
+}
+
+impl PaWatch {
+    fn now(score: &crate::game::ScoreBoard, order: &BattingOrder, team: Team) -> Self {
+        Self {
+            team,
+            slot: order.current(team),
+            half: (score.inning, score.top_of_inning),
+            outs: score.outs,
+            runs: match team {
+                Team::Home => score.home_runs,
+                Team::Away => score.away_runs,
+            },
+        }
+    }
+}
+
+/// Feeds every finished plate appearance into [`Mojo`]. Flow advances the
+/// batting order in the same frame it makes the call, so a PA ended when
+/// the watched batter's slot moves on, and the call is whatever changed
+/// since last frame: an out made (or the half-inning ending on it) is a
+/// failure, reaching base clean a success, plus any runs that scored.
+/// A half-inning that ends with no PA finished (a runner caught for the
+/// third out) just moves the watch to the next batter.
+fn track_mojo(
+    score: Res<crate::game::ScoreBoard>,
+    order: Res<BattingOrder>,
+    mut mojo: ResMut<Mojo>,
+    mut watch: Local<Option<PaWatch>>,
+) {
+    let Some(prev) = *watch else {
+        *watch = Some(PaWatch::now(&score, &order, score.batting_team()));
+        return;
+    };
+    let same = PaWatch::now(&score, &order, prev.team);
+    if same.slot != prev.slot {
+        let half_over = same.half != prev.half;
+        let out_made = half_over || same.outs > prev.outs;
+        let runs = same.runs.saturating_sub(prev.runs);
+        mojo.record(
+            prev.team,
+            prev.slot,
+            PaResult {
+                reached: !out_made,
+                runs,
+            },
+        );
+    }
+    *watch = Some(PaWatch::now(&score, &order, score.batting_team()));
+}
+
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
 /// Marks the flow chain below — `pre_pitch`, `wind_up`, `pitch_live`,
@@ -867,6 +928,7 @@ impl Plugin for FlowPlugin {
             .init_resource::<LeadState>()
             .init_resource::<CpuConfig>()
             .init_resource::<CpuState>()
+            .init_resource::<Mojo>()
             .add_message::<BallInPlayEvent>()
             .add_message::<LiveBallEvent>()
             .add_message::<PitchCaughtEvent>()
@@ -875,6 +937,12 @@ impl Plugin for FlowPlugin {
             .add_systems(
                 crate::game::game_start(),
                 (pitch::reset_flow, reset_cpu_clock, apply_difficulty),
+            )
+            .add_systems(
+                Update,
+                track_mojo
+                    .after(PhaseSet)
+                    .run_if(in_state(GameState::Playing)),
             )
             .add_systems(
                 Update,
