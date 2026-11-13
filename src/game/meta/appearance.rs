@@ -196,6 +196,13 @@ pub struct PlayerDef {
     pub number: u32,
     #[serde(default)]
     pub appearance: PlayerAppearance,
+    /// Scouting grades; any left out are league average.
+    #[serde(default, skip_serializing_if = "is_average")]
+    pub ratings: crate::game::roster::Ratings,
+}
+
+fn is_average(r: &crate::game::roster::Ratings) -> bool {
+    *r == crate::game::roster::Ratings::AVERAGE
 }
 
 /// The whole authored file: both team pools, nine starters then bench each.

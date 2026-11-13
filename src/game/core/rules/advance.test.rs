@@ -2,6 +2,7 @@
 
 use super::super::test_support::*;
 use super::*;
+use crate::game::rules::Runner;
 
 // ── Base running ──────────────────────────────────────────────────────────
 
@@ -93,4 +94,48 @@ fn apply_hit_credits_runs_and_resets_the_count() {
     assert_eq!(score.home_runs, 1);
     assert_eq!((score.balls, score.strikes), (0, 0));
     assert_eq!(bases, with(&[1]));
+}
+
+// ── Runner identity ───────────────────────────────────────────────────────
+
+fn fast() -> Runner {
+    Runner { speed: 70 }
+}
+
+fn slow() -> Runner {
+    Runner { speed: 30 }
+}
+
+#[test]
+fn runners_keep_who_they_are_as_they_advance() {
+    // A fast man on first, a slow batter singles: the fast man is on
+    // second, the slow batter on first — the races after this one time
+    // each at his own speed.
+    let mut b = empty();
+    b.put(0, Some(fast()));
+    b.set_batter(slow());
+    assert_eq!(advance_hit(&mut b, 1), 0);
+    assert_eq!(b.runner(1), Some(fast()));
+    assert_eq!(b.runner(0), Some(slow()));
+
+    // A walk pushes the forced chain up one, each runner moving with it.
+    b.set_batter(Runner::AVERAGE);
+    assert_eq!(advance_walk(&mut b), 0);
+    assert_eq!(b.runner(2), Some(fast()));
+    assert_eq!(b.runner(1), Some(slow()));
+    assert_eq!(b.runner(0), Some(Runner::AVERAGE));
+}
+
+#[test]
+fn a_walk_with_an_open_bag_ahead_moves_nobody_past_it() {
+    // First and third, walk: the batter forces the man on first to
+    // second, and the man on third (not forced) stays put.
+    let mut b = empty();
+    b.put(0, Some(slow()));
+    b.put(2, Some(fast()));
+    b.set_batter(Runner::AVERAGE);
+    assert_eq!(advance_walk(&mut b), 0);
+    assert_eq!(b.runner(0), Some(Runner::AVERAGE));
+    assert_eq!(b.runner(1), Some(slow()));
+    assert_eq!(b.runner(2), Some(fast()));
 }

@@ -23,15 +23,15 @@ pub fn advance_hit_with_jump(bases: &mut Bases, hit_bases: u32, jump: bool) -> u
     let runner_step = hit_bases as usize + jump as usize;
     let batter_step = hit_bases as usize;
     let mut runs = 0;
-    let mut next = vec![false; n];
+    let mut next = vec![None; n];
 
-    for base in 0..n {
-        if bases.is_occupied(base) {
+    for (base, slot) in bases.runners.iter().enumerate() {
+        if let Some(runner) = *slot {
             let dest = base + runner_step;
             if dest >= n {
                 runs += 1; // past the last base → scored
             } else {
-                next[dest] = true;
+                next[dest] = Some(runner);
             }
         }
     }
@@ -40,10 +40,10 @@ pub fn advance_hit_with_jump(bases: &mut Bases, hit_bases: u32, jump: bool) -> u
     if batter_step > n {
         runs += 1;
     } else {
-        next[batter_step - 1] = true;
+        next[batter_step - 1] = Some(bases.batter);
     }
 
-    bases.occupied = next;
+    bases.runners = next;
     runs
 }
 
@@ -52,13 +52,18 @@ pub fn advance_hit_with_jump(bases: &mut Bases, hit_bases: u32, jump: bool) -> u
 /// one run).
 #[must_use]
 pub fn advance_walk(bases: &mut Bases) -> u32 {
-    for base in 0..bases.count() {
-        if !bases.is_occupied(base) {
-            bases.set(base, true);
-            return 0;
-        }
+    // The forced chain is every runner from first up to the first open bag;
+    // each moves up one, and with no open bag the lead runner scores.
+    let n = bases.count();
+    let open = (0..n).find(|&b| !bases.is_occupied(b));
+    let runs = u32::from(open.is_none());
+    let top = open.unwrap_or(n);
+    for base in (0..top).rev() {
+        let runner = bases.take(base);
+        bases.put(base + 1, runner);
     }
-    1 // every base occupied: the lead runner is forced home
+    bases.put(0, Some(bases.batter));
+    runs
 }
 
 /// Applies a hit worth `hit_bases` bases: advances runners (with the
@@ -78,13 +83,12 @@ pub(super) fn advance_runners_only(bases: &mut Bases, n: u32) -> u32 {
     let count = bases.count();
     let mut runs = 0;
     for base in (0..count).rev() {
-        if bases.is_occupied(base) {
-            bases.set(base, false);
+        if let Some(runner) = bases.take(base) {
             let dest = base + n as usize;
             if dest >= count {
                 runs += 1;
             } else {
-                bases.set(dest, true);
+                bases.put(dest, Some(runner));
             }
         }
     }
@@ -98,12 +102,11 @@ pub(super) fn advance_trailing(bases: &mut Bases) -> u32 {
     let mut runs = 0;
     // Walk from the lead base down so nobody leapfrogs.
     for base in (0..n).rev() {
-        if bases.is_occupied(base) {
-            bases.set(base, false);
+        if let Some(runner) = bases.take(base) {
             if base + 1 >= n {
                 runs += 1;
             } else {
-                bases.set(base + 1, true);
+                bases.put(base + 1, Some(runner));
             }
         }
     }
@@ -119,7 +122,7 @@ pub(super) fn tag_up(bases: &mut Bases, deep: bool, tag: TagUp) -> (u32, u32) {
     let mut runs = 0;
     let mut outs = 0;
     if n >= 1 && bases.is_occupied(n - 1) && tag != TagUp::Hold {
-        bases.set(n - 1, false);
+        bases.take(n - 1);
         if tag == TagUp::Scores {
             runs += 1;
         } else {
@@ -127,8 +130,8 @@ pub(super) fn tag_up(bases: &mut Bases, deep: bool, tag: TagUp) -> (u32, u32) {
         }
     }
     if deep && n >= 2 && bases.is_occupied(n - 2) && !bases.is_occupied(n - 1) {
-        bases.set(n - 2, false);
-        bases.set(n - 1, true);
+        let runner = bases.take(n - 2);
+        bases.put(n - 1, runner);
     }
     (runs, outs)
 }
@@ -144,17 +147,16 @@ pub(super) fn advance_extra_base(
     safe: bool,
 ) -> (u32, u32) {
     let n = bases.count();
-    let reader_on = bases.is_occupied(reader);
-    bases.set(reader, false);
+    let reader_on = bases.take(reader);
     let mut runs = advance_hit_with_jump(bases, hit_bases, false);
     let mut outs = 0;
-    if reader_on {
+    if reader_on.is_some() {
         if !safe {
             outs += 1;
         } else if reader + hit_bases as usize + 1 >= n {
             runs += 1;
         } else {
-            bases.set(reader + hit_bases as usize + 1, true);
+            bases.put(reader + hit_bases as usize + 1, reader_on);
         }
     }
     (runs, outs)

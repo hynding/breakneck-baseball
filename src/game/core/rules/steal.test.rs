@@ -2,6 +2,7 @@
 
 use super::super::test_support::*;
 use super::*;
+use crate::game::rules::Runner;
 
 // ── Steals ────────────────────────────────────────────────────────────────
 
@@ -124,7 +125,7 @@ fn race_times_match_the_mlb_stopwatch() {
     assert!((1.3..=1.4).contains(&fb), "fastball to the plate {fb}");
     let ch = delivery_secs(PitchKind::Changeup);
     assert!((1.4..=1.55).contains(&ch), "changeup to the plate {ch}");
-    let race = steal_race(0, &on(PitchKind::Fastball));
+    let race = steal_race(0, 1.0, &on(PitchKind::Fastball));
     let pop = race.defense_secs - fb;
     assert!((1.95..=2.05).contains(&pop), "pop to second {pop}");
     assert!(
@@ -133,14 +134,14 @@ fn race_times_match_the_mlb_stopwatch() {
         race.runner_secs
     );
     // Third is the short throw.
-    let pop3 = steal_race(1, &on(PitchKind::Fastball)).defense_secs - fb;
+    let pop3 = steal_race(1, 1.0, &on(PitchKind::Fastball)).defense_secs - fb;
     assert!((1.55..=1.7).contains(&pop3), "pop to third {pop3}");
 }
 
 #[test]
 fn every_pitch_kind_slows_the_battery_by_its_speed() {
     use PitchKind::*;
-    let def = |k| steal_race(0, &on(k)).defense_secs;
+    let def = |k| steal_race(0, 1.0, &on(k)).defense_secs;
     assert!(def(Fastball) < def(Sinker));
     assert!(def(Sinker) < def(Slider));
     assert!(def(Slider) < def(Curveball));
@@ -150,18 +151,19 @@ fn every_pitch_kind_slows_the_battery_by_its_speed() {
 #[test]
 fn a_late_break_turns_a_steal_into_an_out() {
     let clean = on(PitchKind::Changeup);
-    assert!(steal_race(0, &clean).safe());
+    assert!(steal_race(0, 1.0, &clean).safe());
     let late = StealAttempt {
         break_fraction: 0.6,
         ..clean
     };
     assert!(
-        !steal_race(0, &late).safe(),
+        !steal_race(0, 1.0, &late).safe(),
         "broke as the ball was nearly out"
     );
-    let race = steal_race(0, &late);
+    let race = steal_race(0, 1.0, &late);
     assert!(
-        (race.runner_secs - steal_race(0, &clean).runner_secs - 0.6 * LATE_BREAK_SECS).abs() < 1e-5
+        (race.runner_secs - steal_race(0, 1.0, &clean).runner_secs - 0.6 * LATE_BREAK_SECS).abs()
+            < 1e-5
     );
 }
 
@@ -171,14 +173,14 @@ fn a_pitch_in_the_dirt_gives_the_runner_the_transfer() {
         crossing: Some(Vec2::new(0.0, ZONE_LOW + 0.3)),
         ..on(PitchKind::Fastball)
     };
-    assert!(!steal_race(0, &high).safe());
+    assert!(!steal_race(0, 1.0, &high).safe());
     assert_eq!(receive_penalty_secs(high.crossing), 0.0);
     let dirt = StealAttempt {
         crossing: Some(Vec2::new(0.0, 0.0)),
         ..high
     };
     assert!(
-        steal_race(0, &dirt).safe(),
+        steal_race(0, 1.0, &dirt).safe(),
         "the catcher dug it out too late"
     );
     assert!(
@@ -191,9 +193,10 @@ fn a_pitch_in_the_dirt_gives_the_runner_the_transfer() {
 
 #[test]
 fn a_longer_lead_is_a_faster_steal() {
-    let short = steal_race(0, &on(PitchKind::Fastball)).runner_secs;
+    let short = steal_race(0, 1.0, &on(PitchKind::Fastball)).runner_secs;
     let long = steal_race(
         0,
+        1.0,
         &StealAttempt {
             lead_m: LEAD_NORMAL_M + 1.0,
             ..on(PitchKind::Fastball)
@@ -347,4 +350,32 @@ fn staged_throws_fit_their_races() {
     assert!(third < second);
     assert_eq!(base_name(0), "1ST");
     assert_eq!(base_name(3), "HOME");
+}
+
+#[test]
+fn a_burner_steals_where_an_average_runner_is_caught() {
+    // The fastball that cuts down an average runner off first movement
+    // loses to a 70 runner, and a 30 runner is out by even more.
+    let attempt = on(PitchKind::Fastball);
+    assert!(!steal_race(0, 1.0, &attempt).safe());
+    let fast = Runner { speed: 70 }.speed_factor();
+    let slow = Runner { speed: 30 }.speed_factor();
+    assert!(steal_race(0, fast, &attempt).runner_secs < steal_race(0, 1.0, &attempt).runner_secs);
+    assert!(steal_race(0, slow, &attempt).runner_secs > steal_race(0, 1.0, &attempt).runner_secs);
+
+    // attempt_steal reads the runner's own speed off the bag.
+    let mut score = ScoreBoard::default();
+    let mut bases = empty();
+    bases.put(0, Some(Runner { speed: 80 }));
+    let close = StealAttempt {
+        break_fraction: 0.0,
+        ..on(PitchKind::Slider)
+    };
+    let average_safe = steal_race(0, 1.0, &close).safe();
+    let fast_safe = steal_race(0, Runner { speed: 80 }.speed_factor(), &close).safe();
+    assert_eq!(
+        attempt_steal(&mut score, &mut bases, &std_rules(), &close) != StealResult::Caught,
+        fast_safe
+    );
+    assert!(fast_safe || !average_safe);
 }

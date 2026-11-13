@@ -7,6 +7,7 @@ fn blank_def() -> PlayerDef {
         name: "TEST".to_string(),
         number: 0,
         appearance: PlayerAppearance::default(),
+        ratings: Default::default(),
     }
 }
 

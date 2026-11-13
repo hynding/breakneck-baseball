@@ -143,7 +143,9 @@ pub fn receive_penalty_secs(crossing: Option<Vec2>) -> f32 {
 /// draws — a backyard's short base paths would otherwise make every steal
 /// (or none) succeed — so only *which* bag matters: the first steal is the
 /// long throw to second, every later one the short throw to third.
-pub fn steal_race(runner: usize, attempt: &StealAttempt) -> StealRace {
+/// `speed_factor` is the runner's [`super::Runner::speed_factor`] (1.0 for
+/// a league-average runner); it scales his sprint, not his first step.
+pub fn steal_race(runner: usize, speed_factor: f32, attempt: &StealAttempt) -> StealRace {
     let (lead_bonus, throw_m) = if runner == 0 {
         (0.0, 2.0 * HALF_DIAGONAL)
     } else {
@@ -152,7 +154,7 @@ pub fn steal_race(runner: usize, attempt: &StealAttempt) -> StealRace {
     let lead = attempt.lead_m + lead_bonus;
     let runner_secs = attempt.break_fraction.clamp(0.0, 1.0) * LATE_BREAK_SECS
         + RUNNER_OVERHEAD_SECS
-        + (BASE_DISTANCE_M - lead).max(0.0) / RUNNER_SPRINT_SPEED;
+        + (BASE_DISTANCE_M - lead).max(0.0) / (RUNNER_SPRINT_SPEED * speed_factor);
     let defense_secs = delivery_secs(attempt.kind)
         + receive_penalty_secs(attempt.crossing)
         + CATCHER_EXCHANGE_SECS
@@ -191,9 +193,9 @@ pub fn attempt_steal(
     let Some(runner) = steal_candidate(bases) else {
         return StealResult::NoRunner;
     };
-    bases.set(runner, false);
-    if steal_race(runner, attempt).safe() {
-        bases.set(runner + 1, true);
+    let on = bases.take(runner);
+    if steal_race(runner, on.unwrap_or_default().speed_factor(), attempt).safe() {
+        bases.put(runner + 1, on);
         StealResult::Stolen { base: runner + 1 }
     } else {
         charge_out(score, bases, rules);
@@ -243,7 +245,8 @@ pub fn pickoff_beats_runner(lead_m: f32) -> bool {
 /// Whether the sent runner would beat the throw — [`attempt_steal`]'s race
 /// asked without applying it (`None`: nobody in a position to steal).
 pub fn steal_would_succeed(bases: &Bases, attempt: &StealAttempt) -> Option<bool> {
-    steal_candidate(bases).map(|runner| steal_race(runner, attempt).safe())
+    steal_candidate(bases)
+        .map(|runner| steal_race(runner, bases.speed_factor(runner), attempt).safe())
 }
 
 /// The visible staging of a throw at a bag during the running game: the
@@ -323,7 +326,7 @@ pub fn attempt_pickoff(
 /// Takes the runner on `base` off the bases and charges the out (the
 /// batter's count stands) — a pickoff or caught stealing called at the tag.
 pub fn retire_runner(score: &mut ScoreBoard, bases: &mut Bases, rules: &Ruleset, base: usize) {
-    bases.set(base, false);
+    bases.take(base);
     charge_out(score, bases, rules);
 }
 
@@ -331,7 +334,7 @@ pub fn retire_runner(score: &mut ScoreBoard, bases: &mut Bases, rules: &Ruleset,
 /// caught. Returns whether anyone was actually going.
 pub(super) fn double_off_lead_runner(bases: &mut Bases) -> bool {
     if let Some(runner) = steal_candidate(bases) {
-        bases.set(runner, false);
+        bases.take(runner);
         true
     } else {
         false

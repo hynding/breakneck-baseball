@@ -9,10 +9,37 @@
 //! plays; re-entry is allowed — this is backyard ball, not the rulebook.
 
 use bevy::prelude::{Component, Resource};
+use serde::{Deserialize, Serialize};
 
 use crate::game::Team;
 use crate::game::appearance::{PlayerAppearance, PlayerDef, RosterDefs};
 use crate::game::rules::LINEUP_SIZE;
+
+/// A player's scouting grades on the 20–80 scale, 50 the league average
+/// (per docs/BASEBALL.md, "Player ratings"). Authored per player in
+/// `data/players.ron`; a grade left out is average, so an old file plays
+/// exactly as before. Only speed is wired into play so far.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Ratings {
+    /// Sprint speed: steals, taking the extra base, beating out grounders.
+    pub speed: u8,
+}
+
+impl Ratings {
+    pub const AVERAGE: Ratings = Ratings { speed: 50 };
+
+    /// The rules-side runner these grades make.
+    pub fn runner(self) -> crate::game::rules::Runner {
+        crate::game::rules::Runner { speed: self.speed }
+    }
+}
+
+impl Default for Ratings {
+    fn default() -> Self {
+        Ratings::AVERAGE
+    }
+}
 
 /// One player: jersey name (A–Z only — the procedural jersey font's
 /// alphabet), number, and personal appearance recipe (authored in
@@ -22,6 +49,7 @@ pub struct PlayerCard {
     pub name: String,
     pub number: u32,
     pub appearance: PlayerAppearance,
+    pub ratings: Ratings,
 }
 
 /// One team's nine starters plus the bench.
@@ -41,6 +69,7 @@ impl TeamRoster {
                 name: d.name.clone(),
                 number: d.number,
                 appearance: d.appearance,
+                ratings: d.ratings,
             })
             .collect();
         let bench = cards.split_off(LINEUP_SIZE as usize);

@@ -69,7 +69,7 @@ pub fn read_tag_up(
     }
     let pace = &rules.pace;
     let leg = field.base_positions.first().map_or(27.43, |b| b.length());
-    let runner_at = leg / pace.runner_speed;
+    let runner_at = leg / (pace.runner_speed * bases.speed_factor(n - 1));
     let throw_at = pace.throw_transfer_secs
         + Vec2::new(pos.x, pos.z).length() / pace.throw_speed
         + pace.tag_apply_secs;
@@ -132,17 +132,16 @@ pub fn read_extra_base(
     let to = from + hit + 1;
     let leg = field.base_positions.first().map_or(27.43, |b| b.length());
     let to_go = (hit + 1) as f32;
+    let speed = pace.runner_speed * bases.speed_factor(from);
     let runner_at = if outs >= 2 {
         // Two out: he runs on contact, whatever the ball does.
-        leg * (to_go - pace.secondary_lead_frac) / pace.runner_speed
+        leg * (to_go - pace.secondary_lead_frac) / speed
     } else {
         // Fewer than two out he breaks a reaction after the bat — but on a
         // ball in the air only as far as halfway, where he can still get
         // back if it's caught, and he goes on from there once it drops.
-        let on_contact =
-            pace.reaction_secs + leg * (to_go - pace.secondary_lead_frac) / pace.runner_speed;
-        let from_halfway =
-            landed_secs + pace.reaction_secs + leg * (to_go - HALFWAY_FRAC) / pace.runner_speed;
+        let on_contact = pace.reaction_secs + leg * (to_go - pace.secondary_lead_frac) / speed;
+        let from_halfway = landed_secs + pace.reaction_secs + leg * (to_go - HALFWAY_FRAC) / speed;
         on_contact.max(from_halfway)
     };
     let bag = home_or_base(to, field);
@@ -172,15 +171,17 @@ pub fn read_extra_base(
 /// `gather_time` seconds after contact. Infield gathers contest the out at
 /// first; deeper gathers concede it (nobody throws a clean outfield single to
 /// first) and the batter stretches for every extra base the throw can't beat.
+/// He runs at his own speed (`bases.batter()`).
 pub fn resolve_gathered(
     pos: Vec3,
     gather_time: f32,
+    bases: &Bases,
     field: &FieldSpec,
     rules: &Ruleset,
 ) -> Outcome {
     let leg = field.base_positions.first().map_or(27.43, |b| b.length());
-    let runner_at =
-        |base: usize| rules.pace.reaction_secs + leg * base as f32 / rules.pace.runner_speed;
+    let speed = rules.pace.runner_speed * bases.batter().speed_factor();
+    let runner_at = |base: usize| rules.pace.reaction_secs + leg * base as f32 / speed;
     let throw_at = |target: Vec3| {
         gather_time
             + rules.pace.throw_transfer_secs
@@ -235,9 +236,8 @@ pub fn throw_target(
 ) -> usize {
     let leg = field.base_positions.first().map_or(27.43, |b| b.length());
     // Every forced runner (batter included) sprints exactly one base from a
-    // standing start at contact, so one clock covers them all — minus the
-    // jump when the runners broke with the windup.
-    let runner_at = forced_runner_at(leg, runners_going, pace);
+    // standing start at contact — minus the jump when the runners broke
+    // with the windup — each at his own speed.
     let throw_at = |target: Vec3| {
         gather_time
             + pace.throw_transfer_secs
@@ -249,10 +249,9 @@ pub fn throw_target(
     // infield play, as in [`resolve_thrown`]. The batter never has the
     // jump, so first base races on the standing-start clock.
     let infield = Vec2::new(pos.x, pos.z).length() < INFIELD_GATHER_RADIUS * field.hit_scale;
-    let batter_at = forced_runner_at(leg, false, pace);
     let mut b = lead_force(bases, field);
     loop {
-        let clock = if b == 0 { batter_at } else { runner_at };
+        let clock = forced_runner_at(leg, b != 0 && runners_going, forced_speed(bases, b), pace);
         if infield && clock > throw_at(base_pos(b)) + pace.runner_margin_secs {
             return b;
         }
@@ -260,8 +259,9 @@ pub fn throw_target(
             // No out is winnable anywhere: throw ahead of the batter, to
             // the bag he'll finish on (the same walk [`resolve_thrown`]
             // concedes) — the play the crowd expects to see attempted.
+            let batter_speed = forced_speed(bases, 0) * pace.runner_speed;
             let batter_reaches =
-                |base: usize| pace.reaction_secs + leg * base as f32 / pace.runner_speed;
+                |base: usize| pace.reaction_secs + leg * base as f32 / batter_speed;
             let safe = |base: usize| {
                 field.base_positions.get(base - 1).is_some_and(|bp| {
                     batter_reaches(base) <= throw_at(*bp) + pace.runner_margin_secs
@@ -295,13 +295,24 @@ pub fn throw_target(
 
 /// One forced runner's time to the next bag: a standing start at contact,
 /// minus the hit-and-run head start when the runners broke with the windup.
-fn forced_runner_at(leg: f32, going: bool, pace: &PaceTuning) -> f32 {
-    pace.reaction_secs + leg / pace.runner_speed
+/// `speed_factor` is his [`super::Runner::speed_factor`].
+fn forced_runner_at(leg: f32, going: bool, speed_factor: f32, pace: &PaceTuning) -> f32 {
+    pace.reaction_secs + leg / (pace.runner_speed * speed_factor)
         - if going {
             pace.hit_and_run_jump_secs
         } else {
             0.0
         }
+}
+
+/// The speed factor of the runner forced to bag `b`: the batter for first,
+/// otherwise whoever is on the bag behind it.
+fn forced_speed(bases: &Bases, b: usize) -> f32 {
+    if b == 0 {
+        bases.batter().speed_factor()
+    } else {
+        bases.speed_factor(b - 1)
+    }
 }
 
 /// World position of base `b`, where `b == base_count()` means home plate.
@@ -369,12 +380,13 @@ pub fn resolve_thrown(
 
     let from_home = Vec2::new(pos.x, pos.z).length();
     let infield = from_home < INFIELD_GATHER_RADIUS * field.hit_scale;
-    let runner_clock = if target == 0 {
-        // The batter is the forced runner at first and never has the jump.
-        forced_runner_at(leg, false, &rules.pace)
-    } else {
-        forced_runner_at(leg, runners_going, &rules.pace)
-    };
+    // The batter is the forced runner at first and never has the jump.
+    let runner_clock = forced_runner_at(
+        leg,
+        target != 0 && runners_going,
+        forced_speed(bases, target),
+        &rules.pace,
+    );
     if target <= lead_force(bases, field)
         && infield
         && runner_clock > throw_at(base_pos(target)) + rules.pace.runner_margin_secs
@@ -391,7 +403,8 @@ pub fn resolve_thrown(
         let relay_arrival = throw_at(base_pos(target))
             + rules.pace.relay_transfer_secs
             + flat_dist(base_pos(target), base_pos(0)) / rules.pace.throw_speed;
-        if forced_runner_at(leg, false, &rules.pace) > relay_arrival + rules.pace.runner_margin_secs
+        if forced_runner_at(leg, false, forced_speed(bases, 0), &rules.pace)
+            > relay_arrival + rules.pace.runner_margin_secs
         {
             return Outcome::DoublePlay;
         }
@@ -399,8 +412,8 @@ pub fn resolve_thrown(
     }
 
     // No out on the throw: the batter takes every base it can't beat.
-    let batter_at =
-        |base: usize| rules.pace.reaction_secs + leg * base as f32 / rules.pace.runner_speed;
+    let batter_speed = rules.pace.runner_speed * forced_speed(bases, 0);
+    let batter_at = |base: usize| rules.pace.reaction_secs + leg * base as f32 / batter_speed;
     let safe = |base: usize| {
         field
             .base_positions

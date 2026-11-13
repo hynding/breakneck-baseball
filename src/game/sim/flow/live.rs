@@ -156,7 +156,7 @@ pub(super) fn resolve_live_play(
         let pos = ball_q.single().map(|t| t.translation).unwrap_or(Vec3::ZERO);
         let t = time.elapsed_secs() - play.live.contact_at;
         resolution = Some(if rules::is_fair(pos, &field) {
-            Some(rules::resolve_gathered(pos, t, &field, &rules_res))
+            Some(rules::resolve_gathered(pos, t, &bases, &field, &rules_res))
         } else {
             None
         });

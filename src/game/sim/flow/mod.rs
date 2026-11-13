@@ -817,6 +817,30 @@ impl PlayBanner {
     }
 }
 
+/// Puts the batter due up (his roster card's ratings) into [`Bases`], so
+/// every race on contact runs at his own speed. Writes only when he
+/// changes, keeping `Bases` change detection (the runner mirror's cue)
+/// quiet.
+fn sync_batter(
+    rosters: Option<Res<crate::game::roster::Rosters>>,
+    order: Res<BattingOrder>,
+    score: Res<crate::game::ScoreBoard>,
+    mut bases: ResMut<Bases>,
+) {
+    let Some(rosters) = rosters else {
+        return;
+    };
+    let team = score.batting_team();
+    let batter = rosters
+        .team(team)
+        .batting(order.current(team))
+        .ratings
+        .runner();
+    if bases.batter() != batter {
+        bases.set_batter(batter);
+    }
+}
+
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
 /// Marks the flow chain below — `pre_pitch`, `wind_up`, `pitch_live`,
@@ -864,6 +888,7 @@ impl Plugin for FlowPlugin {
                 // restores that same-frame delivery). It still reads
                 // `cpu_offense`'s intent write from earlier this frame.
                 (
+                    sync_batter,
                     tick_cpu_clock,
                     cpu_defense,
                     cpu_offense,

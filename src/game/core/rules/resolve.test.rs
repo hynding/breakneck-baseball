@@ -3,6 +3,7 @@
 use super::super::best_catcher;
 use super::super::test_support::*;
 use super::*;
+use crate::game::rules::Runner;
 use crate::game::variant::VariantId;
 
 #[test]
@@ -75,7 +76,13 @@ fn catches_map_to_pop_fly_and_foul_pop() {
 #[test]
 fn quick_infield_gather_beats_the_batter() {
     assert_eq!(
-        resolve_gathered(Vec3::new(0.0, 0.0, 7.0), 1.2, &std_field(), &std_rules()),
+        resolve_gathered(
+            Vec3::new(0.0, 0.0, 7.0),
+            1.2,
+            &Bases::default(),
+            &std_field(),
+            &std_rules()
+        ),
         Outcome::Out(OutKind::Ground)
     );
 }
@@ -83,7 +90,13 @@ fn quick_infield_gather_beats_the_batter() {
 #[test]
 fn slow_infield_gather_is_an_infield_single() {
     assert_eq!(
-        resolve_gathered(Vec3::new(0.0, 0.0, 26.0), 3.0, &std_field(), &std_rules()),
+        resolve_gathered(
+            Vec3::new(0.0, 0.0, 26.0),
+            3.0,
+            &Bases::default(),
+            &std_field(),
+            &std_rules()
+        ),
         Outcome::Hit(1)
     );
 }
@@ -91,7 +104,13 @@ fn slow_infield_gather_is_an_infield_single() {
 #[test]
 fn shallow_outfield_gather_concedes_a_single() {
     assert_eq!(
-        resolve_gathered(Vec3::new(0.0, 0.0, 35.0), 2.6, &std_field(), &std_rules()),
+        resolve_gathered(
+            Vec3::new(0.0, 0.0, 35.0),
+            2.6,
+            &Bases::default(),
+            &std_field(),
+            &std_rules()
+        ),
         Outcome::Hit(1)
     );
 }
@@ -99,7 +118,13 @@ fn shallow_outfield_gather_concedes_a_single() {
 #[test]
 fn deep_gap_gather_is_a_double() {
     assert_eq!(
-        resolve_gathered(Vec3::new(50.0, 0.0, 95.0), 5.8, &std_field(), &std_rules()),
+        resolve_gathered(
+            Vec3::new(50.0, 0.0, 95.0),
+            5.8,
+            &Bases::default(),
+            &std_field(),
+            &std_rules()
+        ),
         Outcome::Hit(2)
     );
 }
@@ -107,7 +132,13 @@ fn deep_gap_gather_is_a_double() {
 #[test]
 fn ball_to_the_wall_is_a_triple() {
     assert_eq!(
-        resolve_gathered(Vec3::new(0.0, 0.0, 120.0), 7.5, &std_field(), &std_rules()),
+        resolve_gathered(
+            Vec3::new(0.0, 0.0, 120.0),
+            7.5,
+            &Bases::default(),
+            &std_field(),
+            &std_rules()
+        ),
         Outcome::Hit(3)
     );
 }
@@ -268,7 +299,7 @@ fn prompt_throw_to_first_matches_resolve_gathered() {
     ] {
         assert_eq!(
             neutral(pos, t, 0, &empty(), &f, &r),
-            resolve_gathered(pos, t, &f, &r),
+            resolve_gathered(pos, t, &Bases::default(), &f, &r),
             "at {pos:?} t={t}"
         );
     }
@@ -651,7 +682,55 @@ fn yard() -> (FieldSpec, Ruleset) {
 fn front_yard_infield_out_is_a_peg() {
     let (f, r) = yard();
     assert_eq!(
-        resolve_gathered(Vec3::new(0.0, 0.0, 4.0), 0.4, &f, &r),
+        resolve_gathered(Vec3::new(0.0, 0.0, 4.0), 0.4, &Bases::default(), &f, &r),
         Outcome::Out(OutKind::Pegged)
     );
+}
+
+// ── Runner speed ──────────────────────────────────────────────────────────
+
+#[test]
+fn a_fast_batter_beats_out_grounders_a_slow_one_does_not() {
+    // Sweep the gather time on a grounder to short: safety is monotone in
+    // speed (whoever is safe, everyone faster is too), and a band of
+    // throws exists that only the fast man beats.
+    let (f, r) = (std_field(), std_rules());
+    let pos = Vec3::new(7.0, 0.0, 28.0);
+    let at = |speed: u8, t: f32| {
+        let mut b = empty();
+        b.set_batter(Runner { speed });
+        matches!(neutral(pos, t, 0, &b, &f, &r), Outcome::Hit(_))
+    };
+    let mut only_fast = 0;
+    for i in 0..120 {
+        let t = 0.5 + i as f32 * 0.025;
+        let (slow, avg, fast) = (at(30, t), at(50, t), at(70, t));
+        assert!(!slow || avg, "t={t}");
+        assert!(!avg || fast, "t={t}");
+        only_fast += (fast && !avg) as u32;
+    }
+    assert!(only_fast > 0, "speed never decided a grounder");
+}
+
+#[test]
+fn a_fast_runner_takes_the_extra_base_a_slow_one_holds() {
+    // A single to right-centre: the same read goes for a burner on first
+    // and holds for a station-to-station runner.
+    let f = std_field();
+    let pos = Vec3::new(-20.0, 0.0, 70.0);
+    let read = |speed: u8, t: f32| {
+        let mut b = empty();
+        b.put(0, Some(Runner { speed }));
+        read_extra_base(pos, t, 0.0, &b, 1, 1, false, &f, &pace())
+            .unwrap()
+            .go
+    };
+    let mut only_fast = 0;
+    for i in 0..120 {
+        let t = 1.0 + i as f32 * 0.05;
+        assert!(!read(30, t) || read(50, t), "t={t}");
+        assert!(!read(50, t) || read(70, t), "t={t}");
+        only_fast += (read(70, t) && !read(50, t)) as u32;
+    }
+    assert!(only_fast > 0, "speed never decided an extra base");
 }

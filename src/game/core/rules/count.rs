@@ -36,7 +36,7 @@ pub fn call_strike(
     if score.strikes >= rules.counts.strikes_per_out {
         if dropped_third {
             reset_count(score);
-            bases.set(0, true);
+            bases.put(0, Some(bases.batter()));
             StrikeCall::DroppedThird
         } else {
             record_out(score, bases, rules);
@@ -172,7 +172,7 @@ pub fn apply_double_play(score: &mut ScoreBoard, bases: &mut Bases, rules: &Rule
         doubled_off: false,
         thrown_out_home: false,
     };
-    bases.set(0, false); // the forced runner dies at the middle bag
+    bases.take(0); // the forced runner dies at the middle bag
     if play.outs < outs_left {
         play.runs = advance_trailing(bases);
     }
@@ -202,18 +202,17 @@ pub fn apply_fielders_choice(
         thrown_out_home: false,
     };
     if out_base > 0 {
-        bases.set(out_base - 1, false);
+        bases.take(out_base - 1);
     }
     if play.outs < outs_left {
         // Everyone behind the out was forced by the batter: each moves up,
         // and the batter takes first.
         for base in (0..out_base.saturating_sub(1)).rev() {
-            if bases.is_occupied(base) {
-                bases.set(base, false);
-                bases.set(base + 1, true);
+            if let Some(runner) = bases.take(base) {
+                bases.put(base + 1, Some(runner));
             }
         }
-        bases.set(0, true);
+        bases.put(0, Some(bases.batter()));
     }
     reset_count(score);
     charge_out(score, bases, rules);
