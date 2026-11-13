@@ -273,3 +273,36 @@ fn the_cpu_launch_aim_thins_the_line_drive_band() {
     // Monotone: a higher draw never aims lower.
     assert!(aims.windows(2).all(|w| w[1] >= w[0]));
 }
+
+#[test]
+fn the_cpu_runner_stretches_to_the_line_and_rarely_past_it() {
+    use crate::game::rules::{LEAD_MAX_M, LEAD_NORMAL_M, pickoff_beats_runner, safe_lead_m};
+    // The usual target is a lead the runner can still get back from — a
+    // real stretch, not a normal lead.
+    let usual = stretch_target_m(0.99, 0.4);
+    assert!(!pickoff_beats_runner(usual));
+    assert!(usual > LEAD_NORMAL_M + 1.0);
+    assert!(usual < safe_lead_m());
+    // A misread overreaches to the full stretch, and a sharper runner
+    // misreads less often.
+    assert_eq!(stretch_target_m(0.0, 0.4), LEAD_MAX_M);
+    assert!(pickoff_beats_runner(LEAD_MAX_M));
+    let misreads = |skill: f32| {
+        (0..1000)
+            .filter(|i| stretch_target_m(*i as f32 / 1000.0, skill) == LEAD_MAX_M)
+            .count()
+    };
+    assert!(misreads(0.9) < misreads(0.15));
+    assert!(misreads(0.15) < 150);
+}
+
+#[test]
+fn the_pitcher_goes_after_a_lead_past_the_line() {
+    use crate::game::rules::{LEAD_MAX_M, LEAD_NORMAL_M};
+    for skill in [0.15, 0.4, 0.65, 0.9] {
+        let safe = pickoff_throw_rate(LEAD_NORMAL_M + 1.0, skill);
+        let caught = pickoff_throw_rate(LEAD_MAX_M, skill);
+        assert!(caught > 4.0 * safe, "skill {skill}: {safe} vs {caught}");
+        assert!(safe < 0.1);
+    }
+}
