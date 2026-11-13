@@ -34,7 +34,7 @@ If this file and the test disagree, the test wins — update this file.
 > K% 14.9, BB% 7.5, BABIP .301, doubles/9 2.4. BABIP ceiling tightened .400 → .360 and a
 > doubles/9 band added; both trip on the pre-fix economy (.367, 4.6).
 
-## Asserted bands (N=40, `balance_bands_hold`)
+## Asserted bands (CI gates at N=100, `balance_sim_long`; N=40 `balance_bands_hold` is the quick read)
 
 | Signal | Asserted band | Nominal target | Measured (N=40) |
 |---|---|---|---|

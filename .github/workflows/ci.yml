@@ -4,7 +4,7 @@
 # so nothing deploys without passing it, and runs on a schedule to keep the
 # build caches alive (see `schedule` below).
 #
-# Three jobs run side by side so a red test no longer hides the lints, and the
+# Four jobs run side by side so a red test no longer hides the lints, and the
 # slowest leg (the test suite) sets the wall time instead of the sum of all.
 name: CI
 
@@ -43,7 +43,7 @@ concurrency:
 
 jobs:
   test:
-    name: Tests (unit + e2e + balance sim)
+    name: Tests (unit + e2e)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -77,8 +77,9 @@ jobs:
       - name: Install cargo-nextest
         run: curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C "${CARGO_HOME:-$HOME/.cargo}/bin"
 
-      - name: Tests (unit + e2e + balance sim)
-        run: cargo nextest run --no-fail-fast
+      # The balance sim is gated by the `balance` job at N=100 instead.
+      - name: Tests (unit + e2e)
+        run: cargo nextest run --no-fail-fast -E 'not binary(balance_sim)'
 
       # Headroom after the largest compile, so a disk-pressure regression shows
       # up in the log before it becomes another dead runner. The 2026-09-26 run
@@ -92,6 +93,37 @@ jobs:
         run: |
           df -h / | tail -1
           du -sh target ~/.cargo/registry 2>/dev/null || true
+
+  # The economy gate: the balance-sim bands asserted on 100 one-inning games
+  # (`balance_sim_long`), not the 40 of `balance_bands_hold`. The sim is
+  # deterministic for a given binary, so an N=40 read that lands within one
+  # game's swing of an edge fails every re-run (PR #27: BABIP .370 vs .365 on
+  # two different CPUs, byte-identical output); at N=100 one chaotic game
+  # moves the mean 2.5x less. ~8 min single-threaded on the 2-core runner,
+  # in parallel with the test job, so it stays off the critical path.
+  balance:
+    name: Balance sim (N=100)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Bevy system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev libwayland-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install cargo-nextest
+        run: curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C "${CARGO_HOME:-$HOME/.cargo}/bin"
+
+      - name: Balance sim (N=100)
+        run: cargo nextest run --test balance_sim --run-ignored only
 
   # The creator stage only exists under the `debug` feature, so its e2e
   # suite is invisible to the main test run. It went red unnoticed at the
