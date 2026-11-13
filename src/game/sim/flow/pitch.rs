@@ -138,12 +138,14 @@ pub(super) fn reset_flow(
     mut bases: ResMut<Bases>,
     mut order: ResMut<BattingOrder>,
     mut lead: ResMut<LeadState>,
+    mut mojo: ResMut<crate::game::mojo::Mojo>,
     field: Res<FieldSpec>,
 ) {
     *play = Play::default();
     bases.reset_for(field.base_count());
     *order = BattingOrder::default();
     *lead = LeadState::default();
+    *mojo = crate::game::mojo::Mojo::default();
 }
 
 // ── PrePitch: the leadoff duel, then the defense aims and releases ────────────
@@ -394,7 +396,7 @@ pub(super) fn pitch_live(
     mut contact_ev: MessageWriter<ContactEvent>,
     mut banner: MessageWriter<PlayBanner>,
     mut order: ResMut<BattingOrder>,
-    wind: Res<rules::Wind>,
+    (mojo, wind): (Res<crate::game::mojo::Mojo>, Res<rules::Wind>),
     #[cfg(feature = "debug")] forced: Res<crate::game::debug::ForcedContact>,
 ) {
     if play.phase != Phase::Pitch || play.resolved {
@@ -449,7 +451,10 @@ pub(super) fn pitch_live(
         // now covers a band-miss AND a badly-mistimed in-band swing uniformly.
         let reachable =
             pos.z >= late_exit_z && pos.z <= SWING_EARLY_Z && pos.x.abs() <= SWING_REACH_X;
-        let dt_ms = swing_dt_ms(pos.z, ball_vel.linvel.z);
+        let raw_dt_ms = swing_dt_ms(pos.z, ball_vel.linvel.z);
+        // Mojo: the batter's confidence against the pitcher's stretches or
+        // shrinks the miss before it is graded (`Mojo::timing_scale`).
+        let dt_ms = raw_dt_ms * mojo.timing_scale(batter, order.current(batter));
         // Classic/Meter grade on timing alone; PCI also folds in how far the
         // aiming cursor sat from the ball at the contact point (spec §3).
         #[allow(unused_mut)]
@@ -479,7 +484,7 @@ pub(super) fn pitch_live(
             contact_ev.write(ContactEvent {
                 quality,
                 batting_team: batter,
-                dt_ms,
+                dt_ms: raw_dt_ms,
             });
             // Remember this swing's grade for presentation — the home-run
             // fireworks scale up off a dead-on Perfect (see `game::fx`).
@@ -535,7 +540,7 @@ pub(super) fn pitch_live(
             // STRIKE beat. Nothing else about the pitch changes: it flies
             // on untouched and `catcher_receives` gloves it as a take.
             rules::ContactQuality::Whiff => {
-                play.pitch.whiff = Some(dt_ms);
+                play.pitch.whiff = Some(raw_dt_ms);
             }
         }
         if play.pitch.whiff.is_none() {
