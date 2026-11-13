@@ -31,6 +31,10 @@ const REACH: f32 = 0.9;
 /// Ball height below which a descending ball is catchable / has bounced.
 const CATCH_HEIGHT: f32 = 2.4;
 const BOUNCE_HEIGHT: f32 = 0.25;
+/// A throw that sails ([`rules::Outcome::ThrowingError`]) is aimed this far
+/// past the bag and this high, so it clears the first baseman's reach.
+const SAIL_PAST_M: f32 = 3.0;
+const SAIL_HIGH_M: f32 = 3.4;
 /// Horizontal speed of a cosmetic lob throw.
 const THROW_SPEED: f32 = 16.0;
 /// How long the holder waits for a manual throw before making the smart one.
@@ -477,23 +481,26 @@ fn hold_and_throw(
     // Same pure race flow will run: if this throw turns two, the receiver
     // fires the visible relay on to first.
     let call = rules::runner_call_from_aim(intents.get(score.batting_team()).aim);
-    let relay_to = (!tag_throw)
-        .then(|| {
-            rules::resolve_thrown(
-                ball_tf.translation,
-                throw_time,
-                landed,
-                base,
-                &bases,
-                going,
-                score.outs,
-                call,
-                &field,
-                &ruleset,
-            )
-        })
+    let outcome = (!tag_throw).then(|| {
+        rules::resolve_thrown(
+            ball_tf.translation,
+            throw_time,
+            landed,
+            base,
+            &bases,
+            going,
+            score.outs,
+            call,
+            &field,
+            &ruleset,
+        )
+    });
+    let relay_to = outcome
         .filter(|outcome| matches!(outcome, rules::Outcome::DoublePlay))
         .map(|_| 0);
+    // A throw the race says sails goes high and on past the bag, over the
+    // first baseman's glove, and rolls out toward the fence.
+    let sails = outcome == Some(rules::Outcome::ThrowingError);
 
     let target_pos = cover_pos(&field, base);
     let receiver = active
@@ -513,7 +520,13 @@ fn hold_and_throw(
         });
 
     let from = ball_tf.translation;
-    ball_vel.linvel = lob_velocity(from, target_pos + Vec3::Y * 0.6);
+    let aim = if sails {
+        let on = Vec3::new(target_pos.x - from.x, 0.0, target_pos.z - from.z).normalize_or_zero();
+        target_pos + on * SAIL_PAST_M + Vec3::Y * SAIL_HIGH_M
+    } else {
+        target_pos + Vec3::Y * 0.6
+    };
+    ball_vel.linvel = lob_velocity(from, aim);
     ball_vel.angvel = Vec3::ZERO;
     if let Some(receiver) = receiver {
         commands

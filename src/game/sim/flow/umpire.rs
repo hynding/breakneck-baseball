@@ -275,6 +275,9 @@ impl<'a, 'w> Umpire<'a, 'w> {
                     }
                 }
             }
+            Outcome::ThrowingError => {
+                self.hit(1, "ERROR!", BannerTone::Good, runners_going);
+            }
             // A home run is worth one more base than the field has.
             Outcome::HomeRun => {
                 let bases_worth = self.bases.count() as u32 + 1;

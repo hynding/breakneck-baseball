@@ -320,6 +320,21 @@ only occasionally misjudging it.
   shipped starting nine averages 50, so the league economy stays where the
   balance sim tuned it while individual runners differ.
 
+## Errors (Baseball-Reference)
+
+- MLB teams made **0.50 errors per game in 2025** (0.53 in 2024, 0.52 in
+  2023; fielding percentage .985–.986), per Baseball-Reference's league
+  fielding averages.
+- An error puts a batter on who should have been out; it is not a hit. On a
+  throw that gets past first base every runner can move up.
+- Modeled as `rules::throw_sails`: an infielder's throw to first that is both
+  long (over 25 m: the deep plays from short and third) and hurried (it would
+  have beaten the batter by under 0.15 s) sails past the bag. The batter is
+  safe at first and every runner moves up one (`Outcome::ThrowingError`).
+  Fielding errors (bobbles, dropped flies) are not modeled; the throwing
+  errors alone land near MLB's total rate: the realism harness measures 0.44
+  per team-game.
+
 ## Rules modeled elsewhere
 
 Count thresholds (4 balls / 3 strikes / 3 outs), the strike zone, tag-ups,
@@ -362,3 +377,4 @@ CLAUDE.md's architecture notes for how each maps.
 - [FanGraphs — Scouting Explained: The 20-80 Scouting Scale](https://blogs.fangraphs.com/scouting-explained-the-20-80-scouting-scale)
 - [MLB.com — Sprint Speed metric now tracks baserunners](https://mlb.com/news/statcast-sprint-speed-tracks-baserunner-speed-c238268162)
 - [MLB.com — Sprint speed shows fastest at each position](https://www.mlb.com/news/sprint-speed-shows-fastest-at-each-position-c238290228)
+- [Baseball-Reference — MLB league fielding year-by-year averages](https://www.baseball-reference.com/leagues/majors/field.shtml)

@@ -734,3 +734,54 @@ fn a_fast_runner_takes_the_extra_base_a_slow_one_holds() {
     }
     assert!(only_fast > 0, "speed never decided an extra base");
 }
+
+// ── Throwing errors ───────────────────────────────────────────────────────
+
+#[test]
+fn only_a_long_hurried_throw_sails() {
+    assert!(throw_sails(ERROR_HURRY_SECS - 0.01, ERROR_THROW_M + 1.0));
+    assert!(!throw_sails(ERROR_HURRY_SECS + 0.01, ERROR_THROW_M + 1.0));
+    assert!(!throw_sails(ERROR_HURRY_SECS - 0.01, ERROR_THROW_M - 1.0));
+}
+
+/// The calls a gather at `pos` gets as the fielder takes longer and longer
+/// to get rid of it, with repeats collapsed.
+fn calls_as_the_throw_slows(pos: Vec3) -> Vec<Outcome> {
+    let mut calls: Vec<Outcome> = Vec::new();
+    for i in 0..400 {
+        let call = neutral(
+            pos,
+            i as f32 * 0.01,
+            0,
+            &empty(),
+            &std_field(),
+            &std_rules(),
+        );
+        if calls.last() != Some(&call) {
+            calls.push(call);
+        }
+    }
+    calls
+}
+
+#[test]
+fn a_deep_short_throw_sails_only_when_hurried() {
+    // Deep in the hole at short: a sure out, then a hurried throw that
+    // sails, then too late for any throw — a single.
+    assert_eq!(
+        calls_as_the_throw_slows(Vec3::new(12.0, 0.0, 33.0)),
+        vec![
+            Outcome::Out(OutKind::Ground),
+            Outcome::ThrowingError,
+            Outcome::Hit(1)
+        ]
+    );
+}
+
+#[test]
+fn a_short_throw_from_second_never_sails() {
+    assert_eq!(
+        calls_as_the_throw_slows(Vec3::new(-14.0, 0.0, 30.0)),
+        vec![Outcome::Out(OutKind::Ground), Outcome::Hit(1)]
+    );
+}

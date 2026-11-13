@@ -383,6 +383,9 @@ pub enum Outcome {
         safe: bool,
     },
     HomeRun,
+    /// The infielder's throw to first sailed past the bag ([`throw_sails`]):
+    /// the batter is safe at first and every runner moves up one — no hit.
+    ThrowingError,
 }
 
 /// The runner on third's play on a caught fly: no attempt, tagged and
