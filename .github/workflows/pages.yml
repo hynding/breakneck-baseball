@@ -24,7 +24,7 @@ jobs:
     needs: quality
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -32,7 +32,7 @@ jobs:
           targets: wasm32-unknown-unknown
 
       - name: Cache Cargo registry, build, and tools
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -132,13 +132,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Only tools/web_boot_check.mjs is needed; the site under test is live.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           sparse-checkout: tools
 
       # The boot-check script speaks CDP over Node's built-in WebSocket
       # client, which needs Node >= 22.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
 

@@ -21,9 +21,12 @@ model, and edge-specific rules: `reference/bands.md` (read it before touching an
 3. **Run the sim:**
    ```sh
    export PATH="/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$PATH"   # macOS only
-   cargo test --test balance_sim            # N=40, ~1.5 min
-   cargo test --test balance_sim -- --ignored   # N=100 deep-tune variant, several minutes
+   cargo test --test balance_sim            # N=40, ~1.5 min: quick read
+   cargo test --test balance_sim -- --ignored   # N=100, ~5 min: the CI gate
    ```
+   CI asserts the bands on the **N=100** run (`balance_sim_long`, the `balance` job in
+   `ci.yml`), not N=40. The sim is deterministic per binary, so a re-run never clears an
+   N=40 edge miss; check N=100 before moving a band or calling a change broken.
    The run prints K%, runs/9, HR/9 plus a full PA-outcome and pitch-event breakdown
    (BB/HBP/hits/DP/FC/fouls/called-strike/whiff) — use the breakdown to see *which* mechanism
    moved, not just the headline rates.
@@ -41,6 +44,7 @@ model, and edge-specific rules: `reference/bands.md` (read it before touching an
   the DT to change a number.
 - One-inning games, per-9 extrapolation — don't "improve" the harness to nine innings; the
   runtime budget and the band anchors both assume 1/9 samples.
-- Sim results are bit-deterministic within a process but drift sub-ULP across processes
-  (Rapier core). One out-of-band run on an unchanged binary is suspicious; re-run before
-  concluding anything.
+- Sim results are bit-deterministic within a process and can drift sub-ULP across processes
+  (Rapier core), though in practice CI reproduces a binary's numbers exactly across machines
+  (PR #27: identical output on two CPUs). An edge miss is a property of the change, not of
+  the run: read N=100 rather than re-running N=40.

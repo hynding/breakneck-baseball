@@ -523,11 +523,7 @@ pub fn cpu_defense(
         let intent = intents.get_mut(team);
         intent.action = false;
         if lead.extended {
-            // ~0.1 throws per second of extended lead, deterministic noise.
-            // (Was ~0.5: with the offense stretching on 18% of windows that
-            // made 2.1 pickoffs per team-game, ~40× MLB's 0.05; 0.25 still
-            // picked off 0.7 a game.)
-            let p = (0.06 + 0.1 * cfg.skill) * time.delta_secs();
+            let p = pickoff_throw_rate(lead.lead_m, cfg.skill) * time.delta_secs();
             intent.secondary = cpu.frame_roll(3.9) < p;
         }
         // Re-arm only a short post-window beat instead of the full
@@ -585,6 +581,33 @@ pub fn cpu_defense(
     }
 }
 
+/// Throws over per second at a runner stretching his lead. Past the line
+/// he can get back from (`rules::pickoff_beats_runner`) the pitcher goes
+/// after him; short of it a throw is only a reminder, and rare. (A flat
+/// ~0.5/s used to pick off 2.1 runners per team-game, ~40× MLB; a flat
+/// 0.1/s still picked off 1.1 per 9, because the CPU runner always went to
+/// the full stretch.)
+fn pickoff_throw_rate(lead_m: f32, skill: f32) -> f32 {
+    if crate::game::rules::pickoff_beats_runner(lead_m) {
+        0.2 + 0.4 * skill
+    } else {
+        0.03 + 0.05 * skill
+    }
+}
+
+/// How far the CPU runner stretches his lead this window, from a per-pitch
+/// `roll` in 0..1: to just inside `rules::safe_lead_m`, except on the
+/// occasional misread (rarer for a sharper runner) when he keeps going to
+/// the full stretch and is a dead man if the pitcher looks over.
+fn stretch_target_m(roll: f32, skill: f32) -> f32 {
+    let misread = 0.12 - 0.1 * skill;
+    if roll < misread {
+        crate::game::rules::LEAD_MAX_M
+    } else {
+        crate::game::rules::safe_lead_m() - 0.1
+    }
+}
+
 // ── Offense: the AI bats ──────────────────────────────────────────────────────
 
 // Bevy systems take their dependencies as parameters; the count is inherent.
@@ -595,6 +618,7 @@ pub fn cpu_offense(
     score: Res<ScoreBoard>,
     play: Res<Play>,
     bases: Res<Bases>,
+    lead: Res<LeadState>,
     rules: Res<Ruleset>,
     mut cpu: ResMut<CpuState>,
     ball_q: Query<(&Transform, &Velocity), With<Baseball>>,
@@ -628,6 +652,13 @@ pub fn cpu_offense(
             cpu.window_steal = None;
             false
         };
+        // A stretched lead goes out to the line he can dive back from and
+        // holds there; only now and then does he misjudge it and keep going
+        // (`stretch_target_m`). The release-at-the-line is what keeps
+        // pickoffs MLB-rare without making the throw-over toothless.
+        let extend = extend
+            && !(play.in_steal_window()
+                && lead.lead_m >= stretch_target_m(cpu.roll(5.9), cfg.skill));
         let intent = intents.get_mut(team);
         intent.action = false;
         intent.aim = if extend {

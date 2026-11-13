@@ -386,7 +386,7 @@ fn run_sim(n: u32) -> Aggregate {
          --- pitch events: fouls={} calledStrike={} whiff={}\n\
          --- economy: BB%={:.1} (target 6..11)  HBP%={:.1} (target 0..2)  pitches/PA={:.2} (target 3.3..4.3)\n\
          ---          BABIP={:.3} (target .250..330)  hits 1B/2B/3B={}/{}/{}  2B/9={:.2} (target 1.0..2.5)\n\
-         --- running/9: SB={:.2} CS={:.2} (target 0..1) pickoffs={:.2} (target 0..0.6)",
+         --- running/9: SB={:.2} CS={:.2} (target 0..1) pickoffs={:.2} (target 0..0.2)",
         agg.n,
         agg.k_pct,
         agg.total_k,
@@ -526,9 +526,16 @@ fn run_sim(n: u32) -> Aggregate {
 //    doubles at N=40) and trips the old 4.6; floor 0.5 catches outfielders
 //    that cut off everything (a fly-ball re-pick experiment read 0.14
 //    doubles per single in the realism harness).
-//  * CS/9 0..1.6 and pickoffs/9 0..1.5 — nominal 0..1 / 0..0.6 (MLB 0.2 /
-//    0.05), live 0.2 / 0.6. These are the "CPU runs itself out of innings"
-//    guards: the study measured 3.5× MLB steals and 40× MLB pickoffs.
+//  * CS/9 0..1.6 — nominal 0..1 (MLB 0.2), live 0.6. The "CPU runs itself
+//    out of innings" guard: the study measured 3.5× MLB steals.
+//  * pickoffs/9 0..=0.6 — nominal 0..0.2 (MLB ~0.05). Was 0..1.5 while the
+//    CPU runner stretched to the full 4.5 m lead every time it stretched:
+//    main read 1.12 at N=40 (0.33 a team-game in the nine-inning harness,
+//    ~7× MLB). The runner now stops at the line he can dive back from
+//    (`rules::safe_lead_m`, `ai::stretch_target_m`) and only misreads it
+//    now and then: N=40 reads 0.0, the harness 0.02 a team-game. One
+//    pickoff at N=40 is 0.11, so the ceiling allows five and trips the old
+//    economy's ten.
 const K_PCT_BAND: std::ops::RangeInclusive<f64> = 11.0..=27.0; // nominal 15..30
 const RUNS9_BAND: std::ops::RangeInclusive<f64> = 2.0..=7.5; // nominal 3.0..8.0
 const HR9_BAND: std::ops::RangeInclusive<f64> = 0.6..=2.2; // nominal 0.5..2.5
@@ -538,7 +545,7 @@ const PITCHES_PER_PA_BAND: std::ops::RangeInclusive<f64> = 2.9..=4.5; // nominal
 const BABIP_BAND: std::ops::RangeInclusive<f64> = 0.22..=0.365; // nominal .250..330
 const DOUBLES9_BAND: std::ops::RangeInclusive<f64> = 0.5..=3.5; // nominal 1.0..2.5
 const CS9_BAND: std::ops::RangeInclusive<f64> = 0.0..=1.6; // nominal 0..1
-const PICKOFFS9_BAND: std::ops::RangeInclusive<f64> = 0.0..=1.5; // nominal 0..0.6
+const PICKOFFS9_BAND: std::ops::RangeInclusive<f64> = 0.0..=0.6; // nominal 0..0.2
 
 fn assert_bands(agg: &Aggregate) {
     assert!(
@@ -571,7 +578,7 @@ fn assert_bands(agg: &Aggregate) {
         ("BABIP", agg.babip, &BABIP_BAND, ".250..330"),
         ("doubles/9", agg.doubles_per9, &DOUBLES9_BAND, "1.0..2.5"),
         ("CS/9", agg.caught_stealing_per9, &CS9_BAND, "0..1"),
-        ("pickoffs/9", agg.pickoffs_per9, &PICKOFFS9_BAND, "0..0.6"),
+        ("pickoffs/9", agg.pickoffs_per9, &PICKOFFS9_BAND, "0..0.2"),
     ];
     for (name, value, band, nominal) in checks {
         assert!(
@@ -581,19 +588,22 @@ fn assert_bands(agg: &Aggregate) {
     }
 }
 
-/// The pinned harness: N=40 one-inning games, bands must hold. N was 20 under
-/// the old multi-threaded harness; the single-threaded app here runs the sim
-/// ~5× faster (thread-pool overhead dominated so tiny a workload), so N rose to
-/// 40 — averaging down the per-process spread on K% and HR/9 — while the whole
-/// test still finishes in ~1.5 min (well under the ~3 min budget).
+/// The quick local read: N=40 one-inning games against the same bands, ~1.5 min
+/// alone. N was 20 under the old multi-threaded harness; the single-threaded
+/// app here runs the sim ~5× faster, so N rose to 40. CI does not run this one:
+/// it gates on `balance_sim_long` (N=100), because the sim is deterministic for
+/// a given binary and an N=40 mean within one game's swing of an edge fails on
+/// every re-run. If this trips and N=100 holds, the band holds.
 #[test]
 fn balance_bands_hold() {
     let agg = run_sim(40);
     assert_bands(&agg);
 }
 
-/// Deep-tuning variant: N=100 for a tighter aggregate. Ignored by default
-/// (minutes of runtime); run with `cargo test --test balance_sim -- --ignored`.
+/// The CI gate: N=100 for a tighter aggregate (one chaotic game moves the mean
+/// 2.5× less than at N=40). Ignored by default so a local `cargo test` stays
+/// quick; run it with `cargo nextest run --test balance_sim --run-ignored only`
+/// (or `cargo test --test balance_sim -- --ignored`), ~5 min on 4 cores.
 #[test]
 #[ignore]
 fn balance_sim_long() {
