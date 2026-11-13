@@ -5,7 +5,7 @@ use bevy::prelude::*;
 
 use crate::game::flow::{BannerTone, ContactEvent, Phase, Play, PlayBanner, ResultBeat};
 use crate::game::roster::Rosters;
-use crate::game::rules::{BattingOrder, ContactQuality, LINEUP_SIZE};
+use crate::game::rules::{BattingOrder, ContactQuality, LINEUP_SIZE, PitchKind};
 use crate::game::theme::Theme;
 use crate::game::variant::Ruleset;
 use crate::game::{GameplayEntity, ScoreBoard, Team};
@@ -14,9 +14,6 @@ use super::{
     BannerPill, BannerText, ContactStampText, DuelLine, DuelLineKind, DuelPanel, PitchSpeedText,
     hidden_tint,
 };
-
-/// Metres per second → miles per hour, for the pitch-speed read-out.
-const MPH_PER_MPS: f32 = 2.236_94;
 
 /// How long a banner that is *not* a result pause's announcement (a wall
 /// bang mid-play, "BACK IN TIME" on a pickoff) stays up. A result pause's
@@ -499,9 +496,9 @@ pub(super) fn show_pitch_speed(
     let Some(kind) = play.pitch_kind().filter(|_| pitch_beat) else {
         return;
     };
-    let mph = kind.speed() * rules.pace.pitch_speed_scale * MPH_PER_MPS;
+    let mph = broadcast_reading(kind, rules.pace.pitch_speed_scale, time.elapsed_secs_f64());
     for (mut text, mut color) in &mut text_q {
-        **text = format!("{} MPH", mph.round() as i32);
+        **text = format!("{mph} MPH");
         color.0 = theme.ui.text_primary;
     }
     fade_at.0 = Some(fade_deadline(
@@ -509,6 +506,17 @@ pub(super) fn show_pitch_speed(
         time.elapsed_secs_f64(),
         PITCH_SPEED_SECS,
     ));
+}
+
+/// The radar-gun reading for one pitch of `kind` under the pace dial
+/// `scale`: the kind's broadcast speed ([`PitchKind::broadcast_mph`], so a
+/// heater reads 92–96 rather than its true 85) give or take two, varied on
+/// `seed` (the clock — presentation, not rules, so the spread needs no
+/// replay determinism) the way real velocity wanders pitch to pitch.
+pub(super) fn broadcast_reading(kind: PitchKind, scale: f32, seed: f64) -> i32 {
+    let bits = (seed * 1000.0) as u64;
+    let spread = (bits.wrapping_mul(2_654_435_761) >> 7) % 5;
+    (kind.broadcast_mph() * scale).round() as i32 + spread as i32 - 2
 }
 
 /// Blanks the pitch-speed read-out once its deadline passes (deadline-
@@ -542,3 +550,7 @@ pub(super) fn fade_contact_stamp(
         **text = String::new();
     }
 }
+
+#[cfg(test)]
+#[path = "banner.test.rs"]
+mod tests;

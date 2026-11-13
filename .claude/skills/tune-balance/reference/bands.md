@@ -44,7 +44,7 @@ If this file and the test disagree, the test wins — update this file.
 > K% 14.0, runs/9 3.56, HR/9 1.08, 2B/9 1.57, pitches/PA 3.16. Raising exit speed instead
 > (`EXIT_PEAK` 31 → 33.5) was tried and is the wrong lever: BABIP .399, 3.8 HR a team-game.
 
-## Asserted bands (N=40, `balance_bands_hold`)
+## Asserted bands (CI gates at N=100, `balance_sim_long`; N=40 `balance_bands_hold` is the quick read)
 
 | Signal | Asserted band | Nominal target | Measured (N=40) |
 |---|---|---|---|
