@@ -222,6 +222,17 @@ The game has no cutter or splitter, and its control scheme ties a pitch's
 kind to its held aim (`rules::PitchKind::from_aim`), so the slider lives on
 the inside edge and the sinker on the outside one.
 
+## Pitch speeds (RotoWire velocity tables; Baseball Savant)
+
+MLB average release speeds in the Statcast era: four-seam fastball ~94 mph,
+sinker ~93, changeup ~86, slider ~86, curveball ~80. The game throws slower
+than that so a human can read the pitch (`rules::PitchKind::speed`: heater
+38 m/s = 85 mph, changeup 29 m/s = 65 mph), and its changeup is its slowest
+pitch where a real one is thrown harder than a curve. The speed read-out by
+the plate shows the league numbers instead (`PitchKind::broadcast_mph`, give
+or take two mph pitch to pitch, scaled by the pace dial), so the broadcast
+reads like baseball without changing the timing windows or contact rates.
+
 ## Home run distance (Sports Illustrated, Statcast)
 
 - A typical big-league homer travels about 400 ft.
@@ -284,7 +295,12 @@ caught-stealing rate is ~20–25% of attempts.
 Pickoffs: a pitcher's move and throw to first take ~0.8 s glove to tag;
 a runner on a normal lead dives back in time, one leaning several feet
 further is caught (`rules::attempt_pickoff` races `PICKOFF_THROW_SECS` against
-`dive_back_secs`).
+`dive_back_secs`). Successful pickoffs are rare in MLB — about one every
+twenty team-games (~0.05 per team per 9), and fewer since the 2023
+disengagement limit — because runners lead out to the line they can get back
+from and no further; pitchers throw over far more often than they get anyone.
+The CPU runner models that by stretching to `rules::safe_lead_m` (3.6 m) and
+only occasionally misjudging it.
 
 ## Player ratings (FanGraphs, Statcast sprint speed)
 
@@ -321,6 +337,7 @@ CLAUDE.md's architecture notes for how each maps.
 - [Turface Athletics — Field layouts & dimensions](https://www.turface.com/education/resource-library/baseball-softball-field-layouts-dimensions)
 - [Mighty Grass — Baseball field dimensions guide](https://www.mightygrass.com/baseball-field-dimensions-guide/)
 - [Wikipedia — Tag up](https://en.wikipedia.org/wiki/Tag_up)
+- [CBS Sports — Fewer and more-efficient pickoffs under the new rules](https://www.cbssports.com/mlb/news/four-under-the-radar-effects-of-mlbs-new-rules-including-fewer-and-more-efficient-pickoffs)
 - [Baseball-Reference — Baserunning stats (XBT%, league average 41%)](https://www.baseball-reference.com/blog/archives/10867.html)
 - [Baseball Training World — The 9 fundamentals of base running](https://baseballtrainingworld.com/the-9-fundamentals-of-base-running-in-baseball/)
 - [QC Baseball — Baserunning: tagging up](http://www.qcbaseball.com/skills/baserunning-tagging-up.aspx)
@@ -328,6 +345,7 @@ CLAUDE.md's architecture notes for how each maps.
 - [Baseball Rules Academy — 2.01 Layout of the field](https://baseballrulesacademy.com/official-rule/mlb/2-01-layout-field/) (line width, materials)
 - [Bat Flip Sports — How to chalk a baseball field like a pro](https://batflipsports.com/how-to-chalk-a-baseball-field/) (2–4 in chalk-line width)
 - [Fox Valley Paint — How to stripe a baseball field like a pro](https://foxvalleypaint.com/how-to-stripe-a-baseball-field/) (practical ~4 in foul-line width)
+- [Baseball Savant — pitch arsenal velocity leaderboard](https://baseballsavant.mlb.com/leaderboard/pitch-arsenals)
 - [RotoWire — MLB pitch speed and usage, 2002 to 2025](https://www.rotowire.com/baseball/article/mlb-pitch-speed-and-usage-2002-to-2025-94262)
 - [FanGraphs — Checking in on the hitter's count](https://blogs.fangraphs.com/checking-in-on-the-hitters-count) (70%+ fastballs at 3-0, 3-1, 2-0)
 - [Sports Illustrated — The farthest and hardest-hit home runs of 2024](https://www.si.com/mlb/2024-mlb-season-home-runs-farthest-hardest-hit)
