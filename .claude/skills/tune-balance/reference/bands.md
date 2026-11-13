@@ -52,7 +52,7 @@ If this file and the test disagree, the test wins — update this file.
 > (`ai::pickoff_throw_rate`). N=40 reads 0.0, the harness 0.02 a team-game. The pickoff
 > ceiling tightened 1.5 → 0.6.
 
-## Asserted bands (N=40, `balance_bands_hold`)
+## Asserted bands (CI gates at N=100, `balance_sim_long`; N=40 `balance_bands_hold` is the quick read)
 
 | Signal | Asserted band | Nominal target | Measured (N=40) |
 |---|---|---|---|

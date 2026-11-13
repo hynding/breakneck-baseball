@@ -588,19 +588,22 @@ fn assert_bands(agg: &Aggregate) {
     }
 }
 
-/// The pinned harness: N=40 one-inning games, bands must hold. N was 20 under
-/// the old multi-threaded harness; the single-threaded app here runs the sim
-/// ~5× faster (thread-pool overhead dominated so tiny a workload), so N rose to
-/// 40 — averaging down the per-process spread on K% and HR/9 — while the whole
-/// test still finishes in ~1.5 min (well under the ~3 min budget).
+/// The quick local read: N=40 one-inning games against the same bands, ~1.5 min
+/// alone. N was 20 under the old multi-threaded harness; the single-threaded
+/// app here runs the sim ~5× faster, so N rose to 40. CI does not run this one:
+/// it gates on `balance_sim_long` (N=100), because the sim is deterministic for
+/// a given binary and an N=40 mean within one game's swing of an edge fails on
+/// every re-run. If this trips and N=100 holds, the band holds.
 #[test]
 fn balance_bands_hold() {
     let agg = run_sim(40);
     assert_bands(&agg);
 }
 
-/// Deep-tuning variant: N=100 for a tighter aggregate. Ignored by default
-/// (minutes of runtime); run with `cargo test --test balance_sim -- --ignored`.
+/// The CI gate: N=100 for a tighter aggregate (one chaotic game moves the mean
+/// 2.5× less than at N=40). Ignored by default so a local `cargo test` stays
+/// quick; run it with `cargo nextest run --test balance_sim --run-ignored only`
+/// (or `cargo test --test balance_sim -- --ignored`), ~5 min on 4 cores.
 #[test]
 #[ignore]
 fn balance_sim_long() {
