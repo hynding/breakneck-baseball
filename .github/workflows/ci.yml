@@ -1,16 +1,33 @@
 # Quality gate: unit tests, dual-target compilation, and lints.
 #
-# Runs on every feature-branch push and every pull request, and is also called
-# by the Pages workflow (see pages.yml) so nothing deploys without passing it.
+# Runs on every pull request, is called by the Pages workflow (see pages.yml)
+# so nothing deploys without passing it, and runs on a schedule to keep the
+# build caches alive (see `schedule` below).
+#
+# Three jobs run side by side so a red test no longer hides the lints, and the
+# slowest leg (the test suite) sets the wall time instead of the sum of all.
 name: CI
 
 on:
-  push:
-    # Pushes to main run this via the Pages workflow's `quality` job instead,
-    # so a single push doesn't trigger two identical runs.
-    branches-ignore: [main]
+  # PRs only. A `push` trigger for feature branches ran every PR commit twice
+  # (once as `push`, once as `pull_request`, in different concurrency groups so
+  # neither cancelled the other), doubling runner minutes for the same SHA.
+  # Pushes to main run this through the Pages workflow's `quality` job.
   pull_request:
+    # Docs-only changes can't break the build. No check is required on main,
+    # so a skipped run doesn't block merging.
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE*"
   workflow_call:
+  workflow_dispatch:
+  # GitHub evicts a cache nobody has read for 7 days. A quiet week let the
+  # build trees lapse before 2026-11-10 and the next run took 57 min cold
+  # instead of ~16 warm. Twice a week on main keeps them warm, and also
+  # catches a new stable Rust's lints before a PR trips over them.
+  schedule:
+    - cron: "17 6 * * 1,4"
 
 env:
   CARGO_TERM_COLOR: always
@@ -21,31 +38,15 @@ env:
   CARGO_PROFILE_TEST_DEBUG: line-tables-only
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  quality:
-    name: Tests, dual-target checks & lints
+  test:
+    name: Tests (unit + e2e + balance sim)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      # The debug test tree plus the restored build cache once outgrew the
-      # runner's 86 GB of free disk: the 2026-09-26 run died with "No space left
-      # on device" mid-compile, when each of 36 test files was its own ~600 MB
-      # binary statically linking all of Bevy (~23 GB cold under
-      # `line-tables-only`). The e2e suites now share one binary (tests/e2e/),
-      # which cut the whole cold debug tree from ~27 GB to ~8 GB (2026-10-09).
-      # Dropping the preinstalled toolchains this job never touches (27 GB
-      # measured) stays as cheap headroom.
-      - name: Free runner disk space
-        run: |
-          df -h / | tail -1
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /usr/local/.ghcup /usr/share/swift /opt/hostedtoolcache/CodeQL
-          sudo docker image prune -af >/dev/null 2>&1 || true
-          df -h / | tail -1
+      - uses: actions/checkout@v5
 
       # Bevy's native audio/input/display backends probe these at build-script time,
       # so even `cargo check`/`clippy` need them on Linux. `libwayland-dev` became
@@ -58,33 +59,15 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-          components: clippy, rustfmt
 
-      # Two caches on purpose. Downloaded crates are cheap and useful across any
-      # lockfile, so the registry falls back to the newest prior entry. The build
-      # tree restores only on an exact lockfile match: a prefix fallback used to
-      # unpack a ~20 GB tree from a different Bevy version next to the fresh one
-      # (the 2026-09-26 disk exhaustion), and every stale artifact rode along into
-      # the next saved cache.
-      - name: Cache Cargo registry
-        uses: actions/cache@v4
+      # Caches dependencies only (the workspace crate's own artifacts are pruned
+      # before saving), keyed per job on Cargo.lock + rustc, which keeps each
+      # entry well under the 21 GB the old whole-`target` cache carried. Only
+      # main saves: PR branches read main's entry, and a PR-scoped save of a
+      # multi-GB tree could evict main's from the repo's 10 GB cache budget.
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ runner.os }}-ci-registry-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-ci-registry-
-
-      - name: Cache build tree
-        uses: actions/cache@v4
-        with:
-          path: target
-          key: ${{ runner.os }}-ci-target-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Format check
-        run: cargo fmt --check
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # cargo-nextest (.config/nextest.toml) runs every test binary's tests in
       # one pool, one process per test: 454 s for the full suite against 1289 s
@@ -97,33 +80,88 @@ jobs:
       - name: Tests (unit + e2e + balance sim)
         run: cargo nextest run --no-fail-fast
 
-      # The creator stage only exists under the `debug` feature, so its e2e
-      # suite is invisible to the run above. It went red unnoticed at the
-      # Bevy 0.17 upgrade (TADA 107); this keeps it in the gate. Quoted: a
-      # trailing `::` is a YAML mapping indicator.
-      - name: Creator e2e (debug feature)
-        run: "cargo nextest run --features debug --test e2e creator::"
-
       # Headroom after the largest compile, so a disk-pressure regression shows
-      # up in the log before it becomes another dead runner.
+      # up in the log before it becomes another dead runner. The 2026-09-26 run
+      # died with "No space left on device" when each of 36 test files was its
+      # own ~600 MB binary; the e2e suites now share one binary (tests/e2e/)
+      # and the three jobs split the tree, so the old pre-build purge of the
+      # runner's unused toolchains (2 min a run) is gone. Bring it back if this
+      # line shows the disk filling.
       - name: Report disk usage
         if: always()
         run: |
           df -h / | tail -1
           du -sh target ~/.cargo/registry 2>/dev/null || true
 
+  # The creator stage only exists under the `debug` feature, so its e2e
+  # suite is invisible to the main test run. It went red unnoticed at the
+  # Bevy 0.17 upgrade (TADA 107); this keeps it in the gate. The `debug`
+  # feature pulls in bevy-inspector-egui and rebuilds Bevy with different
+  # features, which is why it is its own job (13 min cold) rather than a
+  # step after the main suite. Building it also covers the native
+  # `cargo check --features debug` the old single job ran separately.
+  creator:
+    name: Creator e2e (debug feature)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Bevy system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev libwayland-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install cargo-nextest
+        run: curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C "${CARGO_HOME:-$HOME/.cargo}/bin"
+
+      # Quoted: a trailing `::` is a YAML mapping indicator.
+      - name: Creator e2e
+        run: "cargo nextest run --features debug --test e2e creator::"
+
+  lint:
+    name: Format, clippy & wasm checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Bevy system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev libwayland-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy, rustfmt
+
+      - name: Format check
+        run: cargo fmt --check
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
       # `--all-targets` lints test code too; `-D warnings` keeps the tree
       # warning-free on both compilation targets (the project norm in CLAUDE.md).
+      # `!cancelled()` on the later steps: one red lint still reports the rest.
       - name: Clippy (native)
         run: cargo clippy --all-targets -- -D warnings
 
       - name: Clippy (wasm)
+        if: ${{ !cancelled() }}
         run: cargo clippy --target wasm32-unknown-unknown -- -D warnings
 
       # The optional `debug` feature (bevy-inspector-egui panel) must compile
-      # clean on both targets even though it's off by default.
-      - name: Check (debug feature)
-        run: cargo check --features debug
-
+      # clean on wasm too even though it's off by default. The native side is
+      # built by the `creator` job.
       - name: Check (debug feature, wasm)
+        if: ${{ !cancelled() }}
         run: cargo check --target wasm32-unknown-unknown --features debug
