@@ -919,28 +919,45 @@ pub struct CalmWind;
 /// light (2 + 12·u², 6 mph on average — MLB parks' season-average
 /// game-time winds run from about 2.5 to 12 mph, per docs/BASEBALL.md
 /// "Wind"), from any direction.
+/// Fair weather's draw (`Weather::Fair`'s 2–14 mph); the game draws
+/// through [`wind_in_range`].
+#[cfg(test)]
 pub(crate) fn wind_from(u_speed: f32, u_dir: f32) -> Vec3 {
-    let mph = 2.0 + 12.0 * u_speed.clamp(0.0, 1.0).powi(2);
+    wind_in_range(u_speed, u_dir, (2.0, 14.0))
+}
+
+/// The wind for a weather's own speed range (`Weather::spec`): `min +
+/// (max − min)·u²` mph, so most days sit near the light end of it.
+pub(crate) fn wind_in_range(u_speed: f32, u_dir: f32, (min, max): (f32, f32)) -> Vec3 {
+    let mph = min + (max - min) * u_speed.clamp(0.0, 1.0).powi(2);
     let theta = std::f32::consts::TAU * u_dir;
     Vec3::new(theta.sin(), 0.0, theta.cos()) * mph * rules::MPS_PER_MPH
 }
 
-/// Draws the day's wind as a game starts. Deterministic for a given game
-/// count and start time, so a headless sim replays exactly.
+/// Draws the day as a game starts: the chosen weather's temperature
+/// ([`crate::game::weather::Conditions`]) and a wind from its speed range.
+/// Deterministic for a given game count and start time, so a headless sim
+/// replays exactly.
 fn draw_wind(
     mut wind: ResMut<rules::Wind>,
     calm: Option<Res<CalmWind>>,
+    settings: Option<Res<crate::game::settings::Settings>>,
+    mut conditions: Option<ResMut<crate::game::weather::Conditions>>,
     time: Res<Time>,
     mut games: Local<u32>,
 ) {
     *games += 1;
+    let weather = settings.map_or_else(Default::default, |s| s.weather);
+    if let Some(conditions) = conditions.as_mut() {
+        **conditions = crate::game::weather::Conditions::for_weather(weather);
+    }
     if calm.is_some() {
         *wind = rules::Wind::default();
         return;
     }
     let seed = *games as f32 * 7.31 + time.elapsed_secs() * 0.37;
     let u = |k: f32| crate::game::ai::hash01(seed + k);
-    *wind = rules::Wind(wind_from(u(0.0), u(3.7)));
+    *wind = rules::Wind(wind_in_range(u(0.0), u(3.7), weather.spec().wind_mph));
 }
 
 /// Spots the walk-off: in the bottom of the last scheduled inning or any
@@ -1118,6 +1135,7 @@ impl Plugin for FlowPlugin {
             .init_resource::<Mojo>()
             .init_resource::<crate::game::fatigue::Fatigue>()
             .init_resource::<BestPlay>()
+            .init_resource::<crate::game::weather::Conditions>()
             .add_message::<BallInPlayEvent>()
             .add_message::<LiveBallEvent>()
             .add_message::<PitchCaughtEvent>()

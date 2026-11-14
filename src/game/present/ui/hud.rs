@@ -394,12 +394,18 @@ pub(super) fn update_score_text(
     }
 }
 
-/// The day's wind, as the broadcast reads it (`rules::wind_report`).
+/// The day's temperature and wind, as the broadcast reads them
+/// ("72F  WIND 8 OUT TO LF", `rules::wind_report`).
 pub(super) fn update_wind_text(
     wind: Res<crate::game::rules::Wind>,
+    conditions: Option<Res<crate::game::weather::Conditions>>,
     mut query: Query<&mut Text, With<WindText>>,
 ) {
-    let report = crate::game::rules::wind_report(wind.0);
+    let wind = crate::game::rules::wind_report(wind.0);
+    let report = match conditions {
+        Some(c) => format!("{}  {wind}", c.temp_report()),
+        None => wind,
+    };
     for mut text in &mut query {
         if text.0 != report {
             text.0 = report.clone();

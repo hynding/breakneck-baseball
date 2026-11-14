@@ -235,3 +235,41 @@ fn no_walk_off_early_or_when_already_ahead() {
     score_home(&mut app);
     assert!(!app.world().resource::<Play>().is_walk_off());
 }
+
+#[test]
+fn the_chosen_weather_sets_the_day() {
+    use crate::game::weather::{Conditions, Weather};
+    let run = |weather: Weather| {
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<rules::Wind>()
+            .init_resource::<Conditions>()
+            .insert_resource(crate::game::settings::Settings {
+                weather,
+                ..Default::default()
+            })
+            .add_systems(Update, draw_wind);
+        app.update();
+        let mph = app.world().resource::<rules::Wind>().0.length() / rules::MPS_PER_MPH;
+        (*app.world().resource::<Conditions>(), mph)
+    };
+    let (hot, _) = run(Weather::Hot);
+    assert_eq!(hot.temp_f, 95.0);
+    let (calm, still) = run(Weather::Calm);
+    assert_eq!(calm.weather, Weather::Calm);
+    assert!(still < 1e-3);
+    let (_, gusty) = run(Weather::Windy);
+    assert!((14.0..=24.0).contains(&gusty), "{gusty}");
+    // Fair is the day the balance sim was tuned in.
+    let (fair, breeze) = run(Weather::Fair);
+    assert_eq!(fair, Conditions::default());
+    assert!((2.0..=14.0).contains(&breeze), "{breeze}");
+}
+
+#[test]
+fn wind_in_range_spans_its_bounds() {
+    let mph = |w: Vec3| w.length() / rules::MPS_PER_MPH;
+    assert!((mph(wind_in_range(0.0, 0.1, (14.0, 24.0))) - 14.0).abs() < 1e-3);
+    assert!((mph(wind_in_range(1.0, 0.1, (14.0, 24.0))) - 24.0).abs() < 1e-3);
+    assert_eq!(wind_in_range(0.7, 0.1, (0.0, 0.0)), Vec3::ZERO);
+}

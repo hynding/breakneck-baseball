@@ -346,6 +346,14 @@ pub struct Settings {
     /// keep the skill they have always played against).
     #[serde(default)]
     pub difficulty: Difficulty,
+    /// The weather for the next game (menu **W**; serde-defaulted to Fair,
+    /// the game's long-standing day).
+    #[serde(default)]
+    pub weather: crate::game::weather::Weather,
+    /// How deep the outfield fences sit (menu **O**; serde-defaulted to the
+    /// regulation park).
+    #[serde(default)]
+    pub fences: crate::game::weather::Fences,
     /// Master volume, 0.0..=1.0, applied via [`bevy::audio::GlobalVolume`].
     pub volume: f32,
     /// Regular-season length for the *next* short season (menu **L**; one
@@ -378,6 +386,8 @@ impl Default for Settings {
             reduce_motion: false,
             graphics: GraphicsQuality::default(),
             difficulty: Difficulty::default(),
+            weather: Default::default(),
+            fences: Default::default(),
             volume: 0.7,
             season_length: season::DEFAULT_SEASON_LENGTH,
             season: None,

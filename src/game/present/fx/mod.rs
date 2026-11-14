@@ -10,10 +10,12 @@ use crate::game::GameState;
 use crate::game::settings::PitchTrailStyle;
 
 mod particles;
+mod rain;
 mod throw;
 mod trail;
 
 pub use particles::FireworkSpark;
+pub use rain::RainDrop;
 pub use throw::{DuelThrowBall, throw_arc};
 pub use trail::TrailMote;
 
@@ -54,7 +56,12 @@ impl Plugin for FxPlugin {
         app.init_resource::<Fireworks>()
             .add_systems(
                 crate::game::game_start(),
-                (build_fx_assets, spawn_landing_ring, spawn_ball_halo),
+                (
+                    build_fx_assets,
+                    spawn_landing_ring,
+                    spawn_ball_halo,
+                    rain::spawn_rain,
+                ),
             )
             .add_systems(
                 Update,
@@ -69,6 +76,7 @@ impl Plugin for FxPlugin {
                     pitch_trail,
                     tick_trail,
                     throw::stage_duel_throw,
+                    rain::fall_rain,
                 )
                     .run_if(in_state(GameState::Playing)),
             );
