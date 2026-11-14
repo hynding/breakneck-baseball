@@ -7,3 +7,4 @@ pub mod rules;
 pub mod season;
 pub mod theme;
 pub mod variant;
+pub mod weather;

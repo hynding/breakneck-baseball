@@ -20,11 +20,16 @@ pub(super) fn spawn_field(
     mut images: ResMut<Assets<Image>>,
     field: Res<FieldSpec>,
     theme: Res<crate::game::theme::Theme>,
+    settings: Option<Res<crate::game::settings::Settings>>,
 ) {
+    // The day's weather greys the sky and dims the sun (`Weather::spec`).
+    let weather = settings.map_or_else(Default::default, |s| s.weather).spec();
     // The sky is theme data like everything else — a bright day or a night
     // game. Matters most from the catcher's-eye duel camera, which looks up
     // past the wall into nothing but clear colour.
-    commands.insert_resource(ClearColor(theme.sky));
+    commands.insert_resource(ClearColor(weather_sky(theme.sky, weather.overcast)));
+    let mut lights = theme.field.clone();
+    lights.sun_scale *= weather.sun;
     let surfaces = FieldSurfaces::build(&mut images, &theme.field);
     match field.scenery {
         Scenery::Stadium => {
@@ -71,15 +76,39 @@ pub(super) fn spawn_field(
             &mut commands,
             std::f32::consts::PI - std::f32::consts::FRAC_PI_6,
             0.15,
-            &theme.field,
+            &lights,
         ),
         Scenery::FrontYard => super::stadium::spawn_lighting(
             &mut commands,
             std::f32::consts::PI + std::f32::consts::FRAC_PI_6,
             0.20,
-            &theme.field,
+            &lights,
         ),
     }
+}
+
+/// The theme's sky pulled `overcast` (0..1) of the way to storm grey — kept
+/// a little of the theme's own hue, so a night game's rain stays dark.
+pub(super) fn weather_sky(sky: Color, overcast: f32) -> Color {
+    let storm = Color::srgb(0.42, 0.45, 0.50);
+    let t = overcast.clamp(0.0, 1.0) * 0.85;
+    let a = sky.to_srgba();
+    let b = storm.to_srgba();
+    // Never brighter than the theme's own sky: overcast only greys and dims.
+    let lum = |c: Srgba| 0.2126 * c.red + 0.7152 * c.green + 0.0722 * c.blue;
+    let mix = |x: f32, y: f32| x + (y - x) * t;
+    let mut out = Srgba::new(
+        mix(a.red, b.red),
+        mix(a.green, b.green),
+        mix(a.blue, b.blue),
+        1.0,
+    );
+    let (lo, lm) = (lum(out), lum(a));
+    if lo > lm && lo > 0.0 {
+        let k = lm / lo;
+        out = Srgba::new(out.red * k, out.green * k, out.blue * k, 1.0);
+    }
+    out.into()
 }
 
 // ── Bases ─────────────────────────────────────────────────────────────────────

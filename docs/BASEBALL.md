@@ -372,6 +372,35 @@ only occasionally misjudging it.
   integrate the same term; the scoreboard reads the wind like a broadcast
   ("WIND 8 OUT TO LF").
 
+## Weather (Alan Nathan, "Baseball Physics"; The Hardball Times)
+
+- Warm air is thinner, so a fly ball carries further: about **1% of distance
+  per 10°F**, roughly 4 ft on a 400 ft fly (Alan Nathan's trajectory
+  calculator and his Hardball Times pieces on temperature and home runs).
+  MLB game-time temperatures run from the 40s °F on April nights to the 90s
+  in summer afternoons.
+- Rain itself barely moves a batted ball; a wet day matters through the
+  cool, heavy air that comes with it.
+- Modeled in `weather::Weather`: Fair (70°F, the light 2–14 mph wind the
+  balance sim was tuned in, the default), Hot (95°F), Cold (42°F, grey),
+  Windy (14–24 mph), Rain (55°F, dark, streaks falling) and Calm (no wind).
+  `weather::carry_factor` puts half the carry change on the exit speed
+  (+0.05% per °F), because carry grows about twice as fast as exit speed in
+  the game's flight model: a 95°F day is ~+1.25% exit speed (≈ +2.5% carry),
+  a 42°F one ~−1.4%.
+
+## Field dimensions (MLB ballpark dimensions; Official Baseball Rules 2.01)
+
+- The rules ask new parks for at least **325 ft** down the lines and **400
+  ft** to centre, but older parks vary widely: the shortest lines run ~310
+  ft (Fenway's left, Yankee Stadium's right ~314 ft) and the deepest centre
+  fields reach ~415–420 ft (Coors Field ~415 ft).
+- Modeled in `weather::Fences`, a multiplier on the variant's fence
+  distances (`FieldSpec::fence_line` / `fence_center`): Cozy ≈ 310 / 380 ft,
+  Standard 328 / 400 ft (the park every variant is authored with) and Deep
+  ≈ 345 / 420 ft. The stadium wall, the home-run call and the fielders'
+  wall margin all read `rules::fence_at`, so the wall moves as one.
+
 ## Wild pitches and passed balls (Baseball-Reference)
 
 - MLB pitchers threw **0.29 wild pitches per team-game in 2025** (0.30 in

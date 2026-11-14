@@ -136,3 +136,17 @@ fn chalk_clears_every_ground_decal_in_both_variants() {
         );
     }
 }
+
+#[test]
+fn weather_greys_the_sky_without_brightening_it() {
+    let day = Color::srgb(0.48, 0.67, 0.88);
+    let night = Color::srgb(0.02, 0.03, 0.08);
+    assert_eq!(weather_sky(day, 0.0).to_srgba(), day.to_srgba());
+    let grey = weather_sky(day, 0.8).to_srgba();
+    // Bluer sky pulled toward grey: less blue than it was.
+    assert!(grey.blue < day.to_srgba().blue);
+    // A rainy night stays a night.
+    let wet_night = weather_sky(night, 0.8).to_srgba();
+    let lum = |c: Srgba| 0.2126 * c.red + 0.7152 * c.green + 0.0722 * c.blue;
+    assert!(lum(wet_night) <= lum(night.to_srgba()) + 1e-4);
+}

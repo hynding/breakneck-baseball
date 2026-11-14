@@ -60,6 +60,8 @@ enum CycleAction {
     Touch,
     Difficulty,
     SeasonLength,
+    Weather,
+    Fences,
 }
 
 /// Public handle for the menu's `Update` chain so `SettingsPlugin` can order
@@ -270,6 +272,16 @@ fn build_menu(
                             MenuAction::Cycle(CycleAction::Innings),
                         ),
                         (
+                            "W   Weather",
+                            settings.weather.label().to_string(),
+                            MenuAction::Cycle(CycleAction::Weather),
+                        ),
+                        (
+                            "O   Fences",
+                            settings.fences.label().to_string(),
+                            MenuAction::Cycle(CycleAction::Fences),
+                        ),
+                        (
                             "T   Theme",
                             config.theme.label().to_string(),
                             MenuAction::Cycle(CycleAction::Theme),
@@ -367,8 +379,9 @@ fn build_menu(
         });
 }
 
-/// The spacing between menu lines.
-const ROW_GAP_PX: f32 = 13.0;
+/// The spacing between menu lines (tightened from 13 when the weather and
+/// fence rows joined, so the card still fits a 720 px-tall window).
+const ROW_GAP_PX: f32 = 8.0;
 
 /// A tappable menu line's layout: the card's full width, with the line
 /// spacing split above and below as padding, so a tap anywhere on the
@@ -410,7 +423,7 @@ fn controls_hint(device: ActiveDevice) -> String {
             "D-pad / stick: move   A: choose   Left/Right: change\nStart: play   Select: settings   B: back\nIn play: stick to aim, A to pitch or swing\n{RUNNER}"
         ),
         ActiveDevice::Keyboard => format!(
-            "1 / 2: play   3: season   F I T D G L: change options   S: settings\nArrows + Enter also move and choose\nIn play: WASD + Space (P1), Arrows + Right-Ctrl (P2)\n{RUNNER}{}",
+            "1 / 2: play   3: season   F I T D W O G L: change options   S: settings\nArrows + Enter also move and choose\nIn play: WASD + Space (P1), Arrows + Right-Ctrl (P2)\n{RUNNER}{}",
             creator_hint()
         ),
         ActiveDevice::Touch => {
@@ -480,6 +493,8 @@ fn apply_cycle(
         }
         CycleAction::Touch => settings.touch_scheme = settings.touch_scheme.next(),
         CycleAction::Difficulty => settings.difficulty = settings.difficulty.next(),
+        CycleAction::Weather => settings.weather = settings.weather.next(),
+        CycleAction::Fences => settings.fences = settings.fences.next(),
         CycleAction::SeasonLength => {
             settings.season_length =
                 crate::game::season::next_season_length(settings.season_length);
@@ -582,13 +597,15 @@ impl StartGame<'_, '_> {
         // variant's default.
         *self.rules = self.config.variant.rules();
         self.rules.counts.innings = self.config.innings;
-        *self.field = self.config.variant.field();
+        // The fences the menu picked move the park's wall.
+        *self.field = self.settings.fences.apply(self.config.variant.field());
         self.next_state.set(GameState::Playing);
     }
 }
 
 /// Cycles the field (**F**), innings (**I**), theme (**T**), CPU
-/// difficulty (**D**), touch swing scheme (**G**) and season length (**L**);
+/// difficulty (**D**), touch swing scheme (**G**), season length (**L**),
+/// weather (**W**) and fences (**O**);
 /// the rebuild system picks the edit up off the
 /// resource's change tick. Keyboard only: a pad changes options through the
 /// cursor ([`menu_navigate`]), so its face buttons keep their conventional
@@ -600,13 +617,15 @@ fn cycle_options(
     mut settings: ResMut<Settings>,
 ) {
     // One row per hotkey: keyboard key, the cycle.
-    const HOTKEYS: [(KeyCode, CycleAction); 6] = [
+    const HOTKEYS: [(KeyCode, CycleAction); 8] = [
         (KeyCode::KeyF, CycleAction::Field),
         (KeyCode::KeyI, CycleAction::Innings),
         (KeyCode::KeyT, CycleAction::Theme),
         (KeyCode::KeyD, CycleAction::Difficulty),
         (KeyCode::KeyG, CycleAction::Touch),
         (KeyCode::KeyL, CycleAction::SeasonLength),
+        (KeyCode::KeyW, CycleAction::Weather),
+        (KeyCode::KeyO, CycleAction::Fences),
     ];
     for (key, action) in HOTKEYS {
         if keyboard.just_pressed(key) {

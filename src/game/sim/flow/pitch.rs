@@ -465,10 +465,10 @@ pub(super) fn pitch_live(
     mut contact_ev: MessageWriter<ContactEvent>,
     mut banner: MessageWriter<PlayBanner>,
     mut order: ResMut<BattingOrder>,
-    (mojo, wind, rosters): (
-        Res<crate::game::mojo::Mojo>,
-        Res<rules::Wind>,
+    (mojo, wind): (Res<crate::game::mojo::Mojo>, Res<rules::Wind>),
+    (rosters, conditions): (
         Option<Res<crate::game::roster::Rosters>>,
+        Option<Res<crate::game::weather::Conditions>>,
     ),
     #[cfg(feature = "debug")] forced: Res<crate::game::debug::ForcedContact>,
 ) {
@@ -610,8 +610,11 @@ pub(super) fn pitch_live(
             | rules::ContactQuality::Solid
             | rules::ContactQuality::Weak => {
                 let base = rules::hit_velocity(dt_ms, aim, &rules.batting);
+                // Warm air carries, cold air holds it up (`Conditions::carry`).
+                let air = conditions.as_ref().map_or(1.0, |c| c.carry());
                 let velocity = rules::apply_contact_quality(base, quality, dt_ms, &rules)
-                    * ratings.power_factor();
+                    * ratings.power_factor()
+                    * air;
                 // The ball leaves the bat from the contact band, not from
                 // wherever the timing read it (see `CONTACT_Z_MIN`).
                 ball.translation.z = pos.z.clamp(CONTACT_Z_MIN, CONTACT_Z_MAX);
