@@ -1042,6 +1042,7 @@ impl Plugin for FlowPlugin {
                 (track_mojo, watch_walk_off, track_best_play)
                     .chain()
                     .after(PhaseSet)
+                    .in_set(crate::game::GameplayOrder::Flow)
                     .run_if(in_state(GameState::Playing)),
             )
             .add_systems(
