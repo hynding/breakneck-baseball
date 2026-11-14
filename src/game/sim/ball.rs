@@ -46,6 +46,13 @@ pub struct Baseball;
 #[derive(Component)]
 pub struct InFlight;
 
+/// The ball has been hit (set on contact, cleared by the next pitch): only
+/// a batted ball feels the wind. A real crosswind moves a pitch by about
+/// an inch, but the game's wind coupling is sized for a 4-second fly, and
+/// on a pitch it drifted enough to plunk batters.
+#[derive(Component)]
+pub struct Batted;
+
 /// Shared mesh/material for trail ghosts, built once per game from the theme.
 #[derive(Resource)]
 struct TrailAssets {
@@ -67,9 +74,14 @@ const TRAIL_MIN_SPEED: f32 = 8.0;
 type FlyingBall<'w, 's> =
     Query<'w, 's, (&'static Transform, &'static Velocity), (With<Baseball>, With<InFlight>)>;
 
-/// Same, mutable — used by the per-tick aerodynamics systems.
-type FlyingBallMut<'w, 's> =
-    Query<'w, 's, (&'static Transform, &'static mut Velocity), (With<Baseball>, With<InFlight>)>;
+/// Same, mutable, plus whether it was hit ([`Batted`]) — used by the
+/// per-tick aerodynamics systems.
+type FlyingBallMut<'w, 's> = Query<
+    'w,
+    's,
+    (&'static Transform, &'static mut Velocity, Has<Batted>),
+    (With<Baseball>, With<InFlight>),
+>;
 
 // ── Events ────────────────────────────────────────────────────────────────────
 /// Fired when a pitch is thrown. Carries the initial world-space velocity and
@@ -133,7 +145,8 @@ pub struct BallPlugin;
 
 impl Plugin for BallPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<PitchEvent>()
+        app.init_resource::<crate::game::rules::Wind>()
+            .add_message::<PitchEvent>()
             .add_message::<HitEvent>()
             .add_message::<WallBangEvent>()
             .add_systems(crate::game::game_start(), spawn_ball)
@@ -234,7 +247,7 @@ fn apply_pitch(
         for (entity, mut vel) in &mut query {
             vel.linvel = event.velocity;
             vel.angvel = event.spin;
-            commands.entity(entity).insert(InFlight);
+            commands.entity(entity).insert(InFlight).remove::<Batted>();
         }
     }
 }
@@ -250,7 +263,7 @@ fn apply_hit(
         for (entity, mut vel) in &mut query {
             vel.linvel = event.velocity;
             vel.angvel = crate::game::rules::hit_spin(event.velocity);
-            commands.entity(entity).insert(InFlight);
+            commands.entity(entity).insert((InFlight, Batted));
         }
     }
 }
@@ -258,13 +271,21 @@ fn apply_hit(
 /// Applies a simplified quadratic aerodynamic drag every physics frame.
 ///
 /// `F_drag = -drag_factor × |v|² × v̂`
-fn apply_drag(mut query: FlyingBallMut, time: Res<Time>) {
+///
+/// Airborne after contact, the wind adds its own push ([`crate::game::rules::wind_accel`],
+/// the same term every landing prediction integrates); a ball on the grass
+/// is left to the rolling resistance below.
+fn apply_drag(mut query: FlyingBallMut, time: Res<Time>, wind: Res<crate::game::rules::Wind>) {
     let dt = time.delta_secs();
-    for (transform, mut vel) in &mut query {
+    for (transform, mut vel, batted) in &mut query {
         let speed = vel.linvel.length();
         if speed > 0.0 {
             let drag = -BALL_DRAG_FACTOR * speed * speed * vel.linvel / speed;
             vel.linvel += drag * dt;
+        }
+        if batted && transform.translation.y > BALL_RADIUS * 3.0 {
+            let push = crate::game::rules::wind_accel(vel.linvel, wind.0);
+            vel.linvel += push * dt;
         }
         // Rolling resistance: once the ball is down and barely bouncing,
         // bleed horizontal speed so grounders die instead of rolling forever.

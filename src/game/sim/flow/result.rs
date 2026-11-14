@@ -108,13 +108,16 @@ pub(super) fn result_phase(
     play.duel.jump_lead_m = rules::LEAD_NORMAL_M;
     play.duel.throw = None;
     play.duel.pitch_queued = false;
+    play.duel.bunt = None;
     play.pitch.taken = false;
     play.live.pending_call = None;
     play.live.wall_called = false;
     play.live.home_run = false;
+    play.live.bunted = false;
     play.live.last_contact_quality = None;
     play.live.last_outcome = None;
     play.pitch.last_strike_call = None;
+    play.pitch.got_away = false;
     // A runner in stealing position opens the duel window for the next at-bat.
     play.duel.hold = steal_window_for(&bases, &rules_res);
     lead.extended = false;

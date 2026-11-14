@@ -96,6 +96,11 @@ impl<'a, 'w> Umpire<'a, 'w> {
         self.bases.is_occupied(base)
     }
 
+    /// Whether anyone is on base.
+    pub(super) fn runners_aboard(&self) -> bool {
+        (0..self.bases.count()).any(|b| self.bases.is_occupied(b))
+    }
+
     /// Records a taken ball. Returns whether it was ball four (a dead-ball
     /// walk, which pre-empts any steal attempt).
     pub(super) fn add_ball(&mut self) -> bool {
@@ -192,9 +197,11 @@ impl<'a, 'w> Umpire<'a, 'w> {
         }
     }
 
-    /// Applies a decided [`Outcome`] and announces it.
-    pub(super) fn resolve_contact(&mut self, outcome: Outcome, runners_going: bool) {
+    /// Applies a decided [`Outcome`] and announces it. `bunted` names a
+    /// ground out that moved the runners up a sacrifice.
+    pub(super) fn resolve_contact(&mut self, outcome: Outcome, runners_going: bool, bunted: bool) {
         let before = self.score.outs;
+        let aboard = (0..self.bases.count()).any(|b| self.bases.is_occupied(b));
         match outcome {
             Outcome::Foul => {
                 rules::foul(self.score, self.rules);
@@ -214,6 +221,13 @@ impl<'a, 'w> Umpire<'a, 'w> {
                     "OUT AT THE PLATE!"
                 } else if play.runs > 0 && matches!(kind, OutKind::Fly { .. }) {
                     "SAC FLY"
+                } else if bunted
+                    && aboard
+                    && kind == OutKind::Ground
+                    && self.score.outs == before + 1
+                {
+                    // The out at first bought the runners a base.
+                    "SAC BUNT"
                 } else {
                     match kind {
                         OutKind::Ground => "GROUND OUT",
@@ -275,11 +289,24 @@ impl<'a, 'w> Umpire<'a, 'w> {
                     }
                 }
             }
+            Outcome::ThrowingError => {
+                self.hit(1, "ERROR!", BannerTone::Good, runners_going);
+            }
             // A home run is worth one more base than the field has.
             Outcome::HomeRun => {
                 let bases_worth = self.bases.count() as u32 + 1;
                 self.hit(bases_worth, "HOME RUN!", BannerTone::Epic, runners_going);
             }
+        }
+    }
+
+    /// The defense puts the batter on: first base, forced runners move.
+    pub(super) fn intentional_walk(&mut self) {
+        let runs = rules::intentional_walk(self.score, self.bases);
+        if runs > 0 {
+            self.announce_scoring(format!("INTENTIONAL WALK  +{runs}"), BannerTone::Good);
+        } else {
+            self.announce("INTENTIONAL WALK", BannerTone::Info);
         }
     }
 
@@ -291,6 +318,18 @@ impl<'a, 'w> Umpire<'a, 'w> {
             self.announce_scoring("HIT BY PITCH", BannerTone::Epic);
         } else {
             self.announce("HIT BY PITCH", BannerTone::Good);
+        }
+    }
+
+    /// The pitch got by the catcher with runners aboard: everyone moves up
+    /// a base. Called after the pitch's own ball/strike call, so its banner
+    /// is the one that shows.
+    pub(super) fn wild_pitch(&mut self) {
+        let runs = rules::wild_pitch(self.score, self.bases);
+        if runs > 0 {
+            self.announce_scoring("WILD PITCH", BannerTone::Good);
+        } else {
+            self.announce("WILD PITCH", BannerTone::Good);
         }
     }
 

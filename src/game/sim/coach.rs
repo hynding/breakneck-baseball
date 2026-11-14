@@ -157,6 +157,7 @@ struct WorldFacts<'w> {
     field: Res<'w, FieldSpec>,
     active: Res<'w, ActivePlay>,
     settled: Res<'w, RunnersSettled>,
+    wind: Res<'w, rules::Wind>,
 }
 
 /// The play-by-play reports the per-frame tracker consumes.
@@ -286,6 +287,7 @@ fn build_snapshot(
         && state.crossing.is_some()
         && !state.contacted
         && !dropped_third
+        && !facts.play.pitch_got_away()
         && !hbp
         && !dirt;
 
@@ -316,6 +318,7 @@ fn build_snapshot(
                     vel.angvel,
                     BALL_DRAG_FACTOR,
                     MAGNUS_FACTOR,
+                    facts.wind.0,
                 )
                 .0
             },

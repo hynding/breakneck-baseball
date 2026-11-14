@@ -272,7 +272,7 @@ pub(super) fn umpire_signals(
             Some(Outcome::ExtraBase { safe: false, .. }) => {
                 (nearest_to_call(), AnimClip::UmpPunchOut)
             }
-            Some(Outcome::Hit(_) | Outcome::ExtraBase { .. }) => {
+            Some(Outcome::Hit(_) | Outcome::ExtraBase { .. } | Outcome::ThrowingError) => {
                 (nearest_to_call(), AnimClip::UmpSafe)
             }
             _ => return,

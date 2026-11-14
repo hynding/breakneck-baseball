@@ -44,6 +44,7 @@ mod gltf_model;
 mod gltf_rig;
 mod home_run_moment;
 mod identity;
+mod manager_calls;
 mod matrix;
 mod menu_cursor;
 mod menu_tap;

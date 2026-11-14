@@ -293,6 +293,23 @@ pub fn throw_target(
     }
 }
 
+/// An infielder's throw to first beating the batter by under this many
+/// seconds is a hurried one.
+pub const ERROR_HURRY_SECS: f32 = 0.15;
+/// A hurried throw longer than this (metres) can sail: the deep-in-the-hole
+/// plays from short and third.
+pub const ERROR_THROW_M: f32 = 25.0;
+
+/// Does an infielder's throw to first sail past the bag? Only a long throw
+/// made in a hurry — `margin_secs` is how much it would have beaten the
+/// batter by, `throw_m` its length. Deterministic, keyed off the race the
+/// engine already ran (no dice in the rules): the realism harness measures
+/// 0.44 per team-game, close to MLB's 0.50 errors of every kind (per
+/// docs/BASEBALL.md, "Errors").
+pub fn throw_sails(margin_secs: f32, throw_m: f32) -> bool {
+    margin_secs < ERROR_HURRY_SECS && throw_m > ERROR_THROW_M
+}
+
 /// One forced runner's time to the next bag: a standing start at contact,
 /// minus the hit-and-run head start when the runners broke with the windup.
 /// `speed_factor` is his [`super::Runner::speed_factor`].
@@ -392,7 +409,12 @@ pub fn resolve_thrown(
         && runner_clock > throw_at(base_pos(target)) + rules.pace.runner_margin_secs
     {
         if target == 0 {
-            // The sure out at first: just the batter.
+            // The out at first — unless a long, hurried throw sails on the
+            // infielder (never on a peg, where the throw is at the runner).
+            let margin = runner_clock - throw_at(base_pos(0)) - rules.pace.runner_margin_secs;
+            if !rules.counts.peg_outs && throw_sails(margin, flat_dist(pos, base_pos(0))) {
+                return Outcome::ThrowingError;
+            }
             return Outcome::Out(if rules.counts.peg_outs {
                 OutKind::Pegged
             } else {

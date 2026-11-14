@@ -39,6 +39,10 @@ pub struct TeamIntent {
     /// pickoff throw on defense, a steal call on offense (E / Right-Shift /
     /// pad East).
     pub secondary: bool,
+    /// The manager's call was pressed this frame: squaring around to bunt
+    /// on offense (pressed again, pulling back), an intentional walk on
+    /// defense (Q / Slash / pad North).
+    pub tactic: bool,
     /// Absolute zone-plane cursor (world x / height, meters), for devices
     /// that aim by position rather than velocity — today the Zone Pad touch
     /// scheme. `None` for sticks/keys; the PCI adapter snaps to it when set.
@@ -58,6 +62,7 @@ impl TeamIntent {
         self.action |= preferred.action;
         self.action_held |= preferred.action_held;
         self.secondary |= preferred.secondary;
+        self.tactic |= preferred.tactic;
         self.cursor = preferred.cursor.or(self.cursor);
     }
 }
@@ -131,6 +136,15 @@ impl KeyScheme {
         match self {
             KeyScheme::Primary => KeyCode::KeyE,
             KeyScheme::Secondary => KeyCode::ShiftRight,
+        }
+    }
+
+    /// The scheme's manager's-call key (bunt on offense, intentional walk
+    /// on defense): Q beside WASD, Slash beside the arrows' Right-Shift.
+    pub fn tactic_key(self) -> KeyCode {
+        match self {
+            KeyScheme::Primary => KeyCode::KeyQ,
+            KeyScheme::Secondary => KeyCode::Slash,
         }
     }
 
@@ -407,6 +421,7 @@ fn gamepad_intent(pad: &Gamepad) -> TeamIntent {
         action: pad.just_pressed(GamepadButton::South),
         action_held: pad.pressed(GamepadButton::South),
         secondary: pad.just_pressed(GamepadButton::East),
+        tactic: pad.just_pressed(GamepadButton::North),
         // Struct-update: channels a physical device can never produce (the
         // absolute cursor) stay at their defaults without a per-channel
         // edit at every constructor.
@@ -455,6 +470,7 @@ fn keyboard_intent(keyboard: &ButtonInput<KeyCode>, scheme: KeyScheme) -> TeamIn
         action: keyboard.just_pressed(action),
         action_held: keyboard.pressed(action),
         secondary: keyboard.just_pressed(secondary),
+        tactic: keyboard.just_pressed(scheme.tactic_key()),
         ..default()
     }
 }

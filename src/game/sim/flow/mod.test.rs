@@ -95,6 +95,35 @@ fn plate_appearance_ends_on_strikeout_walk_and_batted_ball() {
     assert!(!Play::default().walkup_active());
 }
 
+#[test]
+fn the_days_wind_is_light_to_brisk_from_anywhere() {
+    let mph = |w: Vec3| w.length() / rules::MPS_PER_MPH;
+    assert!((mph(wind_from(0.0, 0.3)) - 2.0).abs() < 1e-3);
+    assert!((mph(wind_from(1.0, 0.3)) - 14.0).abs() < 1e-3);
+    // Mostly light: the median draw is 5 mph.
+    assert!((mph(wind_from(0.5, 0.0)) - 5.0).abs() < 1e-3);
+    // Direction spans the compass, and the wind is always horizontal.
+    let out = wind_from(0.7, 0.0);
+    let left = wind_from(0.7, 0.25);
+    assert!(out.z > 0.0 && out.x.abs() < 1e-3);
+    assert!(left.x > 0.0 && left.z.abs() < 1e-3);
+    assert_eq!(wind_from(0.4, 0.6).y, 0.0);
+}
+
+#[test]
+fn calm_wind_keeps_the_day_still() {
+    let mut app = App::new();
+    app.init_resource::<Time>()
+        .insert_resource(rules::Wind(Vec3::X))
+        .insert_resource(CalmWind)
+        .add_systems(Update, draw_wind);
+    app.update();
+    assert_eq!(app.world().resource::<rules::Wind>().0, Vec3::ZERO);
+    app.world_mut().remove_resource::<CalmWind>();
+    app.update();
+    assert_ne!(app.world().resource::<rules::Wind>().0, Vec3::ZERO);
+}
+
 /// Drives [`track_mojo`] through a few hand-made plate appearances.
 #[test]
 fn track_mojo_scores_each_finished_plate_appearance() {
@@ -145,4 +174,64 @@ fn track_mojo_scores_each_finished_plate_appearance() {
     );
     assert_eq!(mojo.batter(Team::Away, 4), 0.0);
     assert!(mojo.pitcher(Team::Home) < 0.0);
+}
+
+fn walk_off_app(inning: u32, top: bool, home: u32, away: u32) -> App {
+    let mut app = App::new();
+    app.insert_resource(crate::game::ScoreBoard {
+        inning,
+        top_of_inning: top,
+        home_runs: home,
+        away_runs: away,
+        ..Default::default()
+    })
+    .insert_resource(crate::game::variant::VariantId::Standard.rules())
+    .init_resource::<Play>()
+    .add_message::<PlayBanner>()
+    .add_systems(Update, watch_walk_off);
+    app.update();
+    app
+}
+
+fn score_home(app: &mut App) {
+    app.world_mut()
+        .resource_mut::<crate::game::ScoreBoard>()
+        .home_runs += 1;
+    app.update();
+}
+
+#[test]
+fn the_go_ahead_run_in_the_bottom_of_the_last_inning_walks_it_off() {
+    let innings = crate::game::variant::VariantId::Standard
+        .rules()
+        .counts
+        .innings;
+    let mut app = walk_off_app(innings, false, 3, 3);
+    assert!(!app.world().resource::<Play>().is_walk_off());
+    score_home(&mut app);
+    assert!(app.world().resource::<Play>().is_walk_off());
+    // Extra innings too.
+    let mut app = walk_off_app(innings + 2, false, 5, 5);
+    score_home(&mut app);
+    assert!(app.world().resource::<Play>().is_walk_off());
+}
+
+#[test]
+fn no_walk_off_early_or_when_already_ahead() {
+    let innings = crate::game::variant::VariantId::Standard
+        .rules()
+        .counts
+        .innings;
+    // The bottom of an earlier inning.
+    let mut app = walk_off_app(innings - 1, false, 3, 3);
+    score_home(&mut app);
+    assert!(!app.world().resource::<Play>().is_walk_off());
+    // Still tied after the run.
+    let mut app = walk_off_app(innings, false, 2, 4);
+    score_home(&mut app);
+    assert!(!app.world().resource::<Play>().is_walk_off());
+    // Home already ahead going to the bottom (the game ended after the top).
+    let mut app = walk_off_app(innings, false, 5, 3);
+    score_home(&mut app);
+    assert!(!app.world().resource::<Play>().is_walk_off());
 }

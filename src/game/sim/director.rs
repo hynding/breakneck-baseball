@@ -163,6 +163,9 @@ pub enum ScriptAction {
     /// Raw secondary edge — the running-game button: a pickoff throw on
     /// defense, a steal call on offense.
     Second,
+    /// Raw manager's-call edge: square to bunt (or pull back) on offense,
+    /// an intentional walk on defense.
+    Tactic,
     /// Raw action level (the Swing Meter's load, without the edge).
     HoldPress,
     /// Style-aware swing commit: the director synthesizes whatever input
@@ -436,6 +439,7 @@ fn direct(
                 }
                 ScriptAction::HoldPress => intent.action_held = true,
                 ScriptAction::Second => intent.secondary = true,
+                ScriptAction::Tactic => intent.tactic = true,
                 ScriptAction::Swing => swing_now = true,
                 ScriptAction::Cursor { x, y } => intent.cursor = Some(Vec2::new(x, y)),
                 ScriptAction::ThrowTo(base) => {

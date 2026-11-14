@@ -115,6 +115,7 @@ pub(super) fn spawn_landing_ring(
 #[allow(clippy::type_complexity)]
 pub(super) fn update_landing_ring(
     play: Res<Play>,
+    wind: Res<rules::Wind>,
     ball_q: Query<(&Transform, &Velocity), (With<Baseball>, With<InFlight>, Without<LandingRing>)>,
     mut ring_q: Query<(&mut Transform, &mut Visibility), With<LandingRing>>,
 ) {
@@ -138,6 +139,7 @@ pub(super) fn update_landing_ring(
         vel.angvel,
         BALL_DRAG_FACTOR,
         MAGNUS_FACTOR,
+        wind.0,
     );
     if Vec2::new(landing.x, landing.z).length() < RING_HOME_SUPPRESS_M {
         if *visibility != Visibility::Hidden {
@@ -322,6 +324,8 @@ pub(super) struct Fireworks {
     remaining: Timer,
     next: Timer,
     perfect: bool,
+    /// The walk-off flag as of last frame, so a walk-off starts one show.
+    walk_off_seen: bool,
 }
 
 /// The home run is a moment: on a ball over the fence, launch a fireworks show
@@ -338,6 +342,9 @@ pub(super) fn home_run_fireworks(
     mut commands: Commands,
 ) {
     let Some(assets) = assets else { return };
+    // A walk-off that wasn't a home run gets the same show, once.
+    let walk_off_now = play.is_walk_off() && !show.walk_off_seen;
+    show.walk_off_seen = play.is_walk_off();
     for ev in in_play.read() {
         if matches!(ev.kind, ContactKind::HomeRun) {
             show.active = true;
@@ -345,6 +352,12 @@ pub(super) fn home_run_fireworks(
             show.remaining = Timer::from_seconds(FIREWORKS_SECS, TimerMode::Once);
             show.next = Timer::from_seconds(0.0, TimerMode::Once); // first burst at once
         }
+    }
+    if walk_off_now && !show.active {
+        show.active = true;
+        show.perfect = true;
+        show.remaining = Timer::from_seconds(FIREWORKS_SECS, TimerMode::Once);
+        show.next = Timer::from_seconds(0.0, TimerMode::Once);
     }
     if !show.active {
         return;

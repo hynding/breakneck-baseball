@@ -320,6 +320,106 @@ only occasionally misjudging it.
   shipped starting nine averages 50, so the league economy stays where the
   balance sim tuned it while individual runners differ.
 
+## Wind (The Hardball Times; MLB.com Statcast)
+
+- A steady tail or head wind changes the distance of a long fly ball by
+  **three to four feet for every mph** (David Kagan, The Hardball Times, "The
+  Physics of Which Way the Wind Blows"); Alan Nathan puts 5 mph behind a ball
+  at nearly 19 ft of extra carry (MLB.com, "Wind effect"). A 17 mph wind in
+  one Statcast example cost a fly 40 ft.
+- Season-average game-time winds by park (2015 box scores) ran from about
+  2.5 mph (Safeco Field) to 12.4 mph (Marlins Park), 0 under a roof.
+- Modeled as `rules::Wind` (drawn per game, 2–14 mph from any direction,
+  6 mph on average) and `rules::wind_accel`, whose coupling `WIND_DRAG` gives
+  a 400 ft fly about +32 ft for 10 mph blowing out, −29 ft blowing in and
+  ~13 ft of drift across. Only batted balls feel it: a crosswind moves a
+  real pitch about an inch, and the game's coupling, sized for a 4-second
+  fly, plunked batters when it touched pitches. The live ball and every landing prediction
+  integrate the same term; the scoreboard reads the wind like a broadcast
+  ("WIND 8 OUT TO LF").
+
+## Wild pitches and passed balls (Baseball-Reference)
+
+- MLB pitchers threw **0.29 wild pitches per team-game in 2025** (0.30 in
+  2024; Baseball-Reference league pitching averages). Passed balls, charged
+  to the catcher, add a few hundredths more; the game calls both a WILD PITCH.
+- On either, the ball is live: every runner may advance, and the man on third
+  scores. The count is unchanged — the pitch was already a ball or strike.
+- Modeled as `rules::gets_by_catcher` (a pitch crossing under 0.175 m, in the
+  dirt, or more than 0.70 m off the plate's centre) and `rules::wild_pitch`
+  (every runner up one), applied to taken and missed pitches with runners on. The realism harness
+  measures 0.33 per team-game.
+
+## Errors (Baseball-Reference)
+
+- MLB teams made **0.50 errors per game in 2025** (0.53 in 2024, 0.52 in
+  2023; fielding percentage .985–.986), per Baseball-Reference's league
+  fielding averages.
+- An error puts a batter on who should have been out; it is not a hit. On a
+  throw that gets past first base every runner can move up.
+- Modeled as `rules::throw_sails`: an infielder's throw to first that is both
+  long (over 25 m: the deep plays from short and third) and hurried (it would
+  have beaten the batter by under 0.15 s) sails past the bag. The batter is
+  safe at first and every runner moves up one (`Outcome::ThrowingError`).
+  Fielding errors (bobbles, dropped flies) are not modeled; the throwing
+  errors alone land near MLB's total rate: the realism harness measures 0.44
+  per team-game.
+
+## Pitcher fatigue and the bullpen
+
+- MLB starters averaged **85.0 pitches a start in 2025** (85.5 in 2024; AP,
+  citing Elias). Only about one start in nine reaches 100 pitches (the
+  average 2025 AL team had 18 of 162; Baseball-Reference starter pitching).
+- Teams used about **3.3 relievers a game** in 2024–25 (MLB Stats API figures
+  via mlbanalytic.com, a secondary source), so about 4.3 pitchers in all.
+- Velocity fades within a start: starters lost "nearly a full mile per hour"
+  from the first inning to the last (FanGraphs, 2017), and four-seamers ran
+  0.8 mph slower on pitches 71–90 than on pitches 11–30 (FanGraphs, 2021).
+- Results fade too: from 2016 to 2025, starters' OPS against rose from .713
+  the first time through the order to .747 the second and .780 the third
+  (MLB.com glossary, "Times Through the Order Penalty").
+- Modeled in `game::fatigue`: an arm is fresh until 25 pitches short of its
+  stamina (85 for the starter, 25 for a reliever), then loses 1.1% of its
+  release speed (about 1 mph on a 95 mph heater) and gains 0.12 stick-units
+  of aim wander for every 25 pitches after that. The CPU makes a pitching
+  change between plate appearances once its pitcher reaches his stamina,
+  bringing in the first bench arm that hasn't pitched; a human manager makes
+  his own changes from the pause board, with the count on the walk-up card.
+
+## Bunts and intentional walks
+
+- MLB teams laid down **0.12 sacrifice hits** and issued **0.11 intentional
+  walks per team-game in 2025** (0.09 and 0.10 in 2024), per
+  Baseball-Reference's league batting averages.
+- Since 2017 an intentional walk is signalled from the dugout: no pitches are
+  thrown, the batter takes first, and only forced runners move.
+- A bunt rolled foul with two strikes is strike three. On a sacrifice the
+  runners lean off their secondary leads and break as soon as the ball is
+  down, which is why the defense usually takes the sure out at first.
+- The textbook spots: a sacrifice with nobody out and a runner on first or
+  second, late in a close game; an intentional walk with first base open and
+  a runner in scoring position, to set up a force or face a weaker hitter.
+- Modeled with the manager's-call button (`TeamIntent::tactic`): the offense
+  squares around (`rules::bunt_reaches`, `rules::bunt_velocity`: a 6.5 m/s
+  roller down the third-base line, or toward first with the stick held
+  right; runners get the hit-and-run jump), the defense calls
+  `rules::intentional_walk`. The CPU uses both only late and close
+  (`ai::sac_bunt_spot`, `ai::intentional_walk_spot`).
+
+## Walk-offs (Official Baseball Rules 7.01(g))
+
+- If the home team scores the winning run in its half of the last inning (or
+  of any extra inning), the game ends the moment that run scores. A batter
+  who hits a home run out of the park still rounds every base, and every run
+  on the play counts.
+- Modeled as `flow::watch_walk_off`: in the bottom of the last scheduled
+  inning or later, the home side going from not leading to leading raises
+  WALK-OFF!, holds `Play::is_walk_off` for the celebration (fireworks and
+  the orbit shot, as on a home-run trot), and the game ends through the usual
+  result gate once the play has finished on screen. The final card names
+  the game's biggest scoring play (`game::highlight`), and a walk-off
+  outweighs everything.
+
 ## Rules modeled elsewhere
 
 Count thresholds (4 balls / 3 strikes / 3 outs), the strike zone, tag-ups,
@@ -362,3 +462,15 @@ CLAUDE.md's architecture notes for how each maps.
 - [FanGraphs — Scouting Explained: The 20-80 Scouting Scale](https://blogs.fangraphs.com/scouting-explained-the-20-80-scouting-scale)
 - [MLB.com — Sprint Speed metric now tracks baserunners](https://mlb.com/news/statcast-sprint-speed-tracks-baserunner-speed-c238268162)
 - [MLB.com — Sprint speed shows fastest at each position](https://www.mlb.com/news/sprint-speed-shows-fastest-at-each-position-c238290228)
+- [The Hardball Times — The physics of which way the wind blows](https://tht.fangraphs.com/the-physics-of-which-way-the-wind-blows/)
+- [MLB.com — Wind effect: these ballparks, players were most impacted by the weather](https://www.mlb.com/news/the-big-impact-of-wind-on-baseball-outcomes)
+- [Baseball-Reference — MLB league pitching year-by-year averages](https://www.baseball-reference.com/leagues/majors/pitch.shtml)
+- [Baseball-Reference — MLB league fielding year-by-year averages](https://www.baseball-reference.com/leagues/majors/field.shtml)
+- [AP via News4JAX — Pitchers' average pitches per start, 2025](https://www.news4jax.com/sports/2025/09/30/flamethrowers-rule-mound-as-right-hander-average-4-seam-fastball-reaches-95-mph/)
+- [Baseball-Reference — 2025 AL starter pitching](https://www.baseball-reference.com/leagues/AL/2025-starter-pitching.shtml)
+- [mlbanalytic.com — Bullpen usage patterns](https://mlbanalytic.com/articles/bullpen-usage-patterns.html)
+- [FanGraphs — In-game velocity changes: when fatigue attacks](https://fantasy.fangraphs.com/in-game-velocity-changes-when-fatigue-attacks)
+- [FanGraphs — Are pitchers getting better at holding their velocity?](https://blogs.fangraphs.com/are-pitchers-getting-better-at-holding-their-velocity)
+- [MLB.com — Third time through the order penalty](https://www.mlb.com/glossary/miscellaneous/third-time-through-the-order-penalty)
+- [Baseball-Reference — MLB league batting year-by-year averages](https://www.baseball-reference.com/leagues/majors/bat.shtml)
+- [MLB.com — Official Baseball Rules](https://www.mlb.com/official-information/official-rules)

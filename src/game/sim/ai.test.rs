@@ -306,3 +306,75 @@ fn the_pitcher_goes_after_a_lead_past_the_line() {
         assert!(safe < 0.1);
     }
 }
+
+// ── Manager's calls ───────────────────────────────────────────────────────
+
+fn late(inning: u32, top: bool, home: u32, away: u32) -> ScoreBoard {
+    ScoreBoard {
+        inning,
+        top_of_inning: top,
+        home_runs: home,
+        away_runs: away,
+        ..Default::default()
+    }
+}
+
+fn tweak(mut score: ScoreBoard, f: impl FnOnce(&mut ScoreBoard)) -> ScoreBoard {
+    f(&mut score);
+    score
+}
+
+fn on(occupied: &[usize]) -> Bases {
+    let mut bases = Bases::new(3);
+    for &b in occupied {
+        bases.set(b, true);
+    }
+    bases
+}
+
+#[test]
+fn the_cpu_bunts_only_in_a_late_close_sacrifice_spot() {
+    // Top of the 8th, away (batting) down one, runner on first, nobody out.
+    let spot = late(8, true, 3, 2);
+    assert!(sac_bunt_spot(&spot, &on(&[0]), 9));
+    assert!(sac_bunt_spot(&spot, &on(&[1]), 9));
+    // Not early, not with an out, not with third occupied, not up a run,
+    // not with two strikes, never in a one-inning game.
+    assert!(!sac_bunt_spot(&late(3, true, 3, 2), &on(&[0]), 9));
+    assert!(!sac_bunt_spot(
+        &tweak(late(8, true, 3, 2), |s| s.outs = 1),
+        &on(&[0]),
+        9
+    ));
+    assert!(!sac_bunt_spot(&spot, &on(&[0, 2]), 9));
+    assert!(!sac_bunt_spot(&late(8, true, 2, 3), &on(&[0]), 9));
+    assert!(!sac_bunt_spot(
+        &tweak(late(8, true, 3, 2), |s| s.strikes = 2),
+        &on(&[0]),
+        9
+    ));
+    assert!(!sac_bunt_spot(&late(1, true, 0, 0), &on(&[0]), 1));
+}
+
+#[test]
+fn the_cpu_walks_a_batter_only_with_first_open_and_a_runner_in_scoring_position() {
+    let spot = tweak(late(9, false, 4, 4), |s| s.outs = 1);
+    assert!(intentional_walk_spot(&spot, &on(&[1]), 9));
+    assert!(intentional_walk_spot(&spot, &on(&[1, 2]), 9));
+    assert!(
+        !intentional_walk_spot(&spot, &on(&[0, 1]), 9),
+        "first occupied"
+    );
+    assert!(!intentional_walk_spot(&spot, &on(&[]), 9), "nobody to stop");
+    assert!(
+        !intentional_walk_spot(&late(9, false, 4, 4), &on(&[1]), 9),
+        "nobody out"
+    );
+    let ahead_in_count = tweak(late(9, false, 4, 4), |s| {
+        s.outs = 1;
+        s.balls = 1;
+    });
+    assert!(!intentional_walk_spot(&ahead_in_count, &on(&[1]), 9));
+    let blowout = tweak(late(9, false, 2, 4), |s| s.outs = 1);
+    assert!(!intentional_walk_spot(&blowout, &on(&[1]), 9), "a blowout");
+}

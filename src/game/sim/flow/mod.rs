@@ -30,11 +30,13 @@ use crate::game::ai::{
     CpuConfig, CpuState, apply_difficulty, cpu_defense, cpu_offense, reset_cpu_clock,
     tick_cpu_clock,
 };
+use crate::game::highlight::{BestPlay, PlayFacts};
 use crate::game::mojo::{Mojo, PaResult};
 use crate::game::rules::{self, Bases, BattingOrder, Outcome};
 use crate::game::variant::Ruleset;
 use crate::game::{GameState, Team};
 
+mod bullpen;
 mod live;
 mod pitch;
 mod result;
@@ -217,6 +219,9 @@ pub struct Play {
     duel: DuelState,
     /// The batted ball, from contact to the announced call.
     live: LiveState,
+    /// The home side just won it in its last at-bat ([`watch_walk_off`]):
+    /// held until the game ends, so the celebration plays out.
+    walk_off: bool,
 }
 
 #[derive(Default)]
@@ -229,6 +234,10 @@ struct PitchState {
     /// The kind of the pitch currently in flight (set at release). Drives the
     /// dropped-third-strike and steal resolutions.
     kind: Option<rules::PitchKind>,
+    /// The fraction of release speed the pitch in flight lost to the
+    /// pitcher's fatigue ([`crate::game::fatigue::velocity_scale`]); 0 for a
+    /// fresh arm.
+    speed_fade: f32,
     /// A swing the batter has committed to but whose bat hasn't come
     /// through the zone yet: the press starts the swing, and the judgement
     /// waits [`pitch::SWING_CONTACT_SECS`] for the bat to arrive — so the
@@ -260,6 +269,9 @@ struct PitchState {
     /// read-only seam observers use to recognize a dropped third without
     /// string-matching the banner (the Coach — TODO 59).
     last_strike_call: Option<rules::StrikeCall>,
+    /// The pitch got by the catcher for a wild pitch: it plays to the
+    /// backstop, never the mitt. Cleared at the PrePitch reset.
+    got_away: bool,
 }
 
 struct DuelState {
@@ -293,6 +305,10 @@ struct DuelState {
     /// A throw at a bag in the running game — a pickoff, or the catcher's
     /// throw on a steal — staged from release to tag.
     throw: Option<DuelThrow>,
+    /// The batter has squared around to bunt this pitch, holding the stick
+    /// this way (`aim.x`; right pushes it toward first). Set and cleared
+    /// with the manager's-call button, and wiped when the pitch ends.
+    bunt: Option<f32>,
 }
 
 /// Which running-game throw is in the air.
@@ -400,6 +416,7 @@ impl Default for DuelState {
             pickoff_cooldown: Timer::from_seconds(0.0, TimerMode::Once),
             pitch_queued: false,
             throw: None,
+            bunt: None,
         }
     }
 }
@@ -410,6 +427,9 @@ struct LiveState {
     /// still in the air, and the play stays visually alive (the throw flies,
     /// the batter rounds the bases) until fielding reports it settled.
     pending_call: Option<Outcome>,
+    /// The ball in play was bunted: a ground out that moves runners up is a
+    /// sacrifice, and a foul with two strikes is strike three.
+    bunted: bool,
     /// `Time::elapsed_secs` at contact — the live-play race clock's zero.
     contact_at: f32,
     /// A wall carom has already been called this play (one banner per play).
@@ -486,6 +506,8 @@ impl Play {
     pub fn pending_hit(&self) -> Option<(u32, Option<(usize, bool)>)> {
         match self.live.pending_call {
             Some(Outcome::Hit(n)) => Some((n, None)),
+            // A throw sailing past first: everyone runs one base, as on a single.
+            Some(Outcome::ThrowingError) => Some((1, None)),
             Some(Outcome::ExtraBase { hit, runner, safe }) => Some((hit, Some((runner, safe)))),
             _ => None,
         }
@@ -526,10 +548,30 @@ impl Play {
         self.live.home_run
     }
 
+    /// Whether the home side has just won the game in its last at-bat — the
+    /// walk-off, celebrated (banner, fireworks, the orbit shot) until the
+    /// game ends.
+    pub fn is_walk_off(&self) -> bool {
+        self.walk_off
+    }
+
     /// Whether the catcher gloved this at-bat's last pitch — read by the
     /// camera to hold the at-bat framing through the result pause.
     pub fn pitch_gloved(&self) -> bool {
         self.pitch.gloved
+    }
+
+    /// Where this play's pitch crossed the plate (`None` before it gets
+    /// there; cleared at the next PrePitch) — the point every call on it is
+    /// judged from.
+    pub fn pitch_crossing(&self) -> Option<Vec2> {
+        self.pitch.crossing
+    }
+
+    /// Whether this play's pitch got by the catcher — a wild pitch, which
+    /// legitimately never reaches the mitt (the Coach's exemption).
+    pub fn pitch_got_away(&self) -> bool {
+        self.pitch.got_away
     }
 
     /// The call on this play's last judged strike (`None` before one lands;
@@ -549,8 +591,19 @@ impl Play {
 
     /// The kind of the pitch in flight or just judged (`None` before the
     /// release and after the PrePitch reset) — the speed read-out's source.
+    /// Whether the batter is squared around to bunt this pitch.
+    pub fn bunting(&self) -> bool {
+        self.duel.bunt.is_some()
+    }
+
     pub fn pitch_kind(&self) -> Option<rules::PitchKind> {
         self.pitch.kind
+    }
+
+    /// The pitch in flight's release-speed multiplier from the pitcher's
+    /// fatigue (1.0 for a fresh arm) — the radar gun reads it.
+    pub fn pitch_fatigue_scale(&self) -> f32 {
+        1.0 - self.pitch.speed_fade
     }
 
     /// Which beat the current result pause is showing (`None` outside a
@@ -709,6 +762,7 @@ impl Default for Play {
             pitch: PitchState::default(),
             duel: DuelState::default(),
             live: LiveState::default(),
+            walk_off: false,
         }
     }
 }
@@ -842,6 +896,130 @@ fn sync_batter(
     }
 }
 
+// ── Weather ───────────────────────────────────────────────────────────────────
+
+/// Keeps every game calm ([`rules::Wind`] stays zero). Every headless test
+/// harness inserts it — scripted e2e batted balls are aimed at a set
+/// fielder's spot, and a breeze would carry them off it — and the sims that
+/// measure the economy (`balance_sim`, `realism_sim`) remove it so they
+/// play in the weather a real game gets.
+#[derive(Resource, Default)]
+pub struct CalmWind;
+
+/// The wind for a game from two uniform draws in 0..1: 2–14 mph, mostly
+/// light (2 + 12·u², 6 mph on average — MLB parks' season-average
+/// game-time winds run from about 2.5 to 12 mph, per docs/BASEBALL.md
+/// "Wind"), from any direction.
+pub(crate) fn wind_from(u_speed: f32, u_dir: f32) -> Vec3 {
+    let mph = 2.0 + 12.0 * u_speed.clamp(0.0, 1.0).powi(2);
+    let theta = std::f32::consts::TAU * u_dir;
+    Vec3::new(theta.sin(), 0.0, theta.cos()) * mph * rules::MPS_PER_MPH
+}
+
+/// Draws the day's wind as a game starts. Deterministic for a given game
+/// count and start time, so a headless sim replays exactly.
+fn draw_wind(
+    mut wind: ResMut<rules::Wind>,
+    calm: Option<Res<CalmWind>>,
+    time: Res<Time>,
+    mut games: Local<u32>,
+) {
+    *games += 1;
+    if calm.is_some() {
+        *wind = rules::Wind::default();
+        return;
+    }
+    let seed = *games as f32 * 7.31 + time.elapsed_secs() * 0.37;
+    let u = |k: f32| crate::game::ai::hash01(seed + k);
+    *wind = rules::Wind(wind_from(u(0.0), u(3.7)));
+}
+
+/// Spots the walk-off: in the bottom of the last scheduled inning or any
+/// extra one, the home side goes from not leading to leading — the game is
+/// over the moment that run scores (per docs/BASEBALL.md, "Walk-offs").
+/// Raises the WALK-OFF! banner once and marks [`Play::is_walk_off`] for the
+/// celebration; the call itself (and GAME OVER) stays with the umpire and
+/// the result gate.
+fn watch_walk_off(
+    score: Res<crate::game::ScoreBoard>,
+    rules_res: Res<Ruleset>,
+    mut play: ResMut<Play>,
+    mut banner: MessageWriter<PlayBanner>,
+    mut was_leading: Local<Option<bool>>,
+) {
+    let home_leads = score.home_runs > score.away_runs;
+    let last_licks = !score.top_of_inning && score.inning >= rules_res.counts.innings;
+    let before = was_leading.replace(home_leads);
+    if last_licks && home_leads && before == Some(false) && !play.walk_off {
+        play.walk_off = true;
+        banner.write(PlayBanner::new("WALK-OFF!", BannerTone::Epic));
+    }
+}
+
+/// Weighs every play that scores into [`BestPlay`] for the final card's
+/// "play of the game": the runs it scored, when, whether it put the batting
+/// side ahead, and whether it walked the game off. The call is the
+/// umpire's banner from the same frame.
+fn track_best_play(
+    score: Res<crate::game::ScoreBoard>,
+    rules_res: Res<Ruleset>,
+    play: Res<Play>,
+    mut banners: MessageReader<PlayBanner>,
+    mut best: ResMut<BestPlay>,
+    mut last: Local<Option<(u32, u32, u32, bool)>>,
+) {
+    let call = banners
+        .read()
+        .map(|b| b.text.clone())
+        .filter(|t| t != "WALK-OFF!")
+        .last();
+    let now = (
+        score.home_runs,
+        score.away_runs,
+        score.inning,
+        score.top_of_inning,
+    );
+    let Some((home, away, inning, top)) = last.replace(now) else {
+        return;
+    };
+    // The side that was batting when the runs crossed.
+    let (scored, margin_before, margin_after) = if top {
+        (
+            score.away_runs.saturating_sub(away),
+            away as i32 - home as i32,
+            score.away_runs as i32 - score.home_runs as i32,
+        )
+    } else {
+        (
+            score.home_runs.saturating_sub(home),
+            home as i32 - away as i32,
+            score.home_runs as i32 - score.away_runs as i32,
+        )
+    };
+    if scored == 0 {
+        return;
+    }
+    let walk_off = play.is_walk_off();
+    let call = call.unwrap_or_else(|| format!("+{scored}"));
+    let call = if walk_off {
+        format!("WALK-OFF!  {call}")
+    } else {
+        call
+    };
+    best.offer(
+        &PlayFacts {
+            runs: scored,
+            inning,
+            innings: rules_res.counts.innings,
+            go_ahead: margin_before <= 0 && margin_after > 0,
+            walk_off,
+            home_run: play.is_home_run(),
+        },
+        &call,
+        top,
+    );
+}
+
 /// What [`track_mojo`] remembers between frames: whose plate appearance
 /// is on, and the half-inning, outs and runs as of last frame.
 #[derive(Clone, Copy, PartialEq)]
@@ -929,6 +1107,8 @@ impl Plugin for FlowPlugin {
             .init_resource::<CpuConfig>()
             .init_resource::<CpuState>()
             .init_resource::<Mojo>()
+            .init_resource::<crate::game::fatigue::Fatigue>()
+            .init_resource::<BestPlay>()
             .add_message::<BallInPlayEvent>()
             .add_message::<LiveBallEvent>()
             .add_message::<PitchCaughtEvent>()
@@ -936,12 +1116,19 @@ impl Plugin for FlowPlugin {
             .add_message::<PlayBanner>()
             .add_systems(
                 crate::game::game_start(),
-                (pitch::reset_flow, reset_cpu_clock, apply_difficulty),
+                (
+                    pitch::reset_flow,
+                    reset_cpu_clock,
+                    apply_difficulty,
+                    draw_wind,
+                ),
             )
             .add_systems(
                 Update,
-                track_mojo
+                (track_mojo, watch_walk_off, track_best_play)
+                    .chain()
                     .after(PhaseSet)
+                    .in_set(crate::game::GameplayOrder::Flow)
                     .run_if(in_state(GameState::Playing)),
             )
             .add_systems(
@@ -956,6 +1143,7 @@ impl Plugin for FlowPlugin {
                 // restores that same-frame delivery). It still reads
                 // `cpu_offense`'s intent write from earlier this frame.
                 (
+                    bullpen::cpu_bullpen,
                     sync_batter,
                     tick_cpu_clock,
                     cpu_defense,

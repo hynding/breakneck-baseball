@@ -23,6 +23,16 @@ pub fn call_ball(score: &mut ScoreBoard, bases: &mut Bases, rules: &Ruleset) -> 
     }
 }
 
+/// The defense puts the batter on intentionally: he takes first, forced
+/// runners move up, and the count is wiped — no pitches thrown (the MLB
+/// rule since 2017, per docs/BASEBALL.md). Returns runs forced in.
+pub fn intentional_walk(score: &mut ScoreBoard, bases: &mut Bases) -> u32 {
+    let runs = advance_walk(bases);
+    score.add_runs(runs);
+    reset_count(score);
+    runs
+}
+
 /// Records a strike (called or swinging). The final strike is an out —
 /// unless `dropped_third` (the ball got away and first base was open), in
 /// which case the batter reaches and no out is recorded.

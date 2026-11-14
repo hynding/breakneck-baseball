@@ -15,6 +15,8 @@ fn test_app() -> App {
         .init_state::<GameState>()
         .init_resource::<Play>()
         .add_message::<ContactEvent>()
+        .add_message::<LiveBallEvent>()
+        .insert_resource(crate::game::variant::VariantId::Standard.field())
         .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             Duration::from_secs_f64(1.0 / 60.0),
         ))
@@ -93,4 +95,47 @@ fn juice_disabled_blocks_every_effect() {
             "JuiceDisabled must keep relative_speed untouched"
         );
     }
+}
+
+fn throw_to(app: &mut App, base: usize) {
+    app.world_mut().write_message(LiveBallEvent::Thrown {
+        pos: Vec3::new(0.0, 0.0, 60.0),
+        base,
+        race_time: 3.0,
+        landed_secs: 0.0,
+    });
+}
+
+#[test]
+fn a_throw_home_slows_until_it_reaches_the_catcher() {
+    let mut app = test_app();
+    let home = app.world().resource::<FieldSpec>().base_count();
+    // A throw to first is no play at the plate.
+    throw_to(&mut app, 0);
+    app.update();
+    assert_eq!(speed(&app), 1.0);
+
+    throw_to(&mut app, home);
+    app.update();
+    assert!((speed(&app) - PLATE_SLOWMO_SPEED).abs() < 1e-6);
+    for _ in 0..30 {
+        app.update();
+    }
+    assert!(speed(&app) < 1.0, "still slow while the throw flies");
+    app.world_mut().write_message(LiveBallEvent::Settled);
+    app.update();
+    assert_eq!(speed(&app), 1.0, "full speed once it's in the mitt");
+}
+
+#[test]
+fn a_plate_slowmo_never_outlives_its_watchdog() {
+    let mut app = test_app();
+    let home = app.world().resource::<FieldSpec>().base_count();
+    throw_to(&mut app, home);
+    app.update();
+    // No Settled ever arrives: 5 s of real frames clears the 4.5 s budget.
+    for _ in 0..300 {
+        app.update();
+    }
+    assert_eq!(speed(&app), 1.0);
 }

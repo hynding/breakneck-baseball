@@ -245,6 +245,65 @@ pub fn hit_by_pitch(score: &mut ScoreBoard, bases: &mut Bases) -> u32 {
     runs
 }
 
+// ── Wild pitches ──────────────────────────────────────────────────────────────
+
+/// A pitch crossing the plate this low has bounced in the dirt in front of
+/// it: the catcher can't smother it and it skips to the backstop.
+pub const WILD_PITCH_LOW_M: f32 = 0.175;
+/// A pitch crossing this far to either side of the plate's centre is past
+/// the catcher's reach.
+pub const WILD_PITCH_WIDE_M: f32 = 0.70;
+
+/// Does a pitch that crossed at `crossing` get by the catcher? Keyed off
+/// the crossing alone, like every other call on a pitch — no dice. The two
+/// edges sit in the thin tails of the CPU's pitch spread: in the realism
+/// harness (48 team-games, 2,327 pitches with runners on) they let 16 get
+/// by, 0.33 per team-game against MLB's 0.29 wild pitches plus a few passed
+/// balls (per docs/BASEBALL.md, "Wild pitches and passed balls").
+pub fn gets_by_catcher(crossing: Vec2) -> bool {
+    crossing.y < WILD_PITCH_LOW_M || crossing.x.abs() > WILD_PITCH_WIDE_M
+}
+
+/// A pitch got by the catcher with the ball live: every runner moves up a
+/// base (the man on third scores). The batter's count is untouched — the
+/// pitch was already called. Returns runs scored.
+#[must_use]
+pub fn wild_pitch(score: &mut ScoreBoard, bases: &mut Bases) -> u32 {
+    let runs = super::advance::advance_runners_only(bases, 1);
+    score.add_runs(runs);
+    runs
+}
+
+// ── Bunts ─────────────────────────────────────────────────────────────────────
+
+/// How far off the plate's centre a squared-around batter can still get
+/// the bat on a pitch.
+pub const BUNT_REACH_X: f32 = 0.45;
+/// How far above the zone's top and below its bottom he can still reach it.
+pub const BUNT_REACH_Y: f32 = 0.12;
+/// A bunt's speed off the deadened bat (m/s): about 20 mph, enough to roll
+/// past the plate and die short of the infielders' depth.
+pub const BUNT_SPEED: f32 = 6.5;
+/// How far off straightaway a bunt is pushed toward a line (radians, ~25°).
+pub const BUNT_ANGLE: f32 = 0.44;
+
+/// Can a batter squared around to bunt get the bat on a pitch crossing at
+/// `crossing`? A strike or near it; anything wilder he pulls back from.
+pub fn bunt_reaches(crossing: Vec2) -> bool {
+    crossing.x.abs() <= BUNT_REACH_X
+        && crossing.y >= ZONE_LOW - BUNT_REACH_Y
+        && crossing.y <= ZONE_HIGH + BUNT_REACH_Y
+}
+
+/// The bunt's launch velocity: deadened, angled down into the grass, and
+/// pushed toward the third-base line — or toward first when the batter
+/// held the stick to the right (`aim_x`, screen-right = world −X, first
+/// base's side).
+pub fn bunt_velocity(aim_x: f32) -> Vec3 {
+    let yaw = if aim_x > 0.3 { -BUNT_ANGLE } else { BUNT_ANGLE };
+    Vec3::new(yaw.sin(), -0.12, yaw.cos()).normalize() * BUNT_SPEED
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

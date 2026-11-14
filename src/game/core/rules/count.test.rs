@@ -529,3 +529,21 @@ fn away_leads_after_bottom_nine_ends_game() {
     };
     assert!(is_game_over(&score, 9));
 }
+
+#[test]
+fn an_intentional_walk_forces_only_the_runners_behind() {
+    // Runner on second, first open: the batter takes first, second stays.
+    let mut score = ScoreBoard {
+        balls: 1,
+        strikes: 2,
+        ..Default::default()
+    };
+    let mut bases = with(&[1]);
+    assert_eq!(intentional_walk(&mut score, &mut bases), 0);
+    assert!(bases.is_occupied(0) && bases.is_occupied(1) && !bases.is_occupied(2));
+    assert_eq!((score.balls, score.strikes), (0, 0));
+    // Bases loaded: a run is forced in.
+    let mut bases = with(&[0, 1, 2]);
+    assert_eq!(intentional_walk(&mut score, &mut bases), 1);
+    assert_eq!(score.home_runs + score.away_runs, 1);
+}

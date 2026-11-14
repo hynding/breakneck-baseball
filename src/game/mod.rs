@@ -9,7 +9,7 @@ pub mod model_assets;
 pub mod present;
 pub mod sim;
 
-pub use self::core::{mojo, roster, rules, season, theme, variant};
+pub use self::core::{fatigue, highlight, mojo, roster, rules, season, theme, variant};
 
 /// The Coach facade: the pure expectation checks (`core::coach`) and the
 /// sim-side observer that samples the world for them (`sim::coach`) share
