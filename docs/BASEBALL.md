@@ -386,6 +386,26 @@ only occasionally misjudging it.
   bringing in the first bench arm that hasn't pitched; a human manager makes
   his own changes from the pause board, with the count on the walk-up card.
 
+## Bunts and intentional walks
+
+- MLB teams laid down **0.12 sacrifice hits** and issued **0.11 intentional
+  walks per team-game in 2025** (0.09 and 0.10 in 2024), per
+  Baseball-Reference's league batting averages.
+- Since 2017 an intentional walk is signalled from the dugout: no pitches are
+  thrown, the batter takes first, and only forced runners move.
+- A bunt rolled foul with two strikes is strike three. On a sacrifice the
+  runners lean off their secondary leads and break as soon as the ball is
+  down, which is why the defense usually takes the sure out at first.
+- The textbook spots: a sacrifice with nobody out and a runner on first or
+  second, late in a close game; an intentional walk with first base open and
+  a runner in scoring position, to set up a force or face a weaker hitter.
+- Modeled with the manager's-call button (`TeamIntent::tactic`): the offense
+  squares around (`rules::bunt_reaches`, `rules::bunt_velocity`: a 6.5 m/s
+  roller down the third-base line, or toward first with the stick held
+  right; runners get the hit-and-run jump), the defense calls
+  `rules::intentional_walk`. The CPU uses both only late and close
+  (`ai::sac_bunt_spot`, `ai::intentional_walk_spot`).
+
 ## Rules modeled elsewhere
 
 Count thresholds (4 balls / 3 strikes / 3 outs), the strike zone, tag-ups,
@@ -438,3 +458,4 @@ CLAUDE.md's architecture notes for how each maps.
 - [FanGraphs — In-game velocity changes: when fatigue attacks](https://fantasy.fangraphs.com/in-game-velocity-changes-when-fatigue-attacks)
 - [FanGraphs — Are pitchers getting better at holding their velocity?](https://blogs.fangraphs.com/are-pitchers-getting-better-at-holding-their-velocity)
 - [MLB.com — Third time through the order penalty](https://www.mlb.com/glossary/miscellaneous/third-time-through-the-order-penalty)
+- [Baseball-Reference — MLB league batting year-by-year averages](https://www.baseball-reference.com/leagues/majors/bat.shtml)

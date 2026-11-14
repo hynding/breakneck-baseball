@@ -164,6 +164,7 @@ pub(super) fn pre_pitch(
     mut banner: MessageWriter<PlayBanner>,
     pitcher_q: Query<Entity, With<Pitcher>>,
     mut commands: Commands,
+    mut order: ResMut<BattingOrder>,
 ) {
     if play.phase != Phase::PrePitch {
         return;
@@ -201,7 +202,36 @@ pub(super) fn pre_pitch(
     lead.called &= candidate.is_some();
     lead.extended = (wants_send(offense.aim) || lead.called) && candidate.is_some();
 
+    // The offense's manager's call: square around to bunt this pitch, the
+    // stick's side picking the line — pressed again, he pulls back.
+    if offense.tactic {
+        play.duel.bunt = match play.duel.bunt {
+            Some(_) => None,
+            None => Some(offense.aim.x),
+        };
+        let text = if play.duel.bunt.is_some() {
+            "SQUARES TO BUNT"
+        } else {
+            "PULLS BACK"
+        };
+        banner.write(PlayBanner::new(text, super::BannerTone::Info));
+    }
+
     let intent = intents.get(score.fielding_team());
+    // The defense's manager's call: put the batter on intentionally. No
+    // pitches are thrown (per docs/BASEBALL.md, "Bunts and intentional
+    // walks"); the plate appearance ends as a walk.
+    if intent.tactic {
+        let batter = score.batting_team();
+        Umpire::new(&mut score, &mut bases, &rules_res, &mut banner).intentional_walk();
+        order.advance(batter);
+        play.duel.pitch_queued = false;
+        lead.lead_m = rules::LEAD_NORMAL_M;
+        lead.extended = false;
+        lead.called = false;
+        end_pitch(&mut play, &rules_res.pace, ResultBeat::Walk);
+        return;
+    }
     // The defense's running-game button throws over to the lead runner's
     // bag — any time before the delivery, one throw per reload, so a held
     // button can't spam the bag. The race is decided as the ball leaves
@@ -463,6 +493,36 @@ pub(super) fn pitch_live(
         }
     }
 
+    // A batter squared around to bunt offers as the pitch reaches the front
+    // of the plate — unless he swung away instead. Within reach he gets the
+    // deadened bat on it; anything wilder he pulls back from and takes.
+    if let Some(bunt_aim) = play.duel.bunt.filter(|_| play.pitch.swing.is_none())
+        && pos.z <= CONTACT_Z_MAX
+    {
+        play.duel.bunt = None;
+        if rules::bunt_reaches(Vec2::new(pos.x, pos.y)) {
+            play.live.bunted = true;
+            // The runners were leaning from their secondary leads and broke
+            // the moment the ball was down — the hit-and-run's head start,
+            // which is what makes a sacrifice cost the defense the lead
+            // force (per docs/BASEBALL.md, "Bunts and intentional walks").
+            play.duel.armed |= rules::steal_candidate(&bases).is_some();
+            ball.translation.z = pos.z.clamp(CONTACT_Z_MIN, CONTACT_Z_MAX);
+            let mut ump = Umpire::new(&mut score, &mut bases, &rules, &mut banner);
+            put_in_play(
+                rules::bunt_velocity(bunt_aim),
+                time.elapsed_secs(),
+                (&field, wind.0),
+                &mut play,
+                (&mut hit_ev, &mut in_play_ev),
+                &mut ump,
+                &mut order,
+                batter,
+            );
+            return;
+        }
+    }
+
     if let Some(PendingSwing { input: swing, .. }) =
         play.pitch.swing.filter(|s| time.elapsed_secs() >= s.at)
     {
@@ -525,26 +585,17 @@ pub(super) fn pitch_live(
                 // The ball leaves the bat from the contact band, not from
                 // wherever the timing read it (see `CONTACT_Z_MIN`).
                 ball.translation.z = pos.z.clamp(CONTACT_Z_MIN, CONTACT_Z_MAX);
-                hit_ev.write(HitEvent { velocity });
-                let (landing, hang_time) = rules::predict_landing(
-                    velocity,
-                    rules::hit_spin(velocity),
-                    crate::game::ball::BALL_DRAG_FACTOR,
-                    crate::game::ball::MAGNUS_FACTOR,
-                    wind.0,
-                );
-                let kind = rules::classify_contact(landing, &field);
-                let contact_class = rules::contact_class(landing, hang_time, &field);
-                in_play_ev.write(BallInPlayEvent {
-                    kind,
-                    landing,
-                    launch: velocity,
-                    contact_class,
-                });
-                play.live.contact_at = time.elapsed_secs();
-                play.phase = Phase::InPlay;
                 let mut ump = Umpire::new(&mut score, &mut bases, &rules, &mut banner);
-                settle_batted_ball(kind, hang_time, &mut play, &mut ump, &mut order, batter);
+                put_in_play(
+                    velocity,
+                    time.elapsed_secs(),
+                    (&field, wind.0),
+                    &mut play,
+                    (&mut hit_ev, &mut in_play_ev),
+                    &mut ump,
+                    &mut order,
+                    batter,
+                );
             }
             // A foul tip: a strike (never the third — see `rules::foul`). The
             // ball is dead, so runners hold (no steal is resolved) and the
@@ -759,6 +810,44 @@ pub(super) fn steal_throw(
 /// settled at contact. Everything else stays live — the fielders' chase and
 /// the runner races decide the call in `resolve_live_play` — and the timer is
 /// the backstop, sized off the predicted hang time.
+/// Launches a batted ball (swung or bunted) into live play: the physics
+/// kick, the predicted landing for everyone who reads it, and the call for
+/// anything physics already settles (a home run).
+#[allow(clippy::too_many_arguments)]
+fn put_in_play(
+    velocity: Vec3,
+    now: f32,
+    (field, wind): (&FieldSpec, Vec3),
+    play: &mut Play,
+    (hit_ev, in_play_ev): (
+        &mut MessageWriter<HitEvent>,
+        &mut MessageWriter<BallInPlayEvent>,
+    ),
+    ump: &mut Umpire,
+    order: &mut BattingOrder,
+    batter: crate::game::Team,
+) {
+    hit_ev.write(HitEvent { velocity });
+    let (landing, hang_time) = rules::predict_landing(
+        velocity,
+        rules::hit_spin(velocity),
+        crate::game::ball::BALL_DRAG_FACTOR,
+        crate::game::ball::MAGNUS_FACTOR,
+        wind,
+    );
+    let kind = rules::classify_contact(landing, field);
+    let contact_class = rules::contact_class(landing, hang_time, field);
+    in_play_ev.write(BallInPlayEvent {
+        kind,
+        landing,
+        launch: velocity,
+        contact_class,
+    });
+    play.live.contact_at = now;
+    play.phase = Phase::InPlay;
+    settle_batted_ball(kind, hang_time, play, ump, order, batter);
+}
+
 fn settle_batted_ball(
     kind: rules::ContactKind,
     hang_time: f32,
@@ -770,7 +859,7 @@ fn settle_batted_ball(
     match kind {
         rules::ContactKind::HomeRun => {
             play.live.home_run = true;
-            ump.resolve_contact(Outcome::HomeRun, play.duel.armed);
+            ump.resolve_contact(Outcome::HomeRun, play.duel.armed, false);
             order.advance(batter);
             play.timer = Timer::from_seconds(
                 (hang_time + INPLAY_BUFFER).clamp(INPLAY_MIN, INPLAY_MAX),

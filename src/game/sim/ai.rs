@@ -464,13 +464,61 @@ pub(crate) fn fit_aim_to_kind(aim: Vec2, kind: PitchKind) -> Vec2 {
 // ── Defense: the AI pitches ───────────────────────────────────────────────────
 
 #[allow(clippy::too_many_arguments)]
+/// The late, close spots where a manager plays for one run: the last three
+/// innings of a game of at least three, with the batting side tied or down
+/// one (or, for the defense's read, up one or tied).
+fn late_and_close(score: &ScoreBoard, innings: u32, batting_margin: i32) -> bool {
+    innings >= 3 && score.inning + 2 >= innings && (-1..=0).contains(&batting_margin)
+}
+
+/// The batting side's margin (its runs minus the defense's).
+fn batting_margin(score: &ScoreBoard) -> i32 {
+    let (bat, field) = match score.batting_team() {
+        crate::game::Team::Home => (score.home_runs, score.away_runs),
+        crate::game::Team::Away => (score.away_runs, score.home_runs),
+    };
+    bat as i32 - field as i32
+}
+
+/// Does the CPU lay down a sacrifice bunt here? Nobody out, a runner on
+/// first or second (third open, so nobody is forced home), fewer than two
+/// strikes, late and close — the textbook spot (per docs/BASEBALL.md, "Bunts
+/// and intentional walks").
+pub(crate) fn sac_bunt_spot(score: &ScoreBoard, bases: &Bases, innings: u32) -> bool {
+    score.outs == 0
+        && score.strikes < 2
+        && (bases.is_occupied(0) || bases.is_occupied(1))
+        && !bases.is_occupied(2)
+        && late_and_close(score, innings, batting_margin(score))
+}
+
+/// Does the CPU put this batter on intentionally? First base open with a
+/// runner in scoring position and somebody out (setting up a force, short
+/// of the inning-ending double play being the only way out), at the start
+/// of the plate appearance, late and close.
+pub(crate) fn intentional_walk_spot(score: &ScoreBoard, bases: &Bases, innings: u32) -> bool {
+    score.balls == 0
+        && score.strikes == 0
+        && score.outs >= 1
+        && !bases.is_occupied(0)
+        && (bases.is_occupied(1) || bases.is_occupied(2))
+        && late_and_close(score, innings, batting_margin(score))
+}
+
+/// How often the CPU takes a sacrifice-bunt or intentional-walk spot, per
+/// pitch: managers pass on most of them (MLB: about 0.1 of each per
+/// team-game, per docs/BASEBALL.md).
+const SAC_BUNT_RATE: f32 = 0.25;
+const INTENTIONAL_WALK_RATE: f32 = 0.2;
+
+#[allow(clippy::too_many_arguments)]
 pub fn cpu_defense(
     time: Res<Time>,
     controllers: Res<Controllers>,
     cfg: Res<CpuConfig>,
     score: Res<ScoreBoard>,
     play: Res<Play>,
-    lead: Res<LeadState>,
+    (lead, bases, rules): (Res<LeadState>, Res<Bases>, Res<Ruleset>),
     mut cpu: ResMut<CpuState>,
     mut intents: ResMut<Intents>,
     mut pitch_override: ResMut<PitchOverride>,
@@ -479,6 +527,12 @@ pub fn cpu_defense(
     if controllers.source(team) != InputSource::Cpu {
         return;
     }
+    // The manager's call: an intentional walk, decided at the start of the
+    // plate appearance (the walk-up hold has to clear before it lands).
+    intents.get_mut(team).tactic = play.phase == Phase::PrePitch
+        && !play.walkup_active()
+        && intentional_walk_spot(&score, &bases, rules.counts.innings)
+        && cpu.roll(7.3) < INTENTIONAL_WALK_RATE;
 
     // Read the hitter: a fresh count at the wind-up starts a new plate
     // appearance; any press during the pitch is an offer.
@@ -628,6 +682,13 @@ pub fn cpu_offense(
     if controllers.source(team) != InputSource::Cpu {
         return;
     }
+    // The manager's call: square around to bunt in a sacrifice spot,
+    // decided pitch by pitch (pressed once — the press toggles).
+    intents.get_mut(team).tactic = play.phase == Phase::PrePitch
+        && !play.walkup_active()
+        && !play.bunting()
+        && sac_bunt_spot(&score, &bases, rules.counts.innings)
+        && cpu.roll(7.7) < SAC_BUNT_RATE;
 
     // Reset the per-pitch decisions before each delivery. In the steal
     // window the AI occasionally stretches the lead — the early break: a
