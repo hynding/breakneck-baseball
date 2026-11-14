@@ -489,6 +489,8 @@ impl Play {
     pub fn pending_hit(&self) -> Option<(u32, Option<(usize, bool)>)> {
         match self.live.pending_call {
             Some(Outcome::Hit(n)) => Some((n, None)),
+            // A throw sailing past first: everyone runs one base, as on a single.
+            Some(Outcome::ThrowingError) => Some((1, None)),
             Some(Outcome::ExtraBase { hit, runner, safe }) => Some((hit, Some((runner, safe)))),
             _ => None,
         }

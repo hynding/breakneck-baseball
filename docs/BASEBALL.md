@@ -350,6 +350,21 @@ only occasionally misjudging it.
   (every runner up one), applied to taken and missed pitches with runners on. The realism harness
   measures 0.33 per team-game.
 
+## Errors (Baseball-Reference)
+
+- MLB teams made **0.50 errors per game in 2025** (0.53 in 2024, 0.52 in
+  2023; fielding percentage .985–.986), per Baseball-Reference's league
+  fielding averages.
+- An error puts a batter on who should have been out; it is not a hit. On a
+  throw that gets past first base every runner can move up.
+- Modeled as `rules::throw_sails`: an infielder's throw to first that is both
+  long (over 25 m: the deep plays from short and third) and hurried (it would
+  have beaten the batter by under 0.15 s) sails past the bag. The batter is
+  safe at first and every runner moves up one (`Outcome::ThrowingError`).
+  Fielding errors (bobbles, dropped flies) are not modeled; the throwing
+  errors alone land near MLB's total rate: the realism harness measures 0.44
+  per team-game.
+
 ## Rules modeled elsewhere
 
 Count thresholds (4 balls / 3 strikes / 3 outs), the strike zone, tag-ups,
@@ -395,3 +410,4 @@ CLAUDE.md's architecture notes for how each maps.
 - [The Hardball Times — The physics of which way the wind blows](https://tht.fangraphs.com/the-physics-of-which-way-the-wind-blows/)
 - [MLB.com — Wind effect: these ballparks, players were most impacted by the weather](https://www.mlb.com/news/the-big-impact-of-wind-on-baseball-outcomes)
 - [Baseball-Reference — MLB league pitching year-by-year averages](https://www.baseball-reference.com/leagues/majors/pitch.shtml)
+- [Baseball-Reference — MLB league fielding year-by-year averages](https://www.baseball-reference.com/leagues/majors/field.shtml)
