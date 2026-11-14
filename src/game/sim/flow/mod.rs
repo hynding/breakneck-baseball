@@ -293,6 +293,10 @@ struct DuelState {
     /// A throw at a bag in the running game — a pickoff, or the catcher's
     /// throw on a steal — staged from release to tag.
     throw: Option<DuelThrow>,
+    /// The batter has squared around to bunt this pitch, holding the stick
+    /// this way (`aim.x`; right pushes it toward first). Set and cleared
+    /// with the manager's-call button, and wiped when the pitch ends.
+    bunt: Option<f32>,
 }
 
 /// Which running-game throw is in the air.
@@ -400,6 +404,7 @@ impl Default for DuelState {
             pickoff_cooldown: Timer::from_seconds(0.0, TimerMode::Once),
             pitch_queued: false,
             throw: None,
+            bunt: None,
         }
     }
 }
@@ -410,6 +415,9 @@ struct LiveState {
     /// still in the air, and the play stays visually alive (the throw flies,
     /// the batter rounds the bases) until fielding reports it settled.
     pending_call: Option<Outcome>,
+    /// The ball in play was bunted: a ground out that moves runners up is a
+    /// sacrifice, and a foul with two strikes is strike three.
+    bunted: bool,
     /// `Time::elapsed_secs` at contact — the live-play race clock's zero.
     contact_at: f32,
     /// A wall carom has already been called this play (one banner per play).
@@ -549,6 +557,11 @@ impl Play {
 
     /// The kind of the pitch in flight or just judged (`None` before the
     /// release and after the PrePitch reset) — the speed read-out's source.
+    /// Whether the batter is squared around to bunt this pitch.
+    pub fn bunting(&self) -> bool {
+        self.duel.bunt.is_some()
+    }
+
     pub fn pitch_kind(&self) -> Option<rules::PitchKind> {
         self.pitch.kind
     }

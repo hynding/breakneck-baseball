@@ -192,9 +192,11 @@ impl<'a, 'w> Umpire<'a, 'w> {
         }
     }
 
-    /// Applies a decided [`Outcome`] and announces it.
-    pub(super) fn resolve_contact(&mut self, outcome: Outcome, runners_going: bool) {
+    /// Applies a decided [`Outcome`] and announces it. `bunted` names a
+    /// ground out that moved the runners up a sacrifice.
+    pub(super) fn resolve_contact(&mut self, outcome: Outcome, runners_going: bool, bunted: bool) {
         let before = self.score.outs;
+        let aboard = (0..self.bases.count()).any(|b| self.bases.is_occupied(b));
         match outcome {
             Outcome::Foul => {
                 rules::foul(self.score, self.rules);
@@ -214,6 +216,13 @@ impl<'a, 'w> Umpire<'a, 'w> {
                     "OUT AT THE PLATE!"
                 } else if play.runs > 0 && matches!(kind, OutKind::Fly { .. }) {
                     "SAC FLY"
+                } else if bunted
+                    && aboard
+                    && kind == OutKind::Ground
+                    && self.score.outs == before + 1
+                {
+                    // The out at first bought the runners a base.
+                    "SAC BUNT"
                 } else {
                     match kind {
                         OutKind::Ground => "GROUND OUT",
@@ -280,6 +289,16 @@ impl<'a, 'w> Umpire<'a, 'w> {
                 let bases_worth = self.bases.count() as u32 + 1;
                 self.hit(bases_worth, "HOME RUN!", BannerTone::Epic, runners_going);
             }
+        }
+    }
+
+    /// The defense puts the batter on: first base, forced runners move.
+    pub(super) fn intentional_walk(&mut self) {
+        let runs = rules::intentional_walk(self.score, self.bases);
+        if runs > 0 {
+            self.announce_scoring(format!("INTENTIONAL WALK  +{runs}"), BannerTone::Good);
+        } else {
+            self.announce("INTENTIONAL WALK", BannerTone::Info);
         }
     }
 

@@ -174,3 +174,35 @@ fn hit_spin_pulls_toward_the_spray_side() {
     let oppo = hit_spin(Vec3::new(-10.0, 8.0, 20.0));
     assert!(pulled.y * oppo.y < 0.0, "sidespin should flip with spray");
 }
+
+// ── Bunts ─────────────────────────────────────────────────────────────────
+
+#[test]
+fn a_squared_batter_reaches_strikes_and_near_misses_only() {
+    let middle = (ZONE_LOW + ZONE_HIGH) / 2.0;
+    assert!(bunt_reaches(Vec2::new(0.0, middle)));
+    assert!(bunt_reaches(Vec2::new(
+        BUNT_REACH_X - 0.01,
+        ZONE_LOW - 0.05
+    )));
+    assert!(!bunt_reaches(Vec2::new(BUNT_REACH_X + 0.05, middle)));
+    assert!(!bunt_reaches(Vec2::new(
+        0.0,
+        ZONE_LOW - BUNT_REACH_Y - 0.05
+    )));
+    assert!(!bunt_reaches(Vec2::new(
+        0.0,
+        ZONE_HIGH + BUNT_REACH_Y + 0.05
+    )));
+}
+
+#[test]
+fn bunts_go_down_the_third_base_line_unless_pushed_to_first() {
+    // Third base is world +X, first base −X.
+    let third = bunt_velocity(0.0);
+    let first = bunt_velocity(1.0);
+    assert!(third.x > 0.0 && first.x < 0.0);
+    assert!(third.z > 0.0 && first.z > 0.0, "fair, out in front");
+    assert!(third.y < 0.0, "chopped down into the grass");
+    assert!((third.length() - BUNT_SPEED).abs() < 1e-3);
+}

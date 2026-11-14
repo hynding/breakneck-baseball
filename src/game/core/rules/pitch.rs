@@ -245,6 +245,36 @@ pub fn hit_by_pitch(score: &mut ScoreBoard, bases: &mut Bases) -> u32 {
     runs
 }
 
+// ── Bunts ─────────────────────────────────────────────────────────────────────
+
+/// How far off the plate's centre a squared-around batter can still get
+/// the bat on a pitch.
+pub const BUNT_REACH_X: f32 = 0.45;
+/// How far above the zone's top and below its bottom he can still reach it.
+pub const BUNT_REACH_Y: f32 = 0.12;
+/// A bunt's speed off the deadened bat (m/s): about 20 mph, enough to roll
+/// past the plate and die short of the infielders' depth.
+pub const BUNT_SPEED: f32 = 6.5;
+/// How far off straightaway a bunt is pushed toward a line (radians, ~25°).
+pub const BUNT_ANGLE: f32 = 0.44;
+
+/// Can a batter squared around to bunt get the bat on a pitch crossing at
+/// `crossing`? A strike or near it; anything wilder he pulls back from.
+pub fn bunt_reaches(crossing: Vec2) -> bool {
+    crossing.x.abs() <= BUNT_REACH_X
+        && crossing.y >= ZONE_LOW - BUNT_REACH_Y
+        && crossing.y <= ZONE_HIGH + BUNT_REACH_Y
+}
+
+/// The bunt's launch velocity: deadened, angled down into the grass, and
+/// pushed toward the third-base line — or toward first when the batter
+/// held the stick to the right (`aim_x`, screen-right = world −X, first
+/// base's side).
+pub fn bunt_velocity(aim_x: f32) -> Vec3 {
+    let yaw = if aim_x > 0.3 { -BUNT_ANGLE } else { BUNT_ANGLE };
+    Vec3::new(yaw.sin(), -0.12, yaw.cos()).normalize() * BUNT_SPEED
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

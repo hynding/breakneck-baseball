@@ -73,8 +73,11 @@ pub(super) fn resolve_live_play(
         if play.live.pending_call.is_some() && (arrived || play.timer.is_finished()) {
             let outcome = play.live.pending_call.take().unwrap();
             let batter = score.batting_team();
-            Umpire::new(&mut score, &mut bases, &rules_res, &mut banner)
-                .resolve_contact(outcome, play.duel.armed);
+            Umpire::new(&mut score, &mut bases, &rules_res, &mut banner).resolve_contact(
+                outcome,
+                play.duel.armed,
+                play.live.bunted,
+            );
             if outcome != Outcome::Foul {
                 order.advance(batter);
             }
@@ -168,7 +171,25 @@ pub(super) fn resolve_live_play(
     let batter = score.batting_team();
     let going = play.duel.armed;
     let outcome = resolved.unwrap_or(Outcome::Foul);
-    Umpire::new(&mut score, &mut bases, &rules_res, &mut banner).resolve_contact(outcome, going);
+    // A bunt rolled foul with two strikes is strike three (per
+    // docs/BASEBALL.md, "Bunts and intentional walks").
+    if outcome == Outcome::Foul
+        && play.live.bunted
+        && score.strikes + 1 >= rules_res.counts.strikes_per_out
+    {
+        let call =
+            Umpire::new(&mut score, &mut bases, &rules_res, &mut banner).add_strike(true, false);
+        play.pitch.last_strike_call = Some(call);
+        order.advance(batter);
+        play.live.last_outcome = Some(outcome);
+        end_pitch(&mut play, &rules_res.pace, ResultBeat::Strikeout);
+        return;
+    }
+    Umpire::new(&mut score, &mut bases, &rules_res, &mut banner).resolve_contact(
+        outcome,
+        going,
+        play.live.bunted,
+    );
     if outcome != Outcome::Foul {
         order.advance(batter);
     }
