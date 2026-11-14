@@ -508,8 +508,8 @@ pub(crate) fn intentional_walk_spot(score: &ScoreBoard, bases: &Bases, innings: 
 /// How often the CPU takes a sacrifice-bunt or intentional-walk spot, per
 /// pitch: managers pass on most of them (MLB: about 0.1 of each per
 /// team-game, per docs/BASEBALL.md).
-const SAC_BUNT_RATE: f32 = 0.35;
-const INTENTIONAL_WALK_RATE: f32 = 0.35;
+const SAC_BUNT_RATE: f32 = 0.25;
+const INTENTIONAL_WALK_RATE: f32 = 0.2;
 
 #[allow(clippy::too_many_arguments)]
 pub fn cpu_defense(
