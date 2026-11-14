@@ -90,6 +90,9 @@ pub struct StealAttempt {
     /// The lead he broke from (regulation metres, [`LEAD_NORMAL_M`] for a
     /// normal lead).
     pub lead_m: f32,
+    /// The catcher's arm as a multiple of an average one (his
+    /// `Ratings::arm_factor`; 1.0 for an average arm or no catcher).
+    pub catcher_arm: f32,
 }
 
 impl StealAttempt {
@@ -100,6 +103,7 @@ impl StealAttempt {
             crossing: None,
             break_fraction: 0.0,
             lead_m: LEAD_NORMAL_M,
+            catcher_arm: 1.0,
         }
     }
 }
@@ -158,11 +162,17 @@ pub fn steal_race(runner: usize, speed_factor: f32, attempt: &StealAttempt) -> S
     let defense_secs = delivery_secs(attempt.kind)
         + receive_penalty_secs(attempt.crossing)
         + CATCHER_EXCHANGE_SECS
-        + throw_m / CATCHER_THROW_SPEED;
+        + throw_m / catcher_throw_speed(attempt.catcher_arm);
     StealRace {
         runner_secs,
         defense_secs,
     }
+}
+
+/// The catcher's throw speed for an arm `arm` times an average one (floored
+/// so a nonsense factor can't stall the throw).
+fn catcher_throw_speed(arm: f32) -> f32 {
+    CATCHER_THROW_SPEED * arm.max(0.5)
 }
 
 /// What sending the runner produced once the pitch reached the catcher.
@@ -286,8 +296,9 @@ pub fn pickoff_throw_timing() -> ThrowTiming {
 /// The catcher's throw on a steal of the bag after `runner` (0-indexed), as
 /// staged once the pitch is in the mitt: his exchange, then the throw at
 /// [`CATCHER_THROW_SPEED`] — the long throw to second, the short one to
-/// third (the same distances [`steal_race`] times).
-pub fn steal_throw_timing(runner: usize) -> ThrowTiming {
+/// third (the same distances [`steal_race`] times), at his own `arm`
+/// ([`StealAttempt::catcher_arm`]).
+pub fn steal_throw_timing(runner: usize, arm: f32) -> ThrowTiming {
     let throw_m = if runner == 0 {
         2.0 * HALF_DIAGONAL
     } else {
@@ -295,7 +306,7 @@ pub fn steal_throw_timing(runner: usize) -> ThrowTiming {
     };
     ThrowTiming {
         release_secs: CATCHER_EXCHANGE_SECS,
-        flight_secs: throw_m / CATCHER_THROW_SPEED,
+        flight_secs: throw_m / catcher_throw_speed(arm),
     }
 }
 

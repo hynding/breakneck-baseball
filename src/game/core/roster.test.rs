@@ -129,25 +129,85 @@ fn jersey_names_fit_the_procedural_font() {
     }
 }
 
+/// Every grade of a card, by name, for the averaging checks below.
+fn grades(c: &PlayerCard) -> [(&'static str, u8); 5] {
+    let r = c.ratings;
+    [
+        ("speed", r.speed),
+        ("contact", r.contact),
+        ("power", r.power),
+        ("arm", r.arm),
+        ("fielding", r.fielding),
+    ]
+}
+
 #[test]
-fn the_shipped_lineups_average_out_to_a_league_average_runner() {
-    // Ratings spread the runners out without moving the economy the
+fn the_shipped_lineups_average_out_to_league_average_grades() {
+    // Ratings spread the players out without moving the economy the
     // balance sim tuned at "everyone is a 50" — each starting nine (and
-    // each bench) averages exactly 50 speed.
+    // each bench) averages exactly 50 in every grade.
     let r = Rosters::default();
     for roster in [&r.home, &r.away] {
-        for group in [&roster.lineup, &roster.bench] {
-            let total: u32 = group.iter().map(|c| c.ratings.speed as u32).sum();
-            assert_eq!(total, 50 * group.len() as u32);
+        for g in 0..5 {
+            let name = grades(&roster.lineup[0])[g].0;
+            let sum =
+                |group: &[PlayerCard]| -> u32 { group.iter().map(|c| grades(c)[g].1 as u32).sum() };
+            for group in [&roster.lineup, &roster.bench] {
+                assert_eq!(sum(group), 50 * group.len() as u32, "{name}");
+            }
+            assert!(
+                roster.lineup.iter().any(|c| grades(c)[g].1 != 50),
+                "{name} is spread out"
+            );
+            // The top of the order too: the balance sim plays one-inning
+            // games, where the first few hitters take most of the plate
+            // appearances, so a skewed top of the lineup would skew its
+            // economy.
+            assert_eq!(sum(&roster.lineup[..4]), 200, "top-4 {name}");
         }
-        assert!(roster.lineup.iter().any(|c| c.ratings.speed != 50));
-        // The top of the order too: the balance sim plays one-inning games,
-        // where the first few hitters take most of the plate appearances,
-        // so a slow top of the lineup would skew its economy.
-        let top: u32 = roster.lineup[..4]
-            .iter()
-            .map(|c| c.ratings.speed as u32)
-            .sum();
-        assert_eq!(top, 200);
     }
+}
+
+#[test]
+fn grade_factors_are_one_at_fifty_and_clamp_to_the_scale() {
+    let avg = Ratings::AVERAGE;
+    assert_eq!(avg.contact_timing_scale(), 1.0);
+    assert_eq!(avg.power_factor(), 1.0);
+    assert_eq!(avg.arm_factor(), 1.0);
+    assert_eq!(avg.range_factor(), 1.0);
+    let star = Ratings {
+        contact: 70,
+        power: 70,
+        arm: 70,
+        fielding: 70,
+        ..avg
+    };
+    assert!(
+        star.contact_timing_scale() < 1.0,
+        "a good hitter misses by less"
+    );
+    assert!(star.power_factor() > 1.0);
+    assert!(star.arm_factor() > 1.0);
+    assert!(star.range_factor() > 1.0);
+    let off_scale = Ratings {
+        power: 99,
+        arm: 0,
+        ..avg
+    };
+    let top = Ratings { power: 80, ..avg };
+    let bottom = Ratings { arm: 20, ..avg };
+    assert_eq!(off_scale.power_factor(), top.power_factor());
+    assert_eq!(off_scale.arm_factor(), bottom.arm_factor());
+}
+
+#[test]
+fn an_old_file_without_the_new_grades_reads_as_average() {
+    let r: Ratings = ron::from_str("(speed: 65)").unwrap();
+    assert_eq!(
+        r,
+        Ratings {
+            speed: 65,
+            ..Ratings::AVERAGE
+        }
+    );
 }

@@ -390,3 +390,45 @@ fn home_run_carry_tops_out_short_of_500_ft() {
     // A dead-on line-drive-to-fly aim is still a no-doubter.
     assert!(perfect_carry_ft(0.0, Vec2::new(0.0, 0.7)) > 420.0);
 }
+
+/// The power grade (per docs/BASEBALL.md, "Player ratings") stretches that
+/// ceiling only a little: the longest drive an 80 power hitter can hit stays
+/// near the ~505 ft Statcast record, and a 20 still reaches the seats.
+#[test]
+fn the_power_grade_moves_the_longest_drive_only_a_little() {
+    let b = std_rules().batting;
+    let longest = |power: u8| {
+        let factor = crate::game::roster::Ratings {
+            power,
+            ..Default::default()
+        }
+        .power_factor();
+        let mut best = 0.0_f32;
+        for aim_step in -10..=10 {
+            for dt_step in -8..=8 {
+                let dt = b.perfect_ms * dt_step as f32 / 8.0;
+                let aim = Vec2::new(0.0, aim_step as f32 / 10.0);
+                let r = std_rules();
+                let v = apply_contact_quality(
+                    hit_velocity(dt, aim, &r.batting),
+                    ContactQuality::Perfect,
+                    dt,
+                    &r,
+                ) * factor;
+                let (landing, _) = predict_landing(
+                    v,
+                    hit_spin(v),
+                    BALL_DRAG_FACTOR,
+                    crate::game::ball::MAGNUS_FACTOR,
+                    Vec3::ZERO,
+                );
+                best = best.max(Vec2::new(landing.x, landing.z).length() / 0.3048);
+            }
+        }
+        best
+    };
+    let (weak, avg, strong) = (longest(20), longest(50), longest(80));
+    assert!(strong > avg + 15.0, "80 power {strong:.0} vs {avg:.0}");
+    assert!(strong < 525.0, "80 power longest {strong:.0} ft");
+    assert!(weak > 420.0, "20 power longest {weak:.0} ft");
+}

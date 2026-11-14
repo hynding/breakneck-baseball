@@ -9,6 +9,7 @@ use crate::game::animation::{AnimClip, Playing};
 use crate::game::ball::{Baseball, HitEvent, InFlight, PitchEvent};
 use crate::game::input::Intents;
 use crate::game::player::{CatcherRole, Pitcher};
+use crate::game::roster::Ratings;
 use crate::game::rules::{self, Bases, BattingOrder, Outcome, StrikeCall};
 use crate::game::variant::{FieldSpec, Ruleset};
 
@@ -430,6 +431,19 @@ pub(super) fn wind_up(
         play.pitch.kind = Some(kind);
         play.pitch.speed_fade = 1.0 - speed;
         play.duel.jump_lead_m = lead.lead_m;
+        // The catcher's arm for the steal race: the fielder stationed behind
+        // the plate (z < 0); a park without one throws an average arm.
+        play.duel.catcher_arm = field
+            .fielder_positions
+            .iter()
+            .position(|spot| spot.z < 0.0)
+            .map_or(1.0, |i| {
+                rosters
+                    .team(score.fielding_team())
+                    .fielding(Some(i))
+                    .ratings
+                    .arm_factor()
+            });
         play.phase = Phase::Pitch;
     }
 }
@@ -451,7 +465,11 @@ pub(super) fn pitch_live(
     mut contact_ev: MessageWriter<ContactEvent>,
     mut banner: MessageWriter<PlayBanner>,
     mut order: ResMut<BattingOrder>,
-    (mojo, wind): (Res<crate::game::mojo::Mojo>, Res<rules::Wind>),
+    (mojo, wind, rosters): (
+        Res<crate::game::mojo::Mojo>,
+        Res<rules::Wind>,
+        Option<Res<crate::game::roster::Rosters>>,
+    ),
     #[cfg(feature = "debug")] forced: Res<crate::game::debug::ForcedContact>,
 ) {
     if play.phase != Phase::Pitch || play.resolved {
@@ -539,7 +557,15 @@ pub(super) fn pitch_live(
         let raw_dt_ms = swing_dt_ms(pos.z, ball_vel.linvel.z);
         // Mojo: the batter's confidence against the pitcher's stretches or
         // shrinks the miss before it is graded (`Mojo::timing_scale`).
-        let dt_ms = raw_dt_ms * mojo.timing_scale(batter, order.current(batter));
+        // His contact grade does the same from his scouting card
+        // (`Ratings::contact_timing_scale`); his power grade scales the exit
+        // speed of whatever he squares up below.
+        let ratings = rosters.as_ref().map_or(Ratings::AVERAGE, |r| {
+            r.team(batter).batting(order.current(batter)).ratings
+        });
+        let dt_ms = raw_dt_ms
+            * mojo.timing_scale(batter, order.current(batter))
+            * ratings.contact_timing_scale();
         // Classic/Meter grade on timing alone; PCI also folds in how far the
         // aiming cursor sat from the ball at the contact point (spec §3).
         #[allow(unused_mut)]
@@ -584,7 +610,8 @@ pub(super) fn pitch_live(
             | rules::ContactQuality::Solid
             | rules::ContactQuality::Weak => {
                 let base = rules::hit_velocity(dt_ms, aim, &rules.batting);
-                let velocity = rules::apply_contact_quality(base, quality, dt_ms, &rules);
+                let velocity = rules::apply_contact_quality(base, quality, dt_ms, &rules)
+                    * ratings.power_factor();
                 // The ball leaves the bat from the contact band, not from
                 // wherever the timing read it (see `CONTACT_Z_MIN`).
                 ball.translation.z = pos.z.clamp(CONTACT_Z_MIN, CONTACT_Z_MAX);
@@ -764,7 +791,7 @@ fn start_steal_throw(play: &mut Play, ump: &Umpire) {
         play.duel.throw = Some(super::DuelThrow::new(
             super::DuelThrowKind::Steal,
             runner,
-            rules::steal_throw_timing(runner),
+            rules::steal_throw_timing(runner, play.duel.catcher_arm),
             safe,
         ));
     }

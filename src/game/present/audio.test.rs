@@ -281,6 +281,7 @@ fn thrown_and_settled_voices_the_routine_out() {
         base: 1,
         race_time: 1.0,
         landed_secs: 0.0,
+        arm: 1.0,
     });
     app.update();
     assert_eq!(audio_players(&mut app).len(), before + 1, "throw whoosh");
