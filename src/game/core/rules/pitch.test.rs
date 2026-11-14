@@ -174,3 +174,29 @@ fn hit_spin_pulls_toward_the_spray_side() {
     let oppo = hit_spin(Vec3::new(-10.0, 8.0, 20.0));
     assert!(pulled.y * oppo.y < 0.0, "sidespin should flip with spray");
 }
+
+// ── Wild pitches ──────────────────────────────────────────────────────────
+
+#[test]
+fn only_a_pitch_in_the_dirt_or_out_of_reach_gets_by() {
+    assert!(!gets_by_catcher(Vec2::new(0.0, 0.8)));
+    assert!(!gets_by_catcher(Vec2::new(0.5, 0.3)));
+    assert!(gets_by_catcher(Vec2::new(0.0, WILD_PITCH_LOW_M - 0.01)));
+    assert!(gets_by_catcher(Vec2::new(-WILD_PITCH_WIDE_M - 0.01, 0.9)));
+    assert!(gets_by_catcher(Vec2::new(WILD_PITCH_WIDE_M + 0.01, 0.9)));
+}
+
+#[test]
+fn a_wild_pitch_moves_every_runner_up_one() {
+    let mut score = ScoreBoard {
+        balls: 2,
+        strikes: 1,
+        ..Default::default()
+    };
+    let mut bases = with(&[0, 2]);
+    assert_eq!(wild_pitch(&mut score, &mut bases), 1);
+    assert_eq!(bases, with(&[1]));
+    assert_eq!(score.away_runs + score.home_runs, 1);
+    // The count stands: the pitch was already called.
+    assert_eq!((score.balls, score.strikes), (2, 1));
+}

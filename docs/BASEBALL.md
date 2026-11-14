@@ -338,6 +338,18 @@ only occasionally misjudging it.
   integrate the same term; the scoreboard reads the wind like a broadcast
   ("WIND 8 OUT TO LF").
 
+## Wild pitches and passed balls (Baseball-Reference)
+
+- MLB pitchers threw **0.29 wild pitches per team-game in 2025** (0.30 in
+  2024; Baseball-Reference league pitching averages). Passed balls, charged
+  to the catcher, add a few hundredths more; the game calls both a WILD PITCH.
+- On either, the ball is live: every runner may advance, and the man on third
+  scores. The count is unchanged — the pitch was already a ball or strike.
+- Modeled as `rules::gets_by_catcher` (a pitch crossing under 0.175 m, in the
+  dirt, or more than 0.70 m off the plate's centre) and `rules::wild_pitch`
+  (every runner up one), applied to taken and missed pitches with runners on. The realism harness
+  measures 0.33 per team-game.
+
 ## Rules modeled elsewhere
 
 Count thresholds (4 balls / 3 strikes / 3 outs), the strike zone, tag-ups,
@@ -382,3 +394,4 @@ CLAUDE.md's architecture notes for how each maps.
 - [MLB.com — Sprint speed shows fastest at each position](https://www.mlb.com/news/sprint-speed-shows-fastest-at-each-position-c238290228)
 - [The Hardball Times — The physics of which way the wind blows](https://tht.fangraphs.com/the-physics-of-which-way-the-wind-blows/)
 - [MLB.com — Wind effect: these ballparks, players were most impacted by the weather](https://www.mlb.com/news/the-big-impact-of-wind-on-baseball-outcomes)
+- [Baseball-Reference — MLB league pitching year-by-year averages](https://www.baseball-reference.com/leagues/majors/pitch.shtml)

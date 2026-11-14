@@ -260,6 +260,9 @@ struct PitchState {
     /// read-only seam observers use to recognize a dropped third without
     /// string-matching the banner (the Coach — TODO 59).
     last_strike_call: Option<rules::StrikeCall>,
+    /// The pitch got by the catcher for a wild pitch: it plays to the
+    /// backstop, never the mitt. Cleared at the PrePitch reset.
+    got_away: bool,
 }
 
 struct DuelState {
@@ -530,6 +533,19 @@ impl Play {
     /// camera to hold the at-bat framing through the result pause.
     pub fn pitch_gloved(&self) -> bool {
         self.pitch.gloved
+    }
+
+    /// Where this play's pitch crossed the plate (`None` before it gets
+    /// there; cleared at the next PrePitch) — the point every call on it is
+    /// judged from.
+    pub fn pitch_crossing(&self) -> Option<Vec2> {
+        self.pitch.crossing
+    }
+
+    /// Whether this play's pitch got by the catcher — a wild pitch, which
+    /// legitimately never reaches the mitt (the Coach's exemption).
+    pub fn pitch_got_away(&self) -> bool {
+        self.pitch.got_away
     }
 
     /// The call on this play's last judged strike (`None` before one lands;

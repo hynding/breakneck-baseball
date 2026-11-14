@@ -88,6 +88,15 @@ fn log_events(
     };
     let phase = format!("{:?}", play.phase);
     if phase != log.prev_phase {
+        if phase == "Result" {
+            if let Some(c) = play.pitch_crossing() {
+                push(
+                    &mut log,
+                    "cross",
+                    format!(",\"x\":{:.3},\"y\":{:.3}", c.x, c.y),
+                );
+            }
+        }
         push(&mut log, "phase", format!(",\"p\":\"{phase}\""));
         log.prev_phase = phase;
     }

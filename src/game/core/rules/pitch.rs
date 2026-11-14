@@ -245,6 +245,35 @@ pub fn hit_by_pitch(score: &mut ScoreBoard, bases: &mut Bases) -> u32 {
     runs
 }
 
+// ── Wild pitches ──────────────────────────────────────────────────────────────
+
+/// A pitch crossing the plate this low has bounced in the dirt in front of
+/// it: the catcher can't smother it and it skips to the backstop.
+pub const WILD_PITCH_LOW_M: f32 = 0.175;
+/// A pitch crossing this far to either side of the plate's centre is past
+/// the catcher's reach.
+pub const WILD_PITCH_WIDE_M: f32 = 0.70;
+
+/// Does a pitch that crossed at `crossing` get by the catcher? Keyed off
+/// the crossing alone, like every other call on a pitch — no dice. The two
+/// edges sit in the thin tails of the CPU's pitch spread: in the realism
+/// harness (48 team-games, 2,327 pitches with runners on) they let 16 get
+/// by, 0.33 per team-game against MLB's 0.29 wild pitches plus a few passed
+/// balls (per docs/BASEBALL.md, "Wild pitches and passed balls").
+pub fn gets_by_catcher(crossing: Vec2) -> bool {
+    crossing.y < WILD_PITCH_LOW_M || crossing.x.abs() > WILD_PITCH_WIDE_M
+}
+
+/// A pitch got by the catcher with the ball live: every runner moves up a
+/// base (the man on third scores). The batter's count is untouched — the
+/// pitch was already called. Returns runs scored.
+#[must_use]
+pub fn wild_pitch(score: &mut ScoreBoard, bases: &mut Bases) -> u32 {
+    let runs = super::advance::advance_runners_only(bases, 1);
+    score.add_runs(runs);
+    runs
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
