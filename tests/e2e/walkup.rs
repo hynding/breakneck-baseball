@@ -235,6 +235,10 @@ fn a_new_batter_walks_up_and_the_hold_ends_by_timer_or_by_press() {
         !card_line(&mut app, WalkUpLine::Name).is_empty(),
         "the card names the batter"
     );
+    assert!(
+        card_line(&mut app, WalkUpLine::Ratings).starts_with("CON "),
+        "the card shows his grades"
+    );
 
     // The script holds the pitch button the whole time: nothing is thrown
     // until the hold expires on its own (plus the curtain), and the duel

@@ -31,6 +31,9 @@ pub enum WalkUpLine {
     Name,
     Number,
     Slot,
+    /// His scouting grades at the plate and on the bases
+    /// ([`crate::game::roster::Ratings`]): contact, power, speed.
+    Ratings,
     /// His mojo ([`crate::game::mojo`]), named and toned.
     Mojo,
     /// Who he faces and that pitcher's count ([`crate::game::fatigue`]),
@@ -68,6 +71,7 @@ pub(super) fn spawn_walkup_card(mut commands: Commands, theme: Res<Theme>) {
                 (WalkUpLine::Name, 30.0),
                 (WalkUpLine::Number, 22.0),
                 (WalkUpLine::Slot, 14.0),
+                (WalkUpLine::Ratings, 14.0),
                 (WalkUpLine::Mojo, 16.0),
                 (WalkUpLine::Pitcher, 14.0),
             ] {
@@ -137,6 +141,13 @@ pub(super) fn paint_walkup_card(
                     format!("{}  -  AB {slot}/{LINEUP_SIZE}", batting.label()),
                     ui.text_dim,
                 ),
+                WalkUpLine::Ratings => {
+                    let r = card.ratings;
+                    (
+                        format!("CON {}  POW {}  SPD {}", r.contact, r.power, r.speed),
+                        ui.text_primary,
+                    )
+                }
                 WalkUpLine::Mojo => {
                     let score = mojo.as_ref().map_or(0.0, |m| m.batter(batting, slot));
                     let level = MojoLevel::of(score);

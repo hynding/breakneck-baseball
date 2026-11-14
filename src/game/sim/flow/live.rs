@@ -91,14 +91,14 @@ pub(super) fn resolve_live_play(
     let mut resolution: Option<Option<Outcome>> = None;
     for ev in events.read() {
         resolution = match *ev {
-            LiveBallEvent::Caught { pos } => {
+            LiveBallEvent::Caught { pos, arm } => {
                 let kind = rules::resolve_catch(
                     pos,
                     &bases,
                     score.outs,
                     play.runners_going(),
                     &field,
-                    &rules_res,
+                    &rules_res.with_arm(arm),
                 );
                 let outcome = Outcome::Out(kind);
                 if matches!(
@@ -127,6 +127,7 @@ pub(super) fn resolve_live_play(
                 base,
                 race_time,
                 landed_secs,
+                arm,
             } => {
                 let call = rules::runner_call_from_aim(intents.get(score.batting_team()).aim);
                 let outcome = rules::resolve_thrown(
@@ -139,7 +140,7 @@ pub(super) fn resolve_live_play(
                     score.outs,
                     call,
                     &field,
-                    &rules_res,
+                    &rules_res.with_arm(arm),
                 );
                 // The race is decided the moment the ball leaves the hand —
                 // but the play stays visually alive until it lands in the

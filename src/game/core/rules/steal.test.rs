@@ -344,8 +344,8 @@ fn staged_throws_fit_their_races() {
     // The pickoff's staging is the race's own clock, split.
     assert!((pickoff_throw_timing().total_secs() - PICKOFF_THROW_SECS).abs() < 1e-6);
     // The catcher's pop to second is the ~2.0 s average; third is shorter.
-    let second = steal_throw_timing(0).total_secs();
-    let third = steal_throw_timing(1).total_secs();
+    let second = steal_throw_timing(0, 1.0).total_secs();
+    let third = steal_throw_timing(1, 1.0).total_secs();
     assert!((1.9..=2.1).contains(&second), "pop to second {second}");
     assert!(third < second);
     assert_eq!(base_name(0), "1ST");
@@ -378,4 +378,50 @@ fn a_burner_steals_where_an_average_runner_is_caught() {
         fast_safe
     );
     assert!(fast_safe || !average_safe);
+}
+
+#[test]
+fn a_strong_catcher_arm_shortens_the_pop_time() {
+    // Per docs/BASEBALL.md ("Player ratings"): the best pop times to second
+    // run ~1.85-1.9 s and the slowest ~2.1-2.15 s, around the 2.0 s average.
+    let strong = crate::game::roster::Ratings {
+        arm: 70,
+        ..Default::default()
+    }
+    .arm_factor();
+    let weak = crate::game::roster::Ratings {
+        arm: 30,
+        ..Default::default()
+    }
+    .arm_factor();
+    let pop = |arm: f32| steal_throw_timing(0, arm).total_secs();
+    assert!(
+        (1.84..=1.92).contains(&pop(strong)),
+        "70 arm pop {}",
+        pop(strong)
+    );
+    assert!(
+        (2.08..=2.18).contains(&pop(weak)),
+        "30 arm pop {}",
+        pop(weak)
+    );
+    // A runner who just beats an average arm off a slider is out against a
+    // strong one.
+    let close = StealAttempt {
+        break_fraction: 0.2,
+        ..on(PitchKind::Slider)
+    };
+    let race = |arm: f32| {
+        steal_race(
+            0,
+            1.0,
+            &StealAttempt {
+                catcher_arm: arm,
+                ..close
+            },
+        )
+    };
+    let gained = race(1.0).defense_secs - race(strong).defense_secs;
+    assert!((0.08..0.15).contains(&gained), "strong arm gains {gained}");
+    assert_eq!(race(1.0).runner_secs, race(strong).runner_secs);
 }

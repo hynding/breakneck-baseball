@@ -177,7 +177,7 @@ fn log_events(
     }
     for e in live.read() {
         let s = match *e {
-            LiveBallEvent::Caught { pos } => format!(
+            LiveBallEvent::Caught { pos, .. } => format!(
                 ",\"ev\":\"caught\",\"pos\":[{:.2},{:.2},{:.2}]",
                 pos.x, pos.y, pos.z
             ),

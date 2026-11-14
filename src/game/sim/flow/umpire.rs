@@ -183,6 +183,7 @@ impl<'a, 'w> Umpire<'a, 'w> {
             crossing: play.pitch.crossing,
             break_fraction: play.duel.break_fraction,
             lead_m: play.duel.jump_lead_m,
+            catcher_arm: play.duel.catcher_arm,
         }
     }
 

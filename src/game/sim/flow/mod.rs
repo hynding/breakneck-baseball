@@ -292,6 +292,9 @@ struct DuelState {
     /// half of his jump. Only a lead stretched during the window (while the
     /// pickoff threat was live) is longer than normal.
     jump_lead_m: f32,
+    /// The catcher's arm (`Ratings::arm_factor`, 1.0 average), snapshotted
+    /// at release — the defense's half of the steal race.
+    catcher_arm: f32,
     /// The pre-pitch steal window: while running, the pitch is gated and the
     /// leadoff/pickoff duel is live. Zero-length when nobody can steal.
     hold: Timer,
@@ -411,6 +414,7 @@ impl Default for DuelState {
             send_prev: false,
             break_fraction: 0.0,
             jump_lead_m: rules::LEAD_NORMAL_M,
+            catcher_arm: 1.0,
             // Zero-length until `steal_window_for` sizes it at the reset.
             hold: Timer::from_seconds(0.0, TimerMode::Once),
             pickoff_cooldown: Timer::from_seconds(0.0, TimerMode::Once),
@@ -804,8 +808,10 @@ pub struct BallInPlayEvent {
 /// what it means.
 #[derive(Message, Clone, Copy)]
 pub enum LiveBallEvent {
-    /// Gloved on the fly at `pos` (before the first bounce).
-    Caught { pos: Vec3 },
+    /// Gloved on the fly at `pos` (before the first bounce) by a fielder
+    /// whose arm is `arm` times an average one (`Ratings::arm_factor`) —
+    /// the arm a tag-up throw home is raced at.
+    Caught { pos: Vec3, arm: f32 },
     /// First bounce at `pos` — the fair/foul call point.
     Landed { pos: Vec3 },
     /// The gathered ball was thrown from `pos` at `base` (`base_count()` =
@@ -819,6 +825,9 @@ pub enum LiveBallEvent {
         /// When the ball first touched down, on the contact clock (0 if it
         /// never did) — where a runner held halfway starts his read.
         landed_secs: f32,
+        /// The thrower's arm as a multiple of an average one
+        /// (`Ratings::arm_factor`): the race runs at his throw speed.
+        arm: f32,
     },
     /// The thrown ball (relay leg included) has been received and the play
     /// is physically dead — the cue [`resolve_live_play`] waits for before
