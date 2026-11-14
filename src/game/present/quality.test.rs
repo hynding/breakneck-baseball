@@ -212,12 +212,9 @@ fn boot_stutter_and_hitches_do_not_count() {
 fn a_crawling_device_steps_down_too() {
     let mut budget = FrameBudget::new();
     let mut tier = QualityTier::Medium;
-    run_frames(
-        &mut budget,
-        &mut tier,
-        0.4,
-        SETTLE_SECS + 3.0 * FRAME_WINDOW_SECS,
-    );
+    // Capped at a hitch's length, 0.4 s frames fill a window in 16 frames
+    // (6.4 s), so two slow windows land well inside 30 seconds.
+    assert_eq!(run_frames(&mut budget, &mut tier, 0.4, 30.0), 1);
     assert_eq!(tier, QualityTier::Low);
 }
 
