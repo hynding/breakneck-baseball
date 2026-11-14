@@ -1,6 +1,7 @@
-//! Game feel: hit-stop on solid contact, and a slow-motion tail on a
-//! dead-on Perfect swing. Driven entirely by `ContactEvent` quality and
-//! implemented by dialing `Time<Virtual>`'s `relative_speed` — this module
+//! Game feel: hit-stop on solid contact, a slow-motion tail on a dead-on
+//! Perfect swing, and slow motion on a play at the plate (a throw home, from
+//! release until it reaches the catcher). Driven by `ContactEvent` quality
+//! and `LiveBallEvent`s, and implemented by dialing `Time<Virtual>`'s `relative_speed` — this module
 //! is the **only** writer of that speed besides the debug Time tab (both
 //! compose through [`BaseSpeed`]), and it is purely cosmetic: it never
 //! touches `ScoreBoard`/`Bases`/rules outcomes.
@@ -25,8 +26,9 @@
 
 use bevy::prelude::*;
 
-use crate::game::flow::{ContactEvent, Phase, Play};
+use crate::game::flow::{ContactEvent, LiveBallEvent, Phase, Play};
 use crate::game::rules::ContactQuality;
+use crate::game::variant::FieldSpec;
 use crate::game::{GameState, game_start};
 
 /// Insert to skip every hit-stop/slow-mo effect outright. Nothing in the
@@ -65,12 +67,22 @@ const SLOWMO_SPEED: f32 = 0.3;
 /// plus its ~1.67 s slow-mo tail at 0.3x).
 const WATCHDOG_BUDGET_SECS: f32 = 3.0;
 
+/// A play at the plate runs at this speed from the throw's release until it
+/// reaches the catcher (`LiveBallEvent::Settled`) — the bang-bang beat.
+const PLATE_SLOWMO_SPEED: f32 = 0.45;
+/// The plate slow-mo's own real-seconds watchdog: a long throw home flies
+/// up to ~1.5 virtual seconds, about 3.3 real seconds at
+/// [`PLATE_SLOWMO_SPEED`].
+const PLATE_WATCHDOG_SECS: f32 = 4.5;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Stage {
     /// Counting down `FREEZE_FRAMES` at `FREEZE_SPEED`.
     Freeze,
     /// Ticking `SLOWMO_SECS` (virtual) at `SLOWMO_SPEED` — Perfect only.
     SlowMo,
+    /// A throw home in the air, at `PLATE_SLOWMO_SPEED` until it settles.
+    Plate,
 }
 
 /// What the current effect is doing, if anything. `watchdog` runs
@@ -114,7 +126,7 @@ impl Plugin for JuicePlugin {
             .add_systems(game_start(), reset_juice)
             .add_systems(
                 Update,
-                (trigger_juice, tick_freeze, tick_slowmo)
+                (trigger_juice, tick_freeze, tick_slowmo, plate_slowmo)
                     .chain()
                     .run_if(motion_enabled)
                     .run_if(in_state(GameState::Playing)),
@@ -212,6 +224,33 @@ fn tick_slowmo(
     if finished {
         virt.set_relative_speed(base.0);
         state.clear();
+    }
+}
+
+/// A throw home is the play at the plate: slow it from release until the
+/// ball reaches the catcher, where the call is made. A hit-stop or slow-mo
+/// still running from contact yields to it.
+fn plate_slowmo(
+    mut live: MessageReader<LiveBallEvent>,
+    field: Res<FieldSpec>,
+    mut virt: ResMut<Time<Virtual>>,
+    mut state: ResMut<JuiceState>,
+    base: Res<BaseSpeed>,
+) {
+    for ev in live.read() {
+        match *ev {
+            LiveBallEvent::Thrown { base: bag, .. } if bag == field.base_count() => {
+                state.clear();
+                state.stage = Some(Stage::Plate);
+                state.watchdog = Some(Timer::from_seconds(PLATE_WATCHDOG_SECS, TimerMode::Once));
+                virt.set_relative_speed(PLATE_SLOWMO_SPEED * base.0);
+            }
+            LiveBallEvent::Settled if state.stage == Some(Stage::Plate) => {
+                virt.set_relative_speed(base.0);
+                state.clear();
+            }
+            _ => {}
+        }
     }
 }
 

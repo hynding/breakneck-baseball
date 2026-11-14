@@ -324,6 +324,8 @@ pub(super) struct Fireworks {
     remaining: Timer,
     next: Timer,
     perfect: bool,
+    /// The walk-off flag as of last frame, so a walk-off starts one show.
+    walk_off_seen: bool,
 }
 
 /// The home run is a moment: on a ball over the fence, launch a fireworks show
@@ -340,6 +342,9 @@ pub(super) fn home_run_fireworks(
     mut commands: Commands,
 ) {
     let Some(assets) = assets else { return };
+    // A walk-off that wasn't a home run gets the same show, once.
+    let walk_off_now = play.is_walk_off() && !show.walk_off_seen;
+    show.walk_off_seen = play.is_walk_off();
     for ev in in_play.read() {
         if matches!(ev.kind, ContactKind::HomeRun) {
             show.active = true;
@@ -347,6 +352,12 @@ pub(super) fn home_run_fireworks(
             show.remaining = Timer::from_seconds(FIREWORKS_SECS, TimerMode::Once);
             show.next = Timer::from_seconds(0.0, TimerMode::Once); // first burst at once
         }
+    }
+    if walk_off_now && !show.active {
+        show.active = true;
+        show.perfect = true;
+        show.remaining = Timer::from_seconds(FIREWORKS_SECS, TimerMode::Once);
+        show.next = Timer::from_seconds(0.0, TimerMode::Once);
     }
     if !show.active {
         return;

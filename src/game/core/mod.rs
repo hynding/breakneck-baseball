@@ -1,5 +1,6 @@
 pub mod coach;
 pub mod fatigue;
+pub mod highlight;
 pub mod mojo;
 pub mod roster;
 pub mod rules;

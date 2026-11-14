@@ -8,6 +8,7 @@ fn cues(phase: Phase) -> ShotCues {
         phase,
         since_contact: 10.0,
         home_run: false,
+        walk_off: false,
         pitch_gloved: false,
         view: DuelView::BattingZoom,
         walkup: false,
@@ -148,6 +149,14 @@ fn a_home_run_is_followed_then_orbited() {
     assert_eq!(pick_shot(&c, None), Shot::BallFollow);
     c.phase = Phase::Result;
     assert_eq!(pick_shot(&c, Some(Shot::BallFollow)), Shot::TrotOrbit);
+}
+
+/// A walk-off that stayed in the park still gets the celebration orbit.
+#[test]
+fn a_walk_off_is_orbited() {
+    let mut c = cues(Phase::Result);
+    c.walk_off = true;
+    assert_eq!(pick_shot(&c, Some(Shot::BaseCam(3))), Shot::TrotOrbit);
 }
 
 /// The call lands in the shot the play ended on: a result pause keeps the

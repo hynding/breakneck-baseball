@@ -406,6 +406,20 @@ only occasionally misjudging it.
   `rules::intentional_walk`. The CPU uses both only late and close
   (`ai::sac_bunt_spot`, `ai::intentional_walk_spot`).
 
+## Walk-offs (Official Baseball Rules 7.01(g))
+
+- If the home team scores the winning run in its half of the last inning (or
+  of any extra inning), the game ends the moment that run scores. A batter
+  who hits a home run out of the park still rounds every base, and every run
+  on the play counts.
+- Modeled as `flow::watch_walk_off`: in the bottom of the last scheduled
+  inning or later, the home side going from not leading to leading raises
+  WALK-OFF!, holds `Play::is_walk_off` for the celebration (fireworks and
+  the orbit shot, as on a home-run trot), and the game ends through the usual
+  result gate once the play has finished on screen. The final card names
+  the game's biggest scoring play (`game::highlight`), and a walk-off
+  outweighs everything.
+
 ## Rules modeled elsewhere
 
 Count thresholds (4 balls / 3 strikes / 3 outs), the strike zone, tag-ups,
@@ -459,3 +473,4 @@ CLAUDE.md's architecture notes for how each maps.
 - [FanGraphs — Are pitchers getting better at holding their velocity?](https://blogs.fangraphs.com/are-pitchers-getting-better-at-holding-their-velocity)
 - [MLB.com — Third time through the order penalty](https://www.mlb.com/glossary/miscellaneous/third-time-through-the-order-penalty)
 - [Baseball-Reference — MLB league batting year-by-year averages](https://www.baseball-reference.com/leagues/majors/bat.shtml)
+- [MLB.com — Official Baseball Rules](https://www.mlb.com/official-information/official-rules)

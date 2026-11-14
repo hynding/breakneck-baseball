@@ -135,4 +135,15 @@ fn walk_off_home_run_is_a_moment_that_finishes_on_screen() {
         "the walk-off ended at contact instead of finishing the trot on screen \
          (winning run was never observed while still Playing)"
     );
+    // The big-moment staging: the walk-off is flagged for the celebration,
+    // and the final card names it as the play of the game.
+    assert!(app.world().resource::<Play>().is_walk_off());
+    let line = app
+        .world()
+        .resource::<breakneck_baseball::game::highlight::BestPlay>()
+        .line();
+    assert!(
+        line.as_deref().is_some_and(|l| l.contains("WALK-OFF!")),
+        "play of the game: {line:?}"
+    );
 }

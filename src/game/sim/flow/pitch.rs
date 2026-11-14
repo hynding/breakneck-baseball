@@ -140,6 +140,7 @@ pub(super) fn reset_flow(
     mut lead: ResMut<LeadState>,
     mut mojo: ResMut<crate::game::mojo::Mojo>,
     mut fatigue: ResMut<crate::game::fatigue::Fatigue>,
+    mut best: ResMut<crate::game::highlight::BestPlay>,
     field: Res<FieldSpec>,
 ) {
     *play = Play::default();
@@ -148,6 +149,7 @@ pub(super) fn reset_flow(
     *lead = LeadState::default();
     *mojo = crate::game::mojo::Mojo::default();
     *fatigue = crate::game::fatigue::Fatigue::default();
+    *best = crate::game::highlight::BestPlay::default();
 }
 
 // ── PrePitch: the leadoff duel, then the defense aims and releases ────────────

@@ -30,6 +30,7 @@ use crate::game::ai::{
     CpuConfig, CpuState, apply_difficulty, cpu_defense, cpu_offense, reset_cpu_clock,
     tick_cpu_clock,
 };
+use crate::game::highlight::{BestPlay, PlayFacts};
 use crate::game::mojo::{Mojo, PaResult};
 use crate::game::rules::{self, Bases, BattingOrder, Outcome};
 use crate::game::variant::Ruleset;
@@ -218,6 +219,9 @@ pub struct Play {
     duel: DuelState,
     /// The batted ball, from contact to the announced call.
     live: LiveState,
+    /// The home side just won it in its last at-bat ([`watch_walk_off`]):
+    /// held until the game ends, so the celebration plays out.
+    walk_off: bool,
 }
 
 #[derive(Default)]
@@ -544,6 +548,13 @@ impl Play {
         self.live.home_run
     }
 
+    /// Whether the home side has just won the game in its last at-bat — the
+    /// walk-off, celebrated (banner, fireworks, the orbit shot) until the
+    /// game ends.
+    pub fn is_walk_off(&self) -> bool {
+        self.walk_off
+    }
+
     /// Whether the catcher gloved this at-bat's last pitch — read by the
     /// camera to hold the at-bat framing through the result pause.
     pub fn pitch_gloved(&self) -> bool {
@@ -751,6 +762,7 @@ impl Default for Play {
             pitch: PitchState::default(),
             duel: DuelState::default(),
             live: LiveState::default(),
+            walk_off: false,
         }
     }
 }
@@ -922,6 +934,92 @@ fn draw_wind(
     *wind = rules::Wind(wind_from(u(0.0), u(3.7)));
 }
 
+/// Spots the walk-off: in the bottom of the last scheduled inning or any
+/// extra one, the home side goes from not leading to leading — the game is
+/// over the moment that run scores (per docs/BASEBALL.md, "Walk-offs").
+/// Raises the WALK-OFF! banner once and marks [`Play::is_walk_off`] for the
+/// celebration; the call itself (and GAME OVER) stays with the umpire and
+/// the result gate.
+fn watch_walk_off(
+    score: Res<crate::game::ScoreBoard>,
+    rules_res: Res<Ruleset>,
+    mut play: ResMut<Play>,
+    mut banner: MessageWriter<PlayBanner>,
+    mut was_leading: Local<Option<bool>>,
+) {
+    let home_leads = score.home_runs > score.away_runs;
+    let last_licks = !score.top_of_inning && score.inning >= rules_res.counts.innings;
+    let before = was_leading.replace(home_leads);
+    if last_licks && home_leads && before == Some(false) && !play.walk_off {
+        play.walk_off = true;
+        banner.write(PlayBanner::new("WALK-OFF!", BannerTone::Epic));
+    }
+}
+
+/// Weighs every play that scores into [`BestPlay`] for the final card's
+/// "play of the game": the runs it scored, when, whether it put the batting
+/// side ahead, and whether it walked the game off. The call is the
+/// umpire's banner from the same frame.
+fn track_best_play(
+    score: Res<crate::game::ScoreBoard>,
+    rules_res: Res<Ruleset>,
+    play: Res<Play>,
+    mut banners: MessageReader<PlayBanner>,
+    mut best: ResMut<BestPlay>,
+    mut last: Local<Option<(u32, u32, u32, bool)>>,
+) {
+    let call = banners
+        .read()
+        .map(|b| b.text.clone())
+        .filter(|t| t != "WALK-OFF!")
+        .last();
+    let now = (
+        score.home_runs,
+        score.away_runs,
+        score.inning,
+        score.top_of_inning,
+    );
+    let Some((home, away, inning, top)) = last.replace(now) else {
+        return;
+    };
+    // The side that was batting when the runs crossed.
+    let (scored, margin_before, margin_after) = if top {
+        (
+            score.away_runs.saturating_sub(away),
+            away as i32 - home as i32,
+            score.away_runs as i32 - score.home_runs as i32,
+        )
+    } else {
+        (
+            score.home_runs.saturating_sub(home),
+            home as i32 - away as i32,
+            score.home_runs as i32 - score.away_runs as i32,
+        )
+    };
+    if scored == 0 {
+        return;
+    }
+    let walk_off = play.is_walk_off();
+    let call = call.unwrap_or_else(|| format!("+{scored}"));
+    let call = if walk_off {
+        format!("WALK-OFF!  {call}")
+    } else {
+        call
+    };
+    best.offer(
+        &PlayFacts {
+            runs: scored,
+            inning,
+            innings: rules_res.counts.innings,
+            go_ahead: margin_before <= 0 && margin_after > 0,
+            walk_off,
+            home_run: play.is_home_run(),
+        },
+        &call,
+        top,
+    );
+}
+
 /// What [`track_mojo`] remembers between frames: whose plate appearance
 /// is on, and the half-inning, outs and runs as of last frame.
 #[derive(Clone, Copy, PartialEq)]
@@ -1010,6 +1108,7 @@ impl Plugin for FlowPlugin {
             .init_resource::<CpuState>()
             .init_resource::<Mojo>()
             .init_resource::<crate::game::fatigue::Fatigue>()
+            .init_resource::<BestPlay>()
             .add_message::<BallInPlayEvent>()
             .add_message::<LiveBallEvent>()
             .add_message::<PitchCaughtEvent>()
@@ -1026,8 +1125,10 @@ impl Plugin for FlowPlugin {
             )
             .add_systems(
                 Update,
-                track_mojo
+                (track_mojo, watch_walk_off, track_best_play)
+                    .chain()
                     .after(PhaseSet)
+                    .in_set(crate::game::GameplayOrder::Flow)
                     .run_if(in_state(GameState::Playing)),
             )
             .add_systems(
