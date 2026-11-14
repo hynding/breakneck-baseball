@@ -320,6 +320,20 @@ only occasionally misjudging it.
   shipped starting nine averages 50, so the league economy stays where the
   balance sim tuned it while individual runners differ.
 
+## Walk-offs (Official Baseball Rules 7.01(g))
+
+- If the home team scores the winning run in its half of the last inning (or
+  of any extra inning), the game ends the moment that run scores. A batter
+  who hits a home run out of the park still rounds every base, and every run
+  on the play counts.
+- Modeled as `flow::watch_walk_off`: in the bottom of the last scheduled
+  inning or later, the home side going from not leading to leading raises
+  WALK-OFF!, holds `Play::is_walk_off` for the celebration (fireworks and
+  the orbit shot, as on a home-run trot), and the game ends through the usual
+  result gate once the play has finished on screen. The final card names
+  the game's biggest scoring play (`game::highlight`), and a walk-off
+  outweighs everything.
+
 ## Rules modeled elsewhere
 
 Count thresholds (4 balls / 3 strikes / 3 outs), the strike zone, tag-ups,
@@ -362,3 +376,4 @@ CLAUDE.md's architecture notes for how each maps.
 - [FanGraphs — Scouting Explained: The 20-80 Scouting Scale](https://blogs.fangraphs.com/scouting-explained-the-20-80-scouting-scale)
 - [MLB.com — Sprint Speed metric now tracks baserunners](https://mlb.com/news/statcast-sprint-speed-tracks-baserunner-speed-c238268162)
 - [MLB.com — Sprint speed shows fastest at each position](https://www.mlb.com/news/sprint-speed-shows-fastest-at-each-position-c238290228)
+- [MLB.com — Official Baseball Rules](https://www.mlb.com/official-information/official-rules)

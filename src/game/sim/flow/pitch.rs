@@ -139,6 +139,7 @@ pub(super) fn reset_flow(
     mut order: ResMut<BattingOrder>,
     mut lead: ResMut<LeadState>,
     mut mojo: ResMut<crate::game::mojo::Mojo>,
+    mut best: ResMut<crate::game::highlight::BestPlay>,
     field: Res<FieldSpec>,
 ) {
     *play = Play::default();
@@ -146,6 +147,7 @@ pub(super) fn reset_flow(
     *order = BattingOrder::default();
     *lead = LeadState::default();
     *mojo = crate::game::mojo::Mojo::default();
+    *best = crate::game::highlight::BestPlay::default();
 }
 
 // ── PrePitch: the leadoff duel, then the defense aims and releases ────────────

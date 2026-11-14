@@ -784,6 +784,7 @@ fn menu_tap(
 
 // ── Game over ─────────────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_game_over(
     mut commands: Commands,
     time: Res<Time<Real>>,
@@ -792,6 +793,7 @@ fn spawn_game_over(
     device: Res<ActiveDevice>,
     season_game: Res<SeasonGame>,
     settings: Res<Settings>,
+    best: Option<Res<crate::game::highlight::BestPlay>>,
 ) {
     // A season game's card also carries the league table (already updated —
     // `season_mode` records on the Playing → GameOver transition).
@@ -858,6 +860,25 @@ fn spawn_game_over(
                         },
                         TextColor(ui.text_primary),
                     ));
+                    // The play of the game: the one moment worth naming.
+                    if let Some(line) = best.as_ref().and_then(|b| b.line()) {
+                        card.spawn((
+                            Text::new("PLAY OF THE GAME"),
+                            TextFont {
+                                font_size: 15.0,
+                                ..default()
+                            },
+                            TextColor(ui.text_dim),
+                        ));
+                        card.spawn((
+                            Text::new(line),
+                            TextFont {
+                                font_size: 22.0,
+                                ..default()
+                            },
+                            TextColor(ui.accent),
+                        ));
+                    }
                     if let Some(season) = season {
                         card.spawn((
                             Text::new(season.next_line()),

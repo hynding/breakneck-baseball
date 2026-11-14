@@ -146,3 +146,63 @@ fn track_mojo_scores_each_finished_plate_appearance() {
     assert_eq!(mojo.batter(Team::Away, 4), 0.0);
     assert!(mojo.pitcher(Team::Home) < 0.0);
 }
+
+fn walk_off_app(inning: u32, top: bool, home: u32, away: u32) -> App {
+    let mut app = App::new();
+    app.insert_resource(crate::game::ScoreBoard {
+        inning,
+        top_of_inning: top,
+        home_runs: home,
+        away_runs: away,
+        ..Default::default()
+    })
+    .insert_resource(crate::game::variant::VariantId::Standard.rules())
+    .init_resource::<Play>()
+    .add_message::<PlayBanner>()
+    .add_systems(Update, watch_walk_off);
+    app.update();
+    app
+}
+
+fn score_home(app: &mut App) {
+    app.world_mut()
+        .resource_mut::<crate::game::ScoreBoard>()
+        .home_runs += 1;
+    app.update();
+}
+
+#[test]
+fn the_go_ahead_run_in_the_bottom_of_the_last_inning_walks_it_off() {
+    let innings = crate::game::variant::VariantId::Standard
+        .rules()
+        .counts
+        .innings;
+    let mut app = walk_off_app(innings, false, 3, 3);
+    assert!(!app.world().resource::<Play>().is_walk_off());
+    score_home(&mut app);
+    assert!(app.world().resource::<Play>().is_walk_off());
+    // Extra innings too.
+    let mut app = walk_off_app(innings + 2, false, 5, 5);
+    score_home(&mut app);
+    assert!(app.world().resource::<Play>().is_walk_off());
+}
+
+#[test]
+fn no_walk_off_early_or_when_already_ahead() {
+    let innings = crate::game::variant::VariantId::Standard
+        .rules()
+        .counts
+        .innings;
+    // The bottom of an earlier inning.
+    let mut app = walk_off_app(innings - 1, false, 3, 3);
+    score_home(&mut app);
+    assert!(!app.world().resource::<Play>().is_walk_off());
+    // Still tied after the run.
+    let mut app = walk_off_app(innings, false, 2, 4);
+    score_home(&mut app);
+    assert!(!app.world().resource::<Play>().is_walk_off());
+    // Home already ahead going to the bottom (the game ended after the top).
+    let mut app = walk_off_app(innings, false, 5, 3);
+    score_home(&mut app);
+    assert!(!app.world().resource::<Play>().is_walk_off());
+}

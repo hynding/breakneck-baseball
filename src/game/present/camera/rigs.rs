@@ -155,6 +155,9 @@ pub(super) struct ShotCues {
     /// Seconds since contact (meaningful in `InPlay`).
     pub since_contact: f32,
     pub home_run: bool,
+    /// The home side just walked it off (`Play::is_walk_off`): the result
+    /// pause orbits the celebration like a home-run trot.
+    pub walk_off: bool,
     pub pitch_gloved: bool,
     pub view: DuelView,
     /// The walk-up hold is on (`Play::walkup_active`).
@@ -194,7 +197,7 @@ pub(super) fn pick_shot(cues: &ShotCues, current: Option<Shot>) -> Shot {
             (None, Some(fielder)) => Shot::FielderCam(fielder),
             (None, None) => Shot::BallFollow,
         },
-        Phase::Result if cues.home_run => Shot::TrotOrbit,
+        Phase::Result if cues.home_run || cues.walk_off => Shot::TrotOrbit,
         // Strike three gets its reaction shot (before the gloved arm: a K
         // into the mitt is gloved too).
         Phase::Result if cues.strikeout => Shot::ReactionCam,
@@ -378,6 +381,7 @@ pub(super) fn broadcast_camera(
         phase: play.phase,
         since_contact: play.since_contact(now),
         home_run: play.is_home_run(),
+        walk_off: play.is_walk_off(),
         pitch_gloved: play.pitch_gloved(),
         view: *view,
         walkup: play.walkup_active(),
