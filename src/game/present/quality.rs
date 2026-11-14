@@ -20,6 +20,14 @@
 //! Medium (the MSAA 2x / 1024 shadow budget the web build always used);
 //! phones and tablets — a coarse primary pointer on the web, or a native
 //! mobile target — get Low.
+//!
+//! **Adaptive fallback.** Auto's pick is a guess from the device class, and
+//! a weak phone or a throttling laptop can still miss it. While the setting
+//! is Auto, [`FrameBudget`] watches real frame times and steps the tier down
+//! one level after two slow windows in a row (mean frame over
+//! [`SLOW_FRAME_SECS`]), never below Low and never back up on its own —
+//! oscillating between tiers would be worse than either. Picking a tier by
+//! hand, or picking Auto again, clears the step.
 
 use bevy::camera::RenderTarget;
 use bevy::camera::visibility::RenderLayers;
@@ -180,6 +188,109 @@ impl Platform {
     }
 }
 
+impl QualityTier {
+    /// One tier cheaper (Low stays Low).
+    pub fn step_down(self) -> QualityTier {
+        match self {
+            QualityTier::High => QualityTier::Medium,
+            QualityTier::Medium | QualityTier::Low => QualityTier::Low,
+        }
+    }
+}
+
+/// Resolves a setting on a platform, `steps` tiers below Auto's pick when
+/// the adaptive fallback has stepped it down (fixed settings ignore steps).
+pub fn resolve_stepped(setting: GraphicsQuality, platform: Platform, steps: u8) -> QualityTier {
+    match setting {
+        GraphicsQuality::Auto => (0..steps).fold(platform.auto_tier(), |tier, _| tier.step_down()),
+        fixed => resolve(fixed, platform),
+    }
+}
+
+/// A mean frame time over this (seconds) is a slow window: under 40 fps.
+/// Browsers and vsync cap at the display rate, so a healthy run sits at
+/// 16.7 ms (60 Hz) or below, well clear of it.
+pub const SLOW_FRAME_SECS: f32 = 1.0 / 40.0;
+/// Frame times are averaged over windows this long (real seconds).
+pub const FRAME_WINDOW_SECS: f32 = 4.0;
+/// Consecutive slow windows before Auto steps down.
+pub const SLOW_WINDOWS_TO_STEP: u32 = 2;
+/// Real seconds ignored after boot or a tier change, while shaders compile
+/// and the new render targets settle.
+pub const SETTLE_SECS: f32 = 6.0;
+/// A single frame longer than this is a hitch (a tab switch, a GC pause, an
+/// asset load) and counts toward the mean only up to this length.
+pub const HITCH_SECS: f32 = 0.25;
+
+/// The adaptive fallback's frame-time monitor. Pure bookkeeping:
+/// [`FrameBudget::observe`] takes one real frame time and says when Auto
+/// should step down.
+#[derive(Resource, Clone, Debug, Default, PartialEq)]
+pub struct FrameBudget {
+    /// Tiers Auto has stepped down since the setting last changed.
+    pub steps: u8,
+    settle_left: f32,
+    window_secs: f32,
+    window_frames: u32,
+    slow_windows: u32,
+    /// The last closed window's mean frame time (seconds), for the log and
+    /// the debug read-out.
+    pub last_mean: Option<f32>,
+}
+
+impl FrameBudget {
+    /// A fresh monitor that waits [`SETTLE_SECS`] before measuring.
+    pub fn new() -> Self {
+        Self {
+            settle_left: SETTLE_SECS,
+            ..Default::default()
+        }
+    }
+
+    /// Starts over after a tier change: keep the steps, drop the samples.
+    fn resettle(&mut self) {
+        *self = Self {
+            steps: self.steps,
+            last_mean: self.last_mean,
+            ..Self::new()
+        };
+    }
+
+    /// Feeds one frame of `dt` real seconds while Auto is at `tier`.
+    /// Returns true when Auto should step down a tier (the caller applies
+    /// it; this has already counted the step and started settling again).
+    pub fn observe(&mut self, dt: f32, tier: QualityTier) -> bool {
+        if self.settle_left > 0.0 {
+            self.settle_left -= dt;
+            return false;
+        }
+        // A hitch counts as one slow frame, not as its full length: a
+        // device that runs every frame at 400 ms still reads slow, while a
+        // lone multi-second stall barely moves a window's mean.
+        let dt = dt.clamp(0.0, HITCH_SECS);
+        self.window_secs += dt;
+        self.window_frames += 1;
+        if self.window_secs < FRAME_WINDOW_SECS {
+            return false;
+        }
+        let mean = self.window_secs / self.window_frames as f32;
+        self.last_mean = Some(mean);
+        self.window_secs = 0.0;
+        self.window_frames = 0;
+        if mean > SLOW_FRAME_SECS {
+            self.slow_windows += 1;
+        } else {
+            self.slow_windows = 0;
+        }
+        if self.slow_windows >= SLOW_WINDOWS_TO_STEP && tier != QualityTier::Low {
+            self.steps += 1;
+            self.resettle();
+            return true;
+        }
+        false
+    }
+}
+
 /// Resolves a setting on a platform.
 pub fn resolve(setting: GraphicsQuality, platform: Platform) -> QualityTier {
     match setting {
@@ -195,6 +306,9 @@ pub fn resolve(setting: GraphicsQuality, platform: Platform) -> QualityTier {
 pub struct ActiveQuality {
     pub setting: GraphicsQuality,
     pub tier: QualityTier,
+    /// True when Auto's pick was stepped down for slow frames
+    /// ([`FrameBudget`]).
+    pub stepped: bool,
 }
 
 impl ActiveQuality {
@@ -207,6 +321,12 @@ impl ActiveQuality {
         };
         let res = (self.tier.render_scale(scale_factor) * 100.0).round();
         match self.setting {
+            GraphicsQuality::Auto if self.stepped => {
+                format!(
+                    "Auto: {} (slow GPU), {aa}, {res:.0}% res",
+                    self.tier.label()
+                )
+            }
             GraphicsQuality::Auto => {
                 format!("Auto: {}, {aa}, {res:.0}% res", self.tier.label())
             }
@@ -239,6 +359,7 @@ impl Plugin for QualityPlugin {
         app.add_systems(Startup, spawn_upscale_view).add_systems(
             Update,
             (
+                watch_frame_budget,
                 resolve_quality,
                 (apply_msaa, apply_shadow_map, apply_render_scale),
             )
@@ -258,24 +379,71 @@ impl Plugin for QualityPlugin {
             platform.auto_tier()
         );
         app.insert_resource(platform)
+            .insert_resource(FrameBudget::new())
             .insert_resource(ActiveQuality {
                 setting,
                 tier: resolve(setting, platform),
+                stepped: false,
             });
     }
 }
 
+/// The adaptive fallback: while the setting is Auto and a window is up
+/// (never headless, so tests can't step down on a slow CI box), feeds real
+/// frame times to [`FrameBudget`] and steps the tier down when it says so.
+fn watch_frame_budget(
+    time: Res<Time<Real>>,
+    platform: Res<Platform>,
+    windows: Query<(), With<PrimaryWindow>>,
+    budget: Option<ResMut<FrameBudget>>,
+    mut active: ResMut<ActiveQuality>,
+) {
+    let Some(mut budget) = budget else {
+        return;
+    };
+    if active.setting != GraphicsQuality::Auto || windows.is_empty() {
+        return;
+    }
+    if budget.observe(time.delta_secs(), active.tier) {
+        let tier = resolve_stepped(GraphicsQuality::Auto, *platform, budget.steps);
+        info!(
+            "graphics: frames averaged {:.1} ms; Auto steps down to {:?}",
+            budget.last_mean.unwrap_or(0.0) * 1000.0,
+            tier
+        );
+        active.set_if_neq(ActiveQuality {
+            setting: GraphicsQuality::Auto,
+            tier,
+            stepped: true,
+        });
+    }
+}
+
+/// Re-resolves the tier when the player changes the setting. A new choice
+/// (cycling back round to Auto included) clears the adaptive step; an edit
+/// to some other settings row keeps it.
 fn resolve_quality(
     settings: Res<Settings>,
     platform: Res<Platform>,
+    budget: Option<ResMut<FrameBudget>>,
     mut active: ResMut<ActiveQuality>,
 ) {
-    if settings.is_changed() {
-        active.set_if_neq(ActiveQuality {
-            setting: settings.graphics,
-            tier: resolve(settings.graphics, *platform),
-        });
+    if !settings.is_changed() {
+        return;
     }
+    if active.setting == settings.graphics && active.stepped {
+        return;
+    }
+    if active.setting != settings.graphics
+        && let Some(mut budget) = budget
+    {
+        *budget = FrameBudget::new();
+    }
+    active.set_if_neq(ActiveQuality {
+        setting: settings.graphics,
+        tier: resolve(settings.graphics, *platform),
+        stepped: false,
+    });
 }
 
 /// Every 3D camera (the main one, plus the dev Creator's preview) follows
