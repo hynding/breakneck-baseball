@@ -365,6 +365,27 @@ only occasionally misjudging it.
   errors alone land near MLB's total rate: the realism harness measures 0.44
   per team-game.
 
+## Pitcher fatigue and the bullpen
+
+- MLB starters averaged **85.0 pitches a start in 2025** (85.5 in 2024; AP,
+  citing Elias). Only about one start in nine reaches 100 pitches (the
+  average 2025 AL team had 18 of 162; Baseball-Reference starter pitching).
+- Teams used about **3.3 relievers a game** in 2024–25 (MLB Stats API figures
+  via mlbanalytic.com, a secondary source), so about 4.3 pitchers in all.
+- Velocity fades within a start: starters lost "nearly a full mile per hour"
+  from the first inning to the last (FanGraphs, 2017), and four-seamers ran
+  0.8 mph slower on pitches 71–90 than on pitches 11–30 (FanGraphs, 2021).
+- Results fade too: from 2016 to 2025, starters' OPS against rose from .713
+  the first time through the order to .747 the second and .780 the third
+  (MLB.com glossary, "Times Through the Order Penalty").
+- Modeled in `game::fatigue`: an arm is fresh until 25 pitches short of its
+  stamina (85 for the starter, 25 for a reliever), then loses 1.1% of its
+  release speed (about 1 mph on a 95 mph heater) and gains 0.12 stick-units
+  of aim wander for every 25 pitches after that. The CPU makes a pitching
+  change between plate appearances once its pitcher reaches his stamina,
+  bringing in the first bench arm that hasn't pitched; a human manager makes
+  his own changes from the pause board, with the count on the walk-up card.
+
 ## Rules modeled elsewhere
 
 Count thresholds (4 balls / 3 strikes / 3 outs), the strike zone, tag-ups,
@@ -411,3 +432,9 @@ CLAUDE.md's architecture notes for how each maps.
 - [MLB.com — Wind effect: these ballparks, players were most impacted by the weather](https://www.mlb.com/news/the-big-impact-of-wind-on-baseball-outcomes)
 - [Baseball-Reference — MLB league pitching year-by-year averages](https://www.baseball-reference.com/leagues/majors/pitch.shtml)
 - [Baseball-Reference — MLB league fielding year-by-year averages](https://www.baseball-reference.com/leagues/majors/field.shtml)
+- [AP via News4JAX — Pitchers' average pitches per start, 2025](https://www.news4jax.com/sports/2025/09/30/flamethrowers-rule-mound-as-right-hander-average-4-seam-fastball-reaches-95-mph/)
+- [Baseball-Reference — 2025 AL starter pitching](https://www.baseball-reference.com/leagues/AL/2025-starter-pitching.shtml)
+- [mlbanalytic.com — Bullpen usage patterns](https://mlbanalytic.com/articles/bullpen-usage-patterns.html)
+- [FanGraphs — In-game velocity changes: when fatigue attacks](https://fantasy.fangraphs.com/in-game-velocity-changes-when-fatigue-attacks)
+- [FanGraphs — Are pitchers getting better at holding their velocity?](https://blogs.fangraphs.com/are-pitchers-getting-better-at-holding-their-velocity)
+- [MLB.com — Third time through the order penalty](https://www.mlb.com/glossary/miscellaneous/third-time-through-the-order-penalty)

@@ -496,7 +496,11 @@ pub(super) fn show_pitch_speed(
     let Some(kind) = play.pitch_kind().filter(|_| pitch_beat) else {
         return;
     };
-    let mph = broadcast_reading(kind, rules.pace.pitch_speed_scale, time.elapsed_secs_f64());
+    let mph = broadcast_reading(
+        kind,
+        rules.pace.pitch_speed_scale * play.pitch_fatigue_scale(),
+        time.elapsed_secs_f64(),
+    );
     for (mut text, mut color) in &mut text_q {
         **text = format!("{mph} MPH");
         color.0 = theme.ui.text_primary;

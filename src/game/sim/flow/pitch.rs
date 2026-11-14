@@ -139,6 +139,7 @@ pub(super) fn reset_flow(
     mut order: ResMut<BattingOrder>,
     mut lead: ResMut<LeadState>,
     mut mojo: ResMut<crate::game::mojo::Mojo>,
+    mut fatigue: ResMut<crate::game::fatigue::Fatigue>,
     field: Res<FieldSpec>,
 ) {
     *play = Play::default();
@@ -146,6 +147,7 @@ pub(super) fn reset_flow(
     *order = BattingOrder::default();
     *lead = LeadState::default();
     *mojo = crate::game::mojo::Mojo::default();
+    *fatigue = crate::game::fatigue::Fatigue::default();
 }
 
 // ── PrePitch: the leadoff duel, then the defense aims and releases ────────────
@@ -323,6 +325,10 @@ pub(super) fn wind_up(
     bases: Res<Bases>,
     mut lead: ResMut<LeadState>,
     mut pitch_ev: MessageWriter<PitchEvent>,
+    (rosters, mut fatigue): (
+        Res<crate::game::roster::Rosters>,
+        ResMut<crate::game::fatigue::Fatigue>,
+    ),
 ) {
     if play.phase != Phase::WindUp {
         // Guarded like every reset in this diff — tick hygiene, not cost.
@@ -364,16 +370,32 @@ pub(super) fn wind_up(
             .pending
             .take()
             .unwrap_or((Vec2::ZERO, rules::PitchKind::Changeup));
+        // The arm's fatigue: a tired pitcher's stuff loses speed and his
+        // aim wanders (per docs/BASEBALL.md, "Pitcher fatigue and the
+        // bullpen"). The wander is keyed off the pitch count — the same
+        // pitch from the same arm wanders the same way.
+        let team = score.fielding_team();
+        let number = rosters.team(team).card(0).number;
+        let tired = fatigue.tiredness(team, number);
+        fatigue.record_pitch(team, number);
+        let speed = crate::game::fatigue::velocity_scale(tired);
+        let seed = fatigue.pitches(team, number) as f32 * 1.37 + number as f32 * 0.11;
+        let wander = crate::game::fatigue::control_wander(tired)
+            * Vec2::new(
+                crate::game::ai::noise(seed),
+                crate::game::ai::noise(seed + 5.3) * 0.5,
+            );
         pitch_ev.write(PitchEvent {
             velocity: rules::pitch_velocity_kind(
                 kind,
-                aim,
+                aim + wander,
                 field.pitch_distance,
-                rules.pace.pitch_speed_scale,
+                rules.pace.pitch_speed_scale * speed,
             ),
             spin: kind.spin(),
         });
         play.pitch.kind = Some(kind);
+        play.pitch.speed_fade = 1.0 - speed;
         play.duel.jump_lead_m = lead.lead_m;
         play.phase = Phase::Pitch;
     }

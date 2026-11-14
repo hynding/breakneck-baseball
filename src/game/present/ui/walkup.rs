@@ -7,6 +7,7 @@
 
 use bevy::prelude::*;
 
+use crate::game::fatigue::Fatigue;
 use crate::game::flow::Play;
 use crate::game::mojo::{Mojo, MojoLevel};
 use crate::game::roster::Rosters;
@@ -32,6 +33,10 @@ pub enum WalkUpLine {
     Slot,
     /// His mojo ([`crate::game::mojo`]), named and toned.
     Mojo,
+    /// Who he faces and that pitcher's count ([`crate::game::fatigue`]),
+    /// toned once the arm starts to fade — a human manager's cue to go to
+    /// the bullpen.
+    Pitcher,
 }
 
 pub(super) fn spawn_walkup_card(mut commands: Commands, theme: Res<Theme>) {
@@ -64,6 +69,7 @@ pub(super) fn spawn_walkup_card(mut commands: Commands, theme: Res<Theme>) {
                 (WalkUpLine::Number, 22.0),
                 (WalkUpLine::Slot, 14.0),
                 (WalkUpLine::Mojo, 16.0),
+                (WalkUpLine::Pitcher, 14.0),
             ] {
                 card.spawn((
                     WalkUpText(line),
@@ -85,7 +91,7 @@ pub(super) fn paint_walkup_card(
     score: Res<ScoreBoard>,
     order: Res<BattingOrder>,
     rosters: Res<Rosters>,
-    mojo: Option<Res<Mojo>>,
+    (mojo, fatigue): (Option<Res<Mojo>>, Option<Res<Fatigue>>),
     theme: Res<Theme>,
     mut cards: Query<(&mut BackgroundColor, &mut BorderColor, &mut Visibility), With<WalkUpCard>>,
     mut lines: Query<(&WalkUpText, &mut Text, &mut TextColor)>,
@@ -141,6 +147,22 @@ pub(super) fn paint_walkup_card(
                         MojoLevel::Cold | MojoLevel::IceCold => ui.tone_info,
                     };
                     (format!("MOJO  {}", level.label()), tint)
+                }
+                WalkUpLine::Pitcher => {
+                    let fielding = score.fielding_team();
+                    let pitcher = rosters.team(fielding).card(0);
+                    let (pitches, tired) = fatigue.as_ref().map_or((0, 0.0), |f| {
+                        (
+                            f.pitches(fielding, pitcher.number),
+                            f.tiredness(fielding, pitcher.number),
+                        )
+                    });
+                    let tint = if tired > 0.0 {
+                        ui.tone_bad
+                    } else {
+                        ui.text_dim
+                    };
+                    (format!("VS {}  -  {pitches} PITCHES", pitcher.name), tint)
                 }
             }
         };
