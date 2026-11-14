@@ -19,8 +19,9 @@ use crate::game::ball::{BALL_DRAG_FACTOR, Baseball, InFlight, MAGNUS_FACTOR};
 use crate::game::flow::{BallInPlayEvent, DuelThrowKind, LiveBallEvent, Phase, Play};
 use crate::game::input::{Controllers, InputSource, Intents};
 use crate::game::player::{CatcherRole, Fielder, Pitcher};
+use crate::game::roster::{Ratings, Rosters};
 use crate::game::rules;
-use crate::game::variant::{FieldSpec, Ruleset};
+use crate::game::variant::{FieldSpec, PaceTuning, Ruleset};
 use crate::game::{GameState, ScoreBoard};
 
 /// Jog speed returning to position — chase speed itself now lives at
@@ -47,6 +48,44 @@ const BACKUP_DEPTH: f32 = 6.0;
 const INTERCEPT_FENCE_MARGIN: f32 = 2.0;
 /// Ground chases may go nearly to the wall pad to dig a ball out.
 const GROUND_FENCE_MARGIN: f32 = 0.6;
+
+/// A fielder's scouting grades, stamped from the fielding team's roster
+/// card for his spot ([`stamp_fielder_grades`]): his range sets his chase
+/// speed and his arm the speed of every throw race he starts. A fielder
+/// without one plays as a league-average 50.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FielderGrades(pub Ratings);
+
+/// The grades of `fielder` (average when unstamped).
+fn grades_of(grades: &Query<&FielderGrades>, fielder: Entity) -> Ratings {
+    grades.get(fielder).map_or(Ratings::AVERAGE, |g| g.0)
+}
+
+/// `fielder`'s chase speed: the league pace at his range.
+fn chase_speed(grades: &Query<&FielderGrades>, fielder: Entity, pace: &PaceTuning) -> f32 {
+    pace.fielder_speed * grades_of(grades, fielder).range_factor()
+}
+
+/// Keeps every fielder's [`FielderGrades`] in step with whoever plays his
+/// spot: the fielding team flips each half-inning and the bench can sub in
+/// between plays. Writes only on a change.
+fn stamp_fielder_grades(
+    rosters: Option<Res<Rosters>>,
+    score: Res<ScoreBoard>,
+    fielders: Query<(Entity, &Fielder, Option<&FielderGrades>)>,
+    mut commands: Commands,
+) {
+    let Some(rosters) = rosters else {
+        return;
+    };
+    let team = rosters.team(score.fielding_team());
+    for (entity, fielder, stamped) in &fielders {
+        let ratings = team.fielding(Some(fielder.index)).ratings;
+        if stamped.is_none_or(|g| g.0 != ratings) {
+            commands.entity(entity).insert(FielderGrades(ratings));
+        }
+    }
+}
 
 /// Choreography state for the current live ball.
 #[derive(Resource, Default)]
@@ -169,9 +208,16 @@ fn assign_on_contact(
     field: Res<FieldSpec>,
     ruleset: Res<Ruleset>,
     mut fielders: Query<(Entity, &Transform, &mut MoveIntent), With<Fielder>>,
+    grades: Query<&FielderGrades>,
     mut active: ResMut<ActivePlay>,
 ) {
     let pace = &ruleset.pace;
+    // Time for `fielder` at `from` to reach `to` at his own range.
+    let reach = |fielder: Entity, from: Vec3, to: Vec3| {
+        let mut own = pace.clone();
+        own.fielder_speed = chase_speed(&grades, fielder, pace);
+        rules::catch_time(from, to, &own)
+    };
     for ev in events.read() {
         // Everyone, ranked by how soon they could reach the landing point.
         let mut ranked: Vec<(Entity, Vec3)> = fielders
@@ -189,9 +235,7 @@ fn assign_on_contact(
             (cutoff, target) = rules::ground_intercept(&spots, ev.landing, ev.launch, pace);
         }
         let target = cap_inside_fence(target, &field, INTERCEPT_FENCE_MARGIN);
-        ranked.sort_by(|a, b| {
-            rules::catch_time(a.1, target, pace).total_cmp(&rules::catch_time(b.1, target, pace))
-        });
+        ranked.sort_by(|a, b| reach(a.0, a.1, target).total_cmp(&reach(b.0, b.1, target)));
         if let Some(i) = cutoff {
             // `ranked` was reordered above; find the cut-off fielder by
             // entity, not by his pre-sort index.
@@ -206,7 +250,7 @@ fn assign_on_contact(
         };
         if let Ok((_, _, mut intent)) = fielders.get_mut(chaser) {
             intent.target = Some(target);
-            intent.speed = pace.fielder_speed;
+            intent.speed = chase_speed(&grades, chaser, pace);
         }
 
         // Cover every base (home included) with the nearest free fielder.
@@ -231,7 +275,7 @@ fn assign_on_contact(
             let (coverer, _) = free.remove(i);
             if let Ok((_, _, mut intent)) = fielders.get_mut(coverer) {
                 intent.target = Some(spot);
-                intent.speed = pace.fielder_speed;
+                intent.speed = chase_speed(&grades, coverer, pace);
             }
             active.cover.push((base, coverer));
         }
@@ -244,7 +288,7 @@ fn assign_on_contact(
                 cap_inside_fence(target + out * BACKUP_DEPTH, &field, INTERCEPT_FENCE_MARGIN);
             if let Ok((_, _, mut intent)) = fielders.get_mut(backup) {
                 intent.target = Some(spot);
-                intent.speed = pace.fielder_speed;
+                intent.speed = chase_speed(&grades, backup, pace);
             }
         }
 
@@ -278,6 +322,7 @@ fn chase_and_gather(
     wind: Res<rules::Wind>,
     mut ball_q: Query<(Entity, &Transform, &mut Velocity), With<Baseball>>,
     mut fielders: Query<(Entity, &Transform, &mut MoveIntent), With<Fielder>>,
+    grades: Query<&FielderGrades>,
     mut reports: MessageWriter<LiveBallEvent>,
     mut commands: Commands,
 ) {
@@ -317,7 +362,8 @@ fn chase_and_gather(
             if let Ok((_, _, mut intent)) = fielders.get_mut(chaser) {
                 intent.target = None;
             }
-            reports.write(LiveBallEvent::Caught { pos: ball_pos });
+            let arm = grades_of(&grades, chaser).arm_factor();
+            reports.write(LiveBallEvent::Caught { pos: ball_pos, arm });
             active.possessor = Some(chaser);
             // The same tag-up read flow calls: a runner tagging from third
             // draws the throw home.
@@ -328,7 +374,7 @@ fn chase_and_gather(
                     score.outs,
                     play.runners_going(),
                     &field,
-                    &ruleset,
+                    &ruleset.with_arm(arm),
                 ),
                 rules::OutKind::Fly {
                     tag: rules::TagUp::Scores | rules::TagUp::ThrownOut,
@@ -369,7 +415,7 @@ fn chase_and_gather(
         );
         if let Ok((_, _, mut intent)) = fielders.get_mut(chaser) {
             intent.target = Some(cap_inside_fence(landing, &field, INTERCEPT_FENCE_MARGIN));
-            intent.speed = ruleset.pace.fielder_speed;
+            intent.speed = chase_speed(&grades, chaser, &ruleset.pace);
         }
         return;
     }
@@ -400,7 +446,7 @@ fn chase_and_gather(
             rules::ground_intercept_from(tf.translation, ball_pos, ball_vel.linvel, &ruleset.pace)
                 .unwrap_or(ball_pos);
         intent.target = Some(cap_inside_fence(spot, &field, GROUND_FENCE_MARGIN));
-        intent.speed = ruleset.pace.fielder_speed;
+        intent.speed = chase_speed(&grades, chaser, &ruleset.pace);
     }
 }
 
@@ -420,6 +466,7 @@ fn hold_and_throw(
     mut active: ResMut<ActivePlay>,
     mut ball_q: Query<(&mut Transform, &mut Velocity), With<Baseball>>,
     fielders: FielderSpots,
+    grades: Query<&FielderGrades>,
     mut reports: MessageWriter<LiveBallEvent>,
     mut commands: Commands,
 ) {
@@ -449,6 +496,9 @@ fn hold_and_throw(
     ball_vel.angvel = Vec3::ZERO;
 
     let now = time.elapsed_secs();
+    // Every race this throw starts runs at the holder's own arm.
+    let arm = grades_of(&grades, holder).arm_factor();
+    let ruleset = ruleset.with_arm(arm);
     let intent = intents.get(score.fielding_team());
     let manual = if intent.action {
         rules::aimed_base(intent.aim, &field)
@@ -540,6 +590,7 @@ fn hold_and_throw(
         base,
         race_time: throw_time,
         landed_secs: landed,
+        arm,
     });
     active.state = PlayState::Thrown {
         catcher: receiver.unwrap_or(holder),
@@ -664,6 +715,7 @@ fn steer_chaser(
     ruleset: Res<Ruleset>,
     active: Res<ActivePlay>,
     mut fielders: Query<(&Transform, &mut MoveIntent), With<Fielder>>,
+    grades: Query<&FielderGrades>,
 ) {
     let PlayState::Chasing { chaser, .. } = active.state else {
         return;
@@ -685,7 +737,7 @@ fn steer_chaser(
             &field,
             GROUND_FENCE_MARGIN,
         ));
-        intent.speed = ruleset.pace.fielder_speed;
+        intent.speed = chase_speed(&grades, chaser, &ruleset.pace);
     }
 }
 
@@ -834,6 +886,7 @@ impl Plugin for FieldingPlugin {
             .add_systems(
                 Update,
                 (
+                    stamp_fielder_grades,
                     assign_on_contact,
                     chase_and_gather,
                     steer_chaser,

@@ -18,20 +18,78 @@ use crate::game::rules::LINEUP_SIZE;
 /// A player's scouting grades on the 20–80 scale, 50 the league average
 /// (per docs/BASEBALL.md, "Player ratings"). Authored per player in
 /// `data/players.ron`; a grade left out is average, so an old file plays
-/// exactly as before. Only speed is wired into play so far.
+/// exactly as before. Each grade becomes a multiplier on one league-wide
+/// tuning number, 1.0 at 50, so a lineup of 50s is the economy the balance
+/// sim tuned.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Ratings {
     /// Sprint speed: steals, taking the extra base, beating out grounders.
     pub speed: u8,
+    /// Bat-to-ball skill: shrinks the swing's timing error before it is
+    /// graded, so more swings land in the Solid and Perfect windows.
+    pub contact: u8,
+    /// Raw power: scales the exit speed of every ball he squares up.
+    pub power: u8,
+    /// Arm strength: how fast his throws cross the diamond.
+    pub arm: u8,
+    /// Range: how fast he gets to a ball in the field.
+    pub fielding: u8,
+}
+
+/// Each grade's step: the fraction of the league tuning value one grade
+/// point above or below 50 is worth (per docs/BASEBALL.md, "Player
+/// ratings", which gives each one's MLB spread).
+const CONTACT_PER_POINT: f32 = 0.005;
+const POWER_PER_POINT: f32 = 0.001;
+const ARM_PER_POINT: f32 = 0.005;
+const RANGE_PER_POINT: f32 = 0.004;
+
+/// `1 + per_point · (grade − 50)`, the grade clamped to the 20–80 scale.
+fn grade_factor(grade: u8, per_point: f32) -> f32 {
+    1.0 + (grade.clamp(20, 80) as f32 - 50.0) * per_point
 }
 
 impl Ratings {
-    pub const AVERAGE: Ratings = Ratings { speed: 50 };
+    pub const AVERAGE: Ratings = Ratings {
+        speed: 50,
+        contact: 50,
+        power: 50,
+        arm: 50,
+        fielding: 50,
+    };
 
     /// The rules-side runner these grades make.
     pub fn runner(self) -> crate::game::rules::Runner {
         crate::game::rules::Runner { speed: self.speed }
+    }
+
+    /// The multiplier on a swing's timing error, applied before it is graded
+    /// (the same seam as mojo's `timing_scale`): a 70 misses by 10% less
+    /// than an average hitter, a 30 by 10% more.
+    pub fn contact_timing_scale(self) -> f32 {
+        // Inverted: a better hitter's error shrinks.
+        2.0 - grade_factor(self.contact, CONTACT_PER_POINT)
+    }
+
+    /// The multiplier on a squared-up ball's exit speed: a 70 hits it 2%
+    /// harder than average, a 30 2% softer. Carry grows about twice as fast
+    /// as exit speed in the game's flight model, so that is ~20 ft on a deep
+    /// fly.
+    pub fn power_factor(self) -> f32 {
+        grade_factor(self.power, POWER_PER_POINT)
+    }
+
+    /// The multiplier on his throws' speed: a 70 throws 10% harder than
+    /// average, a 30 10% softer.
+    pub fn arm_factor(self) -> f32 {
+        grade_factor(self.arm, ARM_PER_POINT)
+    }
+
+    /// The multiplier on his chase speed in the field: a 70 covers ground
+    /// 8% faster than average, a 30 8% slower.
+    pub fn range_factor(self) -> f32 {
+        grade_factor(self.fielding, RANGE_PER_POINT)
     }
 }
 

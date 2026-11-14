@@ -103,6 +103,7 @@ fn throw_to(app: &mut App, base: usize) {
         base,
         race_time: 3.0,
         landed_secs: 0.0,
+        arm: 1.0,
     });
 }
 

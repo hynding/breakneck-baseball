@@ -319,6 +319,40 @@ only occasionally misjudging it.
   50, clamped to 20–80): a 30 runs at 88% of average, a 70 at 112%. Each
   shipped starting nine averages 50, so the league economy stays where the
   balance sim tuned it while individual runners differ.
+- **Contact.** Strikeout rate is the clearest bat-to-ball measure: qualified
+  MLB hitters run from about 10% to 30%, around a league rate near 22%, a
+  spread of roughly 5 points per standard deviation (FanGraphs leaderboards).
+  Modeled as `Ratings::contact_timing_scale`: the swing's timing error is
+  multiplied by `1 − 0.005 · (grade − 50)` before it is graded, the same seam
+  as mojo, so a 70 misses by 10% less and lands more swings in the Solid and
+  Perfect windows.
+- **Power.** Statcast average exit velocity among qualified hitters sits
+  around 89 mph with a spread of about 2.5 mph (≈3%) per standard deviation;
+  max exit velocity spreads a little wider (Baseball Savant, "Exit Velocity &
+  Barrels" leaderboard), and the strongest sluggers hit their deep flies a
+  couple dozen feet further than average hitters. Modeled as
+  `Ratings::power_factor`, `1 + 0.001 · (grade − 50)` on a squared-up ball's
+  exit speed: small on its face, but carry grows about twice as fast as exit
+  speed in the game's flight model, so a 70 drives a deep fly ~20 ft further
+  and the 80 ceiling keeps the longest drive near the ~505 ft Statcast
+  record (`contact::tests::the_power_grade_moves_the_longest_drive_only_a_little`).
+- **Arm.** Statcast arm strength (a fielder's hardest throws) averages in the
+  high 80s mph for outfielders, with a standard deviation near 4 mph (≈5%);
+  catcher **pop time** to second averages about **2.0 s**, the best near
+  1.85–1.9 s and the slowest regulars about 2.1–2.15 s (Baseball Savant, "Arm
+  Strength" and "Pop Time" leaderboards). Modeled as `Ratings::arm_factor`,
+  `1 + 0.005 · (grade − 50)` on every throw race a fielder starts
+  (`Ruleset::with_arm`) and on the catcher's throw in the steal race: a 70
+  catcher pops in about 1.9 s, a 30 in about 2.15 s.
+- **Fielding (range).** Range is first-step and sprint speed toward the ball
+  (Statcast Outs Above Average is built on catch probability from distance
+  and time). Modeled as `Ratings::range_factor`, `1 + 0.004 · (grade − 50)`
+  on the fielder's chase speed: a 70 covers ground 8% faster, which turns a
+  ball at the edge of his reach into a catch.
+- Every grade is 1.0 at 50 and every shipped starting nine (and its first
+  four hitters, who take most of the balance sim's one-inning plate
+  appearances) averages 50 in each, so the league economy stays where the
+  balance sim tuned it.
 
 ## Wind (The Hardball Times; MLB.com Statcast)
 

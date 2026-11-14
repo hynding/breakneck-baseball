@@ -27,6 +27,15 @@ pub struct Ruleset {
 }
 
 impl Ruleset {
+    /// These rules as one fielder plays them: his throws at `arm` times the
+    /// league [`PaceTuning::throw_speed`] (his `Ratings::arm_factor`), so
+    /// every throw race he starts runs at his own arm.
+    pub fn with_arm(&self, arm: f32) -> Ruleset {
+        let mut rules = self.clone();
+        rules.pace.throw_speed *= arm;
+        rules
+    }
+
     /// Paste-ready Rust lines for every field differing from `variant`'s
     /// defaults — the debug panel's tuning-session export.
     pub fn diff_literal(&self, variant: VariantId) -> String {
