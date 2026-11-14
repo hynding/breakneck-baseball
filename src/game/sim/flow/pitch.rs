@@ -133,6 +133,7 @@ pub(super) fn steal_window_for(bases: &Bases, rules: &Ruleset) -> Timer {
 
 /// Fresh play + base state whenever a game (re)starts. The base count follows
 /// the chosen field.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn reset_flow(
     mut play: ResMut<Play>,
     mut bases: ResMut<Bases>,
