@@ -413,6 +413,17 @@ only occasionally misjudging it.
   (every runner up one), applied to taken and missed pitches with runners on. The realism harness
   measures 0.33 per team-game.
 
+## Dropped third strike (Official Baseball Rules 5.05(a)(2))
+
+- The batter becomes a runner when the catcher fails to catch strike three
+  cleanly, provided first base is unoccupied, or first is occupied with two
+  out. Otherwise he is out despite the drop.
+- In practice that is a pitch in the dirt the batter swings through: a
+  catchable strike three is held. Modeled as `rules::drops_third_strike`: a
+  swinging strike three crossing under 0.175 m (the wild-pitch dirt floor)
+  with first base open. The two-out case, which forces the runners aboard,
+  is not modeled.
+
 ## Errors (Baseball-Reference)
 
 - MLB teams made **0.50 errors per game in 2025** (0.53 in 2024, 0.52 in

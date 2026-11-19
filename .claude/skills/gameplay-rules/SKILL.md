@@ -37,7 +37,7 @@ before changing behavior — most "bugs" here are deliberate design.
    runner pacing, the cover fielder, the stand-in ball (`fx::DuelThrowBall`) and the base cam all
    read it. The lead only grows during the window and resets to normal after a pickoff throw. A steal is a timed race
    (`rules::steal_race`): break timing in the windup + sprint from the lead vs. pitch-kind
-   delivery + catcher transfer (low/wide crossing) + pop time. Dropped third = curveball in the dirt.
+   delivery + catcher transfer (low/wide crossing) + pop time. Dropped third = a swinging strike three in the dirt with first open (`rules::drops_third_strike`).
 2. **Pitch** — five-pitch arsenal by dominant held-aim axis at release (`PitchKind::from_aim`):
    up fastball, down curveball, left slider, right sinker, neutral changeup. Untouched pitches end
    in the mitt: `flow::catcher_receives` (skips balls in the dirt) fires `PitchCaughtEvent`.

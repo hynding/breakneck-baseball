@@ -232,7 +232,7 @@ struct PitchState {
     /// the delivery ends.
     pending: Option<(Vec2, rules::PitchKind)>,
     /// The kind of the pitch currently in flight (set at release). Drives the
-    /// dropped-third-strike and steal resolutions.
+    /// steal resolution and the radar-gun read-out.
     kind: Option<rules::PitchKind>,
     /// The fraction of release speed the pitch in flight lost to the
     /// pitcher's fatigue ([`crate::game::fatigue::velocity_scale`]); 0 for a

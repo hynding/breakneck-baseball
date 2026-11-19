@@ -364,8 +364,11 @@ pub enum OutKind {
 pub enum Outcome {
     Foul,
     Out(OutKind),
-    /// The force-and-relay two outs: the forced runner and the batter.
-    DoublePlay,
+    /// The force-and-relay two outs: the runner forced to `out_base`
+    /// (0-indexed; `base_count()` = home plate) and the batter at first.
+    DoublePlay {
+        out_base: usize,
+    },
     /// The force got the runner at `out_base` but the batter beat the relay:
     /// one out, batter on first.
     FieldersChoice {

@@ -264,6 +264,15 @@ pub fn gets_by_catcher(crossing: Vec2) -> bool {
     crossing.y < WILD_PITCH_LOW_M || crossing.x.abs() > WILD_PITCH_WIDE_M
 }
 
+/// Does a swinging strike three get away from the catcher so the batter can
+/// run? Only a pitch in the dirt — the same floor [`gets_by_catcher`] uses —
+/// can't be held, and the batter may run only with first base open (Official
+/// Baseball Rules 5.05(a)(2); the rule's two-out case, which would force the
+/// runners, is not modeled). Per docs/BASEBALL.md ("Dropped third strike").
+pub fn drops_third_strike(crossing: Vec2, first_occupied: bool) -> bool {
+    crossing.y < WILD_PITCH_LOW_M && !first_occupied
+}
+
 /// A pitch got by the catcher with the ball live: every runner moves up a
 /// base (the man on third scores). The batter's count is untouched — the
 /// pitch was already called. Returns runs scored.

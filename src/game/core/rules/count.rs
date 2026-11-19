@@ -169,11 +169,19 @@ pub fn apply_batted_out(
     play
 }
 
-/// Applies [`Outcome::DoublePlay`]: the forced runner at second and the
-/// batter at first, with the trailing advance only when the play doesn't end
-/// the inning — identical base math to the old fiat double play. With one
-/// out remaining only the force counts (the inning ends on it).
-pub fn apply_double_play(score: &mut ScoreBoard, bases: &mut Bases, rules: &Ruleset) -> OutPlay {
+/// Applies [`Outcome::DoublePlay`]: the runner forced to `out_base`
+/// (0-indexed; `base_count()` = home plate) and the batter at first. Unless
+/// the play ends the inning, every other runner moves up a base — the ones
+/// behind the force were forced too, and a runner ahead of a force at second
+/// scores from third, as on the 6-4-3 with the corners full. A force at the
+/// plate therefore never scores a run. With one out remaining only the force
+/// counts (the inning ends on it).
+pub fn apply_double_play(
+    score: &mut ScoreBoard,
+    bases: &mut Bases,
+    rules: &Ruleset,
+    out_base: usize,
+) -> OutPlay {
     let outs_left = rules.counts.outs_per_half.saturating_sub(score.outs);
     let mut play = OutPlay {
         outs: 2.min(outs_left),
@@ -182,7 +190,10 @@ pub fn apply_double_play(score: &mut ScoreBoard, bases: &mut Bases, rules: &Rule
         doubled_off: false,
         thrown_out_home: false,
     };
-    bases.take(0); // the forced runner dies at the middle bag
+    // The forced runner dies at the bag he was running to.
+    if out_base > 0 {
+        bases.take(out_base - 1);
+    }
     if play.outs < outs_left {
         play.runs = advance_trailing(bases);
     }
@@ -194,9 +205,13 @@ pub fn apply_double_play(score: &mut ScoreBoard, bases: &mut Bases, rules: &Rule
     play
 }
 
-/// Applies [`Outcome::FieldersChoice`]: the forced runner is retired at
-/// `out_base` while the batter reaches first; the forced runners behind the
-/// out move up with him and everyone ahead holds. Never scores a run.
+/// Applies [`Outcome::FieldersChoice`]: the runner forced to `out_base` is
+/// retired while the batter reaches first. Every other runner in the force
+/// chain (the consecutively occupied bags from first, all forced by the
+/// batter at contact) takes the next bag — the lead one scoring from third
+/// with the bases loaded and the force at second or third. Runners beyond the
+/// chain were not forced and hold. Nothing moves when the out ends the
+/// inning. Per docs/BASEBALL.md ("Force play").
 pub fn apply_fielders_choice(
     score: &mut ScoreBoard,
     bases: &mut Bases,
@@ -204,26 +219,32 @@ pub fn apply_fielders_choice(
     out_base: usize,
 ) -> OutPlay {
     let outs_left = rules.counts.outs_per_half.saturating_sub(score.outs);
-    let play = OutPlay {
+    let mut play = OutPlay {
         outs: 1,
         runs: 0,
         double_play: false,
         doubled_off: false,
         thrown_out_home: false,
     };
+    let n = bases.count();
+    let forced = (0..n).take_while(|&b| bases.is_occupied(b)).count();
     if out_base > 0 {
         bases.take(out_base - 1);
     }
     if play.outs < outs_left {
-        // Everyone behind the out was forced by the batter: each moves up,
-        // and the batter takes first.
-        for base in (0..out_base.saturating_sub(1)).rev() {
+        // Lead runner first, so nobody lands on a bag still occupied.
+        for base in (0..forced).rev() {
             if let Some(runner) = bases.take(base) {
-                bases.put(base + 1, Some(runner));
+                if base + 1 >= n {
+                    play.runs += 1;
+                } else {
+                    bases.put(base + 1, Some(runner));
+                }
             }
         }
         bases.put(0, Some(bases.batter()));
     }
+    score.add_runs(play.runs);
     reset_count(score);
     charge_out(score, bases, rules);
     play
