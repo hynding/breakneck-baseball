@@ -26,11 +26,21 @@ if [ -n "$warm_pid" ] && grep -qa session-warm "/proc/$warm_pid/cmdline" 2>/dev/
   exit 0
 fi
 
+# macOS has no GNU `timeout`; fall back to Homebrew's `gtimeout`, then to a
+# perl alarm (perl ships on both macOS and the Linux container).
+if command -v timeout >/dev/null 2>&1; then
+  limit=(timeout 290)
+elif command -v gtimeout >/dev/null 2>&1; then
+  limit=(gtimeout 290)
+else
+  limit=(perl -e 'alarm shift; exec @ARGV' 290)
+fi
+
 mkdir -p target
 started=$(mktemp target/.claude-clippy.XXXXXX)
-out=$(timeout 290 cargo clippy --all-targets --message-format short 2>&1)
+out=$("${limit[@]}" cargo clippy --all-targets --message-format short 2>&1)
 status=$?
-if [ "$status" = 124 ]; then
+if [ "$status" = 124 ] || [ "$status" = 142 ]; then # 124: (g)timeout, 142: SIGALRM
   rm -f "$started"
   echo "clippy timed out (cold build?) — run \`cargo clippy --all-targets\` before committing"
   exit 0
