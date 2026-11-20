@@ -1,12 +1,12 @@
 //! Unit tests for [`super`] — the touch chrome.
 
 use super::*;
-use crate::game::touch::{pad_rect, swing_button_rect};
+use crate::game::touch::{pad_rect, pause_button_rect, swing_button_rect};
 
 /// The bottom cards' footprints in UI pixels (the widths the dodge plans
 /// with; heights a little over what they measure on screen).
 const AT_BAT_UI: Vec2 = Vec2::new(AT_BAT_W_PX, 125.0);
-const CLUSTER_UI: Vec2 = Vec2::new(CLUSTER_W_PX, 125.0);
+const CLUSTER_UI: Vec2 = Vec2::new(CLUSTER_W_PX, CLUSTER_H_PX);
 
 /// The two cards' window-pixel rects for `insets` in a window of `size`.
 fn cards(size: Vec2, insets: CornerInsets) -> (Rect, Rect) {
@@ -31,8 +31,8 @@ fn overlaps(a: Rect, b: Rect) -> bool {
 }
 
 /// Phones in both orientations (iPhone 13, a small Android, an iPhone SE)
-/// and a tablet: with the Zone Pad up, neither bottom card covers the pad
-/// or the SWING button, both stay on screen, and in landscape (where they
+/// and tablets: with the Zone Pad up, neither bottom card covers the pad,
+/// the SWING button or the pause button, both stay on screen, and in landscape (where they
 /// slide inward) they don't cover each other.
 #[test]
 fn the_bottom_cards_step_clear_of_the_zone_pad() {
@@ -44,6 +44,7 @@ fn the_bottom_cards_step_clear_of_the_zone_pad() {
         Vec2::new(375.0, 553.0),
         Vec2::new(667.0, 375.0),
         Vec2::new(1024.0, 768.0),
+        Vec2::new(800.0, 600.0),
         Vec2::new(768.0, 1024.0),
     ] {
         let scale = super::super::fit::fit_scale(size);
@@ -59,11 +60,15 @@ fn the_bottom_cards_step_clear_of_the_zone_pad() {
                 !overlaps(card, swing_button_rect(size)),
                 "{size}: {name} covers SWING"
             );
+            assert!(
+                !overlaps(card, pause_button_rect(size)),
+                "{size}: {name} covers the pause button"
+            );
             assert_eq!(screen.union(card), screen, "{size}: {name} off screen");
         }
         if insets[1] == RESTING_INSETS[1] {
             // Slid toward each other beside the controls: never into each
-            // other. (A lift keeps the resting side-by-side spacing.)
+            // other. (A lift keeps each card in its own corner.)
             assert!(!overlaps(at_bat, cluster), "{size}: the cards collide");
         }
     }

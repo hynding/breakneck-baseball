@@ -329,6 +329,9 @@ const DODGE_GAP_PX: f32 = 10.0;
 /// scoreboard card whose width follows its text) with some slack.
 const AT_BAT_W_PX: f32 = 214.0;
 const CLUSTER_W_PX: f32 = 275.0;
+/// The corner cluster's height (UI px): the 120 px meter track and its
+/// border, or the scoreboard card, with some slack.
+const CLUSTER_H_PX: f32 = 130.0;
 
 /// Where the bottom HUD cards go while the Zone Pad shows, for a window of
 /// `size` logical pixels at UI scale `scale`: the pad fills the
@@ -351,8 +354,28 @@ pub(super) fn dodge_insets(size: Vec2, scale: f32) -> CornerInsets {
             RESTING_INSETS[3],
         ]
     } else {
-        let lift = (size.y - pad.min.y.min(swing.min.y)) / scale + DODGE_GAP_PX;
-        [RESTING_INSETS[0], lift, RESTING_INSETS[2], lift]
+        // Each card lifts only over its own control: the AT BAT card over
+        // the pad, the cluster over the SWING button (lower), which keeps
+        // the cluster under the pause button on the right edge where the
+        // screen is wide enough.
+        let over_pad = (size.y - pad.min.y) / scale + DODGE_GAP_PX;
+        // A cluster wide enough to reach over the pad (a portrait phone)
+        // clears the pad too.
+        let cluster_left = size.x - (RESTING_INSETS[2] + CLUSTER_W_PX) * scale;
+        let over_swing = if cluster_left < pad.max.x {
+            over_pad
+        } else {
+            (size.y - swing.min.y) / scale + DODGE_GAP_PX
+        };
+        // If even that reaches the pause button, step the cluster left of it.
+        let pause = crate::game::touch::pause_button_rect(size);
+        let cluster_top = size.y - (over_swing + CLUSTER_H_PX) * scale;
+        let right = if cluster_top < pause.max.y {
+            (size.x - pause.min.x) / scale + DODGE_GAP_PX
+        } else {
+            RESTING_INSETS[2]
+        };
+        [RESTING_INSETS[0], over_pad, right, over_swing]
     }
 }
 
