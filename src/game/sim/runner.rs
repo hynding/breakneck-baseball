@@ -516,9 +516,8 @@ pub(crate) fn sync_runners(
         .map(|t| t.runner);
     for (entity, from) in pool {
         if half_flipped {
-            // Off the field at once, but kept (hidden) for the replay of
-            // the play that ended the half: no base path, so nothing waits
-            // on him.
+            // Off the field at once, hidden and cleared with the other
+            // departed rigs: no base path, so nothing waits on him.
             commands
                 .entity(entity)
                 .remove::<(Runner, BasePath)>()

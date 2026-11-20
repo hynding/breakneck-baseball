@@ -296,6 +296,8 @@ fn a_cpu_game_with_every_replay_finishes() {
     let mut pitches = 0;
     let mut missing = Vec::new();
     let mut was_pre_pitch = false;
+    let mut half_at_contact = None;
+    let (mut half_enders, mut replayed_half_ender) = (0u32, false);
     let finished = run_until(&mut app, 600_000, |app| {
         let pre_pitch = app.world().resource::<Play>().phase == Phase::PrePitch;
         if pre_pitch && !was_pre_pitch {
@@ -316,6 +318,19 @@ fn a_cpu_game_with_every_replay_finishes() {
             }
         }
         was_pre_pitch = pre_pitch;
+        // A play that ends the half gets no replay: the rigs are already
+        // dressed for the next half.
+        let phase = app.world().resource::<Play>().phase;
+        let top = app.world().resource::<ScoreBoard>().top_of_inning;
+        if phase == Phase::InPlay {
+            half_at_contact = Some(top);
+        }
+        if phase == Phase::Result && half_at_contact.is_some_and(|h| h != top) {
+            half_enders += 1;
+            if playing(app) {
+                replayed_half_ender = true;
+            }
+        }
         *app.world().resource::<State<GameState>>().get() == GameState::GameOver
     });
     assert!(finished.is_some(), "the game never finished");
@@ -323,6 +338,8 @@ fn a_cpu_game_with_every_replay_finishes() {
         missing.is_empty(),
         "occupied bags with no runner shown (pitch, base): {missing:?}"
     );
+    assert!(half_enders > 0, "no ball in play ended a half");
+    assert!(!replayed_half_ender, "a play that ended the half replayed");
     let replay = app.world().resource::<Replay>();
     assert!(
         replay.played >= 2,

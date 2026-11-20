@@ -372,10 +372,10 @@ impl Plugin for UiPlugin {
                 run_game::update_run_game_hint,
                 (paint_walkup_card, paint_replay_tag),
                 clear_read_outs_on_result_exit,
-                // Before flow: on the frame the phase flips, flow's pitch
-                // step clears the finished curtain timer in the same pass,
-                // so a paint after it reads "opening" and leaves the wipe
-                // short of flush on the flip frame. Unordered, which side
+                // Before flow: on the frame the phase flips, flow clears the
+                // finished curtain timer in the same pass, so a paint after
+                // it reads "opening" and leaves the wipe short of flush on
+                // the flip frame. Unordered, which side
                 // of flow it landed on was a schedule-build tie-break.
                 drive_curtain.before(crate::game::GameplayOrder::Flow),
             )

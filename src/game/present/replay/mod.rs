@@ -23,7 +23,6 @@ use bevy::prelude::*;
 use bevy::transform::TransformSystems;
 use bevy_rapier3d::plugin::PhysicsSet;
 
-use crate::game::GameState;
 use crate::game::animation::{AnimClip, Playing, RigLimb};
 use crate::game::ball::Baseball;
 use crate::game::flow::{LiveBallEvent, Phase, Play};
@@ -32,6 +31,7 @@ use crate::game::player::{BatPivot, CatcherRole, PlateUmpire, RigUnitTag};
 use crate::game::quality::{ActiveQuality, QualityTier};
 use crate::game::settings::{ReplayMode, Settings};
 use crate::game::variant::FieldSpec;
+use crate::game::{GameState, ScoreBoard};
 
 use clip::{Moment, Recording, Sample, Segment};
 
@@ -103,6 +103,8 @@ struct PlayWatch {
     prev: Option<Phase>,
     /// Contact, on the gameplay clock.
     contact: Option<f32>,
+    /// The half-inning at contact (`top_of_inning`).
+    half: Option<bool>,
     throw_home: bool,
     dove: bool,
     /// When the play's result pause began, and whether it gets a replay.
@@ -230,6 +232,7 @@ fn watch_play(
     play: Res<Play>,
     settings: Res<Settings>,
     field: Res<FieldSpec>,
+    score: Res<ScoreBoard>,
     replay: Res<Replay>,
     mut watch: ResMut<PlayWatch>,
     mut live: MessageReader<LiveBallEvent>,
@@ -248,6 +251,7 @@ fn watch_play(
                 *watch = PlayWatch {
                     prev: Some(Phase::InPlay),
                     contact: Some(now - play.since_contact(now)),
+                    half: Some(score.top_of_inning),
                     ..default()
                 };
             }
@@ -263,11 +267,17 @@ fn watch_play(
                 watch.called_at = Some(now);
                 let big =
                     play.is_home_run() || play.is_walk_off() || watch.throw_home || watch.dove;
-                watch.wanted = match settings.replays {
-                    ReplayMode::Off => false,
-                    ReplayMode::BigPlays => big,
-                    ReplayMode::Always => true,
-                };
+                // A play that ended the half has already re-dressed every
+                // rig for the next one (colours, names): the replay only
+                // carries poses, so it would show both teams in each
+                // other's uniforms. No replay then.
+                let half_over = watch.half != Some(score.top_of_inning);
+                watch.wanted = !half_over
+                    && match settings.replays {
+                        ReplayMode::Off => false,
+                        ReplayMode::BigPlays => big,
+                        ReplayMode::Always => true,
+                    };
             }
         }
         _ => {
