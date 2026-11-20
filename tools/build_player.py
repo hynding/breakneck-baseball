@@ -50,23 +50,43 @@ MATERIALS = {
     "Skin":       (0.87, 0.67, 0.50, 1.0),
     "Cap":        (0.15, 0.20, 0.50, 1.0),
     "Bat":        (0.72, 0.50, 0.28, 1.0),
+    # Fixed colours (never re-tinted): the fielder's mitt (shown on defense
+    # rigs only — see wire_rigs), shoes, and the eyes.
+    "Glove":      (0.42, 0.24, 0.11, 1.0),
+    "Shoe":       (0.07, 0.07, 0.08, 1.0),
+    "Face":       (0.05, 0.04, 0.04, 1.0),
 }
 
 # (primitive, location, half-dims/radii, material, bone, rotation_euler)
+# Every primitive is built at unit size and scaled by its half-dims, so
+# spheres and cylinders can be squashed into ellipsoids and ovals.
 PARTS = [
     ("cube",      (0, 0, 0.975),        (0.15, 0.11, 0.075), "JerseyBody", "Hips",       (0, 0, 0)),
     ("cube",      (0, 0, 1.30),         (0.18, 0.12, 0.22),  "JerseyBody", "Spine",      (0, 0, 0)),
     ("uv_sphere", (0, 0, 1.66),         (0.16, 0.16, 0.16),  "Skin",       "Head",       (0, 0, 0)),
+    # Face: two eyes and a nose on the -Y (front) side of the head.
+    ("uv_sphere", (0.055, -0.142, 1.69),  (0.02, 0.012, 0.024), "Face",    "Head",       (0, 0, 0)),
+    ("uv_sphere", (-0.055, -0.142, 1.69), (0.02, 0.012, 0.024), "Face",    "Head",       (0, 0, 0)),
+    ("cube",      (0, -0.162, 1.645),   (0.016, 0.02, 0.026),"Skin",       "Head",       (0, 0, 0)),
+    # Cap crown plus a rounded brim tipped slightly down over the eyes.
     ("cylinder",  (0, 0, 1.82),         (0.17, 0.17, 0.045), "Cap",        "Head",       (0, 0, 0)),
-    ("cube",      (0, -0.16, 1.80),     (0.13, 0.09, 0.015), "Cap",        "Head",       (0, 0, 0)),
+    ("cylinder",  (0, -0.17, 1.788),    (0.13, 0.11, 0.008), "Cap",        "Head",       (0.14, 0, 0)),
     ("cylinder",  (0.24, 0, 1.30),      (0.055, 0.055, 0.16),"JerseyBody", "UpperArm.L", (0, 0, 0)),
     ("cylinder",  (0.24, 0, 1.01),      (0.05, 0.05, 0.14),  "Skin",       "LowerArm.L", (0, 0, 0)),
     ("cylinder",  (-0.24, 0, 1.30),     (0.055, 0.055, 0.16),"JerseyBody", "UpperArm.R", (0, 0, 0)),
     ("cylinder",  (-0.24, 0, 1.01),     (0.05, 0.05, 0.14),  "Skin",       "LowerArm.R", (0, 0, 0)),
+    # Hands at the forearm tails; the mitt wraps the left one (hidden on
+    # batters, runners and umpires, so the bare hand shows there).
+    ("uv_sphere", (0.24, 0, 0.855),     (0.045, 0.04, 0.05), "Skin",       "LowerArm.L", (0, 0, 0)),
+    ("uv_sphere", (-0.24, 0, 0.855),    (0.045, 0.04, 0.05), "Skin",       "LowerArm.R", (0, 0, 0)),
+    ("uv_sphere", (0.255, -0.02, 0.84), (0.07, 0.05, 0.09),  "Glove",      "LowerArm.L", (0, 0, 0)),
     ("cylinder",  (0.10, 0, 0.70),      (0.07, 0.07, 0.21),  "JerseyBody", "UpperLeg.L", (0, 0, 0)),
     ("cylinder",  (0.10, 0, 0.27),      (0.065, 0.065, 0.23),"JerseyBody", "LowerLeg.L", (0, 0, 0)),
     ("cylinder",  (-0.10, 0, 0.70),     (0.07, 0.07, 0.21),  "JerseyBody", "UpperLeg.R", (0, 0, 0)),
     ("cylinder",  (-0.10, 0, 0.27),     (0.065, 0.065, 0.23),"JerseyBody", "LowerLeg.R", (0, 0, 0)),
+    # Shoes, toes pointing forward (-Y).
+    ("cube",      (0.10, -0.035, 0.032), (0.055, 0.105, 0.032), "Shoe",    "LowerLeg.L", (0, 0, 0)),
+    ("cube",      (-0.10, -0.035, 0.032),(0.055, 0.105, 0.032), "Shoe",    "LowerLeg.R", (0, 0, 0)),
 ]
 
 
@@ -100,8 +120,16 @@ TAU = 2 * math.pi
 #           dz = Hips drop in metres (bone-local Y == world Z for Hips).
 # Values mirror the old limb_pose()/root_drop()/root_pitch() tables.
 CLIPS = {
-    "Idle": (1.0, True, {
-        "Spine": {"rx": [(0, 0), (0.5, 0.03), (1, 0)]},
+    # The breathing layer: a slow 3 s breath every resting rig loops through
+    # (the driver starts each rig at its own phase so a team never breathes
+    # in step). Chest lifts (Spine -rx leans back a touch), the arms float a
+    # little off the body (-rz on .L / +rz on .R swings the hand outward at
+    # rest, probed), the head counters so the eyes stay level.
+    "Idle": (3.0, True, {
+        "Spine": {"rx": [(0, 0), (0.45, -0.035), (1, 0)]},
+        "Head": {"rx": [(0, 0), (0.45, 0.03), (1, 0)]},
+        "UpperArm.L": {"rz": [(0, -0.05), (0.45, -0.09), (1, -0.05)]},
+        "UpperArm.R": {"rz": [(0, 0.05), (0.45, 0.09), (1, 0.05)]},
         # The Bat bone's rest pose is solved for the raised-arm stances; with
         # idle arms it reads as a bat parked vertically behind the back
         # (playtest 2026-08-20, TODO 5). Swing the barrel down-forward so the
@@ -369,6 +397,56 @@ CLIPS = {
                    "ry": [(0, -0.25), (1, 0.0)]},
         "Head": {"rx": [(0, 0), (0.4, -0.3), (1, -0.15)]},
     }),
+    # ── Reactions (graphics plan task 11). Poses were probed against this
+    # rig in bpy: Head/Spine +rx tips forward, LowerArm -rx flexes the elbow.
+    # Fist pump with the LEFT (glove) arm, so a batter's bat stays in his
+    # right hand: the arm drives up twice, then drops back toward Idle.
+    "FistPump": (0.85, False, {
+        "UpperArm.L": {"rx": [(0, 0), (0.2, -2.6), (0.35, -1.9), (0.5, -2.6), (0.65, -1.9), (0.85, -1.6), (1, -0.4)],
+                        "rz": [(0, 0), (0.2, 0.25), (0.85, 0.25), (1, -0.05)]},
+        "LowerArm.L": {"rx": [(0, 0), (0.2, -1.1), (0.85, -1.1), (1, -0.2)]},
+        "Spine": {"rx": [(0, 0), (0.2, -0.12), (0.85, -0.08), (1, 0)]},
+        "Head": {"rx": [(0, 0), (0.2, -0.2), (0.85, -0.1), (1, 0)]},
+        "Bat": {"rx": [(0, -2.6), (1, -2.6)]},
+    }),
+    # Tip of the cap: right hand to the brim (solved: hand within 2 cm of the
+    # brim's front edge), a small nod, and back down.
+    "CapTip": (1.1, False, {
+        "UpperArm.R": {"rx": [(0, 0), (0.3, -2.0), (0.65, -2.0), (1, 0)],
+                        "rz": [(0, 0), (0.3, 0.6), (0.65, 0.6), (1, 0)]},
+        "LowerArm.R": {"rx": [(0, 0), (0.3, -1.3), (0.65, -1.3), (1, 0)]},
+        "Head": {"rx": [(0, 0), (0.3, 0.08), (0.48, 0.22), (0.65, 0.08), (1, 0)]},
+        "Bat": {"rx": [(0, -2.6), (1, -2.6)]},
+    }),
+    # Struck out: a slow, slumped walk to the dugout, head down, the bat
+    # hanging from the right hand. Loops while the batter walks off; the
+    # stride (~1.5 m per cycle) roughly matches runner.rs WALK_OFF_SPEED.
+    "DejectedWalk": (1.0, True, {
+        "UpperLeg.L": {"rx": [(0, 0), (0.25, -0.45), (0.5, 0), (0.75, 0.45), (1, 0)]},
+        "UpperLeg.R": {"rx": [(0, 0), (0.25, 0.45), (0.5, 0), (0.75, -0.45), (1, 0)]},
+        "LowerLeg.L": {"rx": [(0, -0.15), (1, -0.15)]},
+        "LowerLeg.R": {"rx": [(0, -0.15), (1, -0.15)]},
+        "UpperArm.L": {"rx": [(0, 0), (0.25, 0.2), (0.5, 0), (0.75, -0.2), (1, 0)]},
+        "UpperArm.R": {"rx": [(0, 0), (0.25, -0.1), (0.5, 0), (0.75, 0.1), (1, 0)]},
+        "Spine": {"rx": [(0, 0.2), (0.5, 0.24), (1, 0.2)]},
+        "Head": {"rx": [(0, 0.35), (1, 0.35)]},
+        "Bat": {"rx": [(0, -2.8), (1, -2.8)]},
+    }),
+    # Team celebration: a little hop with the right hand thrown up for a
+    # high five and the left arm up beside it.
+    "HighFive": (1.0, False, {
+        "UpperArm.R": {"rx": [(0, 0), (0.3, -2.9), (0.7, -2.9), (1, -0.3)],
+                        "rz": [(0, 0), (0.3, 0.15), (0.7, 0.15), (1, 0)]},
+        "LowerArm.R": {"rx": [(0, 0), (0.3, -0.2), (0.7, -0.2), (1, 0)]},
+        "UpperArm.L": {"rx": [(0, 0), (0.3, -1.5), (0.7, -1.5), (1, 0)],
+                        "rz": [(0, 0), (0.3, -0.5), (0.7, -0.5), (1, 0)]},
+        "UpperLeg.L": {"rx": [(0, 0), (0.15, 0.35), (0.35, 0), (1, 0)]},
+        "UpperLeg.R": {"rx": [(0, 0), (0.15, 0.35), (0.35, 0), (1, 0)]},
+        "LowerLeg.L": {"rx": [(0, 0), (0.15, -0.6), (0.35, 0), (1, 0)]},
+        "LowerLeg.R": {"rx": [(0, 0), (0.15, -0.6), (0.35, 0), (1, 0)]},
+        "Hips": {"dz": [(0, 0), (0.15, -0.08), (0.35, 0.12), (0.55, 0), (1, 0)]},
+        "Bat": {"rx": [(0, -2.6), (1, -2.6)]},
+    }),
 }
 
 CHANNEL = {"rx": ("rotation_euler", 0), "ry": ("rotation_euler", 1),
@@ -415,11 +493,15 @@ def make_body(mats):
             bpy.ops.mesh.primitive_cube_add(location=loc)
             bpy.context.object.scale = dims
         elif prim == "uv_sphere":
-            bpy.ops.mesh.primitive_uv_sphere_add(location=loc, radius=dims[0],
-                                                 segments=12, ring_count=8)
+            small = max(dims) < 0.03  # eyes: fewer facets, same silhouette
+            bpy.ops.mesh.primitive_uv_sphere_add(location=loc, radius=1.0,
+                                                 segments=8 if small else 12,
+                                                 ring_count=6 if small else 8)
+            bpy.context.object.scale = dims
         else:
-            bpy.ops.mesh.primitive_cylinder_add(location=loc, radius=dims[0],
-                                                depth=dims[2] * 2, vertices=10)
+            bpy.ops.mesh.primitive_cylinder_add(location=loc, radius=1.0,
+                                                depth=2.0, vertices=10)
+            bpy.context.object.scale = dims
         ob = bpy.context.object
         ob.rotation_euler = rot
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
@@ -479,4 +561,5 @@ def main():
     print(f"wrote {OUT}")
 
 
-main()
+if __name__ == "__main__":
+    main()

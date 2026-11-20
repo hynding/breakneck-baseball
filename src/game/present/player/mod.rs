@@ -41,7 +41,7 @@ pub(crate) use rig::{build_materials, build_rig_model};
 
 use behavior::{
     BatterFidgetTimer, batter_fidgets, batter_stance, catcher_crouch, celebrate_home_run,
-    reset_batter_fidget_timer, trigger_swing, umpire_signals,
+    reset_batter_fidget_timer, result_reactions, trigger_swing, umpire_signals,
 };
 use rig::{recolor_gltf, recolor_teams, spawn_players};
 
@@ -152,6 +152,7 @@ impl Plugin for PlayerPlugin {
                     celebrate_home_run.after(IdentitySet),
                     catcher_crouch,
                     umpire_signals,
+                    result_reactions,
                 )
                     .chain()
                     // Same-frame phase-flip guarantee (batter_stance's

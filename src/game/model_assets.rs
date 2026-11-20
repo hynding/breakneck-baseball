@@ -17,6 +17,9 @@ pub const CAP_MATERIAL: &str = "Cap";
 pub const BAT_MATERIAL: &str = "Bat";
 /// Named skin material — the per-player tint seam ([`RigSkinMeshes`]).
 pub const SKIN_MATERIAL: &str = "Skin";
+/// Named fielder's-mitt material — like the bat, a submesh every rig
+/// carries, which `wire_rigs` shows on defense rigs only.
+pub const GLOVE_MATERIAL: &str = "Glove";
 
 /// Bones gameplay attaches to (jersey lettering, the bat, future props).
 pub const ATTACH_BONES: &[&str] = &[
@@ -62,6 +65,10 @@ pub const CLIP_TABLE: &[(AnimClip, &str)] = &[
     (AnimClip::FidgetBatTap, "FidgetBatTap"),
     (AnimClip::FidgetHalfSwing, "FidgetHalfSwing"),
     (AnimClip::CelebrateBatFlip, "CelebrateBatFlip"),
+    (AnimClip::FistPump, "FistPump"),
+    (AnimClip::CapTip, "CapTip"),
+    (AnimClip::DejectedWalk, "DejectedWalk"),
+    (AnimClip::HighFive, "HighFive"),
 ];
 
 /// Clips without their own baked action fold onto the one that covers them.
@@ -114,6 +121,9 @@ pub struct RigAnimations {
     /// The skin submesh's material handle — `wire_rigs` compares every
     /// descendant against it to collect [`RigSkinMeshes`] for per-player tint.
     pub skin_material: Handle<StandardMaterial>,
+    /// The mitt submesh's material handle — `wire_rigs` shows it on
+    /// `RigUnit::Defense` rigs only.
+    pub glove_material: Handle<StandardMaterial>,
     nodes: Vec<AnimationNodeIndex>, // parallel to CLIP_TABLE
     speeds: Vec<f32>,               // authored duration / AnimClip::duration()
 }
@@ -277,6 +287,11 @@ fn build_rig_animations(
         .get(SKIN_MATERIAL)
         .cloned()
         .unwrap_or_default();
+    let glove_material = gltf
+        .named_materials
+        .get(GLOVE_MATERIAL)
+        .cloned()
+        .unwrap_or_default();
 
     let tint = |materials: &mut Assets<StandardMaterial>,
                 base: &Handle<StandardMaterial>,
@@ -302,6 +317,7 @@ fn build_rig_animations(
         cap_material: cap_base,
         bat_material,
         skin_material,
+        glove_material,
         nodes,
         speeds,
     });
@@ -347,7 +363,7 @@ pub struct RigCapMeshes(pub Vec<Entity>);
 /// jersey/cap material with [`GltfJerseyMesh`] so [`recolor_gltf`] can dress
 /// it, collects the skin/cap submeshes onto the root as [`RigSkinMeshes`]/
 /// [`RigCapMeshes`] for per-player dressing (`gear::dress_rigs`), and shows
-/// the bat submesh only on the plate batter (the `Batter`
+/// the mitt only on defense rigs and the bat submesh only on the plate batter (the `Batter`
 /// marker) — every other rig, including run-out rigs which also carry
 /// `RigUnit::Batter`, hides it, since the bat is skinned into the shared mesh
 /// and every instance would otherwise carry one. Retries each frame until
@@ -374,6 +390,7 @@ fn wire_rigs(
         let mut cap_meshes = Vec::new();
         let mut bat_meshes = Vec::new();
         let mut skin_meshes = Vec::new();
+        let mut glove_meshes = Vec::new();
         let mut stack = vec![root];
         while let Some(e) = stack.pop() {
             if players.get(e).is_ok() {
@@ -400,6 +417,8 @@ fn wire_rigs(
                     bat_meshes.push(e);
                 } else if mat.0 == anims.skin_material {
                     skin_meshes.push(e);
+                } else if mat.0 == anims.glove_material {
+                    glove_meshes.push(e);
                 }
             }
             if let Ok(children) = children_q.get(e) {
@@ -460,6 +479,16 @@ fn wire_rigs(
         };
         for e in bat_meshes {
             commands.entity(e).insert(bat_visibility);
+        }
+        // Only fielders wear the mitt: the batter, his run-out/runner rigs
+        // and the umpires show the bare left hand underneath it.
+        let glove_visibility = if unit == RigUnit::Defense {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        for e in glove_meshes {
+            commands.entity(e).insert(glove_visibility);
         }
     }
 }

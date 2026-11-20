@@ -408,6 +408,60 @@ fn home_run_queues_the_authored_celebration() {
 }
 
 #[test]
+fn home_run_without_an_authored_celebration_queues_the_fist_pump() {
+    use breakneck_baseball::game::animation::{AnimClip, Playing};
+    use breakneck_baseball::game::flow::BallInPlayEvent;
+    use breakneck_baseball::game::rules::{ContactClass, ContactKind};
+    let mut app = headless_app();
+    start_game(&mut app, KeyCode::Digit1);
+    // Away idx0 has no authored celebration in data/players.ron (only
+    // OKAFOR home/1, KANE home/8, FOX away/2 and MARSH away/10 do), so he
+    // gets the stock fist pump.
+    {
+        use breakneck_baseball::game::animation::celebration_clip;
+        use breakneck_baseball::game::roster::Rosters;
+        let rosters = app.world().resource::<Rosters>();
+        let style = rosters.team(Team::Away).card(0).appearance.style;
+        assert_eq!(
+            celebration_clip(style.celebration),
+            None,
+            "precondition: away idx0 must have no authored celebration"
+        );
+    }
+    let batter = app
+        .world_mut()
+        .query_filtered::<Entity, With<Batter>>()
+        .single(app.world())
+        .unwrap();
+    app.world_mut().entity_mut(batter).insert(PlayerIdentity {
+        team: Team::Away,
+        index: 0,
+    });
+    // Swing in flight when the ball is declared a homer: the celebration
+    // must chain via `Playing.next`, never cutting the swing.
+    app.world_mut()
+        .entity_mut(batter)
+        .insert(Playing::new(AnimClip::BatterSwing));
+    app.world_mut().write_message(BallInPlayEvent {
+        kind: ContactKind::HomeRun,
+        landing: Vec3::new(0.0, 0.0, 120.0),
+        launch: Vec3::new(0.0, 30.0, 45.0),
+        contact_class: ContactClass::DeepFly,
+    });
+    for _ in 0..4 {
+        app.update();
+    }
+    let world = app.world_mut();
+    let playing = world.get::<Playing>(batter).expect("swing still in flight");
+    assert_eq!(playing.clip, AnimClip::BatterSwing, "swing must not be cut");
+    assert_eq!(
+        playing.next,
+        Some(AnimClip::FistPump),
+        "the stock fist pump chains after"
+    );
+}
+
+#[test]
 fn headwear_hides_the_baked_cap_and_mounts_gear() {
     let mut app = headless_app();
     start_game(&mut app, KeyCode::Digit1);

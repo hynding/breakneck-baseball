@@ -91,6 +91,18 @@ pub enum AnimClip {
     /// opens. Chained via `Playing::then` right after `BatterSwing`, so its
     /// frame 0 matches `BatterSwing`'s real end pose.
     CelebrateBatFlip,
+    /// Reaction: the glove-side arm pumps twice overhead. The home-run
+    /// batter's default celebration when he has no authored one.
+    FistPump,
+    /// Reaction: right hand to the cap brim and a nod — the pitcher after a
+    /// strikeout.
+    CapTip,
+    /// Reaction: a slumped, head-down walk. Loops while the struck-out
+    /// batter walks off (a gait, like `RunCycle` — see [`is_gait`]).
+    DejectedWalk,
+    /// Reaction: a hop with one hand thrown up — the batting side's runners
+    /// after a walk-off.
+    HighFive,
 }
 
 /// Where in `BatterSwing`'s play-through the bat comes through the zone:
@@ -120,13 +132,19 @@ impl AnimClip {
             AnimClip::Slide => 0.6,
             AnimClip::BatterSwing => 0.42,
             AnimClip::BattingStance => 1.2,
-            AnimClip::Idle => 1.0,
+            // A slow breath (the idle "breathing layer"): rigs at rest loop
+            // it, each from its own phase (`driver::start_clip`).
+            AnimClip::Idle => 3.0,
             AnimClip::StanceOpen => 1.2,
             AnimClip::StanceClosed => 1.2,
             AnimClip::StanceWaggle => 1.2,
             AnimClip::FidgetBatTap => 0.8,
             AnimClip::FidgetHalfSwing => 0.9,
             AnimClip::CelebrateBatFlip => 0.85,
+            AnimClip::FistPump => 0.85,
+            AnimClip::CapTip => 1.1,
+            AnimClip::DejectedWalk => 1.0,
+            AnimClip::HighFive => 1.0,
         }
     }
 
@@ -141,8 +159,16 @@ impl AnimClip {
                 | AnimClip::StanceOpen
                 | AnimClip::StanceClosed
                 | AnimClip::StanceWaggle
+                | AnimClip::DejectedWalk
         )
     }
+}
+
+/// Clips a moving rig walks or runs on. `locomote` starts `RunCycle` for a
+/// mover with nothing playing and sheds any gait once the rig has no target,
+/// so a rig never jogs (or trudges) in place.
+pub fn is_gait(clip: AnimClip) -> bool {
+    matches!(clip, AnimClip::RunCycle | AnimClip::DejectedWalk)
 }
 
 /// StyleSet → clip resolution. Lives here (not appearance.rs) so the schema

@@ -52,6 +52,7 @@ mod menu_tap;
 mod model_contract;
 mod passive_walks;
 mod pause_subs;
+mod reactions;
 mod replay;
 mod runner_cam;
 mod running_game;
