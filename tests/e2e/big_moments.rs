@@ -189,8 +189,8 @@ fn a_press_skips_the_sequence_and_its_replay() {
 fn a_walk_off_holds_the_pile_up() {
     let mut app = headless_app();
     app.insert_resource(Script {
-        // Up the middle on a line: a single more often than a home run.
-        aim: Some(Vec2::new(0.25, 0.05)),
+        // To left-centre, short of the wall: the ball falls in.
+        aim: Some(Vec2::new(-0.5, 0.3)),
         ..default()
     });
     app.add_systems(DriveGame, drive);
