@@ -109,7 +109,7 @@ pub(super) fn spawn_curtain(
 /// both: a cut to black is less motion than the reset it hides.
 #[allow(clippy::type_complexity)]
 pub(super) fn drive_curtain(
-    time: Res<Time>,
+    real: Res<Time<Real>>,
     play: Res<Play>,
     score: Res<ScoreBoard>,
     theme: Res<Theme>,
@@ -131,8 +131,10 @@ pub(super) fn drive_curtain(
         // Closing: track flow's timer so the frame the phase flips is the
         // frame the screen is fully covered.
         Some(progress) => curtain.coverage.max(progress),
-        // Opening (or already open): retreat toward zero.
-        None => (curtain.coverage - time.delta_secs() / open_secs).max(0.0),
+        // Opening (or already open): retreat toward zero, on the real
+        // clock: the game-start fade-in opens over the intro flyover, which
+        // holds the gameplay clock.
+        None => (curtain.coverage - real.delta_secs() / open_secs).max(0.0),
     };
     if coverage == curtain.coverage && coverage == 0.0 {
         return;

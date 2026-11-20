@@ -15,6 +15,7 @@ fn cues(phase: Phase) -> ShotCues {
         pitch_gloved: false,
         view: DuelView::BattingZoom,
         walkup: false,
+        cutaway: false,
         strikeout: false,
         thrown_base: None,
         grounder: false,
@@ -1226,4 +1227,68 @@ fn reduce_motion_holds_the_trot_orbit_still() {
         opening.eye,
         "it sweeps otherwise"
     );
+}
+
+/// The first walk-up of each half opens on the cutaway for its hold, then
+/// the walk-up shot takes over; the game's first half never gets one (the
+/// intro just showed the park), and a later walk-up in the same half
+/// doesn't either.
+#[test]
+fn each_new_half_opens_on_the_cutaway() {
+    // Top of the first: marked seen, no cutaway.
+    let (cut, up) = half_inning_cutaway(true, (1, true), 0.0, None);
+    assert!(!up);
+    // Bottom of the first: the first walk-up's hold starts it.
+    let (cut, up) = half_inning_cutaway(true, (1, false), 100.0, cut);
+    assert!(up);
+    let (cut, up) = half_inning_cutaway(true, (1, false), 100.0 + CUTAWAY_SECS * 0.9, cut);
+    assert!(up, "held through its seconds");
+    let (cut, up) = half_inning_cutaway(true, (1, false), 100.0 + CUTAWAY_SECS + 0.01, cut);
+    assert!(!up, "then the walk-up shot");
+    // Between pitches and at the half's next walk-up: no second cutaway.
+    let (cut, up) = half_inning_cutaway(false, (1, false), 130.0, cut);
+    assert!(!up);
+    let (cut, up) = half_inning_cutaway(true, (1, false), 160.0, cut);
+    assert!(!up, "only the half's first walk-up");
+    // Top of the second: a fresh one.
+    let (_, up) = half_inning_cutaway(true, (2, true), 300.0, cut);
+    assert!(up);
+
+    let mut c = cues(Phase::PrePitch);
+    c.walkup = true;
+    c.cutaway = true;
+    assert_eq!(pick_shot(&c, None), Shot::HalfInning);
+    c.cutaway = false;
+    assert_eq!(pick_shot(&c, None), Shot::WalkUp);
+}
+
+/// The cutaway frames the whole scoreboard in a stadium (all four corners
+/// inside the frame, the board filling a good share of it), and the yard
+/// from high behind the plate elsewhere.
+#[test]
+fn the_cutaway_frames_the_scoreboard() {
+    let field = VariantId::Standard.field();
+    for aspect in [16.0 / 9.0, 4.0 / 3.0, 390.0 / 664.0] {
+        let (eye, target, fov) = half_inning_cam(&field, aspect);
+        let board = crate::game::field::scoreboard_centre(&field);
+        assert_eq!(target, board);
+        let half = crate::game::field::SCOREBOARD_SIZE / 2.0;
+        let across = Vec3::Y.cross((-board).with_y(0.0).normalize()).normalize();
+        let mut widest: f32 = 0.0;
+        for (sx, sy) in [(1.0, 1.0), (-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0)] {
+            let p = board + across * half.x * sx + Vec3::Y * half.y * sy;
+            let x = framed_ndc_x(eye, target, fov, aspect, p);
+            let y = framed_ndc_y(eye, target, fov, p);
+            assert!(x.abs() <= 1.0 && y.abs() <= 1.0, "corner out at {aspect}");
+            widest = widest.max(x.abs()).max(y.abs());
+        }
+        assert!(widest > 0.6, "the board is too small at {aspect}: {widest}");
+        assert!(
+            eye.length() < board.length(),
+            "the eye is in front of the board"
+        );
+    }
+    let yard = VariantId::FrontYard.field();
+    let (eye, target, _) = half_inning_cam(&yard, 16.0 / 9.0);
+    assert!(eye.y > 10.0 && eye.z < 0.0 && target.z > 0.0);
 }

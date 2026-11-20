@@ -96,12 +96,14 @@ pub(super) fn paint_walkup_card(
     order: Res<BattingOrder>,
     rosters: Res<Rosters>,
     (mojo, fatigue): (Option<Res<Mojo>>, Option<Res<Fatigue>>),
-    theme: Res<Theme>,
+    (theme, intro): (Res<Theme>, Res<crate::game::intro::Intro>),
     mut cards: Query<(&mut BackgroundColor, &mut BorderColor, &mut Visibility), With<WalkUpCard>>,
     mut lines: Query<(&WalkUpText, &mut Text, &mut TextColor)>,
 ) {
     let ui = &theme.ui;
-    let on = play.walkup_active();
+    // Not over the intro: the first walk-up's hold is frozen under it, and
+    // the lineup card has the screen.
+    let on = play.walkup_active() && !intro.is_playing();
     for (mut bg, mut border, mut visibility) in &mut cards {
         let want_visibility = if on {
             Visibility::Inherited
