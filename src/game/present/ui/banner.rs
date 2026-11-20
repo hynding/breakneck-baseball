@@ -248,7 +248,7 @@ pub(super) fn spawn_duel_panels(commands: &mut Commands, theme: &Theme) {
 /// the mutation. The roots spawn visible, so the alpha-0-at-first-extract
 /// cull never applies to them.
 pub(super) fn update_duel_panels(
-    play: Res<Play>,
+    (play, intro): (Res<Play>, Res<crate::game::intro::Intro>),
     score: Res<ScoreBoard>,
     order: Res<BattingOrder>,
     rosters: Res<Rosters>,
@@ -256,8 +256,9 @@ pub(super) fn update_duel_panels(
     mut panels: Query<(&mut BackgroundColor, &mut BorderColor, &mut Visibility), With<DuelPanel>>,
     mut lines: Query<(&DuelLine, &mut Text, &mut TextColor)>,
 ) {
-    // Hidden through the walk-up too: its card is the only chrome then.
-    let visible = play.phase.pre_contact() && !play.walkup_active();
+    // Hidden through the walk-up too: its card is the only chrome then. And
+    // through the intro, where the lineup card has the screen.
+    let visible = play.phase.pre_contact() && !play.walkup_active() && !intro.is_playing();
     let ui = &theme.ui;
     for (mut bg, mut border, mut visibility) in &mut panels {
         let desired = if visible {

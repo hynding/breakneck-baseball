@@ -262,6 +262,12 @@ native.
    on its own; note whether it did.
 10. **Persistence.** Pick a non-Auto tier, reload the page, and confirm it's
     still selected.
+11. **The intro.** Start a game at each tier. The camera should fly from high
+    over centre field, over the first-base stands (never through them), and
+    settle behind home in about 5 s, with the lineup card centred at the top
+    for the second half and the pitching card hidden until it ends. A tap or
+    button press skips it. On a slow phone it may run longer than 5 s of wall
+    time, since one frame advances it at most 0.1 s; note how long it feels.
 
 If something looks off, tell the thread the device, the browser, the tier,
 what the settings row read, and what you saw (a screenshot helps).

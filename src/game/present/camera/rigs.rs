@@ -8,6 +8,7 @@ use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::Velocity;
 
+use crate::game::ScoreBoard;
 use crate::game::ball::{Baseball, HitEvent, WallBangEvent};
 use crate::game::fielding::ActivePlay;
 use crate::game::flow::{LiveBallEvent, Phase, Play, ResultBeat};
@@ -155,6 +156,9 @@ pub struct BroadcastRig {
     /// to; a new contact clears it, even one this camera never saw the
     /// lead-up to (the orbit view was on between plays).
     play_contact: Option<f32>,
+    /// The half-inning whose opening cutaway has started, and when (on the
+    /// virtual clock; [`super::shots::half_inning_cutaway`]).
+    cut_half: super::shots::CutHalf,
 }
 
 impl Default for BroadcastRig {
@@ -169,6 +173,7 @@ impl Default for BroadcastRig {
             read: PlayRead::default(),
             ground_fielder: None,
             play_contact: None,
+            cut_half: None,
         }
     }
 }
@@ -250,7 +255,7 @@ pub(super) fn broadcast_camera(
     field: Res<FieldSpec>,
     view: Res<DuelView>,
     // (Paired to stay inside Bevy's 16-parameter system limit.)
-    (kick, settings): (Res<CameraKick>, Option<Res<Settings>>),
+    (kick, settings, score): (Res<CameraKick>, Option<Res<Settings>>, Res<ScoreBoard>),
     active: Res<ActivePlay>,
     wind: Res<rules::Wind>,
     mut live: MessageReader<LiveBallEvent>,
@@ -409,8 +414,17 @@ pub(super) fn broadcast_camera(
     } else {
         rig.thrown_base
     };
+    let (cut_half, cutaway) = super::shots::half_inning_cutaway(
+        play.phase == Phase::PrePitch,
+        play.walkup_active(),
+        (score.inning, score.top_of_inning),
+        now,
+        rig.cut_half,
+    );
+    rig.cut_half = cut_half;
     let cues = ShotCues {
         phase: play.phase,
+        cutaway,
         since_contact: play.since_contact(now),
         home_run: play.is_home_run(),
         walk_off: play.is_walk_off(),
