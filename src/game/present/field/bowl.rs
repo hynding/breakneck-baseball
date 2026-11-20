@@ -419,12 +419,49 @@ fn facing_home(at: Vec3) -> Quat {
     Quat::from_rotation_y(flat.x.atan2(flat.z))
 }
 
+/// A light tower's unshadowed fill spot at night. Shown on tiers whose
+/// budget has `tower_lights` ([`tower_lights_follow_budget`]).
+#[derive(Component)]
+pub struct TowerLight;
+
+/// Where the fill spots aim: the middle of the infield.
+const TOWER_AIM: Vec3 = Vec3::new(0.0, 0.0, 25.0);
+
+/// Each fill spot's output (lm). Bevy spreads a spot's lumens like a point
+/// light's (over 4π sr), so at the ~170 m throw from a tower this lands
+/// about 2,000 lux on the infield: three of them roughly double the night
+/// key tower's light on the field, lifting it above the dim stands.
+const TOWER_FILL_LUMENS: f32 = 8.0e8;
+
+/// Shows the towers' fill spots on tiers that budget them and hides them
+/// on the rest, following Auto's step-downs mid-game.
+pub(super) fn tower_lights_follow_budget(
+    active: Option<Res<ActiveQuality>>,
+    mut lights: Query<(&mut Visibility, Ref<TowerLight>)>,
+) {
+    let Some(active) = active else {
+        return;
+    };
+    let want = if active.budget().tower_lights {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    for (mut visibility, marker) in &mut lights {
+        if (active.is_changed() || marker.is_added()) && *visibility != want {
+            *visibility = want;
+        }
+    }
+}
+
 pub(super) fn spawn_bowl(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
     field: Res<FieldSpec>,
+    theme: Res<Theme>,
+    settings: Option<Res<crate::game::settings::Settings>>,
 ) {
     commands.remove_resource::<CrowdState>();
     commands.remove_resource::<ScoreboardFace>();
@@ -492,11 +529,36 @@ pub(super) fn spawn_bowl(
         emissive: LinearRgba::rgb(6.0, 5.8, 5.2),
         ..default()
     });
+    // Night: the towers light the park. The key tower's light is the
+    // field's shadowed directional key (`diamond::day_look`); the others
+    // each throw an unshadowed fill spot at the infield, on the tiers whose
+    // budget allows (`TowerLight`).
+    let time = settings.map_or_else(Default::default, |s| s.time_of_day);
+    let night = super::diamond::day_look(theme.sky, &theme.field, time).night;
     for deg in [-118.0_f32, -42.0, 42.0, 118.0] {
         let theta = deg.to_radians();
         let base = seat_point(theta, BOWL_DEPTH, &field) + dir(theta) * 3.0;
         let height = base.y + 22.0;
         let foot = base.with_y(0.0);
+        if night && deg != super::diamond::KEY_TOWER_DEG {
+            let lamp = foot + Vec3::Y * (height + 1.5);
+            commands.spawn((
+                GameplayEntity,
+                TowerLight,
+                SpotLight {
+                    color: Color::srgb(0.86, 0.92, 1.0),
+                    intensity: TOWER_FILL_LUMENS,
+                    range: 400.0,
+                    radius: 2.0,
+                    shadows_enabled: false,
+                    outer_angle: 0.5,
+                    inner_angle: 0.3,
+                    ..default()
+                },
+                Transform::from_translation(lamp).looking_at(TOWER_AIM, Vec3::Y),
+                Visibility::Hidden,
+            ));
+        }
         commands.spawn((
             GameplayEntity,
             Mesh3d(meshes.add(Cylinder::new(0.6, height))),

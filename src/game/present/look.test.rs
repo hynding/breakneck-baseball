@@ -32,11 +32,11 @@ fn overcast_pulls_the_fog_in() {
 }
 
 #[test]
-fn no_tier_blooms_yet() {
+fn only_high_blooms() {
     for (tier, want) in [
         (QualityTier::Low, false),
         (QualityTier::Medium, false),
-        (QualityTier::High, false), // held off until the exposure rework
+        (QualityTier::High, true),
     ] {
         assert_eq!(
             CameraLook::for_sky(DAY, 0.0, &tier.budget()).bloom,
@@ -128,10 +128,10 @@ fn the_camera_follows_the_tier() {
         .spawn((Camera3d::default(), MainCamera))
         .id();
     for (tier, sky, bloom) in [
-        (QualityTier::High, true, false),
+        (QualityTier::High, true, true),
         (QualityTier::Medium, true, false),
         (QualityTier::Low, false, false),
-        (QualityTier::High, true, false),
+        (QualityTier::High, true, true),
     ] {
         app.insert_resource(ActiveQuality {
             setting: GraphicsQuality::Auto,
@@ -145,6 +145,16 @@ fn the_camera_follows_the_tier() {
         assert_eq!(e.contains::<Hdr>(), bloom, "{tier:?} hdr");
         assert!(e.contains::<DistanceFog>(), "{tier:?} fog");
         assert!(e.contains::<ColorGrading>(), "{tier:?} grading");
+        assert_eq!(
+            e.get::<Exposure>().map(|x| x.ev100),
+            Some(SCENE_EV100),
+            "{tier:?} exposure"
+        );
+        assert_eq!(
+            e.get::<Tonemapping>(),
+            Some(&tonemapping_for(bloom)),
+            "{tier:?} tonemapping"
+        );
     }
 }
 

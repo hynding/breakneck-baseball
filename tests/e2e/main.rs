@@ -62,5 +62,6 @@ mod season;
 mod sim_profile;
 mod skeletal_switch;
 mod swing_startup;
+mod time_of_day;
 mod touch_pipeline;
 mod walkup;

@@ -370,6 +370,10 @@ pub struct Settings {
     /// regulation park).
     #[serde(default)]
     pub fences: crate::game::weather::Fences,
+    /// When the next game is played (menu **N**; serde-defaulted to the
+    /// afternoon, the game's long-standing look).
+    #[serde(default)]
+    pub time_of_day: crate::game::weather::TimeOfDay,
     /// Which plays get an instant replay (serde-defaulted to big plays).
     #[serde(default)]
     pub replays: ReplayMode,
@@ -407,6 +411,7 @@ impl Default for Settings {
             difficulty: Difficulty::default(),
             weather: Default::default(),
             fences: Default::default(),
+            time_of_day: Default::default(),
             replays: ReplayMode::default(),
             volume: 0.7,
             season_length: season::DEFAULT_SEASON_LENGTH,

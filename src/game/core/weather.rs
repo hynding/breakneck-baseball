@@ -180,6 +180,48 @@ impl Conditions {
     }
 }
 
+/// When the game is played, picked on the menu (**N**) and kept in the
+/// settings store: a field option, independent of the theme. Purely visual
+/// (the sun, the sky and the lights); it never touches the ball.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum TimeOfDay {
+    /// A low, warm sun and a paler sky.
+    Morning,
+    /// The game's long-standing look: the theme exactly as authored.
+    #[default]
+    Afternoon,
+    /// A dark sky with the field lit from the light towers.
+    Night,
+}
+
+impl TimeOfDay {
+    pub const ALL: [TimeOfDay; 3] = [TimeOfDay::Morning, TimeOfDay::Afternoon, TimeOfDay::Night];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            TimeOfDay::Morning => "Morning",
+            TimeOfDay::Afternoon => "Afternoon",
+            TimeOfDay::Night => "Night",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        let i = Self::ALL.iter().position(|t| *t == self).unwrap_or(0);
+        Self::ALL[(i + 1) % Self::ALL.len()]
+    }
+
+    /// The key light's angle above the horizon (radians): a low morning
+    /// sun for long shadows, the afternoon's 45°, and at night the high
+    /// throw of a tower bank.
+    pub fn key_elevation(self) -> f32 {
+        match self {
+            TimeOfDay::Morning => 22f32.to_radians(),
+            TimeOfDay::Afternoon => 45f32.to_radians(),
+            TimeOfDay::Night => 50f32.to_radians(),
+        }
+    }
+}
+
 /// How deep the outfield fences sit, picked on the menu (**O**) and kept in
 /// the settings store. Real parks run from ~310 ft down the lines and ~390
 /// ft to centre (cozy) to ~345 / 420 ft (spacious), per docs/BASEBALL.md,

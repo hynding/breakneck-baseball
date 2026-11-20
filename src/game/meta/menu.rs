@@ -62,6 +62,7 @@ enum CycleAction {
     SeasonLength,
     Weather,
     Fences,
+    TimeOfDay,
 }
 
 /// Public handle for the menu's `Update` chain so `SettingsPlugin` can order
@@ -275,6 +276,11 @@ fn build_menu(
                             "W   Weather",
                             settings.weather.label().to_string(),
                             MenuAction::Cycle(CycleAction::Weather),
+                        ),
+                        (
+                            "N   Time of day",
+                            settings.time_of_day.label().to_string(),
+                            MenuAction::Cycle(CycleAction::TimeOfDay),
                         ),
                         (
                             "O   Fences",
@@ -495,6 +501,7 @@ fn apply_cycle(
         CycleAction::Difficulty => settings.difficulty = settings.difficulty.next(),
         CycleAction::Weather => settings.weather = settings.weather.next(),
         CycleAction::Fences => settings.fences = settings.fences.next(),
+        CycleAction::TimeOfDay => settings.time_of_day = settings.time_of_day.next(),
         CycleAction::SeasonLength => {
             settings.season_length =
                 crate::game::season::next_season_length(settings.season_length);
@@ -605,7 +612,7 @@ impl StartGame<'_, '_> {
 
 /// Cycles the field (**F**), innings (**I**), theme (**T**), CPU
 /// difficulty (**D**), touch swing scheme (**G**), season length (**L**),
-/// weather (**W**) and fences (**O**);
+/// weather (**W**), fences (**O**) and time of day (**N**);
 /// the rebuild system picks the edit up off the
 /// resource's change tick. Keyboard only: a pad changes options through the
 /// cursor ([`menu_navigate`]), so its face buttons keep their conventional
@@ -617,7 +624,7 @@ fn cycle_options(
     mut settings: ResMut<Settings>,
 ) {
     // One row per hotkey: keyboard key, the cycle.
-    const HOTKEYS: [(KeyCode, CycleAction); 8] = [
+    const HOTKEYS: [(KeyCode, CycleAction); 9] = [
         (KeyCode::KeyF, CycleAction::Field),
         (KeyCode::KeyI, CycleAction::Innings),
         (KeyCode::KeyT, CycleAction::Theme),
@@ -626,6 +633,7 @@ fn cycle_options(
         (KeyCode::KeyL, CycleAction::SeasonLength),
         (KeyCode::KeyW, CycleAction::Weather),
         (KeyCode::KeyO, CycleAction::Fences),
+        (KeyCode::KeyN, CycleAction::TimeOfDay),
     ];
     for (key, action) in HOTKEYS {
         if keyboard.just_pressed(key) {

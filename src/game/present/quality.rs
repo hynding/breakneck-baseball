@@ -133,6 +133,12 @@ pub struct RenderBudget {
     pub sky: bool,
     /// HDR rendering plus bloom on the main camera.
     pub bloom: bool,
+    /// At night, the light towers' unshadowed fill spots (the key tower's
+    /// shadowed light is on at every tier).
+    pub tower_lights: bool,
+    /// In the rain, glossy (lower-roughness) turf and clay that catch the
+    /// sky and lights; every tier still darkens wet ground.
+    pub wet_reflections: bool,
     /// Normal-mapped turf and dirt, worn paths.
     pub surface_detail: bool,
     /// Seconds of play the replay buffer holds.
@@ -156,6 +162,8 @@ impl RenderBudget {
                 fog: true,
                 sky: false,
                 bloom: false,
+                tower_lights: false,
+                wet_reflections: false,
                 surface_detail: false,
                 replay_secs: 8.0,
                 replay_angles: 1,
@@ -169,6 +177,8 @@ impl RenderBudget {
                 fog: true,
                 sky: true,
                 bloom: false,
+                tower_lights: true,
+                wet_reflections: false,
                 surface_detail: false,
                 replay_secs: 10.0,
                 replay_angles: 2,
@@ -181,10 +191,9 @@ impl RenderBudget {
                 trail_scale: 1.0,
                 fog: true,
                 sky: true,
-                // Off until the exposure rework (plan task 12): under HDR
-                // the tonemapper greys the over-exposed sky toward purple.
-                // The camera path that adds Hdr + Bloom stays in look.rs.
-                bloom: false,
+                bloom: true,
+                tower_lights: true,
+                wet_reflections: true,
                 surface_detail: true,
                 replay_secs: 12.0,
                 replay_angles: 2,
