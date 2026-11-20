@@ -42,6 +42,16 @@ derives paths from the file's own location; moving them breaks the build or sile
 model loading. `--features dev` swaps the embedded asset for a file-watched path so the `.glb`
 hot-reloads on Blender export without a rebuild.
 
+No `blender` binary (cloud containers can't download it)? The same scripts run on the PyPI
+`bpy` module, which is Blender as a Python package (use the version the scripts were last run
+with, currently 5.2.4):
+
+```sh
+python3 -m venv /tmp/bpyenv && /tmp/bpyenv/bin/pip install bpy==5.2.4
+/tmp/bpyenv/bin/python tools/build_player.py
+/tmp/bpyenv/bin/python -c "import bpy, runpy; bpy.ops.wm.open_mainfile(filepath='assets-src/player.blend'); runpy.run_path('tools/export_glb.py')"
+```
+
 ## Adding an animation
 
 1. Author a new Blender action in `tools/build_player.py`, rebuild + export (pair above).
@@ -53,6 +63,20 @@ hot-reloads on Blender export without a rebuild.
 The glTF backend drives Bevy's `AnimationPlayer`/`AnimationGraph` with 150 ms cross-fades behind
 the same `Playing` API; `PlayerModelId::Blocky` keeps the original procedural rig and sampler as
 the fallback arm (reachable via `src/game/present/player/`'s mesh match).
+
+## Reactions, the breathing idle, and the mitt
+
+- **Reactions** (`player::behavior::result_reactions`, presentational only): strike three plays
+  `CapTip` on the pitcher and `DejectedWalk` on the batter while `runner.rs` walks him off; a
+  walk-off plays `HighFive` on each batting-side runner once he stops; a homer with no authored
+  celebration chains `FistPump` after the swing.
+- **Gaits** (`animation::is_gait`: `RunCycle`, `DejectedWalk`) are the clips `locomote` sheds when
+  a mover has no target. A new walk or run clip belongs there.
+- **Idle is the breathing layer**: a slow 3 s loop, started at a per-rig phase
+  (`driver::idle_phase`). It isn't an additive graph layer, because the exporter samples every
+  bone's full TRS. An additive clip would add the rest translations a second time.
+- **The mitt** (`GLOVE_MATERIAL`) is skinned into every rig like the bat. `wire_rigs` shows it on
+  `RigUnit::Defense` rigs only, so batters, runners and umpires show the bare left hand.
 
 ## Recolouring & jerseys
 

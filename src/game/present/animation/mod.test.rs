@@ -84,6 +84,7 @@ fn personality_clips_have_the_right_loop_mode() {
         AnimClip::StanceOpen,
         AnimClip::StanceClosed,
         AnimClip::StanceWaggle,
+        AnimClip::DejectedWalk,
     ] {
         assert!(clip.looping(), "{clip:?} must loop");
     }
@@ -91,6 +92,9 @@ fn personality_clips_have_the_right_loop_mode() {
         AnimClip::FidgetBatTap,
         AnimClip::FidgetHalfSwing,
         AnimClip::CelebrateBatFlip,
+        AnimClip::FistPump,
+        AnimClip::CapTip,
+        AnimClip::HighFive,
     ] {
         assert!(!clip.looping(), "{clip:?} must not loop");
     }
@@ -109,4 +113,22 @@ fn swing_startup_matches_the_clips_contact_frame() {
         "BatterSwing puts the bat through the zone at {clip_contact:.3} s but flow judges the \
          swing at {startup:.3} s — retune SWING_CONTACT_SECS or the clip"
     );
+}
+
+/// `locomote` sheds exactly the gait clips when a mover has no target — a
+/// reaction one-shot must never be in that set (it would be cut the frame it
+/// starts on a standing rig), and the struck-out trudge must be (or the
+/// batter would trudge in place at the walk-off spot until the next at-bat).
+#[test]
+fn gaits_are_run_and_trudge_only() {
+    assert!(is_gait(AnimClip::RunCycle));
+    assert!(is_gait(AnimClip::DejectedWalk));
+    for clip in [
+        AnimClip::Idle,
+        AnimClip::FistPump,
+        AnimClip::CapTip,
+        AnimClip::HighFive,
+    ] {
+        assert!(!is_gait(clip), "{clip:?} is not a gait");
+    }
 }

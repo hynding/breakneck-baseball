@@ -19,6 +19,7 @@ use breakneck_baseball::game::flow::{Phase, Play, bat_arrival_z};
 use breakneck_baseball::game::input::Intents;
 use breakneck_baseball::game::player::Fielder;
 use breakneck_baseball::game::replay::{BigMomentCue, Replay, SKIP_GRACE};
+use breakneck_baseball::game::runner::Runner;
 use breakneck_baseball::game::scenario::{self, Scenario};
 use breakneck_baseball::game::variant::Ruleset;
 use breakneck_baseball::game::{GameState, ScoreBoard, Team};
@@ -241,6 +242,7 @@ fn a_walk_off_holds_the_pile_up() {
         Some(BigMoment::WalkOff)
     );
     let mut replay_at = None;
+    let mut high_five = false;
     while phase(&app) == Phase::Result
         && *app.world().resource::<State<GameState>>().get() == GameState::Playing
         && seen.len() < 10
@@ -253,8 +255,17 @@ fn a_walk_off_holds_the_pile_up() {
         {
             seen.push(s);
         }
+        high_five |= app
+            .world_mut()
+            .query_filtered::<&Playing, With<Runner>>()
+            .iter(app.world())
+            .any(|p| p.clip == AnimClip::HighFive);
         app.update();
     }
+    assert!(
+        high_five,
+        "the batting side's runners high-five the walk-off"
+    );
     let at = replay_at.expect("the walk-off replayed");
     assert!(
         (at - PILE_UP_REPLAY_SECS).abs() < 0.1,

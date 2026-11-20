@@ -17,6 +17,12 @@ blender --background --python tools/build_player.py                       # (re)
 blender --background assets-src/player.blend --python tools/export_glb.py # export -> src/game/models/player.glb
 ```
 
+The model is still deliberately low-poly (about 1,300 of the 5,000-triangle budget): box torso, a
+sphere head with two eyes and a nose, a cap crown with a rounded brim tipped down, cylinder limbs
+with sphere hands, box shoes, and a mitt on the left hand. The mitt (`Glove`) is shown on defense
+rigs only, the way the `Bat` submesh is shown on the plate batter only. `Glove`, `Shoe` and `Face`
+are fixed colours. Hands and nose wear `Skin`, so the per-player skin tint covers them.
+
 `src/game/present/animation/` keeps the same `AnimClip`/`Playing`/`MoveIntent` API systems write
 to, but for glTF rigs it drives Bevy's `AnimationPlayer`/`AnimationGraph` with 150 ms cross-fades
 between clips (`PlayerModelId::Blocky` retains the original procedural rig and sampler as the

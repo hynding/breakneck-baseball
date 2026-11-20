@@ -12,7 +12,7 @@ use bevy::prelude::*;
 use crate::game::model_assets::{RigAnimations, RigPlayer};
 
 use super::poses::{bat_idle_rotation, limb_pose, root_drop, root_pitch, self_pose};
-use super::{AnimClip, MoveIntent, Playing, RigBaseY, RigLimb};
+use super::{AnimClip, MoveIntent, Playing, RigBaseY, RigLimb, is_gait};
 
 /// Poses every playing rig from `(clip, progress)`, chains `next`, and removes
 /// finished one-shots. The only code in the game that rotates rig parts.
@@ -154,7 +154,7 @@ pub(super) fn locomote(
             // by another system (e.g. a fielder pulled off a cover as the play
             // ends) strands the clip: nothing else removes RunCycle, and a
             // stuck runner (like the catcher) never re-crouches for the duel.
-            if playing.is_some_and(|p| p.clip == AnimClip::RunCycle) {
+            if playing.is_some_and(|p| is_gait(p.clip)) {
                 commands.entity(entity).remove::<Playing>();
             }
             continue;
@@ -164,7 +164,7 @@ pub(super) fn locomote(
         let dist = to.length();
         if dist <= ARRIVE_EPS {
             intent.target = None;
-            if playing.is_some_and(|p| p.clip == AnimClip::RunCycle) {
+            if playing.is_some_and(|p| is_gait(p.clip)) {
                 commands.entity(entity).remove::<Playing>();
             }
             continue;
@@ -200,7 +200,19 @@ fn start_clip(
     if clip.looping() {
         anim.repeat();
     }
+    if clip == AnimClip::Idle {
+        // The breathing layer: start each rig somewhere different in the
+        // breath so a team standing around never inhales in unison.
+        anim.seek_to(idle_phase(rig.player) * clip.duration() * speed);
+    }
     rig.current = Some(clip);
+}
+
+/// A rig's fixed place in the Idle breath (0..1), spread by the golden
+/// ratio over entity indices so neighbours land far apart. Deterministic:
+/// no RNG, and purely visual.
+fn idle_phase(player: Entity) -> f32 {
+    (player.index_u32() as f32 * 0.618_034).fract()
 }
 
 /// The glTF backend of the `Playing` protocol: reacts to clip changes,

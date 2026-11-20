@@ -1,5 +1,6 @@
 //! Duel-phase animation behaviors: the batter's stance/fidgets, the
-//! catcher's crouch, the swing trigger, and the home-run celebration chain.
+//! catcher's crouch, the swing trigger, the home-run celebration chain, and
+//! the result reactions (cap tip, dejected walk, walk-off high fives).
 
 use bevy::prelude::*;
 
@@ -13,7 +14,10 @@ use crate::game::roster::{PlayerIdentity, Rosters};
 use crate::game::rules::{BattingOrder, ContactKind, Outcome};
 use crate::game::variant::FieldSpec;
 
-use super::{BatPivot, Batter, CatcherRole, PlateUmpire, Umpire};
+use crate::game::animation::MoveIntent;
+use crate::game::runner::{BasePath, Departed, Runner};
+
+use super::{BatPivot, Batter, CatcherRole, Pitcher, PlateUmpire, Umpire};
 
 /// Holds the plate batter (the `Batter`-marker rig) in his personal batting
 /// stance through the duel — resolved from `PlayerIdentity` via
@@ -328,9 +332,9 @@ pub(super) fn trigger_swing(
     }
 }
 
-/// A homer with an authored celebration chains it after the swing
-/// follow-through (`Playing.next`), so the flip rides the same rig the
-/// camera is holding on. The trot rig takes over at `RunDelay` expiry
+/// A homer chains a celebration after the swing follow-through
+/// (`Playing.next`): the batter's authored one, else the stock `FistPump`,
+/// so it rides the same rig the camera is holding on. The trot rig takes over at `RunDelay` expiry
 /// (`TROT_DELAY` 0.9 s) — the flip's 0.85 s mostly fits; the handoff
 /// truncating the last frames on slow swings is an accepted arcade trade
 /// (the HR orbit camera is already moving by then). The `next.is_none()`
@@ -348,11 +352,71 @@ pub(super) fn celebrate_home_run(
         }
         for (id, mut playing) in &mut batters {
             let card = rosters.team(id.team).card(id.index);
-            if let Some(clip) = animation::celebration_clip(card.appearance.style.celebration)
-                && playing.clip == AnimClip::BatterSwing
-                && playing.next.is_none()
-            {
+            // No authored celebration → the stock fist pump.
+            let clip = animation::celebration_clip(card.appearance.style.celebration)
+                .unwrap_or(AnimClip::FistPump);
+            if playing.clip == AnimClip::BatterSwing && playing.next.is_none() {
                 playing.next = Some(clip);
+            }
+        }
+    }
+}
+
+/// Result reactions (graphics plan task 11), purely presentational like
+/// [`umpire_signals`]: the call is flow's, this is the players acting it.
+///
+/// * Strike three: the pitcher tips his cap on the frame the pause begins,
+///   and the batter trudges off on `DejectedWalk` once `runner.rs` gives him
+///   somewhere to walk (its `MoveIntent`; `locomote` sheds the gait when he
+///   arrives or the next at-bat clears the target, exactly like `RunCycle`).
+/// * Walk-off: every batting-side runner still on the field throws up a high
+///   five once he has stopped running — once each per pause.
+#[allow(clippy::type_complexity)]
+pub(super) fn result_reactions(
+    play: Res<Play>,
+    mut prev_phase: Local<Option<Phase>>,
+    mut celebrated: Local<Vec<Entity>>,
+    pitchers: Query<Entity, With<Pitcher>>,
+    batters: Query<(Entity, &MoveIntent, Option<&Playing>), With<Batter>>,
+    runners: Query<
+        (Entity, &MoveIntent, Option<&Playing>),
+        (With<Runner>, Without<Departed>, Without<BasePath>),
+    >,
+    mut commands: Commands,
+) {
+    let in_result = play.phase == Phase::Result;
+    let entered = in_result && *prev_phase != Some(Phase::Result);
+    *prev_phase = Some(play.phase);
+    if !in_result {
+        celebrated.clear();
+        return;
+    }
+    let strikeout = play.result_beat() == Some(ResultBeat::Strikeout);
+    if entered && strikeout {
+        for pitcher in &pitchers {
+            commands
+                .entity(pitcher)
+                .insert(Playing::new(AnimClip::CapTip));
+        }
+    }
+    if strikeout {
+        for (batter, intent, playing) in &batters {
+            let walking = intent.target.is_some();
+            let trudging = playing.is_some_and(|p| p.clip == AnimClip::DejectedWalk);
+            if walking && !trudging {
+                commands
+                    .entity(batter)
+                    .insert(Playing::new(AnimClip::DejectedWalk));
+            }
+        }
+    }
+    if play.is_walk_off() {
+        for (runner, intent, playing) in &runners {
+            if intent.target.is_none() && playing.is_none() && !celebrated.contains(&runner) {
+                celebrated.push(runner);
+                commands
+                    .entity(runner)
+                    .insert(Playing::new(AnimClip::HighFive));
             }
         }
     }

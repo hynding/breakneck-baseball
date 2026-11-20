@@ -152,6 +152,40 @@ pub(super) fn limb_pose(clip: AnimClip, kind: LimbKind, f: f32) -> Quat {
                 LegL | LegR => Quat::IDENTITY,
             }
         }
+        // Reactions: rough Blocky stand-ins for the authored glTF clips
+        // (tools/build_player.py), one arm doing the talking.
+        FistPump => {
+            let up = (f * std::f32::consts::PI).sin();
+            let pump = (f * 2.0 * std::f32::consts::TAU).sin().abs() * 0.4;
+            match kind {
+                ArmL => Quat::from_rotation_x(-(2.6 - pump) * up),
+                _ => Quat::IDENTITY,
+            }
+        }
+        CapTip => {
+            let up = (f * std::f32::consts::PI).sin();
+            match kind {
+                ArmR => Quat::from_rotation_z(0.5 * up) * Quat::from_rotation_x(-2.4 * up),
+                _ => Quat::IDENTITY,
+            }
+        }
+        DejectedWalk => {
+            let swing = (f * std::f32::consts::TAU).sin() * 0.45;
+            match kind {
+                LegR => Quat::from_rotation_x(swing),
+                LegL => Quat::from_rotation_x(-swing),
+                ArmL => Quat::from_rotation_x(-swing * 0.3),
+                ArmR => Quat::from_rotation_x(swing * 0.3),
+            }
+        }
+        HighFive => {
+            let up = (f * std::f32::consts::PI).sin();
+            match kind {
+                ArmR => Quat::from_rotation_x(-2.9 * up),
+                ArmL => Quat::from_rotation_x(-1.5 * up),
+                LegL | LegR => Quat::IDENTITY,
+            }
+        }
         // Blocky fallback: the two-handed grip is a glTF-only bone reposition
         // (tools/build_player.py), so the procedural rig just holds Idle's
         // neutral limb pose rather than approximating the stance. The three
