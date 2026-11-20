@@ -114,7 +114,7 @@ impl QualityTier {
 /// is for discrete GPUs. Every value is monotonic in the tier (pinned by
 /// `budget_never_shrinks_as_the_tier_rises`), and nothing here may need a
 /// WebGL2-missing feature at Low or Medium: a feature WebGL2 can't run is
-/// High-on-native only and checks [`RenderBudget::webgl2_safe`] itself.
+/// High-on-native only and checks [`RenderBudget::is_webgl2`] itself.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RenderBudget {
     /// Crowd instances in the stands (0 = an empty bowl).
@@ -189,10 +189,10 @@ impl RenderBudget {
         }
     }
 
-    /// True on targets with WebGL2's feature set (the web build): no SSAO,
-    /// TAA or compute. Features that need them gate on this as well as on
-    /// the budget.
-    pub const fn webgl2_safe() -> bool {
+    /// True on the web build, which is limited to WebGL2: no SSAO, TAA or
+    /// compute. A feature that needs them is on only where this is false
+    /// *and* the budget allows it.
+    pub const fn is_webgl2() -> bool {
         cfg!(target_arch = "wasm32")
     }
 }
@@ -502,7 +502,8 @@ impl Plugin for QualityPlugin {
 /// (`tools/frame_cost.mjs`) can measure each tier without touching the
 /// player's saved setting: `BREAKNECK_QUALITY=low|medium|high` natively,
 /// `?quality=low|medium|high` on the web. Absent (the normal case), the
-/// settings row and Auto decide.
+/// settings row and Auto decide. Natively the variable reaches every test
+/// harness too, so leave it unset when running the suites.
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ForcedTier(pub Option<QualityTier>);
 

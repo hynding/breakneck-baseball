@@ -10,7 +10,7 @@ use bevy::color::Alpha;
 use super::BattingStyle;
 use super::{Settings, SettingsOpen};
 use crate::game::input::{ActiveDevice, Controllers, StickLatch, menu_nav};
-use crate::game::quality::ActiveQuality;
+use crate::game::quality::{ActiveQuality, ForcedTier};
 use crate::game::theme::Theme;
 use crate::game::ui::{
     KeepAliveUi, OverlayPaint, hidden_tint, overlay_card, overlay_root, set_color_if_neq,
@@ -206,6 +206,7 @@ pub(super) fn paint_settings_screen(
     // Optional so the screen still builds in a harness without
     // `QualityPlugin`; the real app always has it.
     quality: Option<Res<ActiveQuality>>,
+    forced: Option<Res<ForcedTier>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     device: Res<ActiveDevice>,
     mut roots: Query<
@@ -326,6 +327,12 @@ pub(super) fn paint_settings_screen(
             ROW_STRIKE_ZONE => on_off(settings.show_strike_zone).to_string(),
             // Headless (no window) reads as 1x.
             ROW_GRAPHICS => match &quality {
+                // A launch-forced tier (`?quality=`) ignores this row for
+                // the run; say so rather than look dead when cycled.
+                Some(q) if forced.as_ref().is_some_and(|f| f.0.is_some()) => format!(
+                    "{} (forced this run)",
+                    q.describe(windows.single().map_or(1.0, Window::scale_factor))
+                ),
                 Some(q) => q.describe(windows.single().map_or(1.0, Window::scale_factor)),
                 None => settings.graphics.label().to_string(),
             },

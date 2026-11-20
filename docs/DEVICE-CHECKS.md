@@ -62,10 +62,11 @@ No panics in either. Two things it surfaced that need a real phone:
 
 Every presentation change in the graphics and camera plan states what it
 costs per tier. The game prints a `bb-perf` line every 5 s when asked:
-`?perf` on the web, `BREAKNECK_PERF=1` natively. `?quality=low|medium|high`
+`?perf` on the web, `BREAKNECK_PERF=1` natively (`0` or `false` turns it off). `?quality=low|medium|high`
 (natively `BREAKNECK_QUALITY=...`) pins a tier for that run only, without
 touching the saved setting. Each line gives the tier, the mean and worst
-frame, the entity count, and the meshes the main view drew.
+frame, the entity count, and the meshes visible to any view (the main
+camera or a shadow cascade), a proxy for draw cost rather than a draw count.
 
 `node tools/frame_cost.mjs <url> [out-dir] [seconds-per-tier] [WxH]` runs
 all three tiers in a one-player game and prints the medians. Compare runs
@@ -76,7 +77,7 @@ nothing about a real device. The per-tier allowances each feature reads
 
 ### Baseline (2026-11-20, Bevy 0.18, debug wasm, SwiftShader, 1280×720, 40 s per tier)
 
-| Tier | Mean frame (ms) | Worst frame (ms) | Entities | Meshes drawn |
+| Tier | Mean frame (ms) | Worst frame (ms) | Entities | Meshes visible |
 | --- | --- | --- | --- | --- |
 | Low | 438.7 | 461.0 | 1024 | 151 |
 | Medium | 975.7 | 1007.2 | 1024 | 151 |

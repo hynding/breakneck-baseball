@@ -40,8 +40,8 @@ const median = (xs) => {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
 const parse = (line) => {
-  const m = line.match(/bb-perf tier=(\w+) frames=(\d+) mean_ms=([\d.]+) worst_ms=([\d.]+) entities=(\d+) meshes_drawn=(\d+)/);
-  return m && { tier: m[1], frames: +m[2], mean: +m[3], worst: +m[4], entities: +m[5], drawn: +m[6] };
+  const m = line.match(/bb-perf tier=(\w+) frames=(\d+) mean_ms=([\d.]+) worst_ms=([\d.]+) entities=(\d+) meshes_visible=(\d+)/);
+  return m && { tier: m[1], frames: +m[2], mean: +m[3], worst: +m[4], entities: +m[5], visible: +m[6] };
 };
 
 const browser = await chromium.launch({
@@ -70,14 +70,20 @@ for (const tier of ['low', 'medium', 'high']) {
   await page.waitForTimeout(secs * 1000);
   await page.screenshot({ path: join(outDir, `${tier}.png`) });
   // The first window straddles boot and the menu; drop it.
-  const rows = logs.slice(startAt).map(parse).filter(Boolean).slice(1);
+  const label = tier[0].toUpperCase() + tier.slice(1);
+  const rows = logs
+    .slice(startAt)
+    .map(parse)
+    .filter((r) => r && r.tier === label)
+    .slice(1);
+  if (!rows.length) console.error(`${tier}: no bb-perf windows (run at least ~12 s per tier, and check the tier was forced)`);
   report[tier] = {
     forced: logs.some((l) => /tier forced to/.test(l)),
     windows: rows.length,
     meanMs: median(rows.map((r) => r.mean)),
     worstMs: median(rows.map((r) => r.worst)),
     entities: median(rows.map((r) => r.entities)),
-    meshesDrawn: median(rows.map((r) => r.drawn)),
+    meshesVisible: median(rows.map((r) => r.visible)),
     panics: logs.filter((l) => /panicked|PAGEERROR|bb-panic/.test(l)),
   };
   writeFileSync(join(outDir, `${tier}-console.log`), logs.join('\n'));
@@ -87,10 +93,10 @@ await browser.close();
 writeFileSync(join(outDir, 'report.json'), JSON.stringify(report, null, 2));
 
 const fmt = (v, d = 1) => (v == null ? '–' : v.toFixed(d));
-console.log(`| Tier | Mean frame (ms) | Worst frame (ms) | Entities | Meshes drawn |`);
+console.log(`| Tier | Mean frame (ms) | Worst frame (ms) | Entities | Meshes visible |`);
 console.log(`| --- | --- | --- | --- | --- |`);
 for (const [tier, r] of Object.entries(report)) {
-  console.log(`| ${tier} | ${fmt(r.meanMs)} | ${fmt(r.worstMs)} | ${fmt(r.entities, 0)} | ${fmt(r.meshesDrawn, 0)} |`);
+  console.log(`| ${tier} | ${fmt(r.meanMs)} | ${fmt(r.worstMs)} | ${fmt(r.entities, 0)} | ${fmt(r.meshesVisible, 0)} |`);
 }
 const failed = Object.values(report).some((r) => r.panics.length || !r.forced || !r.windows);
 process.exit(failed ? 1 : 0);

@@ -1,7 +1,8 @@
 //! The frame-cost probe: with `BREAKNECK_PERF=1` natively or `?perf` on the
-//! web, logs one `bb-perf` line every [`PROBE_WINDOW_SECS`] of real time
-//! with the tier in force, the mean and worst frame, the entity count and
-//! the meshes the main view actually drew. `tools/frame_cost.mjs` reads
+//! web (`0` or `false` turns it off), logs one `bb-perf` line every
+//! [`PROBE_WINDOW_SECS`] of real time with the tier in force, the mean and
+//! worst frame, the entity count and the meshes visible to any view (the
+//! main camera's or a shadow cascade's: a draw-cost proxy, not a draw count). `tools/frame_cost.mjs` reads
 //! those lines to compare tiers and to show what each presentation PR costs
 //! (task 1 of the graphics and camera plan); nothing else reads them. Off,
 //! it costs one early return per frame.
@@ -63,7 +64,8 @@ pub struct FrameCostPlugin;
 impl Plugin for FrameCostPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(FrameCostProbe {
-            enabled: launch_param("BREAKNECK_PERF", "perf").is_some_and(|v| v != "0"),
+            enabled: launch_param("BREAKNECK_PERF", "perf")
+                .is_some_and(|v| !matches!(v.as_str(), "0" | "false")),
             ..default()
         })
         .add_systems(Last, probe_frame_cost);
@@ -84,9 +86,9 @@ fn probe_frame_cost(
         return;
     };
     let tier = active.map_or("?", |a| a.tier.label());
-    let drawn = meshes.iter().filter(|v| v.get()).count();
+    let visible = meshes.iter().filter(|v| v.get()).count();
     info!(
-        "bb-perf tier={tier} frames={} mean_ms={:.2} worst_ms={:.2} entities={} meshes_drawn={drawn}",
+        "bb-perf tier={tier} frames={} mean_ms={:.2} worst_ms={:.2} entities={} meshes_visible={visible}",
         summary.frames,
         summary.mean_ms,
         summary.worst_ms,
