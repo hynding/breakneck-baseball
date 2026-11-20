@@ -3,11 +3,10 @@
 use super::*;
 use crate::game::touch::{pad_rect, swing_button_rect};
 
-/// The bottom cards' footprints in UI pixels, a little over what they
-/// measure on screen (AT BAT 214 px wide by fixed width; the scoreboard
-/// cluster's width follows its text).
-const AT_BAT_UI: Vec2 = Vec2::new(214.0, 125.0);
-const CLUSTER_UI: Vec2 = Vec2::new(250.0, 125.0);
+/// The bottom cards' footprints in UI pixels (the widths the dodge plans
+/// with; heights a little over what they measure on screen).
+const AT_BAT_UI: Vec2 = Vec2::new(AT_BAT_W_PX, 125.0);
+const CLUSTER_UI: Vec2 = Vec2::new(CLUSTER_W_PX, 125.0);
 
 /// The two cards' window-pixel rects for `insets` in a window of `size`.
 fn cards(size: Vec2, insets: CornerInsets) -> (Rect, Rect) {
@@ -48,7 +47,8 @@ fn the_bottom_cards_step_clear_of_the_zone_pad() {
         Vec2::new(768.0, 1024.0),
     ] {
         let scale = super::super::fit::fit_scale(size);
-        let (at_bat, cluster) = cards(size, dodge_insets(size, scale));
+        let insets = dodge_insets(size, scale);
+        let (at_bat, cluster) = cards(size, insets);
         let screen = Rect::from_corners(Vec2::ZERO, size);
         for (name, card) in [("AT BAT", at_bat), ("scoreboard", cluster)] {
             assert!(
@@ -61,9 +61,9 @@ fn the_bottom_cards_step_clear_of_the_zone_pad() {
             );
             assert_eq!(screen.union(card), screen, "{size}: {name} off screen");
         }
-        if size.x > size.y {
-            // Landscape slides them toward each other; portrait only lifts
-            // them, keeping the resting side-by-side spacing.
+        if insets[1] == RESTING_INSETS[1] {
+            // Slid toward each other beside the controls: never into each
+            // other. (A lift keeps the resting side-by-side spacing.)
             assert!(!overlaps(at_bat, cluster), "{size}: the cards collide");
         }
     }

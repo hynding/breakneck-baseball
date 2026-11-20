@@ -324,32 +324,41 @@ pub(super) const RESTING_INSETS: CornerInsets = [14.0, 14.0, 14.0, 14.0];
 /// Gap kept between a moved card and the control it steps clear of (UI px).
 const DODGE_GAP_PX: f32 = 10.0;
 
+/// The bottom cards' widths (UI px) a slide must make room for: the AT BAT
+/// card's fixed width, and the corner cluster (meter track, gap and a
+/// scoreboard card whose width follows its text) with some slack.
+const AT_BAT_W_PX: f32 = 214.0;
+const CLUSTER_W_PX: f32 = 275.0;
+
 /// Where the bottom HUD cards go while the Zone Pad shows, for a window of
 /// `size` logical pixels at UI scale `scale`: the pad fills the
 /// bottom-left corner and the SWING button the bottom-right, right where
-/// the AT BAT card and the scoreboard sit. In a landscape window the cards
-/// slide inward beside the controls (the field above stays clear); a
-/// portrait window has no room between them, so the cards lift above the
-/// pad's top edge instead.
+/// the AT BAT card and the scoreboard sit. When the gap between the two
+/// controls holds both cards (a landscape phone) they slide inward beside
+/// the controls, keeping the field above clear; otherwise (portrait, or a
+/// tablet whose controls are big for its width) they lift above the pad's
+/// top edge.
 pub(super) fn dodge_insets(size: Vec2, scale: f32) -> CornerInsets {
     let scale = scale.max(1e-3);
     let pad = crate::game::touch::pad_rect(size);
     let swing = crate::game::touch::swing_button_rect(size);
-    if size.y > size.x {
-        let lift = (size.y - pad.min.y.min(swing.min.y)) / scale + DODGE_GAP_PX;
-        [RESTING_INSETS[0], lift, RESTING_INSETS[2], lift]
-    } else {
+    let room = (swing.min.x - pad.max.x) / scale - 3.0 * DODGE_GAP_PX;
+    if room >= AT_BAT_W_PX + CLUSTER_W_PX {
         [
             pad.max.x / scale + DODGE_GAP_PX,
             RESTING_INSETS[1],
             (size.x - swing.min.x) / scale + DODGE_GAP_PX,
             RESTING_INSETS[3],
         ]
+    } else {
+        let lift = (size.y - pad.min.y.min(swing.min.y)) / scale + DODGE_GAP_PX;
+        [RESTING_INSETS[0], lift, RESTING_INSETS[2], lift]
     }
 }
 
 /// Moves the bottom HUD cards clear of the Zone Pad and SWING button while
-/// they show, and back to their corners after. On a phone the cards sat
+/// the touch player bats with the pad, and back to their corners for the
+/// other half. On a phone the cards sat
 /// right over both (portrait and landscape alike), so a thumb aiming at
 /// the pad landed on the batter's card. Only the painted roots' offsets
 /// change, and only when the target moved (the wasm UI rule; no per-frame
@@ -357,11 +366,9 @@ pub(super) fn dodge_insets(size: Vec2, scale: f32) -> CornerInsets {
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub(super) fn dodge_zone_pad(
     windows: Query<&Window, With<PrimaryWindow>>,
-    state: Res<State<crate::game::GameState>>,
     controllers: Res<crate::game::input::Controllers>,
     settings: Res<Settings>,
     score: Res<ScoreBoard>,
-    play: Res<crate::game::flow::Play>,
     ui_scale: Res<UiScale>,
     mut at_bat: Query<&mut Node, (With<super::AtBatCard>, Without<super::HudCornerCluster>)>,
     mut cluster: Query<&mut Node, (With<super::HudCornerCluster>, Without<super::AtBatCard>)>,
@@ -369,7 +376,13 @@ pub(super) fn dodge_zone_pad(
     let Ok(window) = windows.single() else {
         return;
     };
-    let insets = if zone_pad_shown(&state, &controllers, &score, &settings, &play) {
+    // The whole at-bat half, not just the pre-pitch window the pad is
+    // drawn in: tied to the pad's own window the cards jumped away and back
+    // on every pitch.
+    let batting_with_pad = controllers.touch_team.is_some()
+        && controllers.touch_team == Some(score.batting_team())
+        && settings.touch_scheme == TouchScheme::ZonePad;
+    let insets = if batting_with_pad {
         dodge_insets(window.size(), ui_scale.0)
     } else {
         RESTING_INSETS

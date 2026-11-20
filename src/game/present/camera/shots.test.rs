@@ -1227,3 +1227,35 @@ fn reduce_motion_holds_the_trot_orbit_still() {
         "it sweeps otherwise"
     );
 }
+
+/// The nudge lands on the authored lens before the narrow-aspect
+/// correction: on a portrait phone and a 4:3 tablet, +5 widens and -5
+/// tightens every duel view, never clamping the corrected shot narrower.
+#[test]
+fn the_duel_fov_nudge_holds_on_narrow_screens() {
+    let field = VariantId::Standard.field();
+    for aspect in [390.0 / 664.0, 4.0 / 3.0, DUEL_REFERENCE_ASPECT] {
+        for view in [
+            DuelView::BattingZoom,
+            DuelView::CatcherPov,
+            DuelView::BehindPitcher,
+            DuelView::BroadcastPlate,
+        ] {
+            let mut inp = inputs(&field);
+            inp.aspect = aspect;
+            let base = Shot::Duel(view).spec(&inp).fov;
+            inp.duel_fov_nudge = 5.0_f32.to_radians();
+            let wider = Shot::Duel(view).spec(&inp).fov;
+            inp.duel_fov_nudge = (-5.0_f32).to_radians();
+            let tighter = Shot::Duel(view).spec(&inp).fov;
+            assert!(
+                wider > base,
+                "{view:?} at {aspect}: +5 gave {wider} vs {base}"
+            );
+            assert!(
+                tighter < base,
+                "{view:?} at {aspect}: -5 gave {tighter} vs {base}"
+            );
+        }
+    }
+}

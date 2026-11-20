@@ -202,7 +202,7 @@ pub(super) fn spawn_settings_screen(mut commands: Commands, theme: Res<Theme>) {
                     card.spawn(Node {
                         width: Val::Px(ROW_WIDTH_PX),
                         flex_direction: FlexDirection::Row,
-                        align_items: AlignItems::Center,
+                        align_items: AlignItems::Stretch,
                         ..default()
                     })
                     .with_children(|row| {
@@ -487,6 +487,9 @@ fn cycle_row(
             settings.trail_color = if right { c.next() } else { c.prev() };
         }
         ROW_REDUCE_MOTION => settings.reduce_motion = !settings.reduce_motion,
+        // Reduce motion stills the camera whatever the shake row says, and
+        // the row shows that: cycling the hidden value would look dead.
+        ROW_SHAKE if settings.reduce_motion => {}
         ROW_SHAKE => {
             let s = settings.camera_shake;
             settings.camera_shake = if right { s.next() } else { s.prev() };
