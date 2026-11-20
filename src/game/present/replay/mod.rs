@@ -11,7 +11,7 @@
 //! clock resumes exactly where it stopped.
 //!
 //! Which plays get one is the [`ReplayMode`] setting: big plays (a home
-//! run, a walk-off, a throw home, a diving catch) by default. Any confirm
+//! run, a walk-off, a throw home, a diving catch) by default. Any action
 //! press skips (the Director's presses too, so scripts and autoplay never
 //! stall on one). Buffer length and angle count come from the quality
 //! tier's [`RenderBudget`](crate::game::quality::RenderBudget).
@@ -159,7 +159,12 @@ impl Plugin for ReplayPlugin {
             )
             .add_systems(
                 PostUpdate,
-                (record, apply_replay)
+                (
+                    // Gameplay only: a paused game must not fill the ring
+                    // with a frozen field (`Paused` doesn't stop the clock).
+                    record.run_if(in_state(GameState::Playing)),
+                    apply_replay,
+                )
                     .chain()
                     .in_set(ReplaySystems)
                     .after(bevy::app::AnimationSystems)
@@ -344,7 +349,7 @@ fn start_replay(
     virt.pause();
 }
 
-/// Runs the replay on the real clock; a confirm press (after a short
+/// Runs the replay on the real clock; an action press (after a short
 /// grace) or the last segment's end gives play back.
 fn advance_replay(
     real: Res<Time<Real>>,
@@ -434,7 +439,10 @@ fn apply_replay(
             Has<CatcherRole>,
             Has<PlateUmpire>,
         ),
-        Without<Baseball>,
+        (
+            Or<(With<RigUnitTag>, With<RigLimb>, With<AnimationTargetId>)>,
+            Without<Baseball>,
+        ),
     >,
     mut cam: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
 ) {

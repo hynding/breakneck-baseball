@@ -152,9 +152,11 @@ aboard). Memory scales with samples, so:
 | Medium | 10 s | 301 | ~3.0–3.5 MB (derived) | dugout, then centre field |
 | High | 12 s | 361 | 3.6–4.2 MB (measured) | dugout, then centre field at half speed |
 
-Playback writes recorded poses onto the rigs for rendering only and puts
-the live ones back before the next frame, so a replay costs about one
-extra transform copy per frame. On a phone at Low, hit a home run and
+Playback writes recorded poses onto every rig root and bone for
+rendering only and puts the live ones back before the next frame, so while
+a replay plays every rig tree re-propagates each frame and Rapier re-syncs
+the kinematic colliders: roughly the cost of a frame where every player is
+moving, with gameplay itself frozen. On a phone at Low, hit a home run and
 check the replay plays smoothly and play resumes cleanly after it (or
 after skipping it with the action button).
 

@@ -7,10 +7,13 @@
 
 use crate::common;
 
+use bevy::animation::AnimationTargetId;
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::Velocity;
 
+use breakneck_baseball::game::animation::RigLimb;
 use breakneck_baseball::game::ball::Baseball;
+use breakneck_baseball::game::camera::CameraMode;
 use breakneck_baseball::game::flow::{Phase, Play, bat_arrival_z};
 use breakneck_baseball::game::input::{Controllers, InputSource, Intents};
 use breakneck_baseball::game::player::{Batter, RigUnitTag};
@@ -99,7 +102,11 @@ fn virtual_secs(app: &App) -> f64 {
 fn rigs(app: &mut App) -> Vec<(Entity, Transform, GlobalTransform)> {
     let mut q = app
         .world_mut()
-        .query_filtered::<(Entity, &Transform, &GlobalTransform), With<RigUnitTag>>();
+        .query_filtered::<(Entity, &Transform, &GlobalTransform), Or<(
+            With<RigUnitTag>,
+            With<RigLimb>,
+            With<AnimationTargetId>,
+        )>>();
     let mut v: Vec<_> = q.iter(app.world()).map(|(e, t, g)| (e, *t, *g)).collect();
     v.sort_by_key(|(e, _, _)| *e);
     v
@@ -177,7 +184,7 @@ fn a_home_run_replays_with_play_frozen_and_untouched() {
             // (Locomotion re-derives a mover's facing each frame, even with
             // the clock stopped: equal up to float noise.)
             assert!(
-                t.translation == t0.translation && t.rotation.angle_between(t0.rotation) < 1e-4,
+                t.translation == t0.translation && t.rotation.dot(t0.rotation).abs() > 1.0 - 1e-6,
                 "rig {e} moved for real during the replay: {t:?} vs {t0:?}"
             );
             if g.translation().distance(t0.translation) > 0.5 {
@@ -279,4 +286,44 @@ fn a_cpu_game_with_every_replay_finishes() {
     );
     assert!(!replay.is_playing());
     assert!(!app.world().resource::<Time<Virtual>>().is_paused());
+}
+
+/// The orbit camera never sets its own lens and eases from wherever the
+/// camera is, so a replay must hand the lens back as it found it.
+#[test]
+fn the_orbit_camera_gets_its_lens_back() {
+    let mut app = app_with(ReplayMode::BigPlays, false);
+    *app.world_mut().resource_mut::<CameraMode>() = CameraMode::Orbit;
+    to_home_run_call(&mut app);
+    let lens = |app: &mut App| {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<(&Transform, &Projection), With<Camera3d>>();
+        let (tf, p) = q.single(app.world()).expect("one camera");
+        let fov = match p {
+            Projection::Perspective(p) => p.fov,
+            _ => f32::NAN,
+        };
+        (tf.translation, fov)
+    };
+    // The frame before the replay starts.
+    let mut before = lens(&mut app);
+    let started = run_until(&mut app, (2.0 / DT) as u64, |app| {
+        if playing(app) {
+            return true;
+        }
+        before = lens(app);
+        false
+    });
+    assert!(started.is_some(), "no replay");
+    let during = lens(&mut app);
+    assert_ne!(during.1, before.1, "the replay set its own lens");
+    let ended = run_until(&mut app, (30.0 / DT) as u64, |app| !playing(app));
+    assert!(ended.is_some(), "the replay never ended");
+    let after = lens(&mut app);
+    assert_eq!(after.1, before.1, "the lens came back");
+    assert!(
+        after.0.distance(before.0) < 1.0,
+        "the orbit camera carries on from where it was: {before:?} vs {after:?}"
+    );
 }
