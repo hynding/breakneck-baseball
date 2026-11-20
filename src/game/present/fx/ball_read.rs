@@ -10,7 +10,8 @@
 //! - **Minimum on-screen size.** When the ball shrinks under
 //!   [`MIN_BALL_PX`] pixels of radius in the rendered image, a proxy sphere
 //!   in the ball's own material sits over it, sized to exactly that, so it
-//!   never drops below ~3 px across. The ball's own transform is never
+//!   never drops below ~3 px across. Both are placed after Rapier's
+//!   writeback each frame, so they sit on the ball as drawn. The ball's own transform is never
 //!   scaled: it carries the regulation collider.
 //! - **Flight ghosts.** Fading spheres dropped behind any fast-flying ball,
 //!   pitch or batted (they lived in `sim::ball` before; they are cosmetic).
@@ -37,6 +38,8 @@ pub const MIN_BALL_PX: f32 = 1.5;
 /// than the ball's floor.
 pub const MIN_SHADOW_PX: f32 = 3.0;
 /// Shadow height above the turf: over the chalk, under the landing ring.
+/// The mound (~0.25 m) hides it for the first metres of a pitch; a
+/// pitch's shadow there adds nothing.
 const SHADOW_Y: f32 = 0.02;
 const SHADOW_ALPHA: f32 = 0.45;
 
@@ -72,7 +75,7 @@ pub(super) struct BallProxy;
 
 /// One fading ghost of the ball's path; shrinks to nothing and despawns.
 #[derive(Component)]
-pub struct FlightGhost(Timer);
+pub(super) struct FlightGhost(Timer);
 
 /// Shared ghost mesh and material, built per game from the theme.
 #[derive(Resource)]
@@ -159,14 +162,19 @@ fn set_visible(mut visibility: Mut<Visibility>, on: bool) {
 #[allow(clippy::type_complexity)]
 pub(super) fn place_ball_shadow(
     theme: Res<Theme>,
-    ball_q: Query<(&Transform, &InheritedVisibility), (With<Baseball>, With<InFlight>)>,
+    ball_q: Query<(&Transform, &Visibility), (With<Baseball>, With<InFlight>)>,
     cameras: MainView,
     mut shadow_q: Query<(&mut Transform, &mut Visibility), (With<BallShadow>, Without<Baseball>)>,
 ) {
     let Ok((mut tf, visibility)) = shadow_q.single_mut() else {
         return;
     };
-    let ball = ball_q.single().ok().filter(|(_, v)| v.get());
+    // `Visibility`, not `InheritedVisibility`: flow hides the ball in
+    // `Update` (a catch), and the inherited flag only catches up later.
+    let ball = ball_q
+        .single()
+        .ok()
+        .filter(|(_, v)| **v != Visibility::Hidden);
     let Some((ball, _)) = ball else {
         set_visible(visibility, false);
         return;
@@ -185,14 +193,7 @@ pub(super) fn place_ball_shadow(
 #[allow(clippy::type_complexity)]
 pub(super) fn place_ball_proxy(
     theme: Res<Theme>,
-    ball_q: Query<
-        (
-            &Transform,
-            &InheritedVisibility,
-            &MeshMaterial3d<StandardMaterial>,
-        ),
-        With<Baseball>,
-    >,
+    ball_q: Query<(&Transform, &Visibility, &MeshMaterial3d<StandardMaterial>), With<Baseball>>,
     cameras: MainView,
     mut proxy_q: Query<
         (
@@ -213,8 +214,10 @@ pub(super) fn place_ball_proxy(
         return;
     };
     let visual = BALL_RADIUS * theme.ball.visual_scale;
+    // Straight-line distance, not view depth: off-centre that oversizes
+    // the proxy a little, which errs toward visible.
     let floor = min_world_radius(eye.distance(ball.translation), fov, h, MIN_BALL_PX);
-    if !shown.get() || floor <= visual {
+    if shown == &Visibility::Hidden || floor <= visual {
         set_visible(visibility, false);
         return;
     }

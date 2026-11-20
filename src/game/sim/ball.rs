@@ -170,19 +170,20 @@ fn spawn_ball(
     commands.spawn((
         Baseball,
         GameplayEntity,
-        Mesh3d(meshes.add(Sphere::new(visual_radius))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: theme.ball.color,
-            emissive: theme.ball.emissive,
-            perceptual_roughness: 0.4,
-            ..default()
-        })),
+        // The render parts. `fx::ball_read` draws a blob shadow straight
+        // under the flying ball at every tier; a map shadow as well would
+        // double it on Medium/High.
         (
-            Transform::from_xyz(0.0, BALL_RADIUS + 0.25, field.pitch_distance),
-            // `fx::ball_read` draws a blob shadow straight under the ball at
-            // every tier; a map shadow too would double it on Medium/High.
+            Mesh3d(meshes.add(Sphere::new(visual_radius))),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: theme.ball.color,
+                emissive: theme.ball.emissive,
+                perceptual_roughness: 0.4,
+                ..default()
+            })),
             bevy::light::NotShadowCaster,
         ),
+        Transform::from_xyz(0.0, BALL_RADIUS + 0.25, field.pitch_distance),
         RigidBody::Dynamic,
         Collider::ball(BALL_RADIUS),
         Velocity::zero(),

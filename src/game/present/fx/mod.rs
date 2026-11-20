@@ -15,9 +15,6 @@ mod rain;
 mod throw;
 mod trail;
 
-pub use ball_read::{
-    FlightGhost, MIN_BALL_PX, MIN_SHADOW_PX, min_world_radius, px_per_metre, shadow_radius,
-};
 pub use particles::FireworkSpark;
 pub use rain::RainDrop;
 pub use throw::{DuelThrowBall, throw_arc};
@@ -77,8 +74,6 @@ impl Plugin for FxPlugin {
                     bounce_dust,
                     update_landing_ring,
                     update_ball_halo,
-                    ball_read::place_ball_shadow,
-                    ball_read::place_ball_proxy,
                     ball_read::spawn_flight_ghosts,
                     ball_read::fade_flight_ghosts,
                     tick_particles,
@@ -87,6 +82,16 @@ impl Plugin for FxPlugin {
                     throw::stage_duel_throw,
                     rain::fall_rain,
                 )
+                    .run_if(in_state(GameState::Playing)),
+            )
+            // After Rapier writes the ball's pose for this frame and before
+            // it propagates, so the proxy and shadow sit on the ball being
+            // drawn rather than one physics step behind it.
+            .add_systems(
+                PostUpdate,
+                (ball_read::place_ball_shadow, ball_read::place_ball_proxy)
+                    .after(bevy_rapier3d::plugin::PhysicsSet::Writeback)
+                    .before(bevy::transform::TransformSystems::Propagate)
                     .run_if(in_state(GameState::Playing)),
             );
     }
