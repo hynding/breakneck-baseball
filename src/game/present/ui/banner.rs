@@ -248,12 +248,11 @@ pub(super) fn spawn_duel_panels(commands: &mut Commands, theme: &Theme) {
 /// the mutation. The roots spawn visible, so the alpha-0-at-first-extract
 /// cull never applies to them.
 pub(super) fn update_duel_panels(
-    play: Res<Play>,
+    (play, intro): (Res<Play>, Res<crate::game::intro::Intro>),
     score: Res<ScoreBoard>,
     order: Res<BattingOrder>,
     rosters: Res<Rosters>,
     theme: Res<Theme>,
-    intro: Res<crate::game::intro::Intro>,
     mut panels: Query<(&mut BackgroundColor, &mut BorderColor, &mut Visibility), With<DuelPanel>>,
     mut lines: Query<(&DuelLine, &mut Text, &mut TextColor)>,
 ) {
