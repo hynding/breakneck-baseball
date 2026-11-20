@@ -54,27 +54,6 @@ pub struct InFlight;
 #[derive(Component)]
 pub struct Batted;
 
-/// Shared mesh/material for trail ghosts, built once per game from the theme.
-#[derive(Resource)]
-struct TrailAssets {
-    mesh: Handle<Mesh>,
-    material: Handle<StandardMaterial>,
-}
-
-/// One fading ghost of the ball's path; shrinks to nothing and despawns.
-#[derive(Component)]
-struct TrailGhost(Timer);
-
-/// Ghost lifetime (seconds) and spawn cadence while the ball flies.
-const TRAIL_LIFETIME: f32 = 0.35;
-const TRAIL_INTERVAL: f32 = 0.025;
-/// Below this speed (m/s) the ball is rolling, not flying — no trail.
-const TRAIL_MIN_SPEED: f32 = 8.0;
-
-/// Query alias for "the flying ball" (keeps clippy's type-complexity happy).
-type FlyingBall<'w, 's> =
-    Query<'w, 's, (&'static Transform, &'static Velocity), (With<Baseball>, With<InFlight>)>;
-
 /// Same, mutable, plus whether it was hit ([`Batted`]) — used by the
 /// per-tick aerodynamics systems.
 type FlyingBallMut<'w, 's> = Query<
@@ -159,7 +138,7 @@ impl Plugin for BallPlugin {
                 // schedule's ambiguity tie-breaks (see `GameplayOrder`). The
                 // order is the physical pipeline: launch events first, then
                 // the per-frame aerodynamic corrections, then the wall/bounds
-                // reactions, then the cosmetic trail.
+                // reactions. (The flight ghosts are cosmetic: `fx::ball_read`.)
                 (
                     apply_pitch,
                     apply_hit,
@@ -167,8 +146,6 @@ impl Plugin for BallPlugin {
                     apply_magnus,
                     detect_wall_bang,
                     reset_ball_if_out_of_bounds,
-                    spawn_trail,
-                    fade_trail,
                 )
                     .chain()
                     .in_set(crate::game::GameplayOrder::Ball)
@@ -190,16 +167,6 @@ fn spawn_ball(
     // against grass, sky, and asphalt alike. Collider stays regulation.
     let visual_radius = BALL_RADIUS * theme.ball.visual_scale;
 
-    commands.insert_resource(TrailAssets {
-        mesh: meshes.add(Sphere::new(visual_radius * 0.8)),
-        material: materials.add(StandardMaterial {
-            base_color: theme.ball.trail,
-            alpha_mode: AlphaMode::Blend,
-            unlit: true,
-            ..default()
-        }),
-    });
-
     commands.spawn((
         Baseball,
         GameplayEntity,
@@ -210,7 +177,12 @@ fn spawn_ball(
             perceptual_roughness: 0.4,
             ..default()
         })),
-        Transform::from_xyz(0.0, BALL_RADIUS + 0.25, field.pitch_distance),
+        (
+            Transform::from_xyz(0.0, BALL_RADIUS + 0.25, field.pitch_distance),
+            // `fx::ball_read` draws a blob shadow straight under the ball at
+            // every tier; a map shadow too would double it on Medium/High.
+            bevy::light::NotShadowCaster,
+        ),
         RigidBody::Dynamic,
         Collider::ball(BALL_RADIUS),
         Velocity::zero(),
@@ -310,55 +282,6 @@ fn apply_magnus(
         let angvel = vel.angvel;
         let lift = MAGNUS_FACTOR * angvel.cross(vel.linvel);
         vel.linvel += lift * dt;
-    }
-}
-
-/// Drops a fading ghost sphere behind the flying ball every
-/// [`TRAIL_INTERVAL`] seconds so its path reads at a glance.
-fn spawn_trail(
-    time: Res<Time>,
-    mut since_last: Local<f32>,
-    assets: Option<Res<TrailAssets>>,
-    ball_q: FlyingBall,
-    mut commands: Commands,
-) {
-    let Some(assets) = assets else {
-        return;
-    };
-    let Ok((transform, vel)) = ball_q.single() else {
-        return;
-    };
-    if vel.linvel.length() < TRAIL_MIN_SPEED {
-        return;
-    }
-
-    *since_last += time.delta_secs();
-    if *since_last < TRAIL_INTERVAL {
-        return;
-    }
-    *since_last = 0.0;
-
-    commands.spawn((
-        TrailGhost(Timer::from_seconds(TRAIL_LIFETIME, TimerMode::Once)),
-        GameplayEntity,
-        Mesh3d(assets.mesh.clone()),
-        MeshMaterial3d(assets.material.clone()),
-        Transform::from_translation(transform.translation),
-    ));
-}
-
-/// Shrinks each ghost to nothing over its lifetime, then despawns it.
-fn fade_trail(
-    time: Res<Time>,
-    mut ghosts: Query<(Entity, &mut TrailGhost, &mut Transform)>,
-    mut commands: Commands,
-) {
-    for (entity, mut ghost, mut transform) in &mut ghosts {
-        if ghost.0.tick(time.delta()).is_finished() {
-            commands.entity(entity).despawn();
-        } else {
-            transform.scale = Vec3::splat(1.0 - ghost.0.fraction());
-        }
     }
 }
 

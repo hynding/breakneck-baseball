@@ -101,6 +101,21 @@ covered it. As a `Skybox` it shades only the visible sky, after the
 opaque pass, and costs about 9 ms. A real-device check of Low (fog on a
 weak phone) is still owed; see below.
 
+### Ball readability (task 4; same machine and settings as the look pass)
+
+| Tier | Before (ms) | After (ms) |
+| --- | --- | --- |
+| Low | 122.1 | 120.0 |
+| Medium | 304.3 | 299.9 |
+| High | 344.2 | 340.0 |
+
+No measurable cost: one shadow disc, one proxy sphere, and the existing
+flight ghosts. A home-run fly at Low in an 844×390 window (292 px of 3D)
+shows the ball as a 4–5 px disc against the sky and its shadow on the
+grass past the wall. To repeat it, build with `--features autoplay`, wait
+for a `bb-contact` console line with an angle over 20°, and screenshot
+1–3 s later.
+
 ## What still needs a person with a device
 
 Use the GitHub Pages build for the web checks and `cargo run --release` for

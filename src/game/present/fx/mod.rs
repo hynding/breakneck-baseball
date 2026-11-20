@@ -9,11 +9,15 @@ use bevy::prelude::*;
 use crate::game::GameState;
 use crate::game::settings::PitchTrailStyle;
 
+mod ball_read;
 mod particles;
 mod rain;
 mod throw;
 mod trail;
 
+pub use ball_read::{
+    FlightGhost, MIN_BALL_PX, MIN_SHADOW_PX, min_world_radius, px_per_metre, shadow_radius,
+};
 pub use particles::FireworkSpark;
 pub use rain::RainDrop;
 pub use throw::{DuelThrowBall, throw_arc};
@@ -58,6 +62,7 @@ impl Plugin for FxPlugin {
                 crate::game::game_start(),
                 (
                     build_fx_assets,
+                    ball_read::spawn_ball_readability,
                     spawn_landing_ring,
                     spawn_ball_halo,
                     rain::spawn_rain,
@@ -72,6 +77,10 @@ impl Plugin for FxPlugin {
                     bounce_dust,
                     update_landing_ring,
                     update_ball_halo,
+                    ball_read::place_ball_shadow,
+                    ball_read::place_ball_proxy,
+                    ball_read::spawn_flight_ghosts,
+                    ball_read::fade_flight_ghosts,
                     tick_particles,
                     pitch_trail,
                     tick_trail,

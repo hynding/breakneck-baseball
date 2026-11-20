@@ -422,6 +422,20 @@ mod beacon {
         }
     }
 
+    /// Per batted ball: launch speed (m/s) and angle (degrees), so a
+    /// screenshot script can wait for a fly ball (the ball-readability
+    /// check in docs/DEVICE-CHECKS.md).
+    fn contact_beacon(mut hits: MessageReader<crate::game::ball::HitEvent>) {
+        for hit in hits.read() {
+            let v = hit.velocity;
+            let angle = v.y.atan2(v.with_y(0.0).length()).to_degrees();
+            log(&format!(
+                "bb-contact speed={:.1} angle={angle:.0}",
+                v.length()
+            ));
+        }
+    }
+
     fn on_playing() {
         log("bb-state playing");
     }
@@ -462,7 +476,8 @@ mod beacon {
                 .add_systems(crate::game::game_start(), reset_first_pitch)
                 .add_systems(
                     Update,
-                    (first_pitch, walk_up_beacon).run_if(in_state(GameState::Playing)),
+                    (first_pitch, walk_up_beacon, contact_beacon)
+                        .run_if(in_state(GameState::Playing)),
                 );
         }
     }
