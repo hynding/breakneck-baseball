@@ -147,3 +147,16 @@ fn the_camera_follows_the_tier() {
         assert!(e.contains::<ColorGrading>(), "{tier:?} grading");
     }
 }
+
+#[test]
+fn fog_backs_off_with_the_camera() {
+    let base = FogBase(170.0, 800.0);
+    // The batting views sit just behind the plate: fog as authored.
+    assert_eq!(fog_range(base, Vec3::new(0.0, 3.0, -8.0)), (170.0, 800.0));
+    // A wide shot 200 m out still sees the far wall (~330 m away) clear.
+    let eye = Vec3::new(120.0, 60.0, -150.0);
+    let (start, end) = fog_range(base, eye);
+    let wall = eye.distance(Vec3::new(0.0, 0.0, 130.0));
+    assert!(start > wall, "{start} vs wall {wall}");
+    assert_eq!(end - start, 630.0);
+}

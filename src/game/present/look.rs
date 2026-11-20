@@ -128,13 +128,46 @@ pub struct LookPlugin;
 impl Plugin for LookPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, init_sky_texture)
-            .add_systems(Update, (repaint_sky, apply_camera_look).chain());
+            .add_systems(Update, (repaint_sky, apply_camera_look).chain())
+            // After the camera rigs have moved the eye this frame.
+            .add_systems(PostUpdate, fog_follows_camera);
     }
 }
 
 /// The weather's overcast fraction (0 with no settings, e.g. a harness).
 fn overcast(settings: Option<&Settings>) -> f32 {
     settings.map_or(0.0, |s| s.weather.spec().overcast)
+}
+
+/// The weather's fog distances for a camera at home plate, before
+/// [`fog_range`] pushes them out for a camera that has backed off.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct FogBase(pub f32, pub f32);
+
+/// How far behind the plate the batting views sit (m): no push-back there.
+const FOG_HOME_SLACK: f32 = 15.0;
+
+/// Fog distances for a camera at `eye`. Fog is measured from the camera,
+/// so a wide shot (the home-run orbit, a high fly from deep) would fog the
+/// field itself if the distances stayed fixed. Every metre the camera sits
+/// beyond the batting views pushes the fog a metre further out, so it
+/// always starts past the wall as seen from the plate.
+pub fn fog_range(base: FogBase, eye: Vec3) -> (f32, f32) {
+    let push = (eye.length() - FOG_HOME_SLACK).max(0.0);
+    (base.0 + push, base.1 + push)
+}
+
+fn fog_follows_camera(
+    mut cameras: Query<(&Transform, &FogBase, &mut DistanceFog), With<MainCamera>>,
+) {
+    for (eye, base, mut fog) in &mut cameras {
+        let (start, end) = fog_range(*base, eye.translation);
+        let want = FogFalloff::Linear { start, end };
+        if !matches!(fog.falloff, FogFalloff::Linear { start: s, end: e } if s == start && e == end)
+        {
+            fog.falloff = want;
+        }
+    }
 }
 
 #[allow(clippy::type_complexity)]
@@ -160,14 +193,17 @@ fn apply_camera_look(
         e.insert((Tonemapping::TonyMcMapface, look.grading));
         match look.fog {
             Some((color, start, end)) => {
-                e.insert(DistanceFog {
-                    color,
-                    falloff: FogFalloff::Linear { start, end },
-                    ..default()
-                });
+                e.insert((
+                    FogBase(start, end),
+                    DistanceFog {
+                        color,
+                        falloff: FogFalloff::Linear { start, end },
+                        ..default()
+                    },
+                ));
             }
             None => {
-                e.remove::<DistanceFog>();
+                e.remove::<(FogBase, DistanceFog)>();
             }
         }
         if look.sky {
