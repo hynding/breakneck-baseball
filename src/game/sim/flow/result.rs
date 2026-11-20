@@ -72,7 +72,7 @@ pub(super) fn result_phase(
     // and trot all play out before GAME OVER instead of being cut off at
     // contact. Every game-ending call routes through this one Result gate.
     if rules::is_game_over(&score, rules_res.counts.innings) {
-        next_state.set(GameState::GameOver);
+        (*next_state).set_if_neq(GameState::GameOver);
         return;
     }
     if let Ok((entity, mut transform, mut vel, mut vis)) = ball_q.single_mut() {

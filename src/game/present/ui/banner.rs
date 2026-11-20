@@ -208,10 +208,12 @@ pub(super) fn spawn_duel_panels(commands: &mut Commands, theme: &Theme) {
                 // write in `update_duel_panels` is guarded), so it takes the
                 // wasm keep-alive marker like the pause board and walk-up.
                 super::KeepAliveUi,
-                node,
+                Node {
+                    border_radius: BorderRadius::all(Val::Px(12.0)),
+                    ..node
+                },
                 BackgroundColor(ui.panel_bg),
                 BorderColor::all(ui.panel_border),
-                BorderRadius::all(Val::Px(12.0)),
             ))
             .with_children(|card| {
                 for kind in kinds {

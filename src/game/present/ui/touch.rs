@@ -116,11 +116,11 @@ pub(super) fn spawn_touch_overlay(mut commands: Commands, theme: Res<Theme>) {
                 } else {
                     JustifyContent::default()
                 },
+                border_radius: BorderRadius::all(radius),
                 ..default()
             },
             BackgroundColor(hidden_tint(ui.panel_bg)),
             BorderColor::all(hidden_tint(ui.accent)),
-            BorderRadius::all(radius),
         )
     };
     commands

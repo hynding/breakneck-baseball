@@ -243,7 +243,7 @@ pub(crate) fn overlay_card(
     padding: Vec2,
     row_gap: f32,
     ui: &UiTheme,
-) -> (Node, BackgroundColor, BorderColor, BorderRadius) {
+) -> (Node, BackgroundColor, BorderColor) {
     (
         Node {
             padding: UiRect::axes(Val::Px(padding.x), Val::Px(padding.y)),
@@ -251,11 +251,11 @@ pub(crate) fn overlay_card(
             align_items: AlignItems::Center,
             row_gap: Val::Px(row_gap),
             border: UiRect::all(Val::Px(CARD_BORDER_PX)),
+            border_radius: BorderRadius::all(Val::Px(CARD_RADIUS_PX)),
             ..default()
         },
         BackgroundColor(paint.panel(ui.panel_bg)),
         BorderColor::all(paint.panel(ui.panel_border)),
-        BorderRadius::all(Val::Px(CARD_RADIUS_PX)),
     )
 }
 

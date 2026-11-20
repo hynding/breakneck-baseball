@@ -387,8 +387,8 @@ pub(super) fn spawn_outfield_wall(
 }
 
 // ── Lighting ──────────────────────────────────────────────────────────────────
-/// Sun illuminance, matched to `AmbientLight::brightness`'s physical lux-like
-/// units (Bevy 0.15; `AmbientLight::default()` is 80.0, nowhere near a
+/// Sun illuminance, matched to `GlobalAmbientLight::brightness`'s physical lux-like
+/// units (Bevy 0.15; `GlobalAmbientLight::default()` is 80.0, nowhere near a
 /// plausible "sun") — `ambient_fraction` below is a fraction of *this*, not
 /// an absolute brightness.
 const SUN_ILLUMINANCE: f32 = 50_000.0;
@@ -399,7 +399,7 @@ const SUN_ILLUMINANCE: f32 = 50_000.0;
 /// illuminance) rather than an absolute brightness — passing a raw lux value
 /// here (as opposed to a 0..1-ish fraction) would make every unlit surface
 /// render essentially black next to a 50,000 lux sun, which is exactly the
-/// regression this constant documents: `AmbientLight::brightness` changed
+/// regression this constant documents: `GlobalAmbientLight::brightness` changed
 /// from a small relative multiplier to absolute lux in Bevy 0.14, and a
 /// leftover pre-migration value (~0.25) is indistinguishable from "no
 /// ambient at all" at this scale — invisible from a distance, but glaring
@@ -435,7 +435,7 @@ pub(super) fn spawn_lighting(
         )),
     ));
 
-    commands.insert_resource(AmbientLight {
+    commands.insert_resource(GlobalAmbientLight {
         color: lights.ambient,
         brightness: ambient_fraction * SUN_ILLUMINANCE,
         ..Default::default()

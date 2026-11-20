@@ -175,13 +175,13 @@ fn where_the_skipped_inning_first_diverges() {
 
     /// Change-tick and physics state of one rig root this frame.
     fn watch(app: &mut App, index: u32) -> String {
-        use bevy::animation::{AnimationPlayer, AnimationTarget};
+        use bevy::animation::{AnimatedBy, AnimationPlayer};
         use bevy_rapier3d::prelude::{RapierRigidBodyHandle, RapierRigidBodySet, RigidBody};
         let world = app.world_mut();
         let Some(entity) = world
             .query_filtered::<Entity, With<MoveIntent>>()
             .iter(world)
-            .find(|e| e.index() == index)
+            .find(|e| e.index().index() == index)
         else {
             return "no such rig".into();
         };
@@ -216,7 +216,7 @@ fn where_the_skipped_inning_first_diverges() {
             g.is_changed(),
             body_pos,
             e.get::<RigidBody>(),
-            e.contains::<AnimationTarget>(),
+            e.contains::<AnimatedBy>(),
             e.contains::<AnimationPlayer>(),
         )
     }

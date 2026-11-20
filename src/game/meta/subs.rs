@@ -280,7 +280,7 @@ fn open_pause(
         team: score.batting_team(),
         ..default()
     };
-    next_state.set(GameState::Paused);
+    (*next_state).set_if_neq(GameState::Paused);
 }
 
 /// Auto-pause when the player stops watching: the browser tab going hidden
@@ -318,7 +318,7 @@ fn auto_pause_on_focus_loss(
         auto_paused: true,
         ..default()
     };
-    next_state.set(GameState::Paused);
+    (*next_state).set_if_neq(GameState::Paused);
 }
 
 /// The other half of the focus watcher (TODO 80): if the pause was the
@@ -345,7 +345,7 @@ fn auto_resume_on_refocus(
     }
     if regained && menu.auto_paused && !crate::game::transition_pending(&next_state) {
         menu.auto_paused = false;
-        next_state.set(GameState::Playing);
+        (*next_state).set_if_neq(GameState::Playing);
     }
 }
 
@@ -380,7 +380,7 @@ fn board_controls(
     let tap = take_pause_tap(&mut tapped);
     if pause_pressed(&keyboard, &pads, tap) {
         menu.quit_armed = false;
-        next_state.set(GameState::Playing);
+        (*next_state).set_if_neq(GameState::Playing);
         return;
     }
 
@@ -449,7 +449,7 @@ fn press_quit(menu: &mut SubsMenu, next_state: &mut NextState<GameState>) {
         return;
     }
     if menu.quit_armed {
-        next_state.set(GameState::MainMenu);
+        (*next_state).set_if_neq(GameState::MainMenu);
     } else {
         menu.quit_armed = true;
     }
@@ -714,11 +714,11 @@ fn spawn_board(mut commands: Commands, theme: Res<Theme>) {
                         max_width: Val::Px(760.0),
                         padding: UiRect::axes(Val::Px(20.0), Val::Px(12.0)),
                         border: UiRect::all(Val::Px(1.5)),
+                        border_radius: BorderRadius::all(Val::Px(12.0)),
                         ..default()
                     },
                     BackgroundColor(hidden_tint(ui.panel_bg)),
                     BorderColor::all(hidden_tint(ui.panel_border)),
-                    BorderRadius::all(Val::Px(12.0)),
                 ))
                 .with_children(|card| {
                     card.spawn((

@@ -121,7 +121,7 @@ pub struct HeadlessConfig {
     pub single_threaded: bool,
     /// A `tracing` layer for `LogPlugin` (the profiling probe).
     pub log_layer: Option<LogLayerFn>,
-    /// Strip `AnimationTarget` from every bone as rigs spawn, so
+    /// Strip `AnimatedBy` (0.17's `AnimationTarget::player`) from every bone as rigs spawn, so
     /// `bevy_animation::animate_targets` samples nothing. Worth 16% of the
     /// headless frame (TODO 29 lever 2, `tests/e2e/sim_profile.rs`). Bone
     /// poses are cosmetic — the rules and the Coach read rig *root*
@@ -133,7 +133,7 @@ pub struct HeadlessConfig {
     pub skip_skeletal_sampling: bool,
 }
 
-/// Removes `AnimationTarget` from any entity that has one — every frame, so
+/// Removes `AnimatedBy` from any entity that has one — every frame, so
 /// rigs spawned mid-run (a new game in the same app) are covered too.
 /// `try_remove`: a bone seen here can be gone by the command flush (a runner
 /// despawned recursively, a scene instance landing on a parent that already
@@ -141,12 +141,12 @@ pub struct HeadlessConfig {
 /// turns into a panic.
 fn strip_animation_targets(
     mut commands: Commands,
-    targets: Query<Entity, With<bevy::animation::AnimationTarget>>,
+    targets: Query<Entity, With<bevy::animation::AnimatedBy>>,
 ) {
     for entity in &targets {
         commands
             .entity(entity)
-            .try_remove::<bevy::animation::AnimationTarget>();
+            .try_remove::<bevy::animation::AnimatedBy>();
     }
 }
 

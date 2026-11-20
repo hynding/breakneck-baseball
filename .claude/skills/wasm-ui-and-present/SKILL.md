@@ -18,7 +18,7 @@ children are added — and **UI roots spawned mid-`Playing` don't render at all*
   The tint is the *paint* rule, not the hide mechanism: hidden chrome (banner pill, walk-up
   card, pause board, settings screen) also flips `Visibility` — `Hidden` while off, `Inherited`
   on show — so the 0.004-alpha panel never ghosts over a black sky (TODO 97). Spawning a root
-  `Visibility::Hidden` alongside its tint is fine on 0.17 wasm (verified 2026-09-26).
+  `Visibility::Hidden` alongside its tint is fine on 0.17 and 0.18 wasm (verified 2026-09-26, 2026-11-20).
 - Give container roots a `BackgroundColor`.
 - Spawn UI roots at game start (painted at spawn), then show/hide by **mutating children** of
   those roots. The pause/substitution board (`src/game/meta/subs.rs`) is the reference example:
@@ -30,7 +30,7 @@ children are added — and **UI roots spawned mid-`Playing` don't render at all*
   (`OnTransition { MainMenu → Playing }`), never `OnEnter(Playing)` — otherwise they re-run on
   every unpause (`Playing ⇄ Paused` leaves the scene intact; teardown is `Playing → GameOver`).
 - **Never tick a per-frame `ResMut` (e.g. a `Timer` resource) inside a system that also holds
-  `&mut` queries on wasm-rendered UI.** On Bevy 0.16/0.17 wasm/WebGL2 such a system keeps the
+  `&mut` queries on wasm-rendered UI.** On Bevy 0.16–0.18 wasm/WebGL2 such a system keeps the
   queried entities from ever being extracted — ECS visibility stays correct, native renders
   fine, and the bug survives every data-side probe (root-caused by system bisect 2026-08-25,
   TODO 29). Hold a deadline instead: the show system stamps `Some(elapsed + linger)` once, the

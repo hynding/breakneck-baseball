@@ -11,9 +11,7 @@ needs a human (11, 33) or is a deliberate non-action (98).
 
 | Item | Work | Done when |
 |---|---|---|
-| 29 · boot warnings | Clear the three `B0004` hierarchy warnings at boot | `cargo test --test e2e full_game:: -- --nocapture 2>&1 \| grep -c B0004` prints `0`, and the browser console agrees (`/run-web`) |
 | 29 · sim slowdown | Headless sim ~72% slower since Bevy 0.15. Levers 1 and 2 shipped (TADA 108): frame 2.5 → 1.82 ms, `balance_sim` ~450 → 299 s, lever 3 ruled out. What remains is engine-level: ~52% of the frame is executor overhead across ~380 system runs. Details in `docs/agent/BEVY-UPGRADE-ASSESSMENT.md` | Re-profile with `tests/e2e/sim_profile.rs` after the 0.18 step (TODO 29 step 3); close when the per-frame cost is within ~20% of 0.15's or attributed to the engine |
-| 29 · step 3 | Bevy 0.17 → 0.18 (AnimationTarget split, UI extraction rework) in a git worktree | Every gate in `BEVY-UPGRADE-ASSESSMENT.md` green on the branch, incl. the browser run |
 | 78 · remainder | Pause-board height cap for < 530 px viewports | `/run-web` screenshot at a 400 px-tall viewport shows the whole board; `cargo test --test e2e pause_subs::` green |
 
 ## Test-suite gaps
@@ -83,6 +81,9 @@ needs a human (11, 33) or is a deliberate non-action (98).
     the CLAUDE.md toolchain note. **Merged into `main` 2026-09-25** (`8a79168`); CLI bumped,
     CLAUDE.md updated. Steps 3–4 (0.18, 0.19) remain, plus the `B0004` boot warnings and the
     headless-sim slowdown to profile.
+    *Step 3 done 2026-11-20* (0.17.3 → 0.18.1, rapier 0.33, inspector-egui 0.36, wgpu-types 27,
+    MSRV 1.89; the `B0004` boot warnings are gone too) — see TADA 109. Step 4 (0.19) remains,
+    plus re-profiling the headless sim.
 
 ## Coach findings 2026-08-24
 

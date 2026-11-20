@@ -140,7 +140,17 @@ fn spawn_prop(
     let prop = commands
         .spawn((GearProp, Mesh3d(mesh), MeshMaterial3d(material), transform))
         .id();
-    commands.entity(bone).add_child(prop);
+    // The bone can be despawned earlier in this same command flush (a runner
+    // swapped for his run-out stand-in the frame he is dressed), and adding a
+    // child to a dead entity is an error the default handler panics on. Hang
+    // the prop only if the bone is still there; otherwise drop it with him.
+    commands.queue(move |world: &mut World| {
+        if let Ok(mut bone) = world.get_entity_mut(bone) {
+            bone.add_child(prop);
+        } else if let Ok(prop) = world.get_entity_mut(prop) {
+            prop.despawn();
+        }
+    });
     prop
 }
 

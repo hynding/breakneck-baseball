@@ -599,7 +599,7 @@ impl StartGame<'_, '_> {
         self.rules.counts.innings = self.config.innings;
         // The fences the menu picked move the park's wall.
         *self.field = self.settings.fences.apply(self.config.variant.field());
-        self.next_state.set(GameState::Playing);
+        (*self.next_state).set_if_neq(GameState::Playing);
     }
 }
 
@@ -853,11 +853,11 @@ fn spawn_game_over(
                         align_items: AlignItems::Center,
                         row_gap: Val::Px(14.0),
                         border: UiRect::all(Val::Px(1.5)),
+                        border_radius: BorderRadius::all(Val::Px(16.0)),
                         ..default()
                     },
                     BackgroundColor(ui.panel_bg),
                     BorderColor::all(ui.panel_border),
-                    BorderRadius::all(Val::Px(16.0)),
                 ))
                 .with_children(|card| {
                     card.spawn((
@@ -982,7 +982,7 @@ fn game_over_restart(
         || pads.iter().any(|p| p.just_pressed(GamepadButton::South))
         || pointer_on_card();
     if confirm {
-        next_state.set(GameState::MainMenu);
+        (*next_state).set_if_neq(GameState::MainMenu);
     }
 }
 
