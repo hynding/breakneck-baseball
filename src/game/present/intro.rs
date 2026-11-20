@@ -177,7 +177,9 @@ fn start_intro(
 /// or the end gives the game its clock back. Every press made while it
 /// plays, the skip included, is swallowed: flow reads `Intents` with the
 /// clock held, and a press would otherwise start the first pitch under the
-/// flyover or throw it the instant the intro ends.
+/// flyover or throw it the instant the intro ends. (That covers devices and
+/// the Director's seam; the CPU writes its intents later, inside flow, and
+/// is held only because its timers run on the paused clock.)
 fn advance_intro(
     real: Res<Time<Real>>,
     mut intents: ResMut<Intents>,
