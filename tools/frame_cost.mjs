@@ -76,6 +76,11 @@ for (const tier of (process.env.TIERS||'low,medium,high').split(',')) {
   }
   await page.keyboard.press('Digit1');
   await until(/bb-state playing/, 120_000);
+  // Skip the PLAY BALL intro (any action press after its short grace) so
+  // every tier is measured on the game view, not the flyover.
+  await page.waitForTimeout(8000);
+  await page.keyboard.press('Space');
+  await page.waitForTimeout(5000);
   const startAt = logs.length;
   await page.waitForTimeout(secs * 1000);
   await page.screenshot({ path: join(outDir, `${tier}.png`) });
