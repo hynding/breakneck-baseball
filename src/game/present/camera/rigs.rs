@@ -322,10 +322,12 @@ pub(super) fn broadcast_camera(
         _ => false,
     };
     // Pick the subject only once the call is decided: that is when the
-    // runners are re-pathed for it. Flow decides the call and the runner
-    // systems re-path in this same frame, before this system (it runs after
-    // `GameplayOrder::Rigs`), so the pick sees the new paths; at worst a
-    // re-path that lands a frame later costs one frame of ball-follow.
+    // runners are re-pathed for it. Flow runs before Fielding, so it reads
+    // the throw and decides the call the frame after it; the re-path's
+    // commands are flushed before this system (it runs after
+    // `GameplayOrder::Rigs`), so the pick lands on that second frame. The
+    // one frame between holds the shot already up (ball-follow or the
+    // ground-ball shot), so nothing flashes.
     let runner_cam = if long_throw && play.pending_call().is_some() {
         let base = rig.thrown_base.expect("long_throw needs a throw");
         let thrown_bag = bag_at(base);

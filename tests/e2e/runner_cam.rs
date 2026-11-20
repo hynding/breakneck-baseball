@@ -2,7 +2,7 @@
 //! camera follows the ball, then — once the outfielder's throw is away —
 //! trails the runner racing it, and hands over to the base cam for the
 //! call. A scripted sweep of drives into the gaps must produce a double and
-//! a triple whose shot logs both read ball-follow → runner cam → base cam.
+//! a triple whose shot logs both read chase shot → runner cam → base cam.
 
 use crate::common;
 
@@ -103,10 +103,14 @@ fn hit_bases(outcome: Option<Outcome>) -> Option<u32> {
     }
 }
 
-/// Whether `log` holds ball-follow, then a runner cam, then a base cam, in
+/// Whether `log` holds a chase shot (ball-follow, or the ground-ball shot
+/// for a gapper read as a grounder), then a runner cam, then a base cam, in
 /// that order (other shots may sit between).
 fn follows_runner_then_bag(log: &[Shot]) -> bool {
-    let Some(follow) = log.iter().position(|s| *s == Shot::BallFollow) else {
+    let Some(follow) = log
+        .iter()
+        .position(|s| matches!(s, Shot::BallFollow | Shot::GroundBall))
+    else {
         return false;
     };
     let Some(runner) = log[follow..]
@@ -210,7 +214,7 @@ fn extra_base_hits_cut_ball_runner_then_bag() {
         .join("\n");
     assert!(
         double && triple,
-        "need a double and a triple that cut ball-follow → runner cam → base cam \
+        "need a double and a triple that cut chase shot → runner cam → base cam \
          (double {double}, triple {triple}); plays:\n{report}"
     );
 }
