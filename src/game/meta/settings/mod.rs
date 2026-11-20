@@ -112,6 +112,22 @@ impl TouchScheme {
     }
 }
 
+/// Which plays get an instant replay (`game::replay`). A play that ends the
+/// half-inning never does: the rigs are already dressed for the next half,
+/// and a replay carries only poses. The settings row
+/// arrives with the camera settings (plan task 14); until then the store
+/// field can be edited by hand.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ReplayMode {
+    /// Never.
+    Off,
+    /// A home run, a walk-off on a ball in play, a throw home or a dive.
+    #[default]
+    BigPlays,
+    /// Every ball hit (fouls that went into play included).
+    Always,
+}
+
 /// Which look the pitch trail wears (consumed by `game::fx`'s trail systems):
 /// the classic fading path, or one of five interchangeable 3D styles.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -354,6 +370,9 @@ pub struct Settings {
     /// regulation park).
     #[serde(default)]
     pub fences: crate::game::weather::Fences,
+    /// Which plays get an instant replay (serde-defaulted to big plays).
+    #[serde(default)]
+    pub replays: ReplayMode,
     /// Master volume, 0.0..=1.0, applied via [`bevy::audio::GlobalVolume`].
     pub volume: f32,
     /// Regular-season length for the *next* short season (menu **L**; one
@@ -388,6 +407,7 @@ impl Default for Settings {
             difficulty: Difficulty::default(),
             weather: Default::default(),
             fences: Default::default(),
+            replays: ReplayMode::default(),
             volume: 0.7,
             season_length: season::DEFAULT_SEASON_LENGTH,
             season: None,

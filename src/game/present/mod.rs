@@ -9,4 +9,5 @@ pub mod juice;
 pub mod look;
 pub mod player;
 pub mod quality;
+pub mod replay;
 pub mod ui;

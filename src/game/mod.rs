@@ -23,7 +23,8 @@ pub use self::meta::{appearance, autoplay, gear, input, menu, season_mode, setti
 #[cfg(feature = "debug")]
 pub use self::meta::{creator, debug, portraits};
 pub use self::present::{
-    animation, audio, camera, field, frame_cost, fx, jersey, juice, look, player, quality, ui,
+    animation, audio, camera, field, frame_cost, fx, jersey, juice, look, player, quality, replay,
+    ui,
 };
 pub use self::sim::{ai, ball, batting, director, fielding, flow, physics_clock, runner, scenario};
 
@@ -334,6 +335,7 @@ impl Plugin for GamePlugin {
                 sim::coach::CoachPlugin,
                 sim::director::DirectorPlugin,
                 physics_clock::PhysicsClockPlugin,
+                replay::ReplayPlugin,
             ));
         #[cfg(feature = "debug")]
         app.add_plugins((

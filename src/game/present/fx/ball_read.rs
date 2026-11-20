@@ -162,7 +162,8 @@ fn set_visible(mut visibility: Mut<Visibility>, on: bool) {
 #[allow(clippy::type_complexity)]
 pub(super) fn place_ball_shadow(
     theme: Res<Theme>,
-    ball_q: Query<(&Transform, &Visibility), (With<Baseball>, With<InFlight>)>,
+    replay: Option<Res<crate::game::replay::Replay>>,
+    ball_q: Query<(&Transform, &Visibility, Has<InFlight>), With<Baseball>>,
     cameras: MainView,
     mut shadow_q: Query<(&mut Transform, &mut Visibility), (With<BallShadow>, Without<Baseball>)>,
 ) {
@@ -171,11 +172,13 @@ pub(super) fn place_ball_shadow(
     };
     // `Visibility`, not `InheritedVisibility`: flow hides the ball in
     // `Update` (a catch), and the inherited flag only catches up later.
+    // A replay shows the recorded flight whatever the live ball is doing.
+    let replaying = replay.is_some_and(|r| r.is_playing());
     let ball = ball_q
         .single()
         .ok()
-        .filter(|(_, v)| **v != Visibility::Hidden);
-    let Some((ball, _)) = ball else {
+        .filter(|(_, v, flying)| **v != Visibility::Hidden && (*flying || replaying));
+    let Some((ball, ..)) = ball else {
         set_visible(visibility, false);
         return;
     };
