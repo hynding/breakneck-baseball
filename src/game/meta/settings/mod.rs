@@ -112,7 +112,9 @@ impl TouchScheme {
     }
 }
 
-/// Which plays get an instant replay (`game::replay`). The settings row
+/// Which plays get an instant replay (`game::replay`). A play that ends the
+/// half-inning never does: the rigs are already dressed for the next half,
+/// and a replay carries only poses. The settings row
 /// arrives with the camera settings (plan task 14); until then the store
 /// field can be edited by hand.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]

@@ -296,6 +296,8 @@ fn a_cpu_game_with_every_replay_finishes() {
     let mut pitches = 0;
     let mut missing = Vec::new();
     let mut was_pre_pitch = false;
+    let (mut half_at_contact, mut prev_phase) = (None, None);
+    let (mut half_enders, mut ended_half, mut replayed_half_ender) = (0u32, false, false);
     let finished = run_until(&mut app, 600_000, |app| {
         let pre_pitch = app.world().resource::<Play>().phase == Phase::PrePitch;
         if pre_pitch && !was_pre_pitch {
@@ -316,6 +318,27 @@ fn a_cpu_game_with_every_replay_finishes() {
             }
         }
         was_pre_pitch = pre_pitch;
+        // A play that ends the half gets no replay: the rigs are already
+        // dressed for the next half.
+        let phase = app.world().resource::<Play>().phase;
+        let top = app.world().resource::<ScoreBoard>().top_of_inning;
+        match phase {
+            Phase::InPlay => half_at_contact = Some(top),
+            // Entering the call of a ball in play that flipped the half.
+            Phase::Result if prev_phase == Some(Phase::InPlay) => {
+                ended_half = half_at_contact.is_some_and(|h| h != top);
+                half_enders += u32::from(ended_half);
+            }
+            Phase::Result => {}
+            _ => {
+                half_at_contact = None;
+                ended_half = false;
+            }
+        }
+        if ended_half && playing(app) {
+            replayed_half_ender = true;
+        }
+        prev_phase = Some(phase);
         *app.world().resource::<State<GameState>>().get() == GameState::GameOver
     });
     assert!(finished.is_some(), "the game never finished");
@@ -323,6 +346,10 @@ fn a_cpu_game_with_every_replay_finishes() {
         missing.is_empty(),
         "occupied bags with no runner shown (pitch, base): {missing:?}"
     );
+    // (Whether a ball in play ends a half is the CPU's call: a game whose
+    // halves both end on strikeouts or steals checks nothing here.)
+    println!("{half_enders} half-ending balls in play");
+    assert!(!replayed_half_ender, "a play that ended the half replayed");
     let replay = app.world().resource::<Replay>();
     assert!(
         replay.played >= 2,

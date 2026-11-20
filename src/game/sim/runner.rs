@@ -516,13 +516,9 @@ pub(crate) fn sync_runners(
         .map(|t| t.runner);
     for (entity, from) in pool {
         if half_flipped {
-            // Off the field at once, but kept (hidden) for the replay of
-            // the play that ended the half: no base path, so nothing waits
-            // on him.
-            commands
-                .entity(entity)
-                .remove::<(Runner, BasePath)>()
-                .insert((Departed, Visibility::Hidden));
+            // (A play that ends the half gets no replay, so there is
+            // nothing to keep him for.)
+            commands.entity(entity).despawn();
             continue;
         }
         if retired == Some(from) {
