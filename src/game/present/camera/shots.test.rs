@@ -17,6 +17,7 @@ fn cues(phase: Phase) -> ShotCues {
         strikeout: false,
         thrown_base: None,
         grounder: false,
+        runner_cam: None,
         descending_to: None,
         duel_throw_base: None,
     }
@@ -141,6 +142,237 @@ fn in_play_cuts_plate_then_ball_then_fielder_then_base() {
     assert_eq!(pick_shot(&c, None), Shot::BaseCam(1));
 }
 
+/// A throw in from the outfield takes the runner cam ahead of the base cam
+/// while it is wanted; the plate hold and a home run still come first.
+#[test]
+fn the_runner_cam_comes_before_the_base_cam() {
+    let runner = Entity::from_raw_u32(11).unwrap();
+    let mut c = cues(Phase::InPlay);
+    c.thrown_base = Some(1);
+    c.runner_cam = Some(runner);
+    assert_eq!(pick_shot(&c, None), Shot::RunnerCam(runner));
+    c.runner_cam = None;
+    assert_eq!(
+        pick_shot(&c, Some(Shot::RunnerCam(runner))),
+        Shot::BaseCam(1)
+    );
+    c.runner_cam = Some(runner);
+    c.since_contact = BALL_FOLLOW_DELAY * 0.5;
+    assert!(matches!(pick_shot(&c, None), Shot::Duel(_)));
+    c.since_contact = 10.0;
+    c.home_run = true;
+    assert_eq!(pick_shot(&c, None), Shot::BallFollow);
+}
+
+/// The call never lands on the runner cam: a result reached while it is up
+/// cuts to the bag the throw went to.
+#[test]
+fn a_call_on_the_runner_cam_lands_at_the_bag() {
+    let runner = Entity::from_raw_u32(11).unwrap();
+    let mut c = cues(Phase::Result);
+    c.thrown_base = Some(2);
+    assert_eq!(
+        pick_shot(&c, Some(Shot::RunnerCam(runner))),
+        Shot::BaseCam(2)
+    );
+    c.thrown_base = None;
+    assert_eq!(
+        pick_shot(&c, Some(Shot::RunnerCam(runner))),
+        Shot::BallFollow
+    );
+    // Any other shot is still kept for the call.
+    c.thrown_base = Some(2);
+    assert_eq!(pick_shot(&c, Some(Shot::BaseCam(2))), Shot::BaseCam(2));
+}
+
+/// The runner cam's subject: the runner bound for the thrown-to bag beats
+/// a nearer one bound elsewhere; with nobody bound there, the nearest.
+#[test]
+fn the_runner_cam_picks_the_runner_bound_for_the_bag() {
+    let field = VariantId::Standard.field();
+    let (first, second, third) = (
+        field.base_positions[0],
+        field.base_positions[1],
+        field.base_positions[2],
+    );
+    let batter = Entity::from_raw_u32(1).unwrap();
+    let lead = Entity::from_raw_u32(2).unwrap();
+    // The batter, just past first, heads for second; the lead runner,
+    // nearer third than the batter is to it, is bound home.
+    let racing = [
+        (batter, first.lerp(second, 0.2), second),
+        (lead, third * 0.9, Vec3::ZERO),
+    ];
+    assert_eq!(
+        pick_runner_subject(racing, third, 1.0),
+        Some((lead, Vec3::ZERO)),
+        "nobody bound for third: the nearest"
+    );
+    assert_eq!(
+        pick_runner_subject(racing, second, 1.0),
+        Some((batter, second)),
+        "the batter is the one bound for second"
+    );
+    assert_eq!(pick_runner_subject([], second, 1.0), None);
+    // A bag at the runner's feet within `arrived` still counts as his.
+    let near = [(lead, third, third + Vec3::X * 0.5), (batter, third, first)];
+    assert_eq!(
+        pick_runner_subject(near, third, 1.0),
+        Some((lead, third + Vec3::X * 0.5))
+    );
+}
+
+/// Seconds left on a throw: distance over flat speed, a vertical or
+/// stopped ball never arrives.
+#[test]
+fn throw_secs_left_reads_flat_speed() {
+    let bag = Vec3::new(0.0, 0.0, 30.0);
+    let t = throw_secs_left(bag, Vec3::new(0.0, 3.0, 0.0), Vec3::new(0.0, -9.0, 15.0));
+    assert!((t - 2.0).abs() < 1e-5, "{t}");
+    assert!(throw_secs_left(bag, Vec3::ZERO, Vec3::Y * 5.0).is_infinite());
+    const { assert!(RUNNER_CAM_MIN_START_SECS > RUNNER_CAM_HANDOFF_SECS) };
+}
+
+/// Only a throw from the outfield takes the runner cam, only while the
+/// ball is still well out, and never back once the base cam is up.
+#[test]
+fn the_runner_cam_hands_over_to_the_bag() {
+    let field = VariantId::Standard.field();
+    let second = field.base_positions[1];
+    let fence = field.fence_line;
+    let from = Vec3::new(-25.0, 1.8, 80.0);
+    // A deep throw flies 1.2 s (`fielding::lob_velocity`).
+    let vel = (second - from).with_y(0.0) / 1.2;
+    assert!(runner_cam_wanted(from, second, from, vel, fence, false));
+    // Halfway in, it is under the hand-over time: the bag's shot now.
+    let half = second.lerp(from, 0.45);
+    assert!(!runner_cam_wanted(from, second, half, vel, fence, false));
+    let early = second.lerp(from, 0.6);
+    assert!(runner_cam_wanted(from, second, early, vel, fence, false));
+    // A ball that died short of the bag is no throw in flight.
+    assert!(!runner_cam_wanted(
+        from,
+        second,
+        early,
+        vel * 0.05,
+        fence,
+        false
+    ));
+    // Once the base cam is up it keeps the play.
+    assert!(!runner_cam_wanted(from, second, from, vel, fence, true));
+    // A shortstop ranging deep into the hole, or an outfielder gathering
+    // a single in shallow, is not a ball run down in the gap.
+    for short in [Vec3::new(12.0, 1.8, 52.0), Vec3::new(20.0, 1.8, 62.0)] {
+        assert!(!runner_cam_wanted(
+            short,
+            field.base_positions[0],
+            short,
+            Vec3::new(-20.0, 0.0, -40.0),
+            fence,
+            false
+        ));
+    }
+    // The front lawn: the across-the-street fielder's throw qualifies, a
+    // sidewalk fielder's never does.
+    let lawn = VariantId::FrontYard.field();
+    let to = lawn.base_positions[0];
+    for (spot, want) in [
+        (lawn.fielder_positions[2], true),
+        (lawn.fielder_positions[0], false),
+        (lawn.fielder_positions[1], false),
+    ] {
+        let from = spot + Vec3::Y * 1.5;
+        assert_eq!(
+            runner_cam_wanted(from, to, from, (to - from) / 1.0, lawn.fence_line, false),
+            want,
+            "{spot}"
+        );
+    }
+}
+
+/// Degenerate races still give a finite shot above the ground: a runner on
+/// his bag, a ball right over the race, a throw straight down his line.
+#[test]
+fn the_runner_cam_survives_degenerate_races() {
+    let field = VariantId::Standard.field();
+    let second = field.base_positions[1];
+    let first = field.base_positions[0];
+    for (runner, bag, ball) in [
+        (second, second, Vec3::new(0.0, 2.0, 80.0)),
+        (first, second, (first + second) / 2.0),
+        (first, second, first + (first - second) * 2.0 + Vec3::Y),
+        (Vec3::ZERO, Vec3::ZERO, Vec3::ZERO),
+    ] {
+        let r = RunnerFrame {
+            runner,
+            bound_for: bag,
+            call_bag: bag,
+        };
+        let (eye, target, fov) = runner_cam(r, ball, 16.0 / 9.0);
+        assert!(
+            eye.is_finite() && target.is_finite() && fov.is_finite(),
+            "{eye} {target} {fov}"
+        );
+        assert!(eye.y > 1.0);
+        assert!((RUNNER_CAM_MIN_FOV..=MAX_LEAD_FOV + 1e-4).contains(&fov));
+    }
+}
+
+/// The runner cam stands off the runner's race on the side away from the
+/// throw, above the ground, and keeps the runner, the bag and the incoming
+/// ball in the middle of the frame.
+#[test]
+fn the_runner_cam_frames_runner_bag_and_ball() {
+    use super::super::framing::{framed_ndc_x, framed_ndc_y};
+    let field = VariantId::Standard.field();
+    let aspect = 16.0 / 9.0;
+    for (from, to, ball) in [
+        // A double: rounding first for second, throw from left-centre.
+        (0usize, 1usize, Vec3::new(10.0, 3.0, 70.0)),
+        // A triple: rounding second for third, throw from the right-field corner.
+        (1, 2, Vec3::new(-55.0, 3.5, 60.0)),
+        // A double into the right-centre gap: the throw comes from behind him.
+        (0, 1, Vec3::new(-30.0, 2.5, 75.0)),
+        // A triple down the left-field line: the throw comes from ahead.
+        (1, 2, Vec3::new(45.0, 3.0, 55.0)),
+    ] {
+        let bag = field.base_positions[to];
+        let runner = field.base_positions[from].lerp(bag, 0.3);
+        // On a double the throw can go in behind him, to first: that bag
+        // (where the call lands) stays in frame too.
+        let call_bag = if to == 1 {
+            field.base_positions[0]
+        } else {
+            bag
+        };
+        let r = RunnerFrame {
+            runner,
+            bound_for: bag,
+            call_bag,
+        };
+        let (eye, target, fov) = runner_cam(r, ball, aspect);
+        assert!(eye.y > 2.0, "{eye}");
+        // The ball comes in from beyond the race, never from behind the lens.
+        assert!(
+            eye.distance(ball) > eye.distance(bag) && eye.distance(ball) > eye.distance(runner)
+        );
+        assert!((RUNNER_CAM_MIN_FOV..=MAX_LEAD_FOV + 1e-4).contains(&fov));
+        for p in [
+            runner + Vec3::Y,
+            bag + Vec3::Y * 0.5,
+            call_bag + Vec3::Y * 0.5,
+            ball,
+        ] {
+            let x = framed_ndc_x(eye, target, fov, aspect, p);
+            let y = framed_ndc_y(eye, target, fov, p);
+            assert!(
+                x.abs() <= LEAD_MARGIN + 0.02 && y.abs() <= LEAD_MARGIN + 0.02,
+                "{p} at ({x:.2}, {y:.2}) for {from}->{to}"
+            );
+        }
+    }
+}
+
 /// A home run in flight is followed, never fielder- or base-cammed, and its
 /// result pause is the trot orbit.
 #[test]
@@ -244,6 +476,7 @@ fn inputs(field: &FieldSpec) -> ShotInputs<'_> {
         aspect: DUEL_REFERENCE_ASPECT,
         ball: None,
         fielder: None,
+        runner: None,
         wind: Vec3::ZERO,
         home_run: false,
         trot_secs: 0.0,

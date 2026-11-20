@@ -38,6 +38,10 @@ pub enum Shot {
     /// A ball on the ground: a high, wide infield shot that holds the ball,
     /// the fielder going for it, and first base.
     GroundBall,
+    /// A throw in from the outfield: trailing the runner it races as he
+    /// heads for the bag, the throw coming into frame. Hands over to
+    /// the base cam as the ball nears the bag.
+    RunnerCam(Entity),
     /// Behind and above the fielder about to make the catch, ball in frame.
     FielderCam(Entity),
     /// Low beside the bag a throw is headed for (`base_count()` = home):
@@ -75,6 +79,9 @@ pub(super) struct ShotCues {
     /// The ball was hit on the ground ([`is_grounder`], latched by the rig
     /// for the rest of the play).
     pub grounder: bool,
+    /// The runner racing a long throw that is still far from its bag (the
+    /// rig decides; [`runner_cam_wanted`]).
+    pub runner_cam: Option<Entity>,
     /// The chasing fielder, when the ball is in the air and coming down —
     /// the fielder cam's subject.
     pub descending_to: Option<Entity>,
@@ -101,11 +108,12 @@ pub(super) fn pick_shot(cues: &ShotCues, current: Option<Shot>) -> Shot {
         // the bat coming through — then cut to the ball.
         Phase::InPlay if cues.since_contact < BALL_FOLLOW_DELAY => Shot::Duel(cues.view),
         Phase::InPlay if cues.home_run => Shot::BallFollow,
-        Phase::InPlay => match (cues.thrown_base, cues.descending_to) {
-            (Some(base), _) => Shot::BaseCam(base),
-            (None, Some(fielder)) => Shot::FielderCam(fielder),
-            (None, None) if cues.grounder => Shot::GroundBall,
-            (None, None) => Shot::BallFollow,
+        Phase::InPlay => match (cues.runner_cam, cues.thrown_base, cues.descending_to) {
+            (Some(runner), _, _) => Shot::RunnerCam(runner),
+            (None, Some(base), _) => Shot::BaseCam(base),
+            (None, None, Some(fielder)) => Shot::FielderCam(fielder),
+            (None, None, None) if cues.grounder => Shot::GroundBall,
+            (None, None, None) => Shot::BallFollow,
         },
         Phase::Result if cues.home_run || cues.walk_off => Shot::TrotOrbit,
         // Strike three gets its reaction shot (before the gloved arm: a K
@@ -113,6 +121,11 @@ pub(super) fn pick_shot(cues: &ShotCues, current: Option<Shot>) -> Shot {
         Phase::Result if cues.strikeout => Shot::ReactionCam,
         // A gloved pitch's call doesn't deserve a zoom-out: stay at the plate.
         Phase::Result if cues.pitch_gloved => Shot::Duel(cues.view),
+        // The call always lands in the bag's shot, never on the runner cam
+        // (a throw caught early, or the play called before the hand-over).
+        Phase::Result if matches!(current, Some(Shot::RunnerCam(_))) => {
+            cues.thrown_base.map_or(Shot::BallFollow, Shot::BaseCam)
+        }
         Phase::Result => current.unwrap_or(Shot::Duel(cues.view)),
     }
 }
@@ -244,6 +257,8 @@ pub(super) struct ShotInputs<'a> {
     /// The fielder the shot is about (the fielder cam's subject, the
     /// grounder's chaser), where it stands.
     pub fielder: Option<Vec3>,
+    /// The runner cam's subject.
+    pub runner: Option<RunnerFrame>,
     pub wind: Vec3,
     pub home_run: bool,
     /// Seconds since the trot orbit began.
@@ -293,6 +308,18 @@ impl Shot {
                 let (eye, target) = fielder_cam(inp.fielder.unwrap_or(ball.pos), ball.pos);
                 ShotSpec::new(eye, target, PLAY_CAM_FOV)
             }
+            (Shot::RunnerCam(_), Some(ball)) => match inp.runner {
+                Some(r) => {
+                    let (eye, target, fov) = runner_cam(r, ball.pos, inp.aspect);
+                    // Quick to follow: the throw is in frame at up to 40 m/s.
+                    ShotSpec {
+                        follow: BALL_FOLLOW_RATE,
+                        ..ShotSpec::new(eye, target, fov)
+                    }
+                }
+                None => wide(),
+            },
+            (Shot::RunnerCam(_), None) => wide(),
             (Shot::BaseCam(base), _) => {
                 let (eye, target) = base_cam(field, base);
                 ShotSpec::new(eye, target, PLAY_CAM_FOV)
@@ -380,6 +407,127 @@ const MAX_BACK: f32 = 60.0;
 /// ball flying at up to 45 m/s.
 const BALL_FOLLOW_RATE: f32 = 10.0;
 
+/// The runner cam: standoff from the runner's race (beyond half its
+/// length) and height.
+const RUNNER_CAM_BACK: f32 = 9.0;
+const RUNNER_CAM_HEIGHT: f32 = 4.0;
+const RUNNER_CAM_MIN_FOV: f32 = 40.0_f32.to_radians();
+/// A throw is in from deep (worth the runner cam) when it leaves the
+/// fielder's hand this far from home, as a fraction of the park's
+/// foul-line fence distance: 75 m in the stadium, well past the middle
+/// infielders' 45 m depth — a ball run down in the gap or the corner, not
+/// a single gathered in shallow — and 28.5 m on the front lawn, so only
+/// the across-the-street fielder (34 m) takes it, never the sidewalks
+/// (23 m).
+pub(super) const OUTFIELD_FRACTION: f32 = 0.75;
+/// The runner cam hands over to the base cam once the throw is this many
+/// seconds from the bag: a deep throw flies about 1.2 s, so the bag's shot
+/// gets as long as the runner's — the slide and the tag read before the
+/// call.
+pub(super) const RUNNER_CAM_HANDOFF_SECS: f32 = 0.6;
+/// A ball slower than this (m/s, flat) is no longer a throw in flight
+/// (it bounced short or is rolling): the bag's shot takes over.
+const THROW_MIN_SPEED: f32 = 5.0;
+
+/// The runner cam only *starts* when the throw is at least this many
+/// seconds from the bag: a shorter run would flash past before the hand-over.
+pub(super) const RUNNER_CAM_MIN_START_SECS: f32 = 0.9;
+
+/// Seconds until a throw at `ball` moving at `ball_vel` reaches `bag`, on
+/// its flat speed (infinite for a ball not moving).
+pub(super) fn throw_secs_left(bag: Vec3, ball: Vec3, ball_vel: Vec3) -> f32 {
+    let flat = |v: Vec3| Vec2::new(v.x, v.z);
+    let speed = flat(ball_vel).length();
+    if speed <= f32::EPSILON {
+        return f32::INFINITY;
+    }
+    flat(ball).distance(flat(bag)) / speed
+}
+
+/// The runner a long throw races: among `(rig, at, bound_for)` for every rig
+/// still on a base path, the one bound for `thrown_bag` first (within
+/// `arrived` metres), else the one nearest it — on a double the throw can go
+/// in behind the batter, to first. Returns the rig and the bag it is bound
+/// for.
+pub(super) fn pick_runner_subject(
+    candidates: impl IntoIterator<Item = (Entity, Vec3, Vec3)>,
+    thrown_bag: Vec3,
+    arrived: f32,
+) -> Option<(Entity, Vec3)> {
+    let flat = |v: Vec3| v.with_y(0.0);
+    candidates
+        .into_iter()
+        .map(|(e, at, dest)| {
+            let bound_elsewhere = flat(dest).distance(flat(thrown_bag)) > arrived;
+            (e, dest, bound_elsewhere, at.distance(thrown_bag))
+        })
+        .min_by(|a, b| a.2.cmp(&b.2).then(a.3.total_cmp(&b.3)))
+        .map(|(e, dest, _, _)| (e, dest))
+}
+
+/// Whether the rig should be on the runner cam: a throw in from the
+/// outfield ([`OUTFIELD_FRACTION`]) from `throw_from` to `bag`, still in
+/// flight and more than [`RUNNER_CAM_HANDOFF_SECS`] from the bag, while the
+/// base cam hasn't taken the play yet (a cut back from the bag would read
+/// as a stutter).
+pub(super) fn runner_cam_wanted(
+    throw_from: Vec3,
+    bag: Vec3,
+    ball: Vec3,
+    ball_vel: Vec3,
+    fence_line: f32,
+    base_cam_shown: bool,
+) -> bool {
+    let flat = |v: Vec3| Vec2::new(v.x, v.z);
+    !base_cam_shown
+        && flat(throw_from).length() > fence_line * OUTFIELD_FRACTION
+        && flat(ball_vel).length() > THROW_MIN_SPEED
+        && throw_secs_left(bag, ball, ball_vel) > RUNNER_CAM_HANDOFF_SECS
+}
+
+/// The runner cam: standing off the runner's race to the bag he is bound
+/// for, swung round to the side away from the throw so the ball comes in
+/// from beyond the runner (a throw from behind him — right field on a run to
+/// third — would otherwise come from behind the lens), the lens fitted to
+/// the runner, his bag, the bag the call lands on and the ball.
+pub(super) fn runner_cam(r: RunnerFrame, ball: Vec3, aspect: f32) -> (Vec3, Vec3, f32) {
+    let flat = |v: Vec3| Vec3::new(v.x, 0.0, v.z);
+    let (runner, bag) = (r.runner, r.bound_for);
+    let run = flat(bag - runner).normalize_or(flat(bag).normalize_or(Vec3::Z));
+    // The ground the shot must hold: the race and the bag the call lands on.
+    let ground = [runner, bag, r.call_bag];
+    let centre = ground.iter().copied().sum::<Vec3>() / 3.0;
+    let from_ball = flat(centre - ball).normalize_or(-run);
+    // Outward from the diamond, for a ball straight behind the runner
+    // (the two directions cancel).
+    let side = Vec3::new(-run.z, 0.0, run.x);
+    let outward = if side.dot(flat(centre)) >= 0.0 {
+        side
+    } else {
+        -side
+    };
+    // Mostly straight away from the ball (so it comes in from beyond the
+    // race), drawn a little behind the runner.
+    let back = (from_ball * 2.0 - run).normalize_or(outward);
+    let spread = ground
+        .iter()
+        .map(|p| flat(*p - centre).length())
+        .fold(0.0, f32::max);
+    let reach = RUNNER_CAM_BACK + spread;
+    let eye = centre.with_y(0.0) + back * reach + Vec3::Y * RUNNER_CAM_HEIGHT;
+    let subjects = [
+        runner + Vec3::Y,
+        bag + Vec3::Y * 0.5,
+        r.call_bag + Vec3::Y * 0.5,
+        ball,
+    ];
+    // Look between the runner's race and the ball, leaning to the race.
+    let target = (centre + Vec3::Y * 0.75).lerp(ball, 0.25);
+    let fov = fit_vfov(eye, target, &subjects, aspect, LEAD_MARGIN)
+        .clamp(RUNNER_CAM_MIN_FOV, MAX_LEAD_FOV);
+    (eye, target, fov)
+}
+
 /// How far from the frame's centre (in NDC) the lead shots keep their
 /// subjects: the middle 80%.
 pub(super) const LEAD_MARGIN: f32 = 0.8;
@@ -395,6 +543,16 @@ const GROUND_CAM_MIN_FOV: f32 = 40.0_f32.to_radians();
 /// down again within [`GROUNDER_HANG`] seconds.
 const GROUNDER_HEIGHT: f32 = 1.5;
 const GROUNDER_HANG: f32 = 1.0;
+
+/// The runner cam's subject: where the runner is, the bag he is bound for,
+/// and the bag the throw is going to (the call lands there; it can differ,
+/// e.g. a throw in behind the batter on a double).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct RunnerFrame {
+    pub runner: Vec3,
+    pub bound_for: Vec3,
+    pub call_bag: Vec3,
+}
 
 /// What the rig has learned about this play's batted ball, fed once a frame
 /// while it is live ([`PlayRead::observe`]) and cleared between plays.

@@ -13,11 +13,13 @@ use crate::game::fielding::ActivePlay;
 use crate::game::flow::{LiveBallEvent, Phase, Play, ResultBeat};
 use crate::game::player::{CatcherRole, PlateUmpire};
 use crate::game::rules;
+use crate::game::runner::BasePath;
 use crate::game::variant::FieldSpec;
 
 use super::framing::{LENS_BRUSH_RADIUS, OCCLUSION_NEAR, OCCLUSION_RADIUS, brushes_lens, occludes};
 use super::shots::{
-    BallState, FIELDER_CAM_MIN_HEIGHT, PlayRead, RigMotion, Shot, ShotCues, ShotInputs, pick_shot,
+    BallState, FIELDER_CAM_MIN_HEIGHT, PlayRead, RUNNER_CAM_MIN_START_SECS, RigMotion, RunnerFrame,
+    Shot, ShotCues, ShotInputs, pick_runner_subject, pick_shot, runner_cam_wanted, throw_secs_left,
 };
 use super::{
     BALL_FOLLOW_DELAY, BROADCAST_EYE, BROADCAST_FOV, BROADCAST_HOME_TARGET, CameraMode,
@@ -130,6 +132,15 @@ pub struct BroadcastRig {
     /// The base the live ball was last thrown at, cleared once the shot
     /// returns to the duel.
     thrown_base: Option<usize>,
+    /// Where that throw left the fielder's hand.
+    throw_from: Option<Vec3>,
+    /// The runner the runner cam settled on for this throw and the bag he
+    /// is bound for, kept so the shot never hops between runners (and
+    /// still frames him once his run ends).
+    runner_subject: Option<(Entity, Vec3)>,
+    /// The runner cam has been on screen for this throw: once it has, the
+    /// play never waits on a runner again (it goes to the bag).
+    runner_shown: bool,
     /// What this play's batted ball has done: the grounder call (made once
     /// just after the plate hold) and whether it has come down
     /// ([`PlayRead`]); cleared with `thrown_base`.
@@ -149,6 +160,9 @@ impl Default for BroadcastRig {
             motion: RigMotion::new(BROADCAST_EYE, BROADCAST_HOME_TARGET, BROADCAST_FOV),
             shot: None,
             thrown_base: None,
+            throw_from: None,
+            runner_subject: None,
+            runner_shown: false,
             read: PlayRead::default(),
             ground_fielder: None,
             play_contact: None,
@@ -167,6 +181,10 @@ impl BroadcastRig {
 /// kick rides through the hit-stop.
 #[derive(Resource, Default)]
 pub(super) struct CameraKick(Vec3);
+
+/// A base path ending this close to the thrown-to bag (m, flat) is bound
+/// for it.
+const RUNNER_ARRIVED: f32 = 1.0;
 
 /// The live ball as the broadcast camera reads it.
 type BallQuery<'w, 's> =
@@ -205,6 +223,7 @@ pub(super) fn broadcast_camera(
     mut walls: MessageReader<WallBangEvent>,
     ball_q: BallQuery,
     rigs: Query<&Transform, (Without<Baseball>, Without<Camera3d>)>,
+    paths: Query<(Entity, &BasePath)>,
     mut rig: ResMut<BroadcastRig>,
     mut trot_start: Local<Option<f32>>,
     mut cam_q: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
@@ -222,8 +241,11 @@ pub(super) fn broadcast_camera(
     // throw and announced at the arrival (`flow::resolve_live_play`), so
     // this is exactly the shot the call lands in.
     for ev in live.read() {
-        if let LiveBallEvent::Thrown { base, .. } = *ev {
+        if let LiveBallEvent::Thrown { pos, base, .. } = *ev {
             rig.thrown_base = Some(base);
+            rig.throw_from = Some(pos);
+            rig.runner_subject = None;
+            rig.runner_shown = false;
         }
     }
 
@@ -244,6 +266,9 @@ pub(super) fn broadcast_camera(
     }
     if new_play || !matches!(play.phase, Phase::InPlay | Phase::Result) {
         rig.thrown_base = None;
+        rig.throw_from = None;
+        rig.runner_subject = None;
+        rig.runner_shown = false;
         rig.read = PlayRead::default();
         rig.ground_fielder = None;
     }
@@ -267,6 +292,86 @@ pub(super) fn broadcast_camera(
             .chaser()
             .filter(|f| coming_down && rigs.get(*f).is_ok())
     });
+    // A long throw in from the outfield first trails the runner racing it
+    // (the one bound for the thrown-to bag), then hands over to the base
+    // cam for the last stretch and the call.
+    let bag_at = |base: usize| {
+        field
+            .base_positions
+            .get(base)
+            .copied()
+            .unwrap_or(Vec3::ZERO)
+    };
+    // (A throw already in the receiver's glove is no long throw: the base
+    // cam takes it, whatever the clock says.)
+    let long_throw = match (rig.thrown_base, rig.throw_from, ball_state) {
+        (Some(base), Some(from), Some(b))
+            if play.phase == Phase::InPlay
+                && !play.is_home_run()
+                && active.possessor().is_none() =>
+        {
+            runner_cam_wanted(
+                from,
+                bag_at(base),
+                b.pos,
+                b.vel,
+                field.fence_line,
+                matches!(rig.shot, Some(Shot::BaseCam(_))),
+            )
+        }
+        _ => false,
+    };
+    // Pick the subject only once the call is decided: that is when the
+    // runners are re-pathed for it. Flow runs before Fielding, so it reads
+    // the throw and decides the call the frame after it; the re-path's
+    // commands are flushed before this system (it runs after
+    // `GameplayOrder::Rigs`), so the pick lands on that second frame. The
+    // one frame between holds the shot already up (ball-follow or the
+    // ground-ball shot), so nothing flashes.
+    let runner_cam = if long_throw && play.pending_call().is_some() {
+        let base = rig.thrown_base.expect("long_throw needs a throw");
+        let thrown_bag = bag_at(base);
+        // Picked once per throw, then kept (a runner on a triple races on
+        // past the bag the throw went to). A subject that is gone — a
+        // runner scoring despawns at the plate — ends the runner cam
+        // rather than cutting to someone else.
+        let subject = match rig.runner_subject {
+            Some((e, dest)) => rigs.get(e).is_ok().then_some((e, dest)),
+            None if rig.runner_shown => None,
+            // Too little of the throw left to be worth a shot of its own:
+            // release the hold and let the base cam have it.
+            None if ball_state.is_some_and(|b| {
+                throw_secs_left(thrown_bag, b.pos, b.vel) < RUNNER_CAM_MIN_START_SECS
+            }) =>
+            {
+                rig.runner_shown = true;
+                None
+            }
+            // Every rig still running a base path — runners aboard, the
+            // batter, a runner scoring or about to be cut down.
+            None => pick_runner_subject(
+                paths.iter().filter_map(|(e, path)| {
+                    Some((e, rigs.get(e).ok()?.translation, path.destination()?))
+                }),
+                thrown_bag,
+                RUNNER_ARRIVED,
+            ),
+        };
+        if subject.is_some() {
+            rig.runner_subject = subject;
+        }
+        subject.map(|(e, _)| e)
+    } else {
+        None
+    };
+    // Until the call is decided, or while its runner hasn't surfaced, keep
+    // the base cam back (the shot stays on the ball: the chase is over, so
+    // no fielder cam) rather than cut to the bag and straight back.
+    let thrown_base = if long_throw && runner_cam.is_none() && !rig.runner_shown {
+        None
+    } else {
+        rig.thrown_base
+    };
     let cues = ShotCues {
         phase: play.phase,
         since_contact: play.since_contact(now),
@@ -276,8 +381,9 @@ pub(super) fn broadcast_camera(
         view: *view,
         walkup: play.walkup_active(),
         strikeout: play.result_beat() == Some(ResultBeat::Strikeout),
-        thrown_base: rig.thrown_base,
+        thrown_base,
         grounder,
+        runner_cam,
         descending_to,
         duel_throw_base: play.duel_throw().map(|t| t.target),
     };
@@ -300,6 +406,16 @@ pub(super) fn broadcast_camera(
             }
             _ => None,
         },
+        runner: match (shot, rig.runner_subject, rig.thrown_base) {
+            (Shot::RunnerCam(r), Some((_, dest)), Some(base)) => {
+                rigs.get(r).ok().map(|tf| RunnerFrame {
+                    runner: tf.translation,
+                    bound_for: dest,
+                    call_bag: bag_at(base),
+                })
+            }
+            _ => None,
+        },
         wind: wind.0,
         home_run: play.is_home_run(),
         trot_secs: now - start,
@@ -316,6 +432,9 @@ pub(super) fn broadcast_camera(
         rig.thrown_base = None;
     }
 
+    if matches!(shot, Shot::RunnerCam(_)) {
+        rig.runner_shown = true;
+    }
     if rig.shot != Some(shot) {
         // A new subject: the shot says how to get there (a cut, today).
         let kind = shot.transition_from(rig.shot);
