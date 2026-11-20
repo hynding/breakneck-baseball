@@ -416,8 +416,8 @@ impl Shot {
         let wide = || ShotSpec::new(field.broadcast_eye, field.broadcast_target, BROADCAST_FOV);
         match (self, inp.ball) {
             (Shot::Duel(v), _) => {
-                let (eye, target, fov) = v.framing(field, inp.aspect);
-                ShotSpec::new(eye, target, nudged_fov(fov, inp.duel_fov_nudge))
+                let (eye, target, fov) = v.nudged_framing(field, inp.aspect, inp.duel_fov_nudge);
+                ShotSpec::new(eye, target, fov)
             }
             (Shot::BallFollow, Some(ball)) if !inp.home_run => {
                 let (eye, target, focus) = landing_zone_cam(ball, inp.wind, -field.broadcast_eye.z);

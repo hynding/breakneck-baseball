@@ -1,13 +1,12 @@
 //! Unit tests for [`super`] — the touch chrome.
 
 use super::*;
-use crate::game::touch::{pad_rect, swing_button_rect};
+use crate::game::touch::{pad_rect, pause_button_rect, swing_button_rect};
 
-/// The bottom cards' footprints in UI pixels, a little over what they
-/// measure on screen (AT BAT 214 px wide by fixed width; the scoreboard
-/// cluster's width follows its text).
-const AT_BAT_UI: Vec2 = Vec2::new(214.0, 125.0);
-const CLUSTER_UI: Vec2 = Vec2::new(250.0, 125.0);
+/// The bottom cards' footprints in UI pixels (the widths the dodge plans
+/// with; heights a little over what they measure on screen).
+const AT_BAT_UI: Vec2 = Vec2::new(AT_BAT_W_PX, AT_BAT_H_PX);
+const CLUSTER_UI: Vec2 = Vec2::new(CLUSTER_W_PX, CLUSTER_H_PX);
 
 /// The two cards' window-pixel rects for `insets` in a window of `size`.
 fn cards(size: Vec2, insets: CornerInsets) -> (Rect, Rect) {
@@ -32,9 +31,10 @@ fn overlaps(a: Rect, b: Rect) -> bool {
 }
 
 /// Phones in both orientations (iPhone 13, a small Android, an iPhone SE)
-/// and a tablet: with the Zone Pad up, neither bottom card covers the pad
-/// or the SWING button, both stay on screen, and in landscape (where they
-/// slide inward) they don't cover each other.
+/// and tablets: with the Zone Pad up, neither bottom card covers the pad,
+/// the SWING button or the pause button, both stay on screen, and they
+/// don't cover each other. (The footprints are the sizes the dodge plans
+/// with; the screenshots in the PR check them against the real cards.)
 #[test]
 fn the_bottom_cards_step_clear_of_the_zone_pad() {
     for size in [
@@ -45,10 +45,19 @@ fn the_bottom_cards_step_clear_of_the_zone_pad() {
         Vec2::new(375.0, 553.0),
         Vec2::new(667.0, 375.0),
         Vec2::new(1024.0, 768.0),
+        Vec2::new(800.0, 600.0),
+        Vec2::new(375.0, 548.0),
+        Vec2::new(430.0, 932.0),
+        Vec2::new(932.0, 430.0),
+        Vec2::new(568.0, 320.0),
+        Vec2::new(320.0, 568.0),
+        Vec2::new(1366.0, 1024.0),
+        Vec2::new(744.0, 1133.0),
         Vec2::new(768.0, 1024.0),
     ] {
         let scale = super::super::fit::fit_scale(size);
-        let (at_bat, cluster) = cards(size, dodge_insets(size, scale));
+        let insets = dodge_insets(size, scale);
+        let (at_bat, cluster) = cards(size, insets);
         let screen = Rect::from_corners(Vec2::ZERO, size);
         for (name, card) in [("AT BAT", at_bat), ("scoreboard", cluster)] {
             assert!(
@@ -59,13 +68,13 @@ fn the_bottom_cards_step_clear_of_the_zone_pad() {
                 !overlaps(card, swing_button_rect(size)),
                 "{size}: {name} covers SWING"
             );
+            assert!(
+                !overlaps(card, pause_button_rect(size)),
+                "{size}: {name} covers the pause button"
+            );
             assert_eq!(screen.union(card), screen, "{size}: {name} off screen");
         }
-        if size.x > size.y {
-            // Landscape slides them toward each other; portrait only lifts
-            // them, keeping the resting side-by-side spacing.
-            assert!(!overlaps(at_bat, cluster), "{size}: the cards collide");
-        }
+        assert!(!overlaps(at_bat, cluster), "{size}: the cards collide");
     }
 }
 

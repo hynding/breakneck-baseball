@@ -164,6 +164,10 @@ fn camera_rows_cycle_both_ways() {
     cycle_row(ROW_REPLAYS, false, false, false, &mut settings, &mut open);
     assert_eq!(settings.replays, ReplayMode::BigPlays);
     assert!(open.0, "cycling a row keeps the screen open");
+    // Under reduce motion the shake row reads Off and doesn't cycle.
+    settings.reduce_motion = true;
+    cycle_row(ROW_SHAKE, true, false, false, &mut settings, &mut open);
+    assert_eq!(settings.camera_shake, CameraShake::Full);
 }
 
 #[test]

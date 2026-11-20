@@ -56,9 +56,10 @@ No panics in either. Two things it surfaced that need a real phone:
   emulation artifact, so check it on a real phone (step 2 below).
 - **The HUD crowded a portrait phone.** In portrait the at-bat card and the
   scoreboard sat over the Zone Pad and the SWING button (landscape too).
-  Fixed in the camera settings pass: while the pad shows, the two bottom
-  cards lift above it in portrait and slide inward beside the controls in
-  landscape (`ui::touch::dodge_zone_pad`), and the settings screen puts
+  Fixed in the camera settings pass: while the touch player bats with the
+  pad, the two bottom cards slide inward beside the controls where the gap
+  holds them (a landscape phone) and lift above the pad otherwise
+  (portrait, tablets) (`ui::touch::dodge_zone_pad`), and the settings screen puts
   each label and value on one line so all 13 rows fit a phone in either
   orientation. Re-checked under iPhone 13 emulation; confirm on a real
   phone (step 4 below).

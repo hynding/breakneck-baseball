@@ -324,32 +324,114 @@ pub(super) const RESTING_INSETS: CornerInsets = [14.0, 14.0, 14.0, 14.0];
 /// Gap kept between a moved card and the control it steps clear of (UI px).
 const DODGE_GAP_PX: f32 = 10.0;
 
+/// The bottom cards' widths (UI px) a slide must make room for: the AT BAT
+/// card's fixed width, and the corner cluster (meter track, gap and a
+/// scoreboard card whose width follows its text) with some slack.
+const AT_BAT_W_PX: f32 = 214.0;
+const CLUSTER_W_PX: f32 = 275.0;
+/// The AT BAT card's height (UI px), with some slack.
+const AT_BAT_H_PX: f32 = 125.0;
+
+/// A bottom card's window-pixel rect: `side` px in from its own edge (the
+/// left when `from_left`, else the right) and `bottom` px up, `w` by `h`,
+/// all in UI px at `scale`.
+fn card_rect(
+    size: Vec2,
+    scale: f32,
+    side: f32,
+    bottom: f32,
+    w: f32,
+    h: f32,
+    from_left: bool,
+) -> Rect {
+    let x0 = if from_left {
+        side * scale
+    } else {
+        size.x - (side + w) * scale
+    };
+    let y1 = size.y - bottom * scale;
+    Rect::from_corners(Vec2::new(x0, y1 - h * scale), Vec2::new(x0 + w * scale, y1))
+}
+
+/// The corner cluster's height (UI px): the 120 px meter track and its
+/// border, or the scoreboard card, with some slack.
+const CLUSTER_H_PX: f32 = 130.0;
+
 /// Where the bottom HUD cards go while the Zone Pad shows, for a window of
 /// `size` logical pixels at UI scale `scale`: the pad fills the
 /// bottom-left corner and the SWING button the bottom-right, right where
-/// the AT BAT card and the scoreboard sit. In a landscape window the cards
-/// slide inward beside the controls (the field above stays clear); a
-/// portrait window has no room between them, so the cards lift above the
-/// pad's top edge instead.
+/// the AT BAT card and the scoreboard sit. When the gap between the two
+/// controls holds both cards (a landscape phone) they slide inward beside
+/// the controls, keeping the field above clear; otherwise (portrait, or a
+/// tablet whose controls are big for its width) they lift above the pad's
+/// top edge.
 pub(super) fn dodge_insets(size: Vec2, scale: f32) -> CornerInsets {
     let scale = scale.max(1e-3);
     let pad = crate::game::touch::pad_rect(size);
     let swing = crate::game::touch::swing_button_rect(size);
-    if size.y > size.x {
-        let lift = (size.y - pad.min.y.min(swing.min.y)) / scale + DODGE_GAP_PX;
-        [RESTING_INSETS[0], lift, RESTING_INSETS[2], lift]
-    } else {
+    let room = (swing.min.x - pad.max.x) / scale - 3.0 * DODGE_GAP_PX;
+    if room >= AT_BAT_W_PX + CLUSTER_W_PX {
         [
             pad.max.x / scale + DODGE_GAP_PX,
             RESTING_INSETS[1],
             (size.x - swing.min.x) / scale + DODGE_GAP_PX,
             RESTING_INSETS[3],
         ]
+    } else {
+        // The AT BAT card lifts over the pad. The cluster takes the first
+        // spot that clears every control and the card: over the SWING
+        // button in its corner (which keeps it under the pause button
+        // where the screen is wide enough), stepped left of the pause
+        // button, then stacked above the AT BAT card (a portrait phone,
+        // where the two side by side would reach over the pad).
+        let over_pad = (size.y - pad.min.y) / scale + DODGE_GAP_PX;
+        let over_swing = (size.y - swing.min.y) / scale + DODGE_GAP_PX;
+        let pause = crate::game::touch::pause_button_rect(size);
+        let left_of_pause = (size.x - pause.min.x) / scale + DODGE_GAP_PX;
+        let stacked = over_pad + AT_BAT_H_PX + DODGE_GAP_PX;
+        let at_bat = card_rect(
+            size,
+            scale,
+            RESTING_INSETS[0],
+            over_pad,
+            AT_BAT_W_PX,
+            AT_BAT_H_PX,
+            true,
+        );
+        let candidates = [
+            (RESTING_INSETS[2], over_swing),
+            (left_of_pause, over_swing),
+            (RESTING_INSETS[2], stacked),
+            (left_of_pause, stacked),
+        ];
+        let clear = |&(right, bottom): &(f32, f32)| {
+            let r = card_rect(
+                size,
+                scale,
+                right,
+                bottom,
+                CLUSTER_W_PX,
+                CLUSTER_H_PX,
+                false,
+            );
+            [pad, swing, pause, at_bat]
+                .iter()
+                .all(|o| o.intersect(r).is_empty())
+                && r.min.x >= 0.0
+                && r.min.y >= 0.0
+        };
+        let (right, bottom) = candidates
+            .iter()
+            .copied()
+            .find(|c| clear(c))
+            .unwrap_or(candidates[3]);
+        [RESTING_INSETS[0], over_pad, right, bottom]
     }
 }
 
 /// Moves the bottom HUD cards clear of the Zone Pad and SWING button while
-/// they show, and back to their corners after. On a phone the cards sat
+/// the touch player bats with the pad, and back to their corners for the
+/// other half. On a phone the cards sat
 /// right over both (portrait and landscape alike), so a thumb aiming at
 /// the pad landed on the batter's card. Only the painted roots' offsets
 /// change, and only when the target moved (the wasm UI rule; no per-frame
@@ -357,11 +439,9 @@ pub(super) fn dodge_insets(size: Vec2, scale: f32) -> CornerInsets {
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub(super) fn dodge_zone_pad(
     windows: Query<&Window, With<PrimaryWindow>>,
-    state: Res<State<crate::game::GameState>>,
     controllers: Res<crate::game::input::Controllers>,
     settings: Res<Settings>,
     score: Res<ScoreBoard>,
-    play: Res<crate::game::flow::Play>,
     ui_scale: Res<UiScale>,
     mut at_bat: Query<&mut Node, (With<super::AtBatCard>, Without<super::HudCornerCluster>)>,
     mut cluster: Query<&mut Node, (With<super::HudCornerCluster>, Without<super::AtBatCard>)>,
@@ -369,7 +449,13 @@ pub(super) fn dodge_zone_pad(
     let Ok(window) = windows.single() else {
         return;
     };
-    let insets = if zone_pad_shown(&state, &controllers, &score, &settings, &play) {
+    // The whole at-bat half, not just the pre-pitch window the pad is
+    // drawn in: tied to the pad's own window the cards jumped away and back
+    // on every pitch.
+    let batting_with_pad = controllers.touch_team.is_some()
+        && controllers.touch_team == Some(score.batting_team())
+        && settings.touch_scheme == TouchScheme::ZonePad;
+    let insets = if batting_with_pad {
         dodge_insets(window.size(), ui_scale.0)
     } else {
         RESTING_INSETS
