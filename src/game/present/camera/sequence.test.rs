@@ -34,5 +34,5 @@ fn a_dive_gets_its_low_angle_then_the_replay() {
     );
     assert_eq!(sequence_shot(BigMoment::Dive(f), DIVE_SECS), None);
     assert_eq!(replay_at(BigMoment::Dive(f)), DIVE_SECS);
-    assert!(DIVE_SECS < 1.2, "inside the shortest pause");
+    const { assert!(DIVE_SECS < 1.2, "inside the shortest pause") };
 }

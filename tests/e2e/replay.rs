@@ -336,3 +336,66 @@ fn the_orbit_camera_gets_its_lens_back() {
         "the orbit camera carries on from where it was: {before:?} vs {after:?}"
     );
 }
+
+/// A runner who scores is off the field before the call, and the replay
+/// opens 0.6 s after it: his rig must still be there to draw, hidden live,
+/// until the play is over.
+#[test]
+fn a_runner_who_scored_is_in_the_replay() {
+    use breakneck_baseball::game::runner::Runner;
+    use breakneck_baseball::game::scenario::{self, Scenario};
+
+    let mut app = app_with(ReplayMode::BigPlays, false);
+    // Bottom of the 1st, a man on third: Home bats the scripted home run.
+    let staged = Scenario {
+        name: "replay runner on third",
+        bases: vec![false, false, true],
+        top: false,
+        ..default()
+    };
+    // (The drive pitches at once: stage at the first dead ball.)
+    let applied = run_until(&mut app, MAX_FRAMES, |app| {
+        app.world().resource::<Play>().phase == Phase::PrePitch
+            && scenario::apply_to_world(app.world_mut(), &staged).is_ok()
+    });
+    assert!(applied.is_some(), "the scenario never applied");
+    let mut runner = None;
+    let found = run_until(&mut app, 5_000, |app| {
+        let mut q = app.world_mut().query::<(Entity, &Runner)>();
+        runner = q
+            .iter(app.world())
+            .find(|(_, r)| r.base == 2)
+            .map(|(e, _)| e);
+        runner.is_some()
+    });
+    assert!(found.is_some(), "the staged runner never took third");
+    let runner = runner.unwrap();
+    to_home_run_call(&mut app);
+    let started = run_until(&mut app, (2.0 / DT) as u64, |app| playing(app));
+    assert!(started.is_some(), "no replay after the home run call");
+    // One frame of playback applies the recording.
+    app.update();
+    let seen = |app: &App| {
+        app.world().get_entity(runner).ok().and_then(|e| {
+            Some((
+                *e.get::<Visibility>()?,
+                e.get::<InheritedVisibility>()?.get(),
+            ))
+        })
+    };
+    assert_eq!(
+        seen(&app),
+        Some((Visibility::Hidden, true)),
+        "the runner who scored must be drawn by the replay (live: hidden)"
+    );
+    // Once the play is over he is gone for good.
+    let cleared = run_until(&mut app, MAX_FRAMES, |app| {
+        app.world().resource::<Play>().phase == Phase::PrePitch
+    });
+    assert!(cleared.is_some());
+    app.update();
+    assert!(
+        app.world().get_entity(runner).is_err(),
+        "the scored runner lingers"
+    );
+}

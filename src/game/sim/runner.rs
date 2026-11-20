@@ -64,6 +64,13 @@ impl BasePath {
 #[derive(Component)]
 struct DespawnAtPathEnd;
 
+/// A rig whose path ran out to [`DespawnAtPathEnd`]: gone from the play and
+/// hidden, but not despawned until the play is over (see [`clear_departed`]),
+/// because the instant replay ([`crate::game::replay`]) of the play he scored
+/// on still has to draw him.
+#[derive(Component)]
+struct Departed;
+
 /// A freshly spawned run-out rig waiting (hidden) at the plate while the
 /// real batter finishes the swing follow-through — or admires the home run.
 /// When the delay expires the batter rig hides and this one takes over, so
@@ -174,11 +181,31 @@ fn advance_paths(
             intent.speed = ruleset.pace.runner_speed * speed.map_or(1.0, |s| s.0) * legs(l);
             path.next += 1;
         } else if despawn.is_some() {
-            commands.entity(entity).despawn();
+            // Off the field, but kept (hidden) until the next pitch: the
+            // instant replay of this play still has to draw him.
+            commands
+                .entity(entity)
+                .remove::<(BasePath, DespawnAtPathEnd)>()
+                .insert((Departed, Visibility::Hidden));
         } else {
             // Path exhausted and arrived: the rig has settled on its base.
             commands.entity(entity).remove::<BasePath>();
         }
+    }
+}
+
+/// Despawns the [`Departed`] rigs once the play is over: outside a live
+/// ball and its result pause, where no replay can still want them.
+fn clear_departed(
+    play: Res<Play>,
+    departed: Query<Entity, With<Departed>>,
+    mut commands: Commands,
+) {
+    if matches!(play.phase, Phase::InPlay | Phase::Result) {
+        return;
+    }
+    for entity in &departed {
+        commands.entity(entity).despawn();
     }
 }
 
@@ -942,6 +969,7 @@ impl Plugin for RunnerPlugin {
                 read_break_reads,
                 drive_breaks,
                 advance_paths,
+                clear_departed,
                 take_leadoffs,
                 slide_into_base,
                 track_settled,

@@ -288,18 +288,13 @@ fn watch_play(
                 };
                 *cue = BigMomentCue::default();
             }
-            for ev in live.read() {
-                if let LiveBallEvent::Thrown { base, .. } = *ev
-                    && base >= field.base_count()
-                {
-                    watch.throw_home = true;
-                }
-            }
-            if let Some((fielder, _)) = clips.iter().find(|(_, p)| p.clip == AnimClip::Dive) {
-                watch.dove.get_or_insert(fielder);
-            }
+            note_throws_and_dives(&mut watch, &mut live, &clips, &field);
         }
         Phase::Result => {
+            // A throw or a dive on the very frame of the call still counts.
+            if entered && watch.contact.is_some() {
+                note_throws_and_dives(&mut watch, &mut live, &clips, &field);
+            }
             live.clear();
             if entered && watch.contact.is_some() {
                 watch.called_at = Some(now);
@@ -348,6 +343,25 @@ fn watch_play(
                 *cue = BigMomentCue::default();
             }
         }
+    }
+}
+
+/// Notes a throw home or a dive among this frame's events and clip changes.
+fn note_throws_and_dives(
+    watch: &mut PlayWatch,
+    live: &mut MessageReader<LiveBallEvent>,
+    clips: &Query<(Entity, &Playing), Changed<Playing>>,
+    field: &FieldSpec,
+) {
+    for ev in live.read() {
+        if let LiveBallEvent::Thrown { base, .. } = *ev
+            && base >= field.base_count()
+        {
+            watch.throw_home = true;
+        }
+    }
+    if let Some((fielder, _)) = clips.iter().find(|(_, p)| p.clip == AnimClip::Dive) {
+        watch.dove.get_or_insert(fielder);
     }
 }
 
