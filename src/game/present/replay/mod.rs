@@ -28,7 +28,7 @@ use crate::game::animation::{AnimClip, Playing, RigLimb};
 use crate::game::ball::Baseball;
 use crate::game::flow::{LiveBallEvent, Phase, Play};
 use crate::game::input::Intents;
-use crate::game::player::RigUnitTag;
+use crate::game::player::{CatcherRole, PlateUmpire, RigUnitTag};
 use crate::game::quality::{ActiveQuality, QualityTier};
 use crate::game::settings::{ReplayMode, Settings};
 use crate::game::variant::FieldSpec;
@@ -59,6 +59,10 @@ struct Active {
     clock: f32,
     /// Real seconds since it started.
     shown: f32,
+    /// The camera as it was when the replay began, put back when it ends:
+    /// the orbit and zoom cameras ease from wherever the lens is and never
+    /// set the FOV, so they would otherwise carry on from the replay's.
+    camera: Option<(Transform, Projection)>,
 }
 
 impl Replay {
@@ -81,6 +85,13 @@ impl Replay {
         self.active.as_ref().is_some_and(|a| a.shown >= SKIP_GRACE)
     }
 }
+
+/// The recorder and the replay frame's writes (PostUpdate, after animation
+/// and physics, before propagation). Anything that places itself on the
+/// ball or a rig for the rendered frame (the ball proxy and shadow) runs
+/// after it, so it follows the replay rather than the live play.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ReplaySystems;
 
 /// The recorder's ring.
 #[derive(Resource, Default)]
@@ -106,12 +117,13 @@ struct PlayWatch {
 struct LiveCopy {
     transforms: Vec<(Entity, Transform)>,
     visibility: Vec<(Entity, Visibility)>,
+    ball_visibility: Option<Visibility>,
 }
 
 type Recorded<'w, 's> = Query<
     'w,
     's,
-    (Entity, &'static Transform),
+    (Entity, &'static Transform, Option<&'static Visibility>),
     (
         Or<(With<RigUnitTag>, With<RigLimb>, With<AnimationTargetId>)>,
         Without<Baseball>,
@@ -141,10 +153,14 @@ impl Plugin for ReplayPlugin {
                 PostUpdate,
                 (record, apply_replay)
                     .chain()
+                    .in_set(ReplaySystems)
                     .after(bevy::app::AnimationSystems)
                     .after(PhysicsSet::Writeback)
                     .before(TransformSystems::Propagate)
-                    .run_if(in_state(GameState::Playing)),
+                    .before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate)
+                    // Paused too, so the pause screen over a replay shows
+                    // the replay's frame, not the live rigs through its lens.
+                    .run_if(in_state(GameState::Playing).or(in_state(GameState::Paused))),
             )
             .add_systems(Last, restore_live);
     }
@@ -166,9 +182,26 @@ fn reset(
 
 /// Ends any replay and gives the gameplay clock back (the game ended or
 /// was quit mid-replay).
-fn stop(mut replay: ResMut<Replay>, mut virt: ResMut<Time<Virtual>>) {
-    if replay.active.take().is_some() {
+fn stop(
+    mut replay: ResMut<Replay>,
+    mut virt: ResMut<Time<Virtual>>,
+    mut cam: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
+) {
+    if let Some(active) = replay.active.take() {
+        put_camera_back(active.camera, &mut cam);
         virt.unpause();
+    }
+}
+
+fn put_camera_back(
+    saved: Option<(Transform, Projection)>,
+    cam: &mut Query<(&mut Transform, &mut Projection), With<Camera3d>>,
+) {
+    if let (Some((tf, projection)), Ok((mut live_tf, mut live_projection))) =
+        (saved, cam.single_mut())
+    {
+        *live_tf = tf;
+        *live_projection = projection;
     }
 }
 
@@ -246,6 +279,7 @@ fn start_replay(
     mut watch: ResMut<PlayWatch>,
     mut replay: ResMut<Replay>,
     mut virt: ResMut<Time<Virtual>>,
+    cam: Query<(&Transform, &Projection), With<Camera3d>>,
 ) {
     let now = time.elapsed_secs();
     let (Some(contact), Some(called)) = (watch.contact, watch.called_at) else {
@@ -296,6 +330,7 @@ fn start_replay(
         seg: 0,
         clock: first.from,
         shown: 0.0,
+        camera: cam.single().ok().map(|(tf, p)| (*tf, p.clone())),
     });
     replay.played += 1;
     virt.pause();
@@ -308,6 +343,7 @@ fn advance_replay(
     intents: Res<Intents>,
     mut replay: ResMut<Replay>,
     mut virt: ResMut<Time<Virtual>>,
+    mut cam: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
 ) {
     let Some(active) = replay.active.as_mut() else {
         return;
@@ -327,8 +363,8 @@ fn advance_replay(
             }
         }
     }
-    if done {
-        replay.active = None;
+    if done && let Some(active) = replay.active.take() {
+        put_camera_back(active.camera, &mut cam);
         virt.unpause();
     }
 }
@@ -340,7 +376,7 @@ fn record(
     quality: Option<Res<ActiveQuality>>,
     replay: Res<Replay>,
     mut recorder: ResMut<ReplayRecorder>,
-    ball: Query<&Transform, With<Baseball>>,
+    ball: Query<(&Transform, &Visibility), With<Baseball>>,
     recorded: Recorded,
 ) {
     if replay.is_playing() {
@@ -354,15 +390,18 @@ fn record(
     if !recorder.0.due(t) {
         return;
     }
+    let ball = ball.single().ok();
     let sample = Sample {
         t,
-        ball: ball.single().ok().map(|tf| tf.translation),
+        ball: ball.map(|(tf, _)| tf.translation),
+        ball_hidden: ball.is_some_and(|(_, v)| *v == Visibility::Hidden),
         poses: recorded
             .iter()
-            .map(|(entity, tf)| clip::Pose {
+            .map(|(entity, tf, vis)| clip::Pose {
                 entity,
                 pos: tf.translation,
                 rot: tf.rotation,
+                vis: vis.copied(),
             })
             .collect(),
     };
@@ -378,8 +417,17 @@ fn apply_replay(
     field: Res<FieldSpec>,
     mut copy: ResMut<LiveCopy>,
     mut transforms: Query<&mut Transform, (Without<Camera3d>, Without<Baseball>)>,
-    mut ball: Query<&mut Transform, (With<Baseball>, Without<Camera3d>)>,
-    mut roots: Query<(Entity, &mut Visibility), With<RigUnitTag>>,
+    mut ball: Query<(&mut Transform, &mut Visibility), (With<Baseball>, Without<Camera3d>)>,
+    mut visibility: Query<
+        (
+            Entity,
+            &mut Visibility,
+            Has<RigUnitTag>,
+            Has<CatcherRole>,
+            Has<PlateUmpire>,
+        ),
+        Without<Baseball>,
+    >,
     mut cam: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
 ) {
     let Some(active) = replay.active.as_ref() else {
@@ -387,6 +435,7 @@ fn apply_replay(
     };
     let Some(Moment {
         ball: ball_at,
+        ball_hidden,
         poses,
     }) = recorder.0.at(active.clock)
     else {
@@ -399,17 +448,44 @@ fn apply_replay(
             tf.rotation = pose.rot;
         }
     }
-    // A rig that didn't exist yet at this moment (spawned later in the
-    // play) stays out of the shot.
-    for (entity, mut vis) in &mut roots {
-        if poses.binary_search_by_key(&entity, |p| p.entity).is_err() {
+    // Each rig shows as it did then: the batter until his run-out stand-in
+    // took over, the stand-in after. The catcher and plate umpire are only
+    // ever hidden to clear the live duel lens, which the replay's angles
+    // never look through, so they always show.
+    let wants: Vec<(Entity, Visibility)> = visibility
+        .iter()
+        .filter_map(|(entity, _, root, catcher, umpire)| {
+            let recorded = poses.binary_search_by_key(&entity, |p| p.entity).ok();
+            match recorded.map(|i| poses[i].vis) {
+                Some(_) if catcher || umpire => Some((entity, Visibility::Inherited)),
+                Some(vis) => vis.map(|v| (entity, v)),
+                // A rig that didn't exist yet at this moment (spawned
+                // later in the play) stays out of the shot.
+                None if root => Some((entity, Visibility::Hidden)),
+                None => None,
+            }
+        })
+        .collect();
+    for (entity, want) in wants {
+        if let Ok((_, mut vis, ..)) = visibility.get_mut(entity)
+            && *vis != want
+        {
             copy.visibility.push((entity, *vis));
-            *vis = Visibility::Hidden;
+            *vis = want;
         }
     }
-    if let (Some(at), Ok(mut tf)) = (ball_at, ball.single_mut()) {
+    if let (Some(at), Ok((mut tf, mut vis))) = (ball_at, ball.single_mut()) {
         copy.transforms.push((Entity::PLACEHOLDER, *tf));
         tf.translation = at;
+        let want = if ball_hidden {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
+        if *vis != want {
+            copy.ball_visibility = Some(*vis);
+            *vis = want;
+        }
     }
     let angle = active.segments[active.seg].angle;
     let (eye, target, fov) = clip::camera(angle, &field, ball_at);
@@ -430,12 +506,15 @@ fn apply_replay(
 fn restore_live(
     mut copy: ResMut<LiveCopy>,
     mut transforms: Query<&mut Transform, (Without<Camera3d>, Without<Baseball>)>,
-    mut ball: Query<&mut Transform, (With<Baseball>, Without<Camera3d>)>,
-    mut vis: Query<&mut Visibility>,
+    mut ball: Query<(&mut Transform, &mut Visibility), (With<Baseball>, Without<Camera3d>)>,
+    mut vis: Query<&mut Visibility, Without<Baseball>>,
 ) {
+    if let (Some(live), Ok((_, mut v))) = (copy.ball_visibility.take(), ball.single_mut()) {
+        *v = live;
+    }
     for (entity, live) in copy.transforms.drain(..) {
         if entity == Entity::PLACEHOLDER {
-            if let Ok(mut tf) = ball.single_mut() {
+            if let Ok((mut tf, _)) = ball.single_mut() {
                 *tf = live;
             }
         } else if let Ok(mut tf) = transforms.get_mut(entity) {

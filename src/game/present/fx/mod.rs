@@ -91,6 +91,8 @@ impl Plugin for FxPlugin {
                 PostUpdate,
                 (ball_read::place_ball_shadow, ball_read::place_ball_proxy)
                     .after(bevy_rapier3d::plugin::PhysicsSet::Writeback)
+                    // On the replayed ball while a replay plays.
+                    .after(crate::game::replay::ReplaySystems)
                     .before(bevy::transform::TransformSystems::Propagate)
                     .run_if(in_state(GameState::Playing)),
             );

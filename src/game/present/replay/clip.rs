@@ -14,12 +14,15 @@ use crate::game::variant::FieldSpec;
 pub const SAMPLE_HZ: f32 = 30.0;
 
 /// One entity's pose in a sample: local translation and rotation (scale
-/// never animates on a rig).
+/// never animates on a rig), and its own visibility where it has one (the
+/// batter is hidden once his run-out stand-in takes over, the stand-in
+/// until then).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Pose {
     pub entity: Entity,
     pub pos: Vec3,
     pub rot: Quat,
+    pub vis: Option<Visibility>,
 }
 
 /// One sample of the field: when (gameplay seconds), the ball, and every
@@ -28,6 +31,8 @@ pub struct Pose {
 pub struct Sample {
     pub t: f32,
     pub ball: Option<Vec3>,
+    /// The ball was hidden (in a glove, after a catch).
+    pub ball_hidden: bool,
     pub poses: Vec<Pose>,
 }
 
@@ -51,6 +56,8 @@ pub struct Recording {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Moment {
     pub ball: Option<Vec3>,
+    /// The ball was hidden at that moment (the earlier sample's state).
+    pub ball_hidden: bool,
     /// Every entity recorded at that moment and its pose.
     pub poses: Vec<Pose>,
 }
@@ -133,6 +140,7 @@ impl Recording {
                     entity: pa.entity,
                     pos: pa.pos.lerp(pb.pos, f),
                     rot: pa.rot.slerp(pb.rot, f),
+                    vis: pa.vis,
                 },
                 None => *pa,
             })
@@ -141,7 +149,11 @@ impl Recording {
             (Some(x), Some(y)) => Some(x.lerp(y, f)),
             (x, y) => x.or(y),
         };
-        Some(Moment { ball, poses })
+        Some(Moment {
+            ball,
+            ball_hidden: a.ball_hidden,
+            poses,
+        })
     }
 
     /// Samples held.

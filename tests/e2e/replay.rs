@@ -13,7 +13,7 @@ use bevy_rapier3d::prelude::Velocity;
 use breakneck_baseball::game::ball::Baseball;
 use breakneck_baseball::game::flow::{Phase, Play, bat_arrival_z};
 use breakneck_baseball::game::input::{Controllers, InputSource, Intents};
-use breakneck_baseball::game::player::RigUnitTag;
+use breakneck_baseball::game::player::{Batter, RigUnitTag};
 use breakneck_baseball::game::quality::{ActiveQuality, QualityTier};
 use breakneck_baseball::game::replay::{Replay, SKIP_GRACE};
 use breakneck_baseball::game::settings::{ReplayMode, Settings};
@@ -131,6 +131,23 @@ fn a_home_run_replays_with_play_frozen_and_untouched() {
 
     let clock = virtual_secs(&app);
     let live = rigs(&mut app);
+    // Live, the batter is hidden once his run-out stand-in takes over; the
+    // replay opens before contact, so it shows him in the box.
+    let batter_drawn = |app: &mut App| {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<(&Visibility, &InheritedVisibility), With<Batter>>();
+        q.iter(app.world())
+            .map(|(v, inherited)| (*v, inherited.get()))
+            .collect::<Vec<_>>()
+    };
+    let at_start = batter_drawn(&mut app);
+    assert!(
+        at_start
+            .iter()
+            .any(|(live, drawn)| *live == Visibility::Hidden && *drawn),
+        "the replay must draw the batter the live play has hidden: {at_start:?}"
+    );
     let mut rendered_differs = false;
     let mut cameras = Vec::new();
     let mut frames = 0u64;
@@ -216,9 +233,15 @@ fn a_confirm_press_skips_the_replay() {
     let mut app = app_with(ReplayMode::BigPlays, true);
     to_home_run_call(&mut app);
     assert!(run_until(&mut app, (2.0 / DT) as u64, |app| playing(app)).is_some());
-    let ended = run_until(&mut app, ((SKIP_GRACE as f64 + 0.1) / DT) as u64, |app| {
+    // The grace holds: a press during it doesn't skip.
+    let early = run_until(&mut app, ((SKIP_GRACE as f64 - 0.1) / DT) as u64, |app| {
         !playing(app)
     });
+    assert!(
+        early.is_none(),
+        "a press skipped the replay inside the grace"
+    );
+    let ended = run_until(&mut app, (0.3 / DT) as u64, |app| !playing(app));
     assert!(ended.is_some(), "a press never skipped the replay");
 }
 

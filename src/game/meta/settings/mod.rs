@@ -122,7 +122,7 @@ pub enum ReplayMode {
     /// A home run, a walk-off, a throw home or a diving catch.
     #[default]
     BigPlays,
-    /// Every ball put in play.
+    /// Every ball hit (fouls that went into play included).
     Always,
 }
 

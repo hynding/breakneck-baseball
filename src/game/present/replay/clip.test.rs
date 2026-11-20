@@ -10,12 +10,14 @@ fn sample(t: f32, x: f32, entities: &[u32]) -> Sample {
     Sample {
         t,
         ball: Some(Vec3::new(x, 1.0, 0.0)),
+        ball_hidden: false,
         poses: entities
             .iter()
             .map(|&n| Pose {
                 entity: e(n),
                 pos: Vec3::new(x, 0.0, n as f32),
                 rot: Quat::from_rotation_y(x),
+                vis: None,
             })
             .collect(),
     }
@@ -137,4 +139,24 @@ fn replay_cameras_frame_the_ball() {
             }
         }
     }
+}
+
+/// Visibility reads back from the earlier sample, like the entity set.
+#[test]
+fn visibility_follows_the_earlier_sample() {
+    let mut rec = Recording::new(10.0);
+    let mut a = sample(0.0, 0.0, &[1]);
+    a.poses[0].vis = Some(Visibility::Inherited);
+    a.ball_hidden = false;
+    let mut b = sample(1.0, 1.0, &[1]);
+    b.poses[0].vis = Some(Visibility::Hidden);
+    b.ball_hidden = true;
+    rec.push(a);
+    rec.push(b);
+    let mid = rec.at(0.5).unwrap();
+    assert_eq!(mid.poses[0].vis, Some(Visibility::Inherited));
+    assert!(!mid.ball_hidden);
+    let end = rec.at(1.0).unwrap();
+    assert_eq!(end.poses[0].vis, Some(Visibility::Hidden));
+    assert!(end.ball_hidden);
 }
