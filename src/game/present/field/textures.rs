@@ -57,7 +57,7 @@ pub(super) fn dirt_image() -> Image {
 }
 
 /// Wraps raw RGBA pixels in a repeat-sampled square texture.
-fn tiling_image(size: u32, data: Vec<u8>) -> Image {
+pub(super) fn tiling_image(size: u32, data: Vec<u8>) -> Image {
     let mut image = Image::new(
         Extent3d {
             width: size,

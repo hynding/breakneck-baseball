@@ -119,6 +119,24 @@ grass past the wall. To repeat it, build with `--features autoplay`, wait
 for a `bb-contact` console line with an angle over 20°, and screenshot
 1–3 s later.
 
+### Stadium bowl (task 5; same machine and settings, bloom off on High)
+
+| Tier | Before (ms) | After (ms) | Meshes visible |
+| --- | --- | --- | --- |
+| Low | 120.8 | 139.0 | 152 → 167 |
+| Medium | 300.8 | 361.4 | 151 → 166 |
+| High | 306.0 | 402.1 | 151 → 172 |
+
+The bowl, batter's eye, light towers and scoreboard are a few large
+meshes; the crowd is one mesh per sector with fans baked in as vertex
+colours, sized by the tier's crowd allowance, so the draw count barely
+moves. The cost is fill: the stands cover a lot of the screen in the
+wide shots, and software WebGL pays per pixel. High adds the crowd's
+shadows and the cheer on big moments. On a phone at Low, check a home
+run's wide shot still holds frame rate with the stands in view, and
+score a run to check the scoreboard in right-centre updates (it repaints
+its texture in place, which no headless test sees).
+
 ## What still needs a person with a device
 
 Use the GitHub Pages build for the web checks and `cargo run --release` for

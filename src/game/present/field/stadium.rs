@@ -279,6 +279,21 @@ pub(super) fn spawn_front_yard(
         block(Vec3::new(15.0, 1.2, 8.0), Vec3::new(x, 6.2, 44.0), roof);
     }
 
+    // The block runs on past the lot, so a wide shot sees a street rather
+    // than the edge of the world.
+    for x in [-44.0, 44.0] {
+        block(Vec3::new(14.0, 5.5, 7.0), Vec3::new(x, 2.75, 44.0), siding);
+        block(Vec3::new(15.0, 1.2, 8.0), Vec3::new(x, 6.2, 44.0), roof);
+    }
+    for x in [-30.0, 30.0] {
+        block(
+            Vec3::new(12.0, 5.0, 7.0),
+            Vec3::new(x, 2.5, -16.5),
+            neighbour,
+        );
+        block(Vec3::new(13.0, 1.2, 8.0), Vec3::new(x, 5.6, -16.5), roof);
+    }
+
     // Hedges along the lot lines.
     let hedge = Color::srgb(0.13, 0.35, 0.13);
     block(Vec3::new(0.8, 1.0, 16.0), Vec3::new(16.0, 0.5, 10.0), hedge);
@@ -287,13 +302,104 @@ pub(super) fn spawn_front_yard(
         Vec3::new(-16.0, 0.5, 10.0),
         hedge,
     );
+
+    spawn_front_yard_dressing(commands, meshes, materials);
+}
+
+/// Street trees between and behind the houses across the road, one in each
+/// back corner of our lot, and white picket fences on the far lot lines. Every
+/// piece shares one mesh and material per kind, so Bevy batches them into a
+/// handful of draws. Visual only, like the rest of the yard.
+fn spawn_front_yard_dressing(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+) {
+    let matte = |color: Color| StandardMaterial {
+        base_color: color,
+        perceptual_roughness: 1.0,
+        ..default()
+    };
+    let trunk_mesh = meshes.add(Cylinder::new(0.25, 3.0));
+    let canopy_mesh = meshes.add(Sphere::new(2.4).mesh().ico(2).expect("ico 2 is valid"));
+    let trunk_mat = materials.add(matte(Color::srgb(0.33, 0.24, 0.16)));
+    let canopy_mat = materials.add(matte(Color::srgb(0.16, 0.38, 0.14)));
+    // Between the houses across the street, and our back corners.
+    for (x, z, scale) in [
+        (-33.0, 40.0, 1.1),
+        (-11.0, 53.0, 1.0),
+        (11.0, 53.0, 0.9),
+        (33.0, 40.0, 1.15),
+        (-20.0, -11.0, 1.2),
+        (20.0, -11.0, 1.05),
+    ] {
+        commands.spawn((
+            GameplayEntity,
+            Mesh3d(trunk_mesh.clone()),
+            MeshMaterial3d(trunk_mat.clone()),
+            Transform::from_xyz(x, 1.5 * scale, z).with_scale(Vec3::splat(scale)),
+        ));
+        commands.spawn((
+            GameplayEntity,
+            Mesh3d(canopy_mesh.clone()),
+            MeshMaterial3d(canopy_mat.clone()),
+            Transform::from_xyz(x, 4.6 * scale, z).with_scale(Vec3::new(
+                scale,
+                scale * 0.85,
+                scale,
+            )),
+        ));
+    }
+
+    // Picket fences on the outer lot lines of the yards across the street,
+    // from the sidewalk back to the houses (the inner lines are in play).
+    // One picket every 0.3 m.
+    let picket_mesh = meshes.add(Cuboid::new(0.08, 1.0, 0.04));
+    let rail_mesh = meshes.add(Cuboid::new(0.04, 0.06, 7.0));
+    let white = materials.add(matte(Color::srgb(0.92, 0.92, 0.88)));
+    for x in [-33.0, 33.0] {
+        for y in [0.35, 0.8] {
+            commands.spawn((
+                GameplayEntity,
+                Mesh3d(rail_mesh.clone()),
+                MeshMaterial3d(white.clone()),
+                Transform::from_xyz(x, y, 36.0),
+            ));
+        }
+        for i in 0..24 {
+            commands.spawn((
+                GameplayEntity,
+                Mesh3d(picket_mesh.clone()),
+                MeshMaterial3d(white.clone()),
+                Transform::from_xyz(x, 0.5, 32.55 + i as f32 * 0.3),
+            ));
+        }
+    }
 }
 
 // ── Foul poles ────────────────────────────────────────────────────────────────
+/// Height of a foul pole (m).
+const FOUL_POLE_HEIGHT: f32 = 15.0;
+
+/// Where each foul pole stands: on the rules fence where it meets each foul
+/// line, so it rises from the end of the wall in front of the stands. Pure,
+/// pinned by the bowl tests.
+pub(super) fn foul_pole_spots(field: &FieldSpec) -> [Vec3; 2] {
+    [-1.0_f32, 1.0].map(|sign| {
+        let theta = sign * field.fair_half_angle;
+        let dir = Vec3::new(theta.sin(), 0.0, theta.cos());
+        dir * rules::fence_at(dir, field)
+    })
+}
+
+/// Gold foul poles at the ends of the wall. Visual only: a home run is
+/// ruled at contact and a pole carom would only confuse the flight, so
+/// they carry no collider.
 pub(super) fn spawn_foul_poles(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
+    field: &FieldSpec,
 ) {
     let pole_material = materials.add(StandardMaterial {
         base_color: Color::srgb(1.0, 0.84, 0.0), // gold
@@ -301,18 +407,14 @@ pub(super) fn spawn_foul_poles(
         perceptual_roughness: 0.2,
         ..default()
     });
-
-    let foul_line_distance = 100.6_f32; // ≈ 330 ft
-
-    for sign in [-1.0_f32, 1.0_f32] {
+    let pole = meshes.add(Cylinder::new(0.12, FOUL_POLE_HEIGHT));
+    for spot in foul_pole_spots(field) {
         commands.spawn((
             super::FoulPole,
             GameplayEntity,
-            Mesh3d(meshes.add(Cylinder::new(0.05, 15.0))),
+            Mesh3d(pole.clone()),
             MeshMaterial3d(pole_material.clone()),
-            Transform::from_xyz(sign * foul_line_distance, 7.5, foul_line_distance),
-            RigidBody::Fixed,
-            Collider::cylinder(7.5, 0.05),
+            Transform::from_translation(spot + Vec3::Y * (FOUL_POLE_HEIGHT / 2.0)),
         ));
     }
 }

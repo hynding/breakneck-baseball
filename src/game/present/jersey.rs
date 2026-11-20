@@ -77,7 +77,7 @@ const ADVANCE: usize = 6;
 
 /// Stamps `text` into an RGBA byte canvas at `(x, y)`, each font pixel drawn
 /// as a `scale`×`scale` block.
-fn draw_text(
+pub(crate) fn draw_text(
     canvas: &mut [u8],
     width: usize,
     x: usize,
@@ -110,7 +110,7 @@ fn draw_text(
 }
 
 /// Pixel width of `text` at `scale` (without the trailing gap).
-fn text_width(text: &str, scale: usize) -> usize {
+pub(crate) fn text_width(text: &str, scale: usize) -> usize {
     (text.chars().count() * ADVANCE).saturating_sub(1) * scale
 }
 

@@ -20,6 +20,7 @@ use bevy::prelude::*;
 use crate::game::GameState;
 use crate::game::theme::FieldTheme;
 
+mod bowl;
 mod diamond;
 mod stadium;
 mod textures;
@@ -150,21 +151,33 @@ pub struct FieldPlugin;
 
 impl Plugin for FieldPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(crate::game::game_start(), diamond::spawn_field)
-            .add_systems(
-                Update,
-                // trigger/restore before visibility: a same-frame contact
-                // must land in `ZoneFlash` before `strike_zone_visibility`
-                // reads it, or the box hides for the one frame the read
-                // beat the write — see that system's doc comment.
-                (
-                    zone::trigger_zone_flash,
-                    zone::restore_zone_flash,
-                    zone::strike_zone_visibility,
-                    zone::pci_cursor_visibility,
-                )
-                    .chain()
-                    .run_if(in_state(GameState::Playing)),
-            );
+        app.add_systems(
+            crate::game::game_start(),
+            (diamond::spawn_field, bowl::spawn_bowl),
+        )
+        .add_systems(
+            Update,
+            (
+                bowl::build_crowd,
+                bowl::cheer_crowd,
+                bowl::update_scoreboard,
+            )
+                .run_if(in_state(GameState::Playing)),
+        )
+        .add_systems(
+            Update,
+            // trigger/restore before visibility: a same-frame contact
+            // must land in `ZoneFlash` before `strike_zone_visibility`
+            // reads it, or the box hides for the one frame the read
+            // beat the write — see that system's doc comment.
+            (
+                zone::trigger_zone_flash,
+                zone::restore_zone_flash,
+                zone::strike_zone_visibility,
+                zone::pci_cursor_visibility,
+            )
+                .chain()
+                .run_if(in_state(GameState::Playing)),
+        );
     }
 }
