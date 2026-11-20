@@ -25,12 +25,13 @@ use bevy_rapier3d::plugin::PhysicsSet;
 
 use crate::game::animation::{AnimClip, Playing, RigLimb};
 use crate::game::ball::Baseball;
+use crate::game::camera::sequence::{self, BigMoment};
 use crate::game::flow::{LiveBallEvent, Phase, Play};
 use crate::game::input::Intents;
 use crate::game::player::{BatPivot, CatcherRole, PlateUmpire, RigUnitTag};
 use crate::game::quality::{ActiveQuality, QualityTier};
 use crate::game::settings::{ReplayMode, Settings};
-use crate::game::variant::FieldSpec;
+use crate::game::variant::{FieldSpec, Scenery};
 use crate::game::{GameState, ScoreBoard};
 
 use clip::{Moment, Recording, Sample, Segment};
@@ -93,6 +94,40 @@ impl Replay {
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ReplaySystems;
 
+/// The Update systems that follow the play and start or skip the replay;
+/// they write [`BigMomentCue`], so the broadcast camera runs after them
+/// (the call frame must see this frame's cue, not the cleared one).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BigMomentSystems;
+
+/// The play's big moment, if it is one, for the camera's sequence
+/// ([`crate::game::camera::sequence`]): set as the result pause begins,
+/// cleared before the next pitch. Any action press past the grace skips the
+/// sequence (and its replay, if it hasn't started).
+#[derive(Resource, Clone, Copy, Default, Debug, PartialEq)]
+pub struct BigMomentCue {
+    pub moment: Option<BigMoment>,
+    /// Where a home run left the park (the ball as the call was made).
+    pub exit: Option<Vec3>,
+    pub skipped: bool,
+    /// When the call was made (gameplay seconds): the sequence's clock.
+    pub called_at: f32,
+}
+
+impl BigMomentCue {
+    /// The moment whose sequence is still playing (not skipped).
+    pub fn playing(&self) -> Option<BigMoment> {
+        self.moment.filter(|_| !self.skipped)
+    }
+
+    /// Gameplay seconds since the call at `now` (the result pause's own
+    /// timer stops at its hold, while a home run's pause runs on through the
+    /// trot).
+    pub fn since_call(&self, now: f32) -> f32 {
+        (now - self.called_at).max(0.0)
+    }
+}
+
 /// The recorder's ring.
 #[derive(Resource, Default)]
 pub struct ReplayRecorder(pub Recording);
@@ -106,7 +141,8 @@ struct PlayWatch {
     /// The half-inning at contact (`top_of_inning`).
     half: Option<bool>,
     throw_home: bool,
-    dove: bool,
+    /// The fielder who dove this play, if one did.
+    dove: Option<Entity>,
     /// When the play's result pause began, and whether it gets a replay.
     called_at: Option<f32>,
     wanted: bool,
@@ -154,6 +190,7 @@ impl Plugin for ReplayPlugin {
             .init_resource::<ReplayRecorder>()
             .init_resource::<PlayWatch>()
             .init_resource::<LiveCopy>()
+            .init_resource::<BigMomentCue>()
             .add_systems(crate::game::game_start(), reset)
             .add_systems(OnEnter(GameState::GameOver), stop)
             .add_systems(OnEnter(GameState::MainMenu), stop)
@@ -161,6 +198,7 @@ impl Plugin for ReplayPlugin {
                 Update,
                 (watch_play, start_replay, advance_replay)
                     .chain()
+                    .in_set(BigMomentSystems)
                     .after(crate::game::GameplayOrder::Runners)
                     .run_if(in_state(GameState::Playing)),
             )
@@ -194,8 +232,10 @@ fn reset(
     mut replay: ResMut<Replay>,
     mut recorder: ResMut<ReplayRecorder>,
     mut watch: ResMut<PlayWatch>,
+    mut cue: ResMut<BigMomentCue>,
 ) {
     *replay = Replay::default();
+    *cue = BigMomentCue::default();
     recorder.0.clear();
     *watch = PlayWatch::default();
 }
@@ -234,9 +274,12 @@ fn watch_play(
     field: Res<FieldSpec>,
     score: Res<ScoreBoard>,
     replay: Res<Replay>,
+    intents: Res<Intents>,
     mut watch: ResMut<PlayWatch>,
+    mut cue: ResMut<BigMomentCue>,
     mut live: MessageReader<LiveBallEvent>,
-    clips: Query<&Playing, Changed<Playing>>,
+    clips: Query<(Entity, &Playing), Changed<Playing>>,
+    ball: Query<&Transform, With<Baseball>>,
 ) {
     if replay.is_playing() {
         live.clear();
@@ -254,6 +297,7 @@ fn watch_play(
                     half: Some(score.top_of_inning),
                     ..default()
                 };
+                *cue = BigMomentCue::default();
             }
             note_throws_and_dives(&mut watch, &mut live, &clips, &field);
         }
@@ -265,8 +309,29 @@ fn watch_play(
             live.clear();
             if entered && watch.contact.is_some() {
                 watch.called_at = Some(now);
-                let big =
-                    play.is_home_run() || play.is_walk_off() || watch.throw_home || watch.dove;
+                let moment = if play.is_home_run() {
+                    // The crowd shot needs a crowd: only the stadium has
+                    // stands (the front yard's homer goes to the orbit).
+                    (field.scenery == Scenery::Stadium).then_some(BigMoment::HomeRun)
+                } else if play.is_walk_off() {
+                    Some(BigMoment::WalkOff)
+                } else {
+                    watch.dove.map(BigMoment::Dive)
+                };
+                *cue = BigMomentCue {
+                    moment,
+                    exit: ball
+                        .single()
+                        .ok()
+                        .map(|tf| tf.translation)
+                        .filter(|_| moment == Some(BigMoment::HomeRun)),
+                    skipped: false,
+                    called_at: now,
+                };
+                let big = moment.is_some()
+                    || play.is_home_run()
+                    || play.is_walk_off()
+                    || watch.throw_home;
                 // A play that ended the half has already re-dressed every
                 // rig for the next one (colours, names): the replay only
                 // carries poses, so it would show both teams in each
@@ -279,6 +344,16 @@ fn watch_play(
                         ReplayMode::Always => true,
                     };
             }
+            // A press skips the sequence, and its replay if that hasn't
+            // started (once it has, the replay's own skip applies).
+            if cue.moment.is_some()
+                && !cue.skipped
+                && cue.since_call(now) >= SKIP_GRACE
+                && (intents.home.action || intents.away.action)
+            {
+                cue.skipped = true;
+                watch.wanted = false;
+            }
         }
         _ => {
             live.clear();
@@ -287,6 +362,7 @@ fn watch_play(
                 watch.called_at = None;
                 watch.wanted = false;
                 watch.offered = false;
+                *cue = BigMomentCue::default();
             }
         }
     }
@@ -296,7 +372,7 @@ fn watch_play(
 fn note_throws_and_dives(
     watch: &mut PlayWatch,
     live: &mut MessageReader<LiveBallEvent>,
-    clips: &Query<&Playing, Changed<Playing>>,
+    clips: &Query<(Entity, &Playing), Changed<Playing>>,
     field: &FieldSpec,
 ) {
     for ev in live.read() {
@@ -306,8 +382,8 @@ fn note_throws_and_dives(
             watch.throw_home = true;
         }
     }
-    if clips.iter().any(|p| p.clip == AnimClip::Dive) {
-        watch.dove = true;
+    if let Some((fielder, _)) = clips.iter().find(|(_, p)| p.clip == AnimClip::Dive) {
+        watch.dove.get_or_insert(fielder);
     }
 }
 
@@ -318,6 +394,7 @@ fn start_replay(
     play: Res<Play>,
     quality: Option<Res<ActiveQuality>>,
     recorder: Res<ReplayRecorder>,
+    cue: Res<BigMomentCue>,
     mut watch: ResMut<PlayWatch>,
     mut replay: ResMut<Replay>,
     mut virt: ResMut<Time<Virtual>>,
@@ -331,7 +408,7 @@ fn start_replay(
         || !watch.wanted
         || watch.offered
         || replay.is_playing()
-        || now < called + AFTER_CALL
+        || now < called + cue.moment.map_or(AFTER_CALL, sequence::replay_at)
     {
         return;
     }

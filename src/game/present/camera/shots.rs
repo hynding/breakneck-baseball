@@ -56,6 +56,14 @@ pub enum Shot {
     /// A strikeout's result pause: side-on at the plate from the first-base
     /// side — the batter, the catcher with the ball, the umpire behind.
     ReactionCam,
+    /// A home run's crowd reaction: from the outfield grass, up at the
+    /// stands where the ball went out ([`super::sequence`]).
+    CrowdCam,
+    /// A dive: low and tight beside the fielder who laid out.
+    DiveCam(Entity),
+    /// A walk-off: low at the plate from the third-base side, the winning
+    /// run scoring into the waiting team.
+    PileUp,
 }
 
 /// Everything the shot picker reads, gathered once per frame so the choice
@@ -88,6 +96,9 @@ pub(super) struct ShotCues {
     /// The bag a running-game throw (a pickoff, the catcher's throw on a
     /// steal) is staged at, while it is (`Play::duel_throw`).
     pub duel_throw_base: Option<usize>,
+    /// A big moment's sequence shot for this moment of the result pause
+    /// ([`super::sequence::sequence_shot`]), unless it was skipped.
+    pub sequence: Option<Shot>,
 }
 
 /// Which shot the play wants right now. `current` is the shot on screen: a
@@ -115,6 +126,8 @@ pub(super) fn pick_shot(cues: &ShotCues, current: Option<Shot>) -> Shot {
             (None, None, None) if cues.grounder => Shot::GroundBall,
             (None, None, None) => Shot::BallFollow,
         },
+        // A big moment's sequence owns the pause while it runs.
+        Phase::Result if let Some(shot) = cues.sequence => shot,
         Phase::Result if cues.home_run || cues.walk_off => Shot::TrotOrbit,
         // Strike three gets its reaction shot (before the gloved arm: a K
         // into the mitt is gloved too).
@@ -124,6 +137,16 @@ pub(super) fn pick_shot(cues: &ShotCues, current: Option<Shot>) -> Shot {
         // The call always lands in the bag's shot, never on the runner cam
         // (a throw caught early, or the play called before the hand-over).
         Phase::Result if matches!(current, Some(Shot::RunnerCam(_))) => {
+            cues.thrown_base.map_or(Shot::BallFollow, Shot::BaseCam)
+        }
+        // A sequence shot that ended (or was skipped) hands the rest of the
+        // pause to the play: the bag the throw went to, else the ball.
+        Phase::Result
+            if matches!(
+                current,
+                Some(Shot::DiveCam(_) | Shot::CrowdCam | Shot::PileUp)
+            ) =>
+        {
             cues.thrown_base.map_or(Shot::BallFollow, Shot::BaseCam)
         }
         Phase::Result => current.unwrap_or(Shot::Duel(cues.view)),
@@ -158,6 +181,52 @@ const WALKUP_FOV: f32 = 42.0_f32.to_radians();
 pub(super) const REACTION_EYE: Vec3 = Vec3::new(-4.6, 1.35, -0.6);
 pub(super) const REACTION_TARGET: Vec3 = Vec3::new(0.35, 1.0, -1.0);
 const REACTION_FOV: f32 = 40.0_f32.to_radians();
+
+/// The crowd shot's lens, the dive cam's, and the pile-up's.
+const CROWD_FOV: f32 = 32.0_f32.to_radians();
+const DIVE_FOV: f32 = 38.0_f32.to_radians();
+const PILE_UP_FOV: f32 = 48.0_f32.to_radians();
+/// The pile-up: low on the third-base side (+x) in front of the plate,
+/// looking across it toward the first-base dugout.
+pub(super) const PILE_UP_EYE: Vec3 = Vec3::new(3.4, 1.3, 3.4);
+pub(super) const PILE_UP_TARGET: Vec3 = Vec3::new(0.0, 0.9, -0.3);
+/// The crowd shot aims this far into the stands past the fence, and keeps
+/// at least this far off dead centre, where the batter's eye stands with no
+/// seats (`field::bowl`, ±8°).
+const CROWD_INTO_STANDS: f32 = 10.0;
+const CROWD_OFF_CENTRE: f32 = 12.0_f32.to_radians();
+
+/// Eye and look-at for the crowd shot: from the outfield grass on the line
+/// the ball left by, up at the seats beyond the fence there (shifted off the
+/// batter's eye for a ball out to dead centre).
+pub(super) fn crowd_cam(field: &FieldSpec, exit: Vec3) -> (Vec3, Vec3) {
+    let mut angle = exit.x.atan2(exit.z);
+    if !angle.is_finite() {
+        angle = 0.0;
+    }
+    if angle.abs() < CROWD_OFF_CENTRE {
+        angle = CROWD_OFF_CENTRE.copysign(if angle == 0.0 { 1.0 } else { angle });
+    }
+    let dir = Vec3::new(angle.sin(), 0.0, angle.cos());
+    let fence = rules::fence_at(dir * 100.0, field);
+    let seats = fence + CROWD_INTO_STANDS;
+    // The stands rise about 0.6 m per metre back from a front row a little
+    // over the wall's height (`field::bowl`).
+    let target = dir * seats + Vec3::Y * (4.0 + CROWD_INTO_STANDS * 0.6);
+    let eye = dir * (fence * 0.55) + Vec3::Y * 3.0;
+    (eye, target)
+}
+
+/// Eye and look-at for the dive cam: low beside the fielder, a quarter
+/// round toward home, the lens at his level so the layout reads.
+pub(super) fn dive_cam(fielder: Vec3) -> (Vec3, Vec3) {
+    let flat = Vec3::new(fielder.x, 0.0, fielder.z);
+    let home = (-flat).normalize_or(-Vec3::Z);
+    let side = Vec3::new(-home.z, 0.0, home.x);
+    let eye = flat + side * 3.5 + home * 1.8 + Vec3::Y * 0.7;
+    let target = flat + Vec3::Y * 0.45;
+    (eye, target)
+}
 
 /// Eye and look-at for the base cam at `base` (`base_count()` = home): low
 /// and just outside the diamond, three-quarters behind the runner's line of
@@ -263,6 +332,8 @@ pub(super) struct ShotInputs<'a> {
     pub home_run: bool,
     /// Seconds since the trot orbit began.
     pub trot_secs: f32,
+    /// Where a home run left the park (the crowd shot looks there).
+    pub exit: Option<Vec3>,
 }
 
 impl Shot {
@@ -326,6 +397,19 @@ impl Shot {
             }
             (Shot::WalkUp, _) => ShotSpec::new(WALKUP_EYE, WALKUP_TARGET, WALKUP_FOV),
             (Shot::ReactionCam, _) => ShotSpec::new(REACTION_EYE, REACTION_TARGET, REACTION_FOV),
+            (Shot::CrowdCam, _) => {
+                let exit = inp.exit.unwrap_or(Vec3::new(0.0, 0.0, field.fence_center));
+                let (eye, target) = crowd_cam(field, exit);
+                ShotSpec::new(eye, target, CROWD_FOV)
+            }
+            (Shot::DiveCam(_), _) => match inp.fielder {
+                Some(fielder) => {
+                    let (eye, target) = dive_cam(fielder);
+                    ShotSpec::new(eye, target, DIVE_FOV)
+                }
+                None => wide(),
+            },
+            (Shot::PileUp, _) => ShotSpec::new(PILE_UP_EYE, PILE_UP_TARGET, PILE_UP_FOV),
             // Result pause of a home run: orbit the diamond while the batter
             // trots the bases. The azimuth sweeps only through the
             // behind-home arc, so the outfield sky, where the fireworks
