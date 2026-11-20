@@ -36,9 +36,8 @@ fn the_front_row_sits_behind_the_wall_and_off_the_foul_lines() {
             );
         }
     }
-    // Behind the plate the stands stay clear of the broadcast camera
-    // (eye at z ≈ -12).
-    assert!(inner_radius(PI, &field) > 20.0);
+    // Behind the plate the stands stay clear of the broadcast camera.
+    assert!(inner_radius(PI, &field) > -field.broadcast_eye.z + 2.0);
 }
 
 #[test]
@@ -104,4 +103,23 @@ fn the_scoreboard_shows_the_score() {
         ..default()
     });
     assert_ne!(a.data, b.data);
+}
+
+/// The foul poles rise from the ends of the wall, in front of the stands.
+#[test]
+fn the_foul_poles_stand_in_front_of_the_stands() {
+    let field = stadium();
+    for spot in super::super::stadium::foul_pole_spots(&field) {
+        let theta = spot.x.atan2(spot.z);
+        let r = Vec2::new(spot.x, spot.z).length();
+        assert!(
+            (theta.abs() - field.fair_half_angle).abs() < 1e-4,
+            "{theta}"
+        );
+        let front = inner_radius(theta.rem_euclid(TAU), &field);
+        assert!(
+            r < front && front - r <= WALL_GAP + 1e-3,
+            "pole {r} m, stands {front} m"
+        );
+    }
 }

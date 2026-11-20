@@ -46,7 +46,7 @@ pub(super) fn spawn_field(
                 &surfaces,
                 &field,
             );
-            super::stadium::spawn_foul_poles(&mut commands, &mut meshes, &mut materials);
+            super::stadium::spawn_foul_poles(&mut commands, &mut meshes, &mut materials, &field);
             super::stadium::spawn_outfield_wall(&mut commands, &mut meshes, &mut materials, &field);
         }
         Scenery::FrontYard => {

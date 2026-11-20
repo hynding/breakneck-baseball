@@ -416,16 +416,15 @@ fn facing_home(at: Vec3) -> Quat {
     Quat::from_rotation_y(flat.x.atan2(flat.z))
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn spawn_bowl(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
     field: Res<FieldSpec>,
-    score: Res<ScoreBoard>,
 ) {
     commands.remove_resource::<CrowdState>();
+    commands.remove_resource::<ScoreboardFace>();
     if field.scenery != Scenery::Stadium {
         return;
     }
@@ -434,7 +433,7 @@ pub(super) fn spawn_bowl(
         Color::srgb(0.16, 0.30, 0.52),
         Color::srgb(0.30, 0.31, 0.33),
     ));
-    let one_sided = |m: StandardMaterial| StandardMaterial {
+    let matte = |m: StandardMaterial| StandardMaterial {
         perceptual_roughness: 0.95,
         ..m
     };
@@ -442,7 +441,7 @@ pub(super) fn spawn_bowl(
         Bowl,
         GameplayEntity,
         Mesh3d(meshes.add(ramp)),
-        MeshMaterial3d(materials.add(one_sided(StandardMaterial {
+        MeshMaterial3d(materials.add(matte(StandardMaterial {
             base_color_texture: Some(seat_tex),
             ..default()
         }))),
@@ -452,7 +451,7 @@ pub(super) fn spawn_bowl(
         Bowl,
         GameplayEntity,
         Mesh3d(meshes.add(concrete)),
-        MeshMaterial3d(materials.add(one_sided(StandardMaterial {
+        MeshMaterial3d(materials.add(matte(StandardMaterial {
             base_color: Color::srgb(0.46, 0.46, 0.47),
             ..default()
         }))),
@@ -462,7 +461,9 @@ pub(super) fn spawn_bowl(
     // The batter's eye: a dark, plain screen behind dead centre, as tall
     // as the bowl, so the pitch is read against nothing.
     let eye_r = field.fence_center + WALL_GAP + 4.0;
-    let eye_w = 2.0 * (eye_r * EYE_HALF.tan()) + 2.0;
+    // As wide as the gap in the seats at the screen's own distance, so it
+    // never cuts into the ramp beside it.
+    let eye_w = 2.0 * eye_r * EYE_HALF.tan();
     let eye_h = top_height(0.0, &field) + PARAPET;
     commands.spawn((
         GameplayEntity,
@@ -515,7 +516,15 @@ pub(super) fn spawn_bowl(
     let at = seat_point(theta, BOWL_DEPTH, &field) + dir(theta) * 4.0;
     let (bw, bh) = (24.0, 12.0);
     let centre = at.with_y(at.y + PARAPET + bh / 2.0 + 1.0);
-    let face = images.add(scoreboard_image(&score));
+    // A fresh game's board; `update_scoreboard` repaints it on the first
+    // score change. Painted from scratch rather than read from `ScoreBoard`,
+    // whose game_start reset may not have run yet.
+    let fresh = ScoreBoard {
+        inning: 1,
+        top_of_inning: true,
+        ..default()
+    };
+    let face = images.add(scoreboard_image(&fresh));
     commands.insert_resource(ScoreboardFace(face.clone()));
     let turn = facing_home(at);
     commands.spawn((
