@@ -81,6 +81,18 @@ back in `Last`, so gameplay state is never touched and nothing is re-simulated. 
 skips it after a 0.35 s grace. The tag (`ui/replay_tag.rs`, "REPLAY" / "SLOW MOTION" / the skip
 prompt) follows the wasm UI rule like the walk-up card. e2e `replay.rs` pins frozen clock, untouched
 live transforms, a moving camera, the tag, skip, and Off. Memory per tier: docs/DEVICE-CHECKS.md.
+
+**Big-moment sequences** (`camera/sequence.rs`, pure): a short timed run of shots through the
+result pause of a home run, a walk-off (not a home run) or a dive. `replay::BigMomentCue` reads the
+moment off the play at the call (`called_at`, timed with `since_call`, since the flow's result timer
+clamps at 1.2 s while the pause runs on for the trot), and the broadcast rig takes
+`sequence_shot(moment, elapsed)` ahead of the ordinary Result shots: home run = `Shot::CrowdCam`
+(up into the seats the ball landed among) for `CROWD_SECS`, the replay, then the trot orbit;
+walk-off = `Shot::PileUp` on the plate for the whole pause, the replay inside it; dive =
+`Shot::DiveCam(fielder)` low and tight for `DIVE_SECS`, then the replay. `replay_at` delays the
+replay until the opening shot is done. An action press after the skip grace drops the sequence and
+its replay: the ordinary shot list is back the next frame. e2e `big_moments.rs` pins each sequence
+and the skip.
 The grounder call is made once, just after the plate hold, by `shots::PlayRead` (low and coming
 down, or already down during the hold per `ActivePlay::landed_at`). The ball-follow leads the ball to its predicted landing spot and fits its
 lens to both, within an 80° cap; `shots::tests::the_ball_stays_in_the_middle_of_the_frame` pins the

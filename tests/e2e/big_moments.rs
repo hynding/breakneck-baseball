@@ -132,7 +132,8 @@ fn home_run_pause(app: &mut App) -> (Vec<Shot>, Option<f32>) {
     let mut frames = 0;
     while phase(app) == Phase::Result && frames < 60_000 {
         if playing(app) {
-            replay_at.get_or_insert(app.world().resource::<Play>().result_elapsed_secs());
+            let now = app.world().resource::<Time>().elapsed_secs();
+            replay_at.get_or_insert(app.world().resource::<BigMomentCue>().since_call(now));
         } else if let Some(s) = shot(app)
             && log.last() != Some(&s)
         {
@@ -189,8 +190,8 @@ fn a_press_skips_the_sequence_and_its_replay() {
 fn a_walk_off_holds_the_pile_up() {
     let mut app = headless_app();
     app.insert_resource(Script {
-        // To left-centre, short of the wall: the ball falls in.
-        aim: Some(Vec2::new(-0.5, 0.3)),
+        // To right-centre, short of the wall: the ball falls in.
+        aim: Some(Vec2::new(0.5, 0.3)),
         ..default()
     });
     app.add_systems(DriveGame, drive);
