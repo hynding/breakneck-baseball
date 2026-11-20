@@ -141,6 +141,13 @@ fn detect_wall_bang(
 }
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
+
+/// The aero systems alone, in the plugin's order, for the flight tests.
+#[cfg(test)]
+fn add_aero_systems(app: &mut App, _when: fn() -> bool) {
+    app.add_systems(Update, (apply_drag, apply_magnus).chain());
+}
+
 pub struct BallPlugin;
 
 impl Plugin for BallPlugin {
@@ -227,7 +234,7 @@ fn spawn_ball(
         // Allow rotation (spin) but dampen it slightly.
         Damping {
             linear_damping: 0.0,
-            angular_damping: 0.1,
+            angular_damping: crate::game::rules::SPIN_DAMPING,
         },
         CollisionGroups::new(BALL_GROUP, !PLAYER_GROUP),
         ActiveEvents::COLLISION_EVENTS,
@@ -393,3 +400,7 @@ fn reset_ball_if_out_of_bounds(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "ball.test.rs"]
+mod tests;
