@@ -106,7 +106,7 @@ struct FieldSurfaces {
 const DRY_ROUGHNESS: f32 = 0.95;
 /// Rain-soaked turf and clay on tiers that budget wet reflections: glossy
 /// enough to catch the sky and the lights.
-const WET_ROUGHNESS: f32 = 0.45;
+const WET_ROUGHNESS: f32 = 0.65;
 /// How much darker rain-soaked ground reads, at every tier.
 const WET_DARKEN: f32 = 0.78;
 

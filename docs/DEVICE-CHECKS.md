@@ -98,11 +98,13 @@ Software WebGL is bound by per-pixel ALU, so fog and grading look dearer
 here than on a GPU. The sky was first a 700 m dome mesh and cost about
 90 ms at Medium, because it shaded the whole screen before the field
 covered it. As a `Skybox` it shades only the visible sky, after the
-opaque pass, and costs about 9 ms. HDR and bloom on High are now off:
-the scene is over-exposed (a 50k lux sun at Bevy's default exposure), and
-HDR tonemapping greyed the sky toward purple. They return with the
-exposure rework in the time-of-day task. A real-device check of Low (fog on a
-weak phone) is still owed; see below.
+opaque pass, and costs about 9 ms. HDR and bloom on High were off for a
+while: the scene was over-exposed (a 50k lux sun at Bevy's default
+exposure, EV100 9.7), and HDR tonemapping greyed the sky toward purple.
+The time-of-day task fixed both: every tier now renders at EV100 11.7
+(`look::SCENE_EV100`), and High's HDR path skips tonemapping so its sky and
+grass match the LDR tiers, with bloom back on for the floodlights. A
+real-device check of Low (fog on a weak phone) is still owed; see below.
 
 ### Ball readability (task 4; same machine and settings as the look pass)
 
@@ -160,6 +162,25 @@ moving, with gameplay itself frozen. On a phone at Low, hit a home run and
 check the replay plays smoothly and play resumes cleanly after it (or
 after skipping it with the action button).
 
+### Time of day and wet turf (task 12; same machine, 640×360, 25 s per tier)
+
+| Tier | Afternoon, Fair (ms) | Afternoon, Rain (ms) | Night, Fair (ms) |
+| --- | --- | --- | --- |
+| Low | 156.0 | 158.4 | 151.9 |
+| Medium | 405.7 | 412.9 | 439.2 |
+| High | 471.9 | 475.6 | 512.9 |
+
+Rain holds Low within budget: darker turf is only a tint, and the rain
+streaks (twice the visible meshes) cost about 2 ms. Glossy wet turf on High
+is a material roughness, not an extra pass. Night costs about 35–40 ms on
+Medium and High under software WebGL, from the three unshadowed tower
+spotlights that relight the infield; Low skips them and lights the field
+from the key tower alone, so it gets no dearer at night. Bloom on High
+(back since this task) is inside the High column. `tools/frame_cost.mjs`
+takes main-menu hotkeys as a fifth argument (`wwww` for Rain, `n` for
+Night) to repeat these runs. On a phone at Low, play an inning at Night
+and check the field is still readable without the tower spotlights.
+
 ## What still needs a person with a device
 
 Use the GitHub Pages build for the web checks and `cargo run --release` for
@@ -187,10 +208,10 @@ native.
 3. **Switch tiers mid-game on the phone.** Cycle Low → Medium → High → Auto
    from the pause menu. The UI must never go blank (the wasm/WebGL2 failure
    the single render route exists to avoid), and the view should re-sharpen
-   or soften right away with no black frame that sticks. (HDR and bloom
-   are off on every tier for now; when they return on High, check the
-   floodlights glow and no frame goes blank, since they need float render
-   targets, `EXT_color_buffer_float`, that some phone drivers lack.)
+   or soften right away with no black frame that sticks. High turns on HDR
+   and bloom: check no frame goes blank when you pick it, since they need
+   float render targets (`EXT_color_buffer_float`) that some phone drivers
+   lack, and at Night check the floodlights glow.
 4. **Rotate the phone at each tier.** Portrait to landscape and back. The 3D
    view should refill the screen at the new size, with nothing stretched or
    letterboxed. In portrait, note whether the HUD cards overlap each other

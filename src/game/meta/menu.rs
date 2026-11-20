@@ -429,7 +429,7 @@ fn controls_hint(device: ActiveDevice) -> String {
             "D-pad / stick: move   A: choose   Left/Right: change\nStart: play   Select: settings   B: back\nIn play: stick to aim, A to pitch or swing\n{RUNNER}"
         ),
         ActiveDevice::Keyboard => format!(
-            "1 / 2: play   3: season   F I T D W O G L: change options   S: settings\nArrows + Enter also move and choose\nIn play: WASD + Space (P1), Arrows + Right-Ctrl (P2)\n{RUNNER}{}",
+            "1 / 2: play   3: season   F I T D W N O G L: change options   S: settings\nArrows + Enter also move and choose\nIn play: WASD + Space (P1), Arrows + Right-Ctrl (P2)\n{RUNNER}{}",
             creator_hint()
         ),
         ActiveDevice::Touch => {

@@ -182,12 +182,12 @@ pub(crate) fn day_look(
         TimeOfDay::Night => {
             look.sky = NIGHT_SKY;
             look.night = true;
-            // The key tower alone is a fraction of the sun (about 6,000 lux
+            // The key tower alone is a fraction of the sun (about 8,000 lux
             // on the field) and the night fill is dim, so the stands and
             // the sky fall dark; on Medium and High the other towers' fill
             // spots (`bowl::TowerLight`) bring the infield back up.
             look.lights.sun = Color::srgb(0.86, 0.92, 1.0);
-            look.lights.sun_scale = field.sun_scale * 0.12;
+            look.lights.sun_scale = field.sun_scale * 0.16;
             look.lights.ambient = Color::srgb(0.45, 0.58, 0.88);
             look.fill = 0.25;
             look.lights.grass_tint = tint(field.grass_tint, [0.62, 0.72, 0.86]);
