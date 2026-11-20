@@ -482,6 +482,8 @@ fn inputs(field: &FieldSpec) -> ShotInputs<'_> {
         wind: Vec3::ZERO,
         home_run: false,
         trot_secs: 0.0,
+        duel_fov_nudge: 0.0,
+        still: false,
         exit: None,
     }
 }
@@ -1170,5 +1172,90 @@ fn the_pile_up_frames_the_plate() {
         Vec3::new(-1.5, 1.0, 0.5),
     ] {
         assert!(in_frame(s.eye, s.target, s.fov, p), "{p} out of {s:?}");
+    }
+}
+
+// ── Camera settings and reduce motion ─────────────────────────────────────────
+
+#[test]
+fn the_duel_fov_nudge_widens_and_tightens_only_the_duel() {
+    let field = VariantId::Standard.field();
+    let mut inp = inputs(&field);
+    let base = Shot::Duel(DuelView::default()).spec(&inp).fov;
+    let wide = Shot::BallFollow.spec(&inp).fov;
+    inp.duel_fov_nudge = 10.0_f32.to_radians();
+    let wider = Shot::Duel(DuelView::default()).spec(&inp).fov;
+    assert!((wider - base - 10.0_f32.to_radians()).abs() < 1e-5);
+    assert_eq!(
+        Shot::BallFollow.spec(&inp).fov,
+        wide,
+        "other shots keep their lens"
+    );
+    inp.duel_fov_nudge = (-5.0_f32).to_radians();
+    assert!(Shot::Duel(DuelView::default()).spec(&inp).fov < base);
+}
+
+#[test]
+fn reduce_motion_cuts_every_transition() {
+    for kind in [
+        Transition::Cut,
+        Transition::Ease { secs: 0.6 },
+        Transition::WhipPan { secs: 0.3 },
+    ] {
+        assert_eq!(motion_safe(kind, true), Transition::Cut, "{kind:?}");
+        assert_eq!(motion_safe(kind, false), kind);
+    }
+}
+
+#[test]
+fn reduce_motion_holds_the_trot_orbit_still() {
+    let field = VariantId::Standard.field();
+    let mut inp = inputs(&field);
+    inp.home_run = true;
+    inp.still = true;
+    let opening = Shot::TrotOrbit.spec(&inp);
+    for secs in [0.5, 2.0, 6.0] {
+        inp.trot_secs = secs;
+        let s = Shot::TrotOrbit.spec(&inp);
+        assert_eq!(s.eye, opening.eye, "{secs} s");
+        assert_eq!(s.target, opening.target);
+    }
+    inp.still = false;
+    assert_ne!(
+        Shot::TrotOrbit.spec(&inp).eye,
+        opening.eye,
+        "it sweeps otherwise"
+    );
+}
+
+/// The nudge lands on the authored lens before the narrow-aspect
+/// correction: on a portrait phone and a 4:3 tablet, +5 widens and -5
+/// tightens every duel view, never clamping the corrected shot narrower.
+#[test]
+fn the_duel_fov_nudge_holds_on_narrow_screens() {
+    let field = VariantId::Standard.field();
+    for aspect in [390.0 / 664.0, 4.0 / 3.0, DUEL_REFERENCE_ASPECT] {
+        for view in [
+            DuelView::BattingZoom,
+            DuelView::CatcherPov,
+            DuelView::BehindPitcher,
+            DuelView::BroadcastPlate,
+        ] {
+            let mut inp = inputs(&field);
+            inp.aspect = aspect;
+            let base = Shot::Duel(view).spec(&inp).fov;
+            inp.duel_fov_nudge = 5.0_f32.to_radians();
+            let wider = Shot::Duel(view).spec(&inp).fov;
+            inp.duel_fov_nudge = (-5.0_f32).to_radians();
+            let tighter = Shot::Duel(view).spec(&inp).fov;
+            assert!(
+                wider > base,
+                "{view:?} at {aspect}: +5 gave {wider} vs {base}"
+            );
+            assert!(
+                tighter < base,
+                "{view:?} at {aspect}: -5 gave {tighter} vs {base}"
+            );
+        }
     }
 }

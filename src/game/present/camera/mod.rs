@@ -103,16 +103,25 @@ impl DuelView {
     /// This view's eye, look-at target, and vertical FOV for the given park
     /// and camera `aspect` ratio (width / height).
     fn framing(self, field: &FieldSpec, aspect: f32) -> (Vec3, Vec3, f32) {
+        self.nudged_framing(field, aspect, 0.0)
+    }
+
+    /// [`Self::framing`] with the DUEL VIEW FOV setting's `nudge` (radians)
+    /// added to the authored lens *before* the narrow-aspect correction, so
+    /// a nudge on a portrait phone widens or tightens the corrected shot
+    /// rather than clamping it back below what the aspect needs.
+    fn nudged_framing(self, field: &FieldSpec, aspect: f32, nudge: f32) -> (Vec3, Vec3, f32) {
+        let n = |fov| shots::nudged_fov(fov, nudge);
         match self {
             DuelView::CatcherPov => (
                 field.duel_eye,
                 field.duel_target,
-                aspect_safe_duel_vfov(DUEL_FOV, aspect),
+                aspect_safe_duel_vfov(n(DUEL_FOV), aspect),
             ),
             DuelView::BehindPitcher => (
                 field.behind_pitcher_eye,
                 field.behind_pitcher_target,
-                BEHIND_PITCHER_FOV,
+                n(BEHIND_PITCHER_FOV),
             ),
             // The same aspect correction as the catcher POV: this is the
             // tight default shot now, and a narrow viewport must widen
@@ -120,11 +129,13 @@ impl DuelView {
             DuelView::BattingZoom => (
                 field.batting_zoom_eye,
                 field.batting_zoom_target,
-                aspect_safe_duel_vfov(BATTING_ZOOM_FOV, aspect),
+                aspect_safe_duel_vfov(n(BATTING_ZOOM_FOV), aspect),
             ),
-            DuelView::BroadcastPlate => {
-                (field.broadcast_eye, field.broadcast_target, BROADCAST_FOV)
-            }
+            DuelView::BroadcastPlate => (
+                field.broadcast_eye,
+                field.broadcast_target,
+                n(BROADCAST_FOV),
+            ),
         }
     }
 }

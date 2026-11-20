@@ -395,6 +395,7 @@ fn start_replay(
     quality: Option<Res<ActiveQuality>>,
     recorder: Res<ReplayRecorder>,
     cue: Res<BigMomentCue>,
+    settings: Option<Res<Settings>>,
     mut watch: ResMut<PlayWatch>,
     mut replay: ResMut<Replay>,
     mut virt: ResMut<Time<Virtual>>,
@@ -431,7 +432,8 @@ fn start_replay(
         called,
         key,
         budget.replay_angles,
-        tier == QualityTier::High,
+        // Reduce motion plays the replay at speed: no slow motion.
+        tier == QualityTier::High && !settings.as_ref().is_some_and(|s| s.reduce_motion),
     );
     let Some(first) = segments.first().copied() else {
         return;

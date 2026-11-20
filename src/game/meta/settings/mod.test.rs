@@ -20,6 +20,9 @@ fn save_load_round_trips_through_env_path() {
     let mut s = Settings::default();
     s.batting_style[1] = BattingStyle::PciCursor;
     s.volume = 0.4;
+    s.camera_shake = CameraShake::Low;
+    s.duel_fov = 10;
+    s.replays = ReplayMode::Always;
     save_settings(&s);
     assert_eq!(load_settings(), s);
     // SAFETY: still under `ENV_LOCK` via `_guard`; see the set_var above.
@@ -141,6 +144,9 @@ fn legacy_store_without_trail_fields_loads_with_defaults() {
     assert_eq!(s.trail_color, TrailColor::Ember);
     assert!(s.show_strike_zone, "zone overlay defaults on");
     assert!(!s.reduce_motion, "full motion defaults on");
+    assert_eq!(s.camera_shake, CameraShake::Full, "the kick defaults full");
+    assert_eq!(s.duel_fov, 0, "the duel lens defaults as authored");
+    assert_eq!(s.replays, ReplayMode::BigPlays);
     assert_eq!(
         s.graphics,
         GraphicsQuality::Auto,
@@ -207,6 +213,14 @@ fn clamped_bounds_volume() {
     assert!((s.clamped().volume - 1.0).abs() < f32::EPSILON);
     s.volume = -0.3;
     assert!(s.clamped().volume.abs() < f32::EPSILON);
+    s.duel_fov = 40;
+    assert_eq!(
+        s.clamped().duel_fov,
+        0,
+        "an off-ladder nudge plays as authored"
+    );
+    s.duel_fov = -5;
+    assert_eq!(s.clamped().duel_fov, -5);
 }
 
 #[test]

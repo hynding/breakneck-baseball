@@ -32,6 +32,7 @@ pub(super) fn spawn_hud(
     commands
         .spawn((
             GameplayEntity,
+            super::HudCornerCluster,
             Node {
                 position_type: PositionType::Absolute,
                 bottom: Val::Px(14.0),

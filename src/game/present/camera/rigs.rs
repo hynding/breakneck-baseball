@@ -14,6 +14,7 @@ use crate::game::flow::{LiveBallEvent, Phase, Play, ResultBeat};
 use crate::game::player::{CatcherRole, PlateUmpire};
 use crate::game::rules;
 use crate::game::runner::{BasePath, Departed};
+use crate::game::settings::Settings;
 use crate::game::variant::FieldSpec;
 
 use super::framing::{LENS_BRUSH_RADIUS, OCCLUSION_NEAR, OCCLUSION_RADIUS, brushes_lens, occludes};
@@ -182,7 +183,7 @@ impl BroadcastRig {
 /// Impulse added to the broadcast eye on contact; decays on real time so the
 /// kick rides through the hit-stop.
 #[derive(Resource, Default)]
-pub(super) struct CameraKick(Vec3);
+pub(super) struct CameraKick(pub(super) Vec3);
 
 /// A base path ending this close to the thrown-to bag (m, flat) is bound
 /// for it.
@@ -192,19 +193,43 @@ const RUNNER_ARRIVED: f32 = 1.0;
 type BallQuery<'w, 's> =
     Query<'w, 's, (&'static Transform, &'static Velocity), (With<Baseball>, Without<Camera3d>)>;
 
-pub(super) fn kick_on_hit(mut hits: MessageReader<HitEvent>, mut kick: ResMut<CameraKick>) {
+/// The kick on contact and off the wall at full shake.
+pub(super) const HIT_KICK: Vec3 = Vec3::new(0.0, 0.18, -0.35);
+pub(super) const WALL_KICK: Vec3 = Vec3::new(0.0, 0.10, 0.20);
+
+/// The share of the authored kick the CAMERA SHAKE setting lets through:
+/// none under reduce motion, full with no settings (as the harnesses
+/// always had).
+pub(super) fn shake(settings: Option<&Settings>) -> f32 {
+    settings.map_or(1.0, |s| {
+        if s.reduce_motion {
+            0.0
+        } else {
+            s.camera_shake.scale()
+        }
+    })
+}
+
+pub(super) fn kick_on_hit(
+    mut hits: MessageReader<HitEvent>,
+    settings: Option<Res<Settings>>,
+    mut kick: ResMut<CameraKick>,
+) {
+    let k = shake(settings.as_deref());
     for _ in hits.read() {
-        kick.0 += Vec3::new(0.0, 0.18, -0.35);
+        kick.0 += HIT_KICK * k;
     }
 }
 
 /// A smaller thump when the ball bangs off the outfield wall.
 pub(super) fn kick_on_wall_bang(
     mut bangs: MessageReader<WallBangEvent>,
+    settings: Option<Res<Settings>>,
     mut kick: ResMut<CameraKick>,
 ) {
+    let k = shake(settings.as_deref());
     for _ in bangs.read() {
-        kick.0 += Vec3::new(0.0, 0.10, 0.20);
+        kick.0 += WALL_KICK * k;
     }
 }
 
@@ -224,7 +249,8 @@ pub(super) fn broadcast_camera(
     play: Res<Play>,
     field: Res<FieldSpec>,
     view: Res<DuelView>,
-    kick: Res<CameraKick>,
+    // (Paired to stay inside Bevy's 16-parameter system limit.)
+    (kick, settings): (Res<CameraKick>, Option<Res<Settings>>),
     active: Res<ActivePlay>,
     wind: Res<rules::Wind>,
     mut live: MessageReader<LiveBallEvent>,
@@ -434,6 +460,8 @@ pub(super) fn broadcast_camera(
         wind: wind.0,
         home_run: play.is_home_run(),
         trot_secs: now - start,
+        duel_fov_nudge: f32::from(settings.as_ref().map_or(0, |s| s.duel_fov)).to_radians(),
+        still: settings.as_ref().is_some_and(|s| s.reduce_motion),
         exit: cue.exit,
     };
     let want = shot.spec(&inputs);
@@ -453,7 +481,8 @@ pub(super) fn broadcast_camera(
     }
     if rig.shot != Some(shot) {
         // A new subject: the shot says how to get there (a cut, today).
-        let kind = shot.transition_from(rig.shot);
+        let reduce = settings.as_ref().is_some_and(|s| s.reduce_motion);
+        let kind = super::shots::motion_safe(shot.transition_from(rig.shot), reduce);
         rig.shot = Some(shot);
         rig.motion.start(kind, want, time.delta_secs());
     } else {

@@ -4,7 +4,7 @@
 mod common;
 
 use bevy::input::keyboard::KeyCode;
-use breakneck_baseball::game::settings::{BattingStyle, Settings, SettingsOpen};
+use breakneck_baseball::game::settings::{BattingStyle, CameraShake, Settings, SettingsOpen};
 
 #[test]
 fn settings_edit_persists_and_game_starts() {
@@ -40,6 +40,24 @@ fn settings_edit_persists_and_game_starts() {
     // Persisted.
     let on_disk: Settings = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(on_disk.batting_style[0], BattingStyle::SwingMeter);
+
+    // Down to CAMERA SHAKE (row 6): Right steps Full -> Off. Down to DUEL
+    // VIEW FOV: Right nudges it to +5 degrees. Both persist.
+    for _ in 0..6 {
+        common::tap_key(&mut app, KeyCode::ArrowDown);
+    }
+    common::tap_key(&mut app, KeyCode::ArrowRight);
+    common::tap_key(&mut app, KeyCode::ArrowDown);
+    common::tap_key(&mut app, KeyCode::ArrowRight);
+    for _ in 0..3 {
+        app.update();
+    }
+    let s = app.world().resource::<Settings>();
+    assert_eq!(s.camera_shake, CameraShake::Off);
+    assert_eq!(s.duel_fov, 5);
+    let on_disk: Settings = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(on_disk.camera_shake, CameraShake::Off);
+    assert_eq!(on_disk.duel_fov, 5);
 
     // Esc closes; the game still starts (menu keys un-suppressed).
     common::tap_key(&mut app, KeyCode::Escape);

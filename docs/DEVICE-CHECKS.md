@@ -54,9 +54,15 @@ No panics in either. Two things it surfaced that need a real phone:
   `devicePixelRatio` 3, so the whole frame (UI included) rendered at a third
   of the screen's resolution and the HUD text looked soft. That may be an
   emulation artifact, so check it on a real phone (step 2 below).
-- **The HUD crowds a portrait phone.** In portrait the pitching card covers
-  the touch pad and the at-bat card sits under the scoreboard. Landscape is
-  the intended orientation, but portrait is what a phone opens in.
+- **The HUD crowded a portrait phone.** In portrait the at-bat card and the
+  scoreboard sat over the Zone Pad and the SWING button (landscape too).
+  Fixed in the camera settings pass: while the touch player bats with the
+  pad, the two bottom cards slide inward beside the controls where the gap
+  holds them (a landscape phone) and lift above the pad otherwise
+  (portrait, tablets) (`ui::touch::dodge_zone_pad`), and the settings screen puts
+  each label and value on one line so all 13 rows fit a phone in either
+  orientation. Re-checked under iPhone 13 emulation; confirm on a real
+  phone (step 4 below).
 
 ## Frame cost per tier
 
@@ -234,8 +240,10 @@ native.
    `EXT_color_buffer_float`, that some phone drivers lack.)
 4. **Rotate the phone at each tier.** Portrait to landscape and back. The 3D
    view should refill the screen at the new size, with nothing stretched or
-   letterboxed. In portrait, note whether the HUD cards overlap each other
-   or the touch pad (they did under emulation).
+   letterboxed. With the Zone Pad scheme, at bat, the AT BAT card and the
+   scoreboard should sit clear of the pad and the SWING button in both
+   orientations, and the settings screen (S on the menu) should show every
+   row from SETTINGS to CLOSE.
 5. **Shadows and edges at Low.** With a 512 shadow map and no MSAA, look at
    the players' shadows (blocky, or shimmering as they run?) and the foul
    lines and bases (jagged?). Decide whether that's acceptable.

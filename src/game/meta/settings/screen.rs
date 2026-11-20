@@ -51,7 +51,14 @@ pub(super) struct SettingsRowIndex(usize);
 
 /// The vertical spacing between settings lines, carried as each line's
 /// padding rather than a card row gap so no gap is dead to a tap.
-const ROW_PAD_PX: f32 = 10.0;
+const ROW_PAD_PX: f32 = 8.0;
+
+/// A settings row's width (UI px): fits a portrait phone's 480 px design
+/// width with the card's padding.
+const ROW_WIDTH_PX: f32 = 420.0;
+
+/// The widest a row's value runs before it wraps (UI px).
+const VALUE_MAX_PX: f32 = 250.0;
 
 /// Which row the cursor is on (0..ROW_LABELS.len()).
 #[derive(Resource, Default)]
@@ -94,12 +101,15 @@ const ROW_TOUCH: usize = 2;
 const ROW_TRAIL: usize = 3;
 const ROW_TRAIL_COLOR: usize = 4;
 const ROW_REDUCE_MOTION: usize = 5;
-const ROW_STRIKE_ZONE: usize = 6;
-const ROW_GRAPHICS: usize = 7;
-const ROW_VOLUME: usize = 8;
+const ROW_SHAKE: usize = 6;
+const ROW_DUEL_FOV: usize = 7;
+const ROW_REPLAYS: usize = 8;
+const ROW_STRIKE_ZONE: usize = 9;
+const ROW_GRAPHICS: usize = 10;
+const ROW_VOLUME: usize = 11;
 /// The CLOSE pseudo-row (tap / Left / Right closes the screen — the touch
 /// equivalent of Esc). Keep it last; keep the array below in index order.
-const ROW_CLOSE: usize = 9;
+const ROW_CLOSE: usize = 12;
 
 const ROW_LABELS: [&str; ROW_CLOSE + 1] = [
     "P1 BATTING STYLE",
@@ -108,6 +118,9 @@ const ROW_LABELS: [&str; ROW_CLOSE + 1] = [
     "PITCH TRAIL",
     "TRAIL COLOR",
     "REDUCE MOTION",
+    "CAMERA SHAKE",
+    "DUEL VIEW FOV",
+    "REPLAYS",
     "STRIKE ZONE",
     "GRAPHICS",
     "VOLUME",
@@ -140,14 +153,14 @@ pub(super) fn spawn_settings_screen(mut commands: Commands, theme: Res<Theme>) {
                 KeepAliveUi,
                 // No row gap: the rows' own padding spaces them, so the
                 // whole card height is tappable (see `row_part`).
-                overlay_card(OverlayPaint::Hidden, Vec2::new(40.0, 28.0), 0.0, ui),
+                overlay_card(OverlayPaint::Hidden, Vec2::new(24.0, 20.0), 0.0, ui),
             ))
             .with_children(|card| {
                 card.spawn((
                     SettingsTitle,
                     Text::new(""),
                     TextFont {
-                        font_size: 34.0,
+                        font_size: 28.0,
                         ..default()
                     },
                     TextColor(ui.accent),
@@ -161,11 +174,11 @@ pub(super) fn spawn_settings_screen(mut commands: Commands, theme: Res<Theme>) {
                 // the row index (a touch anywhere on the row selects and
                 // cycles it). One body, so a component every part needs
                 // can't reach one and miss the other — leaving a row half
-                // that renders but never taps. Each part spans the card's
-                // width and splits the old row gap as padding, so a finger
-                // that lands between the words, or between two lines,
-                // still hits a row.
-                let row_part = |i: usize, font_size: f32, color: Color| {
+                // that renders but never taps. The label grows to fill the
+                // row and both parts split the row gap as padding, so a
+                // finger that lands between the words, or between two
+                // lines, still hits a row.
+                let row_part = |i: usize, font_size: f32, color: Color, node: Node, justify| {
                     (
                         Button,
                         SettingsRowIndex(i),
@@ -175,17 +188,51 @@ pub(super) fn spawn_settings_screen(mut commands: Commands, theme: Res<Theme>) {
                             ..default()
                         },
                         TextColor(color),
-                        TextLayout::new_with_justify(Justify::Center),
+                        TextLayout::new_with_justify(justify),
                         Node {
-                            align_self: AlignSelf::Stretch,
                             padding: UiRect::vertical(Val::Px(ROW_PAD_PX / 2.0)),
-                            ..default()
+                            ..node
                         },
                     )
                 };
+                // Label and value share one line (13 rows stacked two lines
+                // each ran off a phone in both orientations); a long value
+                // wraps inside its cap instead of widening the card.
                 for i in 0..ROW_LABELS.len() {
-                    card.spawn((SettingsRowLabel, row_part(i, 20.0, ui.text_primary)));
-                    card.spawn((SettingsRowText, row_part(i, 18.0, ui.text_dim)));
+                    card.spawn(Node {
+                        width: Val::Px(ROW_WIDTH_PX),
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Stretch,
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        row.spawn((
+                            SettingsRowLabel,
+                            row_part(
+                                i,
+                                18.0,
+                                ui.text_primary,
+                                Node {
+                                    flex_grow: 1.0,
+                                    ..default()
+                                },
+                                Justify::Left,
+                            ),
+                        ));
+                        row.spawn((
+                            SettingsRowText,
+                            row_part(
+                                i,
+                                16.0,
+                                ui.text_dim,
+                                Node {
+                                    max_width: Val::Px(VALUE_MAX_PX),
+                                    ..default()
+                                },
+                                Justify::Right,
+                            ),
+                        ));
+                    });
                 }
             });
         });
@@ -322,6 +369,13 @@ pub(super) fn paint_settings_screen(
             ROW_TRAIL => settings.pitch_trail.label().to_string(),
             ROW_TRAIL_COLOR => settings.trail_color.label().to_string(),
             ROW_REDUCE_MOTION => on_off(settings.reduce_motion).to_string(),
+            ROW_SHAKE if settings.reduce_motion => "Off (reduce motion)".to_string(),
+            ROW_SHAKE => settings.camera_shake.label().to_string(),
+            ROW_DUEL_FOV => match settings.duel_fov {
+                0 => "As authored".to_string(),
+                d => format!("{d:+} deg"),
+            },
+            ROW_REPLAYS => settings.replays.label().to_string(),
             // The zone overlay was persisted but reachable only via the
             // undiscoverable Z on the pause board (TODO 79).
             ROW_STRIKE_ZONE => on_off(settings.show_strike_zone).to_string(),
@@ -433,6 +487,20 @@ fn cycle_row(
             settings.trail_color = if right { c.next() } else { c.prev() };
         }
         ROW_REDUCE_MOTION => settings.reduce_motion = !settings.reduce_motion,
+        // Reduce motion stills the camera whatever the shake row says, and
+        // the row shows that: cycling the hidden value would look dead.
+        ROW_SHAKE if settings.reduce_motion => {}
+        ROW_SHAKE => {
+            let s = settings.camera_shake;
+            settings.camera_shake = if right { s.next() } else { s.prev() };
+        }
+        ROW_DUEL_FOV => {
+            settings.duel_fov = crate::game::settings::cycle_duel_fov(settings.duel_fov, right);
+        }
+        ROW_REPLAYS => {
+            let r = settings.replays;
+            settings.replays = if right { r.next() } else { r.prev() };
+        }
         ROW_STRIKE_ZONE => settings.show_strike_zone = !settings.show_strike_zone,
         ROW_GRAPHICS => {
             let q = settings.graphics;

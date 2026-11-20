@@ -332,6 +332,12 @@ pub(super) struct ShotInputs<'a> {
     pub home_run: bool,
     /// Seconds since the trot orbit began.
     pub trot_secs: f32,
+    /// Added to the duel views' field of view (radians; the DUEL VIEW FOV
+    /// setting).
+    pub duel_fov_nudge: f32,
+    /// Reduce motion: the trot orbit holds its opening angle instead of
+    /// sweeping.
+    pub still: bool,
     /// Where a home run left the park (the crowd shot looks there).
     pub exit: Option<Vec3>,
 }
@@ -343,7 +349,7 @@ impl Shot {
         let wide = || ShotSpec::new(field.broadcast_eye, field.broadcast_target, BROADCAST_FOV);
         match (self, inp.ball) {
             (Shot::Duel(v), _) => {
-                let (eye, target, fov) = v.framing(field, inp.aspect);
+                let (eye, target, fov) = v.nudged_framing(field, inp.aspect, inp.duel_fov_nudge);
                 ShotSpec::new(eye, target, fov)
             }
             (Shot::BallFollow, Some(ball)) if !inp.home_run => {
@@ -416,7 +422,8 @@ impl Shot {
             // burst, stays in frame for the whole show (TODO 70).
             (Shot::TrotOrbit, _) => {
                 let focus = Vec3::new(field.broadcast_target.x, 1.4, field.broadcast_target.z);
-                let sweep = (inp.trot_secs * TROT_ORBIT_RATE - 0.9).clamp(-0.9, 0.9);
+                let secs = if inp.still { 0.0 } else { inp.trot_secs };
+                let sweep = (secs * TROT_ORBIT_RATE - 0.9).clamp(-0.9, 0.9);
                 let eye = trot_orbit_eye(focus, std::f32::consts::PI + sweep);
                 ShotSpec::new(eye, focus, BROADCAST_FOV)
             }
@@ -427,6 +434,24 @@ impl Shot {
     pub(super) fn transition_from(self, _from: Option<Shot>) -> Transition {
         Transition::Cut
     }
+}
+
+/// The transition to play: under reduce motion every ease and whip pan
+/// becomes a cut, so the lens never glides or swings on its own.
+pub(super) fn motion_safe(kind: Transition, reduce_motion: bool) -> Transition {
+    if reduce_motion { Transition::Cut } else { kind }
+}
+
+/// The narrowest and widest a nudged duel lens may get (radians).
+const DUEL_FOV_MIN: f32 = 20.0_f32.to_radians();
+const DUEL_FOV_MAX: f32 = 90.0_f32.to_radians();
+
+/// A duel view's lens with the player's nudge added, kept to a sane range.
+pub(super) fn nudged_fov(fov: f32, nudge: f32) -> f32 {
+    if nudge == 0.0 {
+        return fov;
+    }
+    (fov + nudge).clamp(DUEL_FOV_MIN, DUEL_FOV_MAX)
 }
 
 /// A live, uncalled play: where the ball is coming down. The eye stations

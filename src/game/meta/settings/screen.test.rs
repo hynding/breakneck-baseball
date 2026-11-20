@@ -41,6 +41,9 @@ fn row_consts_agree_with_their_labels() {
         (ROW_TRAIL, "PITCH TRAIL"),
         (ROW_TRAIL_COLOR, "TRAIL COLOR"),
         (ROW_REDUCE_MOTION, "REDUCE MOTION"),
+        (ROW_SHAKE, "CAMERA SHAKE"),
+        (ROW_DUEL_FOV, "DUEL VIEW FOV"),
+        (ROW_REPLAYS, "REPLAYS"),
         (ROW_STRIKE_ZONE, "STRIKE ZONE"),
         (ROW_GRAPHICS, "GRAPHICS"),
         (ROW_VOLUME, "VOLUME"),
@@ -139,4 +142,35 @@ fn edit_settings_cycles_style_and_clamps_volume() {
     kb.press(KeyCode::ArrowRight);
     app.update();
     assert!((app.world().resource::<Settings>().volume - 1.0).abs() < f32::EPSILON);
+}
+
+#[test]
+fn camera_rows_cycle_both_ways() {
+    use crate::game::settings::{CameraShake, ReplayMode};
+    let mut settings = Settings::default();
+    let mut open = SettingsOpen(true);
+    cycle_row(ROW_SHAKE, true, false, false, &mut settings, &mut open);
+    assert_eq!(settings.camera_shake, CameraShake::Off, "Full wraps to Off");
+    cycle_row(ROW_SHAKE, false, false, false, &mut settings, &mut open);
+    assert_eq!(settings.camera_shake, CameraShake::Full);
+    for want in [5, 10, -5, 0] {
+        cycle_row(ROW_DUEL_FOV, true, false, false, &mut settings, &mut open);
+        assert_eq!(settings.duel_fov, want);
+    }
+    cycle_row(ROW_DUEL_FOV, false, false, false, &mut settings, &mut open);
+    assert_eq!(settings.duel_fov, -5);
+    cycle_row(ROW_REPLAYS, true, false, false, &mut settings, &mut open);
+    assert_eq!(settings.replays, ReplayMode::Always);
+    cycle_row(ROW_REPLAYS, false, false, false, &mut settings, &mut open);
+    assert_eq!(settings.replays, ReplayMode::BigPlays);
+    assert!(open.0, "cycling a row keeps the screen open");
+    // Under reduce motion the shake row reads Off and doesn't cycle.
+    settings.reduce_motion = true;
+    cycle_row(ROW_SHAKE, true, false, false, &mut settings, &mut open);
+    assert_eq!(settings.camera_shake, CameraShake::Full);
+}
+
+#[test]
+fn a_hand_edited_duel_fov_snaps_back_to_the_ladder() {
+    assert_eq!(crate::game::settings::cycle_duel_fov(7, true), 0);
 }
