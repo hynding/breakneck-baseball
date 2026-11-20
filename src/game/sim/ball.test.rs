@@ -120,7 +120,10 @@ fn the_flight_lands_where_fielders_predict_it() {
             let (spot, _) = carry_at(fps, ball);
             let gap = spot.distance(predicted);
             assert!(
-                gap < 0.25,
+                // The predictor takes the first 120 Hz sample at or below the
+                // ground, so it can overshoot by one step (~0.2 m); 0.4 m
+                // leaves room for that and still catches a spin mismatch (2.4 m).
+                gap < 0.4,
                 "{speed} m/s at {launch}°: {fps} fps lands {gap:.2} m from the prediction"
             );
         }
