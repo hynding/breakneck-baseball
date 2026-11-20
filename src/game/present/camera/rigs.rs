@@ -17,8 +17,7 @@ use crate::game::variant::FieldSpec;
 
 use super::framing::{LENS_BRUSH_RADIUS, OCCLUSION_NEAR, OCCLUSION_RADIUS, brushes_lens, occludes};
 use super::shots::{
-    BallState, FIELDER_CAM_MIN_HEIGHT, RigMotion, Shot, ShotCues, ShotInputs, decide_grounder,
-    pick_shot,
+    BallState, FIELDER_CAM_MIN_HEIGHT, PlayRead, RigMotion, Shot, ShotCues, ShotInputs, pick_shot,
 };
 use super::{
     BALL_FOLLOW_DELAY, BROADCAST_EYE, BROADCAST_FOV, BROADCAST_HOME_TARGET, CameraMode,
@@ -131,10 +130,13 @@ pub struct BroadcastRig {
     /// The base the live ball was last thrown at, cleared once the shot
     /// returns to the duel.
     thrown_base: Option<usize>,
-    /// Whether this play's ball was hit on the ground, decided once just
-    /// after the plate hold ([`decide_grounder`]); cleared with
-    /// `thrown_base`.
-    grounder: Option<bool>,
+    /// What this play's batted ball has done: the grounder call (made once
+    /// just after the plate hold) and whether it has come down
+    /// ([`PlayRead`]); cleared with `thrown_base`.
+    read: PlayRead,
+    /// Where the ground-ball shot last saw the chasing fielder, held once
+    /// the chase ends so the framing doesn't jump as he gathers the ball.
+    ground_fielder: Option<Vec3>,
 }
 
 impl Default for BroadcastRig {
@@ -143,7 +145,8 @@ impl Default for BroadcastRig {
             motion: RigMotion::new(BROADCAST_EYE, BROADCAST_HOME_TARGET, BROADCAST_FOV),
             shot: None,
             thrown_base: None,
-            grounder: None,
+            read: PlayRead::default(),
+            ground_fielder: None,
         }
     }
 }
@@ -225,17 +228,27 @@ pub(super) fn broadcast_camera(
         vel: vel.linvel,
         spin: vel.angvel,
     });
-    // Decide once, just after the plate hold, whether the ball was hit on
-    // the ground; the answer holds for the play.
-    let ready = play.phase == Phase::InPlay
-        && !play.is_home_run()
-        && play.since_contact(now) >= BALL_FOLLOW_DELAY;
-    rig.grounder = decide_grounder(rig.grounder, ready, ball_state, wind.0);
-    let grounder = rig.grounder == Some(true);
+    // Between plays nothing carries over — also when this camera was off
+    // (the orbit view) for a whole play and never saw its duel frame.
+    if !matches!(play.phase, Phase::InPlay | Phase::Result) {
+        rig.thrown_base = None;
+        rig.read = PlayRead::default();
+        rig.ground_fielder = None;
+    }
+    // Watch the batted ball from contact; just after the plate hold it is
+    // called a grounder or not, and the call holds for the play.
+    if play.phase == Phase::InPlay {
+        let ready = !play.is_home_run() && play.since_contact(now) >= BALL_FOLLOW_DELAY;
+        rig.read.observe(ready, ball_state, wind.0);
+    }
+    let grounder = rig.read.grounder() == Some(true);
+    let landed = rig.read.landed();
     let descending_to = ball.and_then(|(tf, vel)| {
-        // A chopper's high hop is still a grounder's play: no fielder cam.
+        // A chopper's high hop is still a grounder's play, and a fly that
+        // has already come down is not caught on the way down: no fielder
+        // cam for either.
         let coming_down =
-            !grounder && tf.translation.y > FIELDER_CAM_MIN_HEIGHT && vel.linvel.y < 0.0;
+            !grounder && !landed && tf.translation.y > FIELDER_CAM_MIN_HEIGHT && vel.linvel.y < 0.0;
         active
             .chaser()
             .filter(|f| coming_down && rigs.get(*f).is_ok())
@@ -263,10 +276,14 @@ pub(super) fn broadcast_camera(
         ball: ball_state,
         fielder: match shot {
             Shot::FielderCam(f) => rigs.get(f).ok().map(|tf| tf.translation),
-            Shot::GroundBall => active
-                .chaser()
-                .and_then(|f| rigs.get(f).ok())
-                .map(|tf| tf.translation),
+            Shot::GroundBall => {
+                let chaser = active
+                    .chaser()
+                    .and_then(|f| rigs.get(f).ok())
+                    .map(|tf| tf.translation);
+                rig.ground_fielder = chaser.or(rig.ground_fielder);
+                rig.ground_fielder
+            }
             _ => None,
         },
         wind: wind.0,
@@ -280,8 +297,9 @@ pub(super) fn broadcast_camera(
         *trot_start = None;
     }
     if matches!(shot, Shot::Duel(_)) {
+        // (Not the play read: the plate hold is a duel frame too, and the
+        // read watches the ball through it.)
         rig.thrown_base = None;
-        rig.grounder = None;
     }
 
     if rig.shot != Some(shot) {

@@ -355,7 +355,9 @@ pub(super) fn landing_zone_cam(ball: BallState, wind: Vec3, max_behind: f32) -> 
     // Never further behind the plate than the park's own broadcast eye,
     // which is known to be clear of the backstop and the scenery.
     let along = (depth - back).min(ball_along - TRAIL_BACK).max(-max_behind);
-    let eye = Vec3::new(line.x * along, height, line.y * along);
+    // (And never behind it in world z either: for a ball landing behind
+    // the plate the line itself points back toward the backstop.)
+    let eye = Vec3::new(line.x * along, height, (line.y * along).max(-max_behind));
     // Look down the bisector of the ball and the drop zone as the eye sees
     // them, so a lens fitted to both opens the least: a high fly lifts the
     // look-at toward the ball, a grounder barely moves it off the spot.
@@ -394,26 +396,61 @@ const GROUND_CAM_MIN_FOV: f32 = 40.0_f32.to_radians();
 const GROUNDER_HEIGHT: f32 = 1.5;
 const GROUNDER_HANG: f32 = 1.0;
 
-/// Whether this play's ball was hit on the ground, decided **once**: at
-/// the first frame the plate hold is over (`ready`) with a live ball, from
-/// that ball's state, and then kept for the whole play (the rig clears it
-/// with the duel). Deciding later would read every fly ball as a grounder
-/// in its last half-metre, and a held ball as one too.
-pub(super) fn decide_grounder(
-    latch: Option<bool>,
-    ready: bool,
-    ball: Option<BallState>,
-    wind: Vec3,
-) -> Option<bool> {
-    match (latch, ready, ball) {
-        (Some(decided), _, _) => Some(decided),
-        (None, true, Some(b)) => Some(is_grounder(b, wind)),
-        _ => None,
+/// A ball under this height whose climb starts again has bounced: only
+/// the ground turns a falling ball around (the ball ignores the player
+/// capsules), and no pitch is put in play this low, so the swing itself
+/// never reads as a bounce.
+const BOUNCE_HEIGHT: f32 = 0.3;
+
+/// What the rig has learned about this play's batted ball, fed once a frame
+/// from contact ([`PlayRead::observe`]) and cleared between plays.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(super) struct PlayRead {
+    last_vy: Option<f32>,
+    bounced: bool,
+    grounder: Option<bool>,
+    landed: bool,
+}
+
+impl PlayRead {
+    /// One frame of the live play. `ready` is the first frame after the
+    /// plate hold: the grounder call is made **once**, then — from the ball
+    /// at that frame, or from a bounce already seen during the hold (a hard
+    /// chopper can be up on its first hop by then) — and kept for the whole
+    /// play. Deciding later would read every fly ball as a grounder in its
+    /// last half-metre, and a held ball as one too.
+    pub fn observe(&mut self, ready: bool, ball: Option<BallState>, wind: Vec3) {
+        let Some(b) = ball else {
+            return;
+        };
+        let turned_up = self.last_vy.is_some_and(|vy| vy < 0.0) && b.vel.y > 0.0;
+        if turned_up && b.pos.y < BOUNCE_HEIGHT {
+            self.bounced = true;
+        }
+        self.last_vy = Some(b.vel.y);
+        if self.grounder.is_none() && ready {
+            self.grounder = Some(self.bounced || is_grounder(b, wind));
+        }
+        if self.grounder.is_some() && (self.bounced || b.pos.y < BOUNCE_HEIGHT) {
+            self.landed = true;
+        }
+    }
+
+    /// The grounder call, once made.
+    pub fn grounder(&self) -> Option<bool> {
+        self.grounder
+    }
+
+    /// The ball has come down once since the call: a fly that took a high
+    /// hop or came off the wall is not caught on the way down any more, so
+    /// the fielder cam is done for the play.
+    pub fn landed(&self) -> bool {
+        self.landed
     }
 }
 
 /// True for a ball on (or skimming) the ground: low, and coming down at
-/// once. Only meaningful off the bat; see [`decide_grounder`].
+/// once. Only meaningful off the bat; see [`PlayRead::observe`].
 pub(super) fn is_grounder(ball: BallState, wind: Vec3) -> bool {
     if ball.pos.y > GROUNDER_HEIGHT {
         return false;

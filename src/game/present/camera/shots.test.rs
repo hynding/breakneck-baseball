@@ -523,16 +523,17 @@ fn worst_ball_ndc(field: &FieldSpec, start: BallState, aspect: f32) -> (f32, Sho
     let mut ball = start;
     let mut motion = RigMotion::new(field.broadcast_eye, field.broadcast_target, BROADCAST_FOV);
     let mut shot = None;
-    let mut latch = None;
+    let mut read = PlayRead::default();
     let mut worst = (0.0_f32, Shot::BallFollow);
     let mut t = 0.0;
     let mut landed = false;
     while t < 4.0 && !landed {
         fly_step(&mut ball, dt);
         t += dt;
-        latch = decide_grounder(latch, t >= BALL_FOLLOW_DELAY, Some(ball), Vec3::ZERO);
-        let grounder = latch == Some(true);
-        let descending = ball.pos.y > FIELDER_CAM_MIN_HEIGHT && ball.vel.y < 0.0 && !grounder;
+        read.observe(t >= BALL_FOLLOW_DELAY, Some(ball), Vec3::ZERO);
+        let grounder = read.grounder() == Some(true);
+        let descending =
+            ball.pos.y > FIELDER_CAM_MIN_HEIGHT && ball.vel.y < 0.0 && !grounder && !read.landed();
         let mut c = cues(Phase::InPlay);
         c.since_contact = t;
         c.grounder = grounder;
@@ -608,22 +609,27 @@ fn only_grounders_take_the_ground_ball_shot() {
     for (ball, want) in [
         (launch(-6.0, 12.0, 36.0), true),
         (launch(-15.0, -20.0, 30.0), true),
+        // A hard chopper: down at once, then up on a high first hop at the
+        // decision frame — still a grounder.
+        (launch(-20.0, 0.0, 40.0), true),
+        (launch(-35.0, 25.0, 45.0), true),
         (launch(14.0, -10.0, 38.0), false),
         (launch(72.0, 5.0, 30.0), false),
         (launch(30.0, 15.0, 40.0), false),
     ] {
         let mut b = ball;
-        let mut latch = None;
+        let mut read = PlayRead::default();
         let mut t = 0.0;
         // Run past the landing and on through a held ball.
         while t < 8.0 {
             fly_step(&mut b, dt);
             t += dt;
-            latch = decide_grounder(latch, t >= BALL_FOLLOW_DELAY, Some(b), Vec3::ZERO);
+            read.observe(t >= BALL_FOLLOW_DELAY, Some(b), Vec3::ZERO);
             let mut c = cues(Phase::InPlay);
             c.since_contact = t;
-            c.grounder = latch == Some(true);
+            c.grounder = read.grounder() == Some(true);
             if t < BALL_FOLLOW_DELAY {
+                assert_eq!(read.grounder(), None, "decided during the plate hold");
                 continue;
             }
             assert_eq!(
@@ -633,21 +639,68 @@ fn only_grounders_take_the_ground_ball_shot() {
                 ball.vel
             );
         }
-        let held = BallState {
-            pos: Vec3::new(5.0, 1.2, 60.0),
-            vel: Vec3::ZERO,
-            spin: Vec3::ZERO,
-        };
-        assert_eq!(
-            decide_grounder(latch, true, Some(held), Vec3::ZERO),
-            Some(want),
-            "a held ball never changes the call"
+        // A fielder holding the ball chest-high, still, doesn't reopen the
+        // call (it is made once).
+        read.observe(
+            true,
+            Some(BallState {
+                pos: Vec3::new(5.0, 1.2, 60.0),
+                vel: Vec3::ZERO,
+                spin: Vec3::ZERO,
+            }),
+            Vec3::ZERO,
         );
+        assert_eq!(read.grounder(), Some(want), "the call never changes");
+        assert!(read.landed(), "every ball here came down");
     }
     // Nothing is decided before the plate hold ends, or without a ball.
-    let b = launch(-6.0, 12.0, 36.0);
-    assert_eq!(decide_grounder(None, false, Some(b), Vec3::ZERO), None);
-    assert_eq!(decide_grounder(None, true, None, Vec3::ZERO), None);
+    let mut read = PlayRead::default();
+    read.observe(false, Some(launch(-6.0, 12.0, 36.0)), Vec3::ZERO);
+    read.observe(true, None, Vec3::ZERO);
+    assert_eq!(read.grounder(), None);
+}
+
+/// The swing itself is never read as a bounce: a pitch coming down into
+/// the zone and leaving on a fly turns upward well above the bounce
+/// height.
+#[test]
+fn the_swing_is_not_a_bounce() {
+    let mut read = PlayRead::default();
+    let pitch = BallState {
+        pos: Vec3::new(0.0, 0.5, 0.3),
+        vel: Vec3::new(0.0, -3.0, -38.0),
+        spin: Vec3::ZERO,
+    };
+    read.observe(false, Some(pitch), Vec3::ZERO);
+    let mut fly = launch(30.0, 0.0, 40.0);
+    fly.pos.y = 0.5;
+    read.observe(true, Some(fly), Vec3::ZERO);
+    assert_eq!(read.grounder(), Some(false));
+    assert!(!read.landed());
+}
+
+/// A fly that comes down and takes a high hop is done with the fielder
+/// cam: the read marks it landed at the first touchdown.
+#[test]
+fn a_fly_is_landed_after_its_first_touchdown() {
+    let dt = 1.0 / 60.0;
+    let mut b = launch(35.0, 0.0, 34.0);
+    let mut read = PlayRead::default();
+    let mut t = 0.0;
+    let mut was_up = false;
+    while b.pos.y > 0.0 || t < 0.1 {
+        fly_step(&mut b, dt);
+        t += dt;
+        read.observe(t >= BALL_FOLLOW_DELAY, Some(b), Vec3::ZERO);
+        if b.pos.y > 2.0 {
+            was_up = true;
+            assert!(!read.landed(), "landed in the air at {t:.2}");
+        }
+    }
+    assert!(was_up);
+    fly_step(&mut b, dt);
+    read.observe(true, Some(b), Vec3::ZERO);
+    assert!(read.landed());
 }
 
 /// The ball-follow's lens is wider while the ball is high than as it drops
