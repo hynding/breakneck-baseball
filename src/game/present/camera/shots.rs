@@ -22,11 +22,12 @@ use super::{BALL_FOLLOW_DELAY, BROADCAST_FOV, DuelView};
 // ── The shot list ─────────────────────────────────────────────────────────────
 
 /// One subject per shot (TODO 102; the reference grammar in
-/// docs/agent/SMB3-REFERENCE-NOTES.md §2.5–2.6). A change of `Shot` is a
-/// **hard cut** — the rig snaps to the new framing — and smoothing only ever
-/// runs *within* a shot (the ball-follow and the fielder cam tracking their
-/// subjects). The old single rig glided 20–30 m across the park between
-/// framings; a cut announces the new subject instead.
+/// docs/agent/SMB3-REFERENCE-NOTES.md §2.5–2.6). How a change of `Shot`
+/// moves the lens is the new shot's [`Shot::transition_from`]: every shot
+/// today is a **hard cut** (the rig snaps to the new framing), and
+/// smoothing only runs *within* a shot (the ball-follow and the fielder cam
+/// tracking their subjects). The old single rig glided 20–30 m across the
+/// park between framings; a cut announces the new subject instead.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Shot {
     /// The duel framing of the active [`DuelView`] (a V press is a cut too).
@@ -367,22 +368,24 @@ impl RigMotion {
     }
 
     /// Start moving to a new shot. A cut lands this frame; an ease or a
-    /// whip pan starts from wherever the lens is now.
-    pub(super) fn start(&mut self, kind: Transition, to: ShotSpec) {
+    /// whip pan starts from wherever the lens is now and takes this frame's
+    /// first step. A transition with no usable length (zero, negative or
+    /// not finite) is a cut.
+    pub(super) fn start(&mut self, kind: Transition, to: ShotSpec, dt: f32) {
         match kind {
-            Transition::Cut => {
-                self.blend = None;
-                self.set(to);
-            }
-            Transition::Ease { secs } | Transition::WhipPan { secs } if secs <= 0.0 => {
-                self.start(Transition::Cut, to);
-            }
-            _ => {
+            Transition::Ease { secs } | Transition::WhipPan { secs }
+                if secs.is_finite() && secs > 0.0 =>
+            {
                 self.blend = Some(Blend {
                     from: self.current(),
                     kind,
                     elapsed: 0.0,
                 });
+                self.step(to, dt);
+            }
+            _ => {
+                self.blend = None;
+                self.set(to);
             }
         }
     }

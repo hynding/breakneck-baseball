@@ -1,7 +1,8 @@
 //! Camera rigs: the broadcast and orbit systems that actually move the
 //! `Camera3d`, plus the occlusion pass that hides whoever is standing in
-//! the broadcast lens's way. Reads the pure math in [`super::framing`] and
-//! the mode/duel-view state owned by [`super`].
+//! the broadcast lens's way. Reads the shot catalog in [`super::shots`]
+//! (which shot, its framing, how to move between shots), the pure math in
+//! [`super::framing`], and the mode/duel-view state owned by [`super`].
 
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
@@ -265,7 +266,7 @@ pub(super) fn broadcast_camera(
         // A new subject: the shot says how to get there (a cut, today).
         let kind = shot.transition_from(rig.shot);
         rig.shot = Some(shot);
-        rig.motion.start(kind, want);
+        rig.motion.start(kind, want, time.delta_secs());
     } else {
         rig.motion.step(want, time.delta_secs());
     }

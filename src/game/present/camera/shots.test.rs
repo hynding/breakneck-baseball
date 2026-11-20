@@ -249,20 +249,30 @@ fn inputs(field: &FieldSpec) -> ShotInputs<'_> {
     }
 }
 
-/// The catalog frames each shot exactly as the rig did before it existed:
-/// the duel views, the fixed plate shots and the play cams.
+/// The catalog frames each shot as the rig did before it existed: the duel
+/// views, the fixed plate shots and the play cams, with the lenses pinned
+/// to their literal values.
 #[test]
 fn every_shot_keeps_its_framing() {
     let field = VariantId::Standard.field();
     let inp = inputs(&field);
-    for view in [DuelView::BattingZoom, DuelView::CatcherPov] {
+    for view in [
+        DuelView::BattingZoom,
+        DuelView::CatcherPov,
+        DuelView::BehindPitcher,
+        DuelView::BroadcastPlate,
+    ] {
         let (eye, target, fov) = view.framing(&field, DUEL_REFERENCE_ASPECT);
         assert_eq!(Shot::Duel(view).spec(&inp), ShotSpec::new(eye, target, fov));
     }
     let walk = Shot::WalkUp.spec(&inp);
     assert_eq!((walk.eye, walk.target), (WALKUP_EYE, WALKUP_TARGET));
+    assert!((walk.fov.to_degrees() - 42.0).abs() < 1e-3);
     let react = Shot::ReactionCam.spec(&inp);
     assert_eq!((react.eye, react.target), (REACTION_EYE, REACTION_TARGET));
+    assert!((react.fov.to_degrees() - 40.0).abs() < 1e-3);
+    assert!((PLAY_CAM_FOV.to_degrees() - 45.0).abs() < 1e-3);
+    assert_eq!(FOLLOW_RATE, 5.0);
     let (eye, target) = base_cam(&field, 2);
     let base = Shot::BaseCam(2).spec(&inp);
     assert_eq!(
@@ -363,7 +373,7 @@ fn spec(eye: Vec3, target: Vec3, fov: f32) -> ShotSpec {
 fn a_cut_snaps() {
     let mut m = RigMotion::new(Vec3::ZERO, Vec3::Z, 1.0);
     let to = spec(Vec3::new(10.0, 5.0, 0.0), Vec3::new(0.0, 0.0, 50.0), 0.8);
-    m.start(Transition::Cut, to);
+    m.start(Transition::Cut, to, 1.0 / 60.0);
     assert_eq!((m.eye, m.target, m.fov), (to.eye, to.target, to.fov));
     assert!(!m.blending());
 }
@@ -390,16 +400,19 @@ fn within_a_shot_the_lens_follows() {
 fn an_ease_glides_and_lands() {
     let mut m = RigMotion::new(Vec3::ZERO, Vec3::Z, 1.0);
     let to = spec(Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 20.0), 0.5);
-    m.start(Transition::Ease { secs: 1.0 }, to);
+    m.start(Transition::Ease { secs: 1.0 }, to, 0.0);
     assert_eq!(m.eye, Vec3::ZERO, "an ease starts where the lens is");
     for _ in 0..5 {
         m.step(to, 0.1);
     }
     assert!((m.eye.x - 5.0).abs() < 1e-3, "midpoint {}", m.eye.x);
     assert!((m.fov - 0.75).abs() < 1e-4);
-    // The subject moves on: the ease lands on where it is now.
+    // The subject moves on: the ease follows it, then lands on it.
     let moved = spec(Vec3::new(12.0, 0.0, 0.0), to.target, to.fov);
-    for _ in 0..5 {
+    m.step(moved, 0.1);
+    let s = smoothstep(0.6);
+    assert!((m.eye.x - 12.0 * s).abs() < 1e-3, "mid-blend {}", m.eye.x);
+    for _ in 0..4 {
         m.step(moved, 0.1);
     }
     m.step(moved, 0.01);
@@ -412,8 +425,8 @@ fn an_ease_glides_and_lands() {
 fn a_whip_pan_swings_then_cuts() {
     let mut m = RigMotion::new(Vec3::ZERO, Vec3::Z, 1.0);
     let to = spec(Vec3::new(10.0, 0.0, 0.0), Vec3::new(30.0, 0.0, 0.0), 0.5);
-    m.start(Transition::WhipPan { secs: 0.3 }, to);
-    m.step(to, 0.15);
+    m.start(Transition::WhipPan { secs: 0.3 }, to, 0.05);
+    m.step(to, 0.1);
     assert_eq!(m.eye, Vec3::ZERO, "the eye holds during the pan");
     assert!(
         (m.target - Vec3::new(15.0, 0.0, 0.5)).length() < 1e-3,
@@ -424,12 +437,26 @@ fn a_whip_pan_swings_then_cuts() {
     assert_eq!((m.eye, m.target, m.fov), (to.eye, to.target, to.fov));
 }
 
-/// A zero-length ease is a cut.
+/// A transition with no usable length is a cut: zero, negative, NaN or
+/// infinite seconds can never leave the lens stuck mid-blend.
 #[test]
-fn a_zero_length_ease_is_a_cut() {
+fn a_degenerate_transition_is_a_cut() {
+    for secs in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+        for kind in [Transition::Ease { secs }, Transition::WhipPan { secs }] {
+            let mut m = RigMotion::new(Vec3::ZERO, Vec3::Z, 1.0);
+            let to = spec(Vec3::X, Vec3::Y, 0.5);
+            m.start(kind, to, 1.0 / 60.0);
+            assert_eq!(m.eye, Vec3::X, "{kind:?}");
+            assert!(!m.blending());
+        }
+    }
+}
+
+/// A blend's first step uses the frame it starts on.
+#[test]
+fn a_blend_moves_on_its_first_frame() {
     let mut m = RigMotion::new(Vec3::ZERO, Vec3::Z, 1.0);
-    let to = spec(Vec3::X, Vec3::Y, 0.5);
-    m.start(Transition::Ease { secs: 0.0 }, to);
-    assert_eq!(m.eye, Vec3::X);
-    assert!(!m.blending());
+    let to = spec(Vec3::new(10.0, 0.0, 0.0), Vec3::Z, 1.0);
+    m.start(Transition::Ease { secs: 1.0 }, to, 0.1);
+    assert!(m.eye.x > 0.0);
 }
