@@ -19,6 +19,7 @@ use bevy::transform::TransformSystems;
 
 use crate::game::GameState;
 use crate::game::director::Director;
+use crate::game::field::stands_height_under;
 use crate::game::input::Intents;
 use crate::game::settings::Settings;
 use crate::game::variant::FieldSpec;
@@ -32,6 +33,14 @@ const _: () = assert!(INTRO_SECS - LINEUP_FROM >= 3.0);
 /// Real seconds before a press can skip it, so the press that started the
 /// game doesn't skip it unseen.
 pub const SKIP_GRACE: f32 = 0.35;
+
+/// The most one frame advances the intro (real seconds).
+const MAX_STEP: f32 = 0.1;
+
+/// How far over the stands the flyover keeps (m), and how finely it
+/// looks ahead along its path for them.
+const STANDS_CLEARANCE: f32 = 6.0;
+const CLEAR_SAMPLES: usize = 48;
 
 /// The flyover's lens (vertical, radians).
 const FLY_FOV: f32 = 50.0_f32.to_radians();
@@ -89,14 +98,29 @@ pub fn flyover(t: f32, field: &FieldSpec, still: bool) -> (Vec3, Vec3, f32) {
         (t / INTRO_SECS).clamp(0.0, 1.0)
     };
     let s = f * f * (3.0 - 2.0 * f);
-    // Azimuth from +Z (centre field) toward +X, ending at -Z (behind home).
-    let azimuth = s * PI;
-    let radius = field.fence_line * 1.25 + (22.0 - field.fence_line * 1.25) * s;
-    let height = 42.0 + (7.0 - 42.0) * s;
-    let eye = Vec3::new(azimuth.sin() * radius, height, azimuth.cos() * radius);
+    // Never lower than the stands still ahead on the path ask for, so the
+    // swing passes over the first-base seats rather than through them and
+    // the descent never climbs back up.
+    let floor = (0..=CLEAR_SAMPLES)
+        .map(|i| {
+            let ahead = s + (1.0 - s) * i as f32 / CLEAR_SAMPLES as f32;
+            stands_height_under(path(ahead, field), field) + STANDS_CLEARANCE
+        })
+        .fold(0.0, f32::max);
+    let eye = path(s, field);
+    let eye = eye.with_y(eye.y.max(floor));
     let home = Vec3::new(0.0, 1.0, 0.0);
     let mound = Vec3::new(0.0, 1.0, field.pitch_distance * 0.6);
     (eye, home.lerp(mound, s), FLY_FOV)
+}
+
+/// The flyover's eye at eased progress `s` before it clears the stands.
+/// Azimuth from +Z (centre field) toward +X, ending at -Z (behind home).
+fn path(s: f32, field: &FieldSpec) -> Vec3 {
+    let azimuth = s * PI;
+    let radius = field.fence_line * 1.25 + (22.0 - field.fence_line * 1.25) * s;
+    let height = 42.0 + (7.0 - 42.0) * s;
+    Vec3::new(azimuth.sin() * radius, height, azimuth.cos() * radius)
 }
 
 pub struct IntroPlugin;
@@ -152,7 +176,9 @@ fn advance_intro(
     let Some(run) = intro.active.as_mut() else {
         return;
     };
-    run.shown += real.delta_secs();
+    // A hitch (the scene spawning on PLAY BALL, a slow phone) must not eat
+    // the flyover in one frame.
+    run.shown += real.delta_secs().min(MAX_STEP);
     let pressed = run.shown >= SKIP_GRACE && (intents.home.action || intents.away.action);
     let skip = pressed || director.is_some() || disabled.is_some();
     if (skip || run.shown >= INTRO_SECS)

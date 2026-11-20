@@ -187,3 +187,24 @@ fn each_later_half_opens_on_the_cutaway() {
         "one cutaway per later half"
     );
 }
+
+/// A long frame (the scene spawning on PLAY BALL, a slow phone) advances
+/// the intro by one capped step, not by the whole hitch.
+#[test]
+fn a_hitch_does_not_eat_the_intro() {
+    use bevy::time::TimeUpdateStrategy;
+    use std::time::Duration;
+
+    let mut app = game_with_intro();
+    app.update();
+    let before = intro(&app).shown().expect("playing");
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs(3)));
+    app.update();
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
+        DT,
+    )));
+    let after = intro(&app)
+        .shown()
+        .expect("still playing after a 3 s frame");
+    assert!(after - before <= 0.1 + 1e-4, "{before} -> {after}");
+}

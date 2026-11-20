@@ -23,6 +23,11 @@ fn the_flyover_swings_from_centre_field_to_behind_the_plate() {
             let (eye, _, _) = flyover(INTRO_SECS * i as f32 / 50.0, &field, false);
             assert!(eye.y <= prev + 1e-4, "{id:?}: climbs at step {i}");
             assert!(eye.x >= -1e-3, "{id:?}: swings round the first-base side");
+            let stands = crate::game::field::stands_height_under(eye, &field);
+            assert!(
+                eye.y >= stands + 5.0,
+                "{id:?}: through the stands at step {i}: {eye}"
+            );
             prev = eye.y;
         }
     }

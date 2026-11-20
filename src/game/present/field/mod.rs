@@ -36,7 +36,7 @@ mod zone;
 /// resolves unchanged.
 pub use crate::game::rules::{BASE_DISTANCE_M as BASE_DISTANCE, HALF_DIAGONAL, PITCH_DISTANCE};
 
-pub use bowl::{SCOREBOARD_SIZE, scoreboard_centre};
+pub use bowl::{SCOREBOARD_SIZE, scoreboard_centre, stands_height_under};
 pub use diamond::foul_line_spans;
 pub use flags::WindFlag;
 pub use stadium::WALL_HEIGHT;

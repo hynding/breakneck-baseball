@@ -56,8 +56,10 @@ pub(super) fn spawn_lineup_card(mut commands: Commands, theme: Res<Theme>) {
             Visibility::Hidden,
             Node {
                 position_type: PositionType::Absolute,
+                // Centred across the top: the duel cards stand down while
+                // the intro plays, and a narrow phone has no room beside them.
                 top: Val::Percent(14.0),
-                right: Val::Percent(5.0),
+                left: Val::Percent(50.0),
                 padding: UiRect::axes(Val::Px(20.0), Val::Px(16.0)),
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(10.0),
@@ -65,6 +67,9 @@ pub(super) fn spawn_lineup_card(mut commands: Commands, theme: Res<Theme>) {
                 border_radius: BorderRadius::all(Val::Px(12.0)),
                 ..default()
             },
+            // Back by half its own width, so it sits centred whatever its
+            // text measures.
+            UiTransform::from_translation(Val2::percent(-50.0, 0.0)),
             BackgroundColor(hidden_tint(ui.panel_bg)),
             BorderColor::all(hidden_tint(ui.panel_border)),
         ))

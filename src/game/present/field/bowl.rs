@@ -107,6 +107,24 @@ pub fn top_height(theta: f32, field: &FieldSpec) -> f32 {
     front_height(theta, field) + BOWL_DEPTH * BOWL_SLOPE
 }
 
+/// The height of the stands under `p` (m): 0 over the field and in parks
+/// without a bowl, the seating's surface over it, the parapet's top past the
+/// back row. A camera flying over the park keeps above it.
+pub fn stands_height_under(p: Vec3, field: &FieldSpec) -> f32 {
+    if field.scenery != Scenery::Stadium {
+        return 0.0;
+    }
+    let theta = p.x.atan2(p.z);
+    let depth = p.with_y(0.0).length() - inner_radius(theta, field);
+    if depth <= 0.0 {
+        0.0
+    } else if depth >= BOWL_DEPTH {
+        top_height(theta, field) + PARAPET
+    } else {
+        front_height(theta, field) + depth * BOWL_SLOPE
+    }
+}
+
 /// One seat: where, which way it faces, its row and a stable hash.
 #[derive(Clone, Copy, Debug)]
 pub struct Seat {

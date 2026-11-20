@@ -253,11 +253,13 @@ pub(super) fn update_duel_panels(
     order: Res<BattingOrder>,
     rosters: Res<Rosters>,
     theme: Res<Theme>,
+    intro: Res<crate::game::intro::Intro>,
     mut panels: Query<(&mut BackgroundColor, &mut BorderColor, &mut Visibility), With<DuelPanel>>,
     mut lines: Query<(&DuelLine, &mut Text, &mut TextColor)>,
 ) {
-    // Hidden through the walk-up too: its card is the only chrome then.
-    let visible = play.phase.pre_contact() && !play.walkup_active();
+    // Hidden through the walk-up too: its card is the only chrome then. And
+    // through the intro, where the lineup card has the screen.
+    let visible = play.phase.pre_contact() && !play.walkup_active() && !intro.is_playing();
     let ui = &theme.ui;
     for (mut bg, mut border, mut visibility) in &mut panels {
         let desired = if visible {
