@@ -329,6 +329,30 @@ const DODGE_GAP_PX: f32 = 10.0;
 /// scoreboard card whose width follows its text) with some slack.
 const AT_BAT_W_PX: f32 = 214.0;
 const CLUSTER_W_PX: f32 = 275.0;
+/// The AT BAT card's height (UI px), with some slack.
+const AT_BAT_H_PX: f32 = 125.0;
+
+/// A bottom card's window-pixel rect: `side` px in from its own edge (the
+/// left when `from_left`, else the right) and `bottom` px up, `w` by `h`,
+/// all in UI px at `scale`.
+fn card_rect(
+    size: Vec2,
+    scale: f32,
+    side: f32,
+    bottom: f32,
+    w: f32,
+    h: f32,
+    from_left: bool,
+) -> Rect {
+    let x0 = if from_left {
+        side * scale
+    } else {
+        size.x - (side + w) * scale
+    };
+    let y1 = size.y - bottom * scale;
+    Rect::from_corners(Vec2::new(x0, y1 - h * scale), Vec2::new(x0 + w * scale, y1))
+}
+
 /// The corner cluster's height (UI px): the 120 px meter track and its
 /// border, or the scoreboard card, with some slack.
 const CLUSTER_H_PX: f32 = 130.0;
@@ -354,28 +378,54 @@ pub(super) fn dodge_insets(size: Vec2, scale: f32) -> CornerInsets {
             RESTING_INSETS[3],
         ]
     } else {
-        // Each card lifts only over its own control: the AT BAT card over
-        // the pad, the cluster over the SWING button (lower), which keeps
-        // the cluster under the pause button on the right edge where the
-        // screen is wide enough.
+        // The AT BAT card lifts over the pad. The cluster takes the first
+        // spot that clears every control and the card: over the SWING
+        // button in its corner (which keeps it under the pause button
+        // where the screen is wide enough), stepped left of the pause
+        // button, then stacked above the AT BAT card (a portrait phone,
+        // where the two side by side would reach over the pad).
         let over_pad = (size.y - pad.min.y) / scale + DODGE_GAP_PX;
-        // A cluster wide enough to reach over the pad (a portrait phone)
-        // clears the pad too.
-        let cluster_left = size.x - (RESTING_INSETS[2] + CLUSTER_W_PX) * scale;
-        let over_swing = if cluster_left < pad.max.x {
-            over_pad
-        } else {
-            (size.y - swing.min.y) / scale + DODGE_GAP_PX
-        };
-        // If even that reaches the pause button, step the cluster left of it.
+        let over_swing = (size.y - swing.min.y) / scale + DODGE_GAP_PX;
         let pause = crate::game::touch::pause_button_rect(size);
-        let cluster_top = size.y - (over_swing + CLUSTER_H_PX) * scale;
-        let right = if cluster_top < pause.max.y {
-            (size.x - pause.min.x) / scale + DODGE_GAP_PX
-        } else {
-            RESTING_INSETS[2]
+        let left_of_pause = (size.x - pause.min.x) / scale + DODGE_GAP_PX;
+        let stacked = over_pad + AT_BAT_H_PX + DODGE_GAP_PX;
+        let at_bat = card_rect(
+            size,
+            scale,
+            RESTING_INSETS[0],
+            over_pad,
+            AT_BAT_W_PX,
+            AT_BAT_H_PX,
+            true,
+        );
+        let candidates = [
+            (RESTING_INSETS[2], over_swing),
+            (left_of_pause, over_swing),
+            (RESTING_INSETS[2], stacked),
+            (left_of_pause, stacked),
+        ];
+        let clear = |&(right, bottom): &(f32, f32)| {
+            let r = card_rect(
+                size,
+                scale,
+                right,
+                bottom,
+                CLUSTER_W_PX,
+                CLUSTER_H_PX,
+                false,
+            );
+            [pad, swing, pause, at_bat]
+                .iter()
+                .all(|o| o.intersect(r).is_empty())
+                && r.min.x >= 0.0
+                && r.min.y >= 0.0
         };
-        [RESTING_INSETS[0], over_pad, right, over_swing]
+        let (right, bottom) = candidates
+            .iter()
+            .copied()
+            .find(|c| clear(c))
+            .unwrap_or(candidates[3]);
+        [RESTING_INSETS[0], over_pad, right, bottom]
     }
 }
 
