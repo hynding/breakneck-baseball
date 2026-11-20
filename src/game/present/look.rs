@@ -113,7 +113,7 @@ impl CameraLook {
         CameraLook {
             fog,
             grading,
-            sky: budget.sky_dome,
+            sky: budget.sky,
             bloom: budget.bloom,
         }
     }
