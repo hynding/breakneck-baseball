@@ -38,6 +38,22 @@ fn spread(i: usize, k: u32) -> f32 {
     (x ^ (x >> 13)) as f32 / u32::MAX as f32
 }
 
+/// The mesh and material rain splashes share, present only in a rain game.
+#[derive(Resource)]
+pub(super) struct SplashAssets {
+    mesh: Handle<Mesh>,
+    material: Handle<StandardMaterial>,
+}
+
+/// Splashes per second at High, on tiers that budget `weather_fx`.
+pub(super) const SPLASHES_PER_SEC: f32 = 70.0;
+/// How long a splash ring lives (s).
+const SPLASH_SECS: f32 = 0.28;
+/// The patch of ground ahead of the camera the splashes land in (m):
+/// half-width and depth.
+const SPLASH_HALF_WIDTH: f32 = 9.0;
+const SPLASH_DEPTH: f32 = 22.0;
+
 /// Spawns the drops when the game's weather rains.
 pub(super) fn spawn_rain(
     mut commands: Commands,
@@ -45,6 +61,7 @@ pub(super) fn spawn_rain(
     meshes: Option<ResMut<Assets<Mesh>>>,
     materials: Option<ResMut<Assets<StandardMaterial>>>,
 ) {
+    commands.remove_resource::<SplashAssets>();
     let rains = settings.is_some_and(|s| s.weather.spec().rain);
     let (Some(mut meshes), Some(mut materials)) = (meshes, materials) else {
         return;
@@ -52,6 +69,15 @@ pub(super) fn spawn_rain(
     if !rains {
         return;
     }
+    commands.insert_resource(SplashAssets {
+        mesh: meshes.add(Cylinder::new(0.07, 0.004)),
+        material: materials.add(StandardMaterial {
+            base_color: Color::srgba(0.85, 0.90, 1.0, 0.4),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
+    });
     let mesh = meshes.add(Cuboid::new(0.012, 0.55, 0.012));
     let material = materials.add(StandardMaterial {
         base_color: Color::srgba(0.78, 0.84, 0.95, 0.45),
@@ -99,6 +125,68 @@ pub(super) fn fall_rain(
         let base = eye - Vec3::Y * (HEIGHT * 0.5);
         tf.translation =
             base + right * drop.offset.x + Vec3::Y * drop.offset.y + fwd * (drop.offset.z + 3.0);
+    }
+}
+
+/// A splash ring, tagged for the e2e check.
+#[derive(Component)]
+pub struct RainSplash;
+
+/// How many splashes are due this frame: `per_sec` scaled by the tier,
+/// carrying the fraction left over in `owed`.
+pub(super) fn splashes_due(owed: &mut f32, per_sec: f32, scale: f32, dt: f32) -> usize {
+    *owed += per_sec * scale * dt;
+    let due = owed.floor();
+    *owed -= due;
+    due as usize
+}
+
+/// Raindrops splash on the ground ahead of the camera: small rings that
+/// spread and fade, on tiers that budget weather effects (Medium and up).
+pub(super) fn rain_splashes(
+    assets: Option<Res<SplashAssets>>,
+    camera: Query<&GlobalTransform, With<MainCamera>>,
+    time: Res<Time>,
+    mut owed: Local<f32>,
+    mut count: Local<usize>,
+    mut budget: super::budget::FxBudget,
+    mut commands: Commands,
+) {
+    let Some(assets) = assets else { return };
+    let b = budget.budget();
+    if !b.weather_fx {
+        return;
+    }
+    let Ok(cam) = camera.single() else { return };
+    let due = splashes_due(
+        &mut owed,
+        SPLASHES_PER_SEC,
+        b.particle_scale,
+        time.delta_secs(),
+    );
+    if due == 0 {
+        return;
+    }
+    // Already scaled by the tier: claim them at face value.
+    let n = budget.allow_unscaled(due);
+    let eye = cam.translation();
+    let fwd = Vec3::new(cam.forward().x, 0.0, cam.forward().z).normalize_or(Vec3::Z);
+    let right = Vec3::Y.cross(fwd).normalize_or(Vec3::X);
+    for _ in 0..n {
+        *count = count.wrapping_add(1);
+        let i = *count;
+        let at = eye.with_y(0.03)
+            + right * ((spread(i, 7) * 2.0 - 1.0) * SPLASH_HALF_WIDTH)
+            + fwd * (2.0 + spread(i, 8) * SPLASH_DEPTH);
+        commands.spawn((
+            super::particles::Particle::new(Vec3::ZERO, SPLASH_SECS, 0.0, 1.8),
+            RainSplash,
+            GameplayEntity,
+            Mesh3d(assets.mesh.clone()),
+            MeshMaterial3d(assets.material.clone()),
+            Transform::from_translation(at),
+            bevy::light::NotShadowCaster,
+        ));
     }
 }
 

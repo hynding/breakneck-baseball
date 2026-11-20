@@ -408,7 +408,9 @@ pub(super) fn spawn_foul_poles(
         ..default()
     });
     let pole = meshes.add(Cylinder::new(0.12, FOUL_POLE_HEIGHT));
-    for spot in foul_pole_spots(field) {
+    let flags = super::flags::FlagKit::new(meshes, materials);
+    for (i, spot) in foul_pole_spots(field).into_iter().enumerate() {
+        flags.spawn_flag(commands, spot + Vec3::Y * FOUL_POLE_HEIGHT, i as f32 * 2.1);
         commands.spawn((
             super::FoulPole,
             GameplayEntity,

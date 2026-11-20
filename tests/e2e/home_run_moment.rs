@@ -4,7 +4,8 @@
 //! but instead of just asserting the game reaches GAME OVER it watches the
 //! moment play out on screen:
 //!
-//!   * the fireworks show spawns motes (`fx::FireworkSpark`),
+//!   * the fireworks show spawns motes (`fx::FireworkSpark`), and the
+//!     walk-off its confetti (`fx::Confetti`),
 //!   * the camera enters the home-run trot orbit (`Play::is_home_run()` while
 //!     `Phase::Result`), and
 //!   * the walk-off finishes on screen: the winning run sits on the board with
@@ -19,7 +20,7 @@ use bevy_rapier3d::prelude::Velocity;
 
 use breakneck_baseball::game::ball::Baseball;
 use breakneck_baseball::game::flow::{Phase, Play, bat_arrival_z};
-use breakneck_baseball::game::fx::FireworkSpark;
+use breakneck_baseball::game::fx::{Confetti, FireworkSpark};
 use breakneck_baseball::game::input::Intents;
 use breakneck_baseball::game::variant::Ruleset;
 use breakneck_baseball::game::{GameState, ScoreBoard, Team};
@@ -94,12 +95,22 @@ fn walk_off_home_run_is_a_moment_that_finishes_on_screen() {
     pin_classic_contact_windows(&mut app);
 
     let mut saw_fireworks = false;
+    let mut saw_confetti = false;
     let mut saw_trot_orbit = false;
     let mut winning_run_while_playing = false;
 
     let finished = run_until(&mut app, MAX_FRAMES, |app| {
         if firework_motes(app) > 0 {
             saw_fireworks = true;
+        }
+        let world = app.world_mut();
+        if world
+            .query_filtered::<(), With<Confetti>>()
+            .iter(world)
+            .next()
+            .is_some()
+        {
+            saw_confetti = true;
         }
         if *app.world().resource::<State<GameState>>().get() == GameState::Playing {
             let play = app.world().resource::<Play>();
@@ -126,6 +137,7 @@ fn walk_off_home_run_is_a_moment_that_finishes_on_screen() {
         saw_fireworks,
         "the home-run fireworks never spawned any motes"
     );
+    assert!(saw_confetti, "the walk-off never fired its confetti");
     assert!(
         saw_trot_orbit,
         "the camera never entered the trot orbit (is_home_run() during Phase::Result)"

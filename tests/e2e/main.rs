@@ -38,6 +38,7 @@ mod cpu_timing;
 #[cfg(feature = "debug")]
 mod creator;
 mod dressing;
+mod effects;
 mod fielder_spots;
 mod frame_rate;
 mod full_game;

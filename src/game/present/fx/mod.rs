@@ -1,4 +1,6 @@
-//! Impact particles, trails, and fireworks. Purely cosmetic: nothing here
+//! Impact particles, trails, fireworks, and the moment effects (slide
+//! dust, glove pop, chalk, confetti, rain splashes), every burst sized by
+//! the tier's particle budget (`budget`). Purely cosmetic: nothing here
 //! may touch the scoreboard, the bases, or the rules — and nothing here may
 //! touch `Time<Virtual>` either: hit-stop/slow-mo live in `game::juice`,
 //! the single owner of `relative_speed` (a second writer here once raced it
@@ -10,13 +12,17 @@ use crate::game::GameState;
 use crate::game::settings::PitchTrailStyle;
 
 mod ball_read;
+mod budget;
+mod moments;
 mod particles;
 mod rain;
 mod throw;
 mod trail;
 
-pub use particles::FireworkSpark;
-pub use rain::RainDrop;
+pub use budget::LiveParticles;
+pub use moments::{ChalkPuff, Confetti, DirtSpray, GlovePop};
+pub use particles::{FireworkSpark, Particle};
+pub use rain::{RainDrop, RainSplash};
 pub use throw::{DuelThrowBall, throw_arc};
 pub use trail::TrailMote;
 
@@ -37,6 +43,13 @@ struct FxAssets {
     dust: Handle<StandardMaterial>,
     /// A small bright palette the fireworks pick from, burst by burst.
     firework: Vec<Handle<StandardMaterial>>,
+    /// Foul-line chalk, for the puff off a ball landing on a line.
+    chalk: Handle<StandardMaterial>,
+    /// A confetti flake and a streamer: flat paper, seen from both sides.
+    flake_mesh: Handle<Mesh>,
+    streamer_mesh: Handle<Mesh>,
+    /// The fireworks palette plus white, as double-sided paper.
+    confetti: Vec<Handle<StandardMaterial>>,
 }
 
 /// Meshes plus the fade ladder for the chosen colour — built per game start
@@ -81,6 +94,17 @@ impl Plugin for FxPlugin {
                     tick_trail,
                     throw::stage_duel_throw,
                     rain::fall_rain,
+                )
+                    .run_if(in_state(GameState::Playing)),
+            )
+            .add_systems(
+                Update,
+                (
+                    moments::slide_and_dive_spray,
+                    moments::glove_pop,
+                    moments::chalk_puff,
+                    moments::walk_off_confetti,
+                    rain::rain_splashes,
                 )
                     .run_if(in_state(GameState::Playing)),
             )
