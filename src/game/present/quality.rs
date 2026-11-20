@@ -181,7 +181,10 @@ impl RenderBudget {
                 trail_scale: 1.0,
                 fog: true,
                 sky: true,
-                bloom: true,
+                // Off until the exposure rework (plan task 12): under HDR
+                // the tonemapper greys the over-exposed sky toward purple.
+                // The camera path that adds Hdr + Bloom stays in look.rs.
+                bloom: false,
                 surface_detail: true,
                 replay_secs: 12.0,
                 replay_angles: 2,

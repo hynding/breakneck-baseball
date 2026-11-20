@@ -5,7 +5,8 @@
 //!
 //! Each piece follows the tier's [`RenderBudget`]: grading and fog are on at
 //! every tier (both are a few shader instructions), the sky from Medium,
-//! and bloom only on High. The camera's look is re-applied whenever the
+//! and bloom wherever the budget allows it (no tier does until the exposure
+//! rework: HDR tonemapping greys today's over-exposed sky). The camera's look is re-applied whenever the
 //! tier, the sky (theme or weather) or the camera itself changes.
 //!
 //! Bloom renders through the same offscreen route as every other tier

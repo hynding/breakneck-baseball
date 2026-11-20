@@ -92,13 +92,16 @@ Medium and High differ only in MSAA 2x vs 4x and the shadow map here.
 | --- | --- | --- | --- |
 | Low | 97.6 | 122.1 | Fog and colour grading |
 | Medium | 238.2 | 304.3 | + gradient skybox |
-| High | 247.7 | 344.2 | + HDR and bloom |
+| High | 247.7 | 344.2 | + HDR and bloom (since turned off, see below) |
 
 Software WebGL is bound by per-pixel ALU, so fog and grading look dearer
 here than on a GPU. The sky was first a 700 m dome mesh and cost about
 90 ms at Medium, because it shaded the whole screen before the field
 covered it. As a `Skybox` it shades only the visible sky, after the
-opaque pass, and costs about 9 ms. A real-device check of Low (fog on a
+opaque pass, and costs about 9 ms. HDR and bloom on High are now off:
+the scene is over-exposed (a 50k lux sun at Bevy's default exposure), and
+HDR tonemapping greyed the sky toward purple. They return with the
+exposure rework in the time-of-day task. A real-device check of Low (fog on a
 weak phone) is still owed; see below.
 
 ### Ball readability (task 4; same machine and settings as the look pass)
@@ -143,11 +146,10 @@ native.
 3. **Switch tiers mid-game on the phone.** Cycle Low → Medium → High → Auto
    from the pause menu. The UI must never go blank (the wasm/WebGL2 failure
    the single render route exists to avoid), and the view should re-sharpen
-   or soften right away with no black frame that sticks. High turns on HDR
-   and bloom, which need float render targets (`EXT_color_buffer_float`)
-   that some phone WebGL2 drivers lack: on High, the floodlights and
-   fireworks should glow and no frame should go blank. Auto never picks
-   High on the web, so only a hand-picked High is at risk.
+   or soften right away with no black frame that sticks. (HDR and bloom
+   are off on every tier for now; when they return on High, check the
+   floodlights glow and no frame goes blank, since they need float render
+   targets, `EXT_color_buffer_float`, that some phone drivers lack.)
 4. **Rotate the phone at each tier.** Portrait to landscape and back. The 3D
    view should refill the screen at the new size, with nothing stretched or
    letterboxed. In portrait, note whether the HUD cards overlap each other
