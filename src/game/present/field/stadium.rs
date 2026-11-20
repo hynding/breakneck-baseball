@@ -279,6 +279,21 @@ pub(super) fn spawn_front_yard(
         block(Vec3::new(15.0, 1.2, 8.0), Vec3::new(x, 6.2, 44.0), roof);
     }
 
+    // The block runs on past the lot, so a wide shot sees a street rather
+    // than the edge of the world.
+    for x in [-44.0, 44.0] {
+        block(Vec3::new(14.0, 5.5, 7.0), Vec3::new(x, 2.75, 44.0), siding);
+        block(Vec3::new(15.0, 1.2, 8.0), Vec3::new(x, 6.2, 44.0), roof);
+    }
+    for x in [-30.0, 30.0] {
+        block(
+            Vec3::new(12.0, 5.0, 7.0),
+            Vec3::new(x, 2.5, -16.5),
+            neighbour,
+        );
+        block(Vec3::new(13.0, 1.2, 8.0), Vec3::new(x, 5.6, -16.5), roof);
+    }
+
     // Hedges along the lot lines.
     let hedge = Color::srgb(0.13, 0.35, 0.13);
     block(Vec3::new(0.8, 1.0, 16.0), Vec3::new(16.0, 0.5, 10.0), hedge);
@@ -287,6 +302,78 @@ pub(super) fn spawn_front_yard(
         Vec3::new(-16.0, 0.5, 10.0),
         hedge,
     );
+
+    spawn_front_yard_dressing(commands, meshes, materials);
+}
+
+/// Street trees between the houses across the road, one in each back
+/// corner of our lot, and white picket fences on the far lot lines. Every
+/// piece shares one mesh and material per kind, so Bevy batches them into a
+/// handful of draws. Visual only, like the rest of the yard.
+fn spawn_front_yard_dressing(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+) {
+    let matte = |color: Color| StandardMaterial {
+        base_color: color,
+        perceptual_roughness: 1.0,
+        ..default()
+    };
+    let trunk_mesh = meshes.add(Cylinder::new(0.25, 3.0));
+    let canopy_mesh = meshes.add(Sphere::new(2.4).mesh().ico(2).expect("ico 2 is valid"));
+    let trunk_mat = materials.add(matte(Color::srgb(0.33, 0.24, 0.16)));
+    let canopy_mat = materials.add(matte(Color::srgb(0.16, 0.38, 0.14)));
+    // Between the houses across the street, and our back corners.
+    for (x, z, scale) in [
+        (-33.0, 40.0, 1.1),
+        (-11.0, 39.5, 1.0),
+        (11.0, 39.5, 0.9),
+        (33.0, 40.0, 1.15),
+        (-20.0, -11.0, 1.2),
+        (20.0, -11.0, 1.05),
+    ] {
+        commands.spawn((
+            GameplayEntity,
+            Mesh3d(trunk_mesh.clone()),
+            MeshMaterial3d(trunk_mat.clone()),
+            Transform::from_xyz(x, 1.5 * scale, z).with_scale(Vec3::splat(scale)),
+        ));
+        commands.spawn((
+            GameplayEntity,
+            Mesh3d(canopy_mesh.clone()),
+            MeshMaterial3d(canopy_mat.clone()),
+            Transform::from_xyz(x, 4.6 * scale, z).with_scale(Vec3::new(
+                scale,
+                scale * 0.85,
+                scale,
+            )),
+        ));
+    }
+
+    // Picket fences on the lot lines of the yards across the street, from
+    // the sidewalk back to the houses. One picket every 0.3 m.
+    let picket_mesh = meshes.add(Cuboid::new(0.08, 1.0, 0.04));
+    let rail_mesh = meshes.add(Cuboid::new(0.04, 0.06, 7.0));
+    let white = materials.add(matte(Color::srgb(0.92, 0.92, 0.88)));
+    for x in [-33.0, -11.0, 11.0, 33.0] {
+        for y in [0.35, 0.8] {
+            commands.spawn((
+                GameplayEntity,
+                Mesh3d(rail_mesh.clone()),
+                MeshMaterial3d(white.clone()),
+                Transform::from_xyz(x, y, 36.0),
+            ));
+        }
+        for i in 0..24 {
+            commands.spawn((
+                GameplayEntity,
+                Mesh3d(picket_mesh.clone()),
+                MeshMaterial3d(white.clone()),
+                Transform::from_xyz(x, 0.5, 32.55 + i as f32 * 0.3),
+            ));
+        }
+    }
 }
 
 // ── Foul poles ────────────────────────────────────────────────────────────────
