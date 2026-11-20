@@ -108,6 +108,16 @@ pub struct RunGameHintText;
 #[derive(Component)]
 struct DuelPanel;
 
+/// The batter/"AT BAT" duel card (bottom-left): moved clear of the Zone
+/// Pad while it shows (`touch::dodge_zone_pad`).
+#[derive(Component)]
+struct AtBatCard;
+
+/// The bottom-right cluster (Swing Meter track + scoreboard card): moved
+/// clear of the SWING button while it shows (`touch::dodge_zone_pad`).
+#[derive(Component)]
+struct HudCornerCluster;
+
 /// One line of a duel card, updated (and shown/hidden) by phase.
 #[derive(Component)]
 struct DuelLine(DuelLineKind);
@@ -399,6 +409,7 @@ impl Plugin for UiPlugin {
                     // a frame later on some schedule builds than others —
                     // cosmetic, but a per-build tie-break all the same.
                     .after(crate::game::subs::PauseInputSet),
+                touch::dodge_zone_pad.after(touch::paint_touch_overlay),
                 touch::tap_pause
                     .before(crate::game::subs::PauseInputSet)
                     // Before the Paused-state liveness recompute, so this

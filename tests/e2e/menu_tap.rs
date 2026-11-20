@@ -51,14 +51,17 @@ fn tap_one_player_in_window(width: u32, height: u32) {
     );
 
     let ui_scale = app.world().resource::<UiScale>().0;
-    // The topmost laid-out Button is the menu's first row, One Player.
+    // The topmost shown Button is the menu's first row, One Player.
     let mut buttons = app
         .world_mut()
-        .query_filtered::<(&ComputedNode, &UiGlobalTransform), With<Button>>();
+        .query_filtered::<(&ComputedNode, &UiGlobalTransform, &InheritedVisibility), With<Button>>(
+        );
     let (size, center) = buttons
         .iter(app.world())
-        .filter(|(node, _)| node.size().x > 0.0)
-        .map(|(node, t)| {
+        // Shown and laid out: the closed settings screen's rows are
+        // Buttons too, hidden but still laid out behind the menu.
+        .filter(|(node, _, shown)| node.size().x > 0.0 && shown.get())
+        .map(|(node, t, _)| {
             // Physical layout pixels back to window pixels: the inverse
             // scale undoes DPI and UI scale together, so the UI scale is
             // multiplied back in.

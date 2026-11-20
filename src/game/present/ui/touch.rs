@@ -291,6 +291,104 @@ fn paint_region(
     *border = BorderColor::all(stroke);
 }
 
+/// Whether the Zone Pad and SWING button are drawn: exactly while the
+/// translator claims their regions (the shared predicate, so drawn
+/// controls whose touches would do something else entirely can never stay
+/// on screen). The translator only runs in `Playing`, so while Paused the
+/// gameplay chrome hides: an active-looking pad over the pause board would
+/// be dead to the touch.
+fn zone_pad_shown(
+    state: &State<crate::game::GameState>,
+    controllers: &crate::game::input::Controllers,
+    score: &ScoreBoard,
+    settings: &Settings,
+    play: &crate::game::flow::Play,
+) -> bool {
+    let touch_team = controllers.touch_team;
+    *state.get() == crate::game::GameState::Playing
+        && touch_team.is_some()
+        && crate::game::touch::zone_pad_active(
+            settings.touch_scheme,
+            touch_team == Some(score.batting_team()),
+            play.phase,
+        )
+}
+
+/// The HUD's bottom corners, in UI pixels: (AT BAT card's left, its
+/// bottom, the bottom-right cluster's right, its bottom).
+pub(super) type CornerInsets = [f32; 4];
+
+/// Where the bottom HUD cards rest: 14 px in from each corner.
+pub(super) const RESTING_INSETS: CornerInsets = [14.0, 14.0, 14.0, 14.0];
+
+/// Gap kept between a moved card and the control it steps clear of (UI px).
+const DODGE_GAP_PX: f32 = 10.0;
+
+/// Where the bottom HUD cards go while the Zone Pad shows, for a window of
+/// `size` logical pixels at UI scale `scale`: the pad fills the
+/// bottom-left corner and the SWING button the bottom-right, right where
+/// the AT BAT card and the scoreboard sit. In a landscape window the cards
+/// slide inward beside the controls (the field above stays clear); a
+/// portrait window has no room between them, so the cards lift above the
+/// pad's top edge instead.
+pub(super) fn dodge_insets(size: Vec2, scale: f32) -> CornerInsets {
+    let scale = scale.max(1e-3);
+    let pad = crate::game::touch::pad_rect(size);
+    let swing = crate::game::touch::swing_button_rect(size);
+    if size.y > size.x {
+        let lift = (size.y - pad.min.y.min(swing.min.y)) / scale + DODGE_GAP_PX;
+        [RESTING_INSETS[0], lift, RESTING_INSETS[2], lift]
+    } else {
+        [
+            pad.max.x / scale + DODGE_GAP_PX,
+            RESTING_INSETS[1],
+            (size.x - swing.min.x) / scale + DODGE_GAP_PX,
+            RESTING_INSETS[3],
+        ]
+    }
+}
+
+/// Moves the bottom HUD cards clear of the Zone Pad and SWING button while
+/// they show, and back to their corners after. On a phone the cards sat
+/// right over both (portrait and landscape alike), so a thumb aiming at
+/// the pad landed on the batter's card. Only the painted roots' offsets
+/// change, and only when the target moved (the wasm UI rule; no per-frame
+/// `Node` writes).
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+pub(super) fn dodge_zone_pad(
+    windows: Query<&Window, With<PrimaryWindow>>,
+    state: Res<State<crate::game::GameState>>,
+    controllers: Res<crate::game::input::Controllers>,
+    settings: Res<Settings>,
+    score: Res<ScoreBoard>,
+    play: Res<crate::game::flow::Play>,
+    ui_scale: Res<UiScale>,
+    mut at_bat: Query<&mut Node, (With<super::AtBatCard>, Without<super::HudCornerCluster>)>,
+    mut cluster: Query<&mut Node, (With<super::HudCornerCluster>, Without<super::AtBatCard>)>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let insets = if zone_pad_shown(&state, &controllers, &score, &settings, &play) {
+        dodge_insets(window.size(), ui_scale.0)
+    } else {
+        RESTING_INSETS
+    };
+    let [left, low_left, right, low_right] = insets.map(Val::Px);
+    for mut node in &mut at_bat {
+        if node.left != left || node.bottom != low_left {
+            node.left = left;
+            node.bottom = low_left;
+        }
+    }
+    for mut node in &mut cluster {
+        if node.right != right || node.bottom != low_right {
+            node.right = right;
+            node.bottom = low_right;
+        }
+    }
+}
+
 /// Repaints the chrome from the selected scheme and whose turn it is —
 /// but only when an input actually changed (or the window resized): the
 /// unguarded version dirtied `Node`s every frame, forcing a UI relayout per
@@ -329,18 +427,10 @@ pub(super) fn paint_touch_overlay(
     let seen = gestures.touch_seen();
     // The same resolved ownership the translator merges by.
     let touch_team = controllers.touch_team;
-    let batting = touch_team == Some(score.batting_team());
     let scheme = settings.touch_scheme;
-    // Exactly while the translator claims the pad/button regions — the
-    // shared predicate, so drawn controls whose touches would do something
-    // else entirely can never stay on screen. The translator only runs in
-    // `Playing`, so while Paused (this system runs there too — the pause
-    // button resumes) the gameplay chrome hides: an active-looking pad
-    // over the pause board would be dead to the touch.
     let playing = *state.get() == crate::game::GameState::Playing;
-    let show_zone_pad = playing
-        && touch_team.is_some()
-        && crate::game::touch::zone_pad_active(scheme, batting, play.phase);
+    let batting = touch_team == Some(score.batting_team());
+    let show_zone_pad = zone_pad_shown(&state, &controllers, &score, &settings, &play);
     // One predicate shared with `tap_pause`, so the button can never be an
     // invisible-but-live target.
     let show_pause = crate::game::touch::pause_chrome_visible(touch_team, seen);
@@ -458,3 +548,7 @@ pub(super) fn tap_pause(
         tapped.0 = true;
     }
 }
+
+#[cfg(test)]
+#[path = "touch.test.rs"]
+mod tests;

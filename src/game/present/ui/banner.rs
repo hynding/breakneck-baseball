@@ -215,6 +215,7 @@ pub(super) fn spawn_duel_panels(commands: &mut Commands, theme: &Theme) {
                 BackgroundColor(ui.panel_bg),
                 BorderColor::all(ui.panel_border),
             ))
+            .insert_if(super::AtBatCard, || side == 0)
             .with_children(|card| {
                 for kind in kinds {
                     let (size, color) = match kind {

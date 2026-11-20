@@ -114,9 +114,8 @@ impl TouchScheme {
 
 /// Which plays get an instant replay (`game::replay`). A play that ends the
 /// half-inning never does: the rigs are already dressed for the next half,
-/// and a replay carries only poses. The settings row
-/// arrives with the camera settings (plan task 14); until then the store
-/// field can be edited by hand.
+/// and a replay carries only poses. Cycled from the settings screen's
+/// REPLAYS row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ReplayMode {
     /// Never.
@@ -126,6 +125,84 @@ pub enum ReplayMode {
     BigPlays,
     /// Every ball hit (fouls that went into play included).
     Always,
+}
+
+impl ReplayMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            ReplayMode::Off => "Off",
+            ReplayMode::BigPlays => "Big plays",
+            ReplayMode::Always => "Always",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            ReplayMode::Off => ReplayMode::BigPlays,
+            ReplayMode::BigPlays => ReplayMode::Always,
+            ReplayMode::Always => ReplayMode::Off,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        self.next().next()
+    }
+}
+
+/// How hard the broadcast camera jolts on contact and off the wall
+/// (`camera::CameraKick`). Reduce motion turns it off whatever this says.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum CameraShake {
+    Off,
+    Low,
+    #[default]
+    Full,
+}
+
+impl CameraShake {
+    pub fn label(self) -> &'static str {
+        match self {
+            CameraShake::Off => "Off",
+            CameraShake::Low => "Low",
+            CameraShake::Full => "Full",
+        }
+    }
+
+    /// The share of the authored kick this setting lets through.
+    pub fn scale(self) -> f32 {
+        match self {
+            CameraShake::Off => 0.0,
+            CameraShake::Low => 0.4,
+            CameraShake::Full => 1.0,
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            CameraShake::Off => CameraShake::Low,
+            CameraShake::Low => CameraShake::Full,
+            CameraShake::Full => CameraShake::Off,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        self.next().next()
+    }
+}
+
+/// The steps the duel view's field of view can be nudged by (degrees): a
+/// touch tighter, as authored, or up to ten degrees wider for players who
+/// want more of the field around the pitch.
+pub const DUEL_FOV_STEPS: [i8; 4] = [-5, 0, 5, 10];
+
+/// The next (or previous) step of [`DUEL_FOV_STEPS`] from `deg`; a value
+/// off the ladder (a hand-edited store) snaps to as authored.
+pub fn cycle_duel_fov(deg: i8, right: bool) -> i8 {
+    let n = DUEL_FOV_STEPS.len();
+    let Some(i) = DUEL_FOV_STEPS.iter().position(|&d| d == deg) else {
+        return 0;
+    };
+    DUEL_FOV_STEPS[if right { (i + 1) % n } else { (i + n - 1) % n }]
 }
 
 /// Which look the pitch trail wears (consumed by `game::fx`'s trail systems):
@@ -349,7 +426,8 @@ pub struct Settings {
     /// mid-game; defaults on, serde-defaulted for old stores.
     #[serde(default = "default_true")]
     pub show_strike_zone: bool,
-    /// Accessibility: suppress hit-stop, slow-mo, and the camera kick
+    /// Accessibility: suppress hit-stop, slow-mo, the camera kick, camera
+    /// eases and whip pans, and the home-run orbit's sweep
     /// (`juice::motion_enabled` is the gate). Serde-defaulted off so old
     /// stores keep their other options.
     #[serde(default)]
@@ -377,6 +455,14 @@ pub struct Settings {
     /// Which plays get an instant replay (serde-defaulted to big plays).
     #[serde(default)]
     pub replays: ReplayMode,
+    /// How hard the camera jolts on contact (serde-defaulted to Full, the
+    /// long-standing kick).
+    #[serde(default)]
+    pub camera_shake: CameraShake,
+    /// Degrees added to the duel views' field of view, one of
+    /// [`DUEL_FOV_STEPS`] (serde-defaulted to 0, as authored).
+    #[serde(default)]
+    pub duel_fov: i8,
     /// Master volume, 0.0..=1.0, applied via [`bevy::audio::GlobalVolume`].
     pub volume: f32,
     /// Regular-season length for the *next* short season (menu **L**; one
@@ -413,6 +499,8 @@ impl Default for Settings {
             fences: Default::default(),
             time_of_day: Default::default(),
             replays: ReplayMode::default(),
+            camera_shake: CameraShake::default(),
+            duel_fov: 0,
             volume: 0.7,
             season_length: season::DEFAULT_SEASON_LENGTH,
             season: None,
@@ -426,6 +514,10 @@ impl Settings {
     pub fn clamped(&self) -> Self {
         let mut result = self.clone();
         result.volume = result.volume.clamp(0.0, 1.0);
+        // A hand-edited lens nudge off the ladder plays as authored.
+        if !DUEL_FOV_STEPS.contains(&result.duel_fov) {
+            result.duel_fov = 0;
+        }
         if !season::SEASON_LENGTHS.contains(&result.season_length) {
             result.season_length = season::DEFAULT_SEASON_LENGTH;
         }
