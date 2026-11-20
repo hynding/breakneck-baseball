@@ -33,6 +33,9 @@ pub(super) fn grass_image() -> Image {
     tiling_image(SIZE as u32, data)
 }
 
+/// The clay's colour before speckles (sRGB): what the cleat marks and worn clay darken.
+pub(super) const DIRT_RGB: [u8; 3] = [194, 153, 108];
+
 /// Infield dirt: warm clay with darker speckles.
 pub(super) fn dirt_image() -> Image {
     const SIZE: usize = 64;
@@ -44,7 +47,11 @@ pub(super) fn dirt_image() -> Image {
             let (r, g, b) = if hash01(seed * 1.7) > 0.93 {
                 (150.0, 115.0, 82.0) // a pebble
             } else {
-                (194.0, 153.0, 108.0)
+                (
+                    f32::from(DIRT_RGB[0]),
+                    f32::from(DIRT_RGB[1]),
+                    f32::from(DIRT_RGB[2]),
+                )
             };
             let at = (y * SIZE + x) * 4;
             data[at] = (r + n) as u8;

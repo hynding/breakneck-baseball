@@ -263,11 +263,23 @@ native.
 10. **Persistence.** Pick a non-Auto tier, reload the page, and confirm it's
     still selected.
 11. **The intro.** Start a game at each tier. The camera should fly from high
-    over centre field, over the first-base stands (never through them), and
+    over centre field, over the third-base stands (never through them), and
     settle behind home in about 5 s, with the lineup card centred at the top
     for the second half and the pitching card hidden until it ends. A tap or
     button press skips it. On a slow phone it may run longer than 5 s of wall
     time, since one frame advances it at most 0.1 s; note how long it feels.
+12. **Ground detail.** On High, the turf should vary gently in shade, the
+    grass and clay should look textured up close (normal maps), the base
+    paths and the rim of the home circle should read worn and darker, and
+    after the first pitch the batter's boxes should show cleat marks that
+    deepen over the game (around pitches 40, 120 and 220). The worn clay,
+    turf shade and normal maps are set at game start, so a tier change
+    mid-game shows them from the next game (the cleat marks follow at
+    once). Medium shows the shade and cleat marks but flat clay; Low shows
+    none of it. On a desktop
+    GPU, note whether High holds the frame rate Medium does. In a software
+    browser renderer High cost about 8% more per frame than before this
+    change, Medium about 3%, Low nothing.
 
 If something looks off, tell the thread the device, the browser, the tier,
 what the settings row read, and what you saw (a screenshot helps).

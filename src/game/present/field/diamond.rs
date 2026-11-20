@@ -40,8 +40,11 @@ pub(super) fn spawn_field(
     // Rain soaks the ground: darker everywhere, glossy where the tier
     // budgets the reflections. Picked once at game start like the rest of
     // the park (a mid-game tier step-down keeps the wet sheen it has).
-    let glossy = active.is_some_and(|a| a.budget().wet_reflections);
-    let surfaces = FieldSurfaces::build(&mut images, &lights, weather.rain, glossy);
+    let budget = active.map(|a| a.budget());
+    let glossy = budget.is_some_and(|b| b.wet_reflections);
+    // Surface detail too, though its decals follow a mid-game change.
+    let detail = budget.map_or((false, false), |b| (b.surface_color, b.surface_detail));
+    let surfaces = FieldSurfaces::build(&mut images, &lights, weather.rain, glossy, detail);
     match field.scenery {
         Scenery::Stadium => {
             super::stadium::spawn_stadium_ground(
@@ -56,6 +59,19 @@ pub(super) fn spawn_field(
                 &mut materials,
                 &surfaces,
                 &field,
+            );
+            super::surface::spawn_cleat_marks(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &mut images,
+                [-1.0, 1.0].map(|side| {
+                    (
+                        Vec3::new(side * BOX_CENTER_X, 0.0, 0.0),
+                        Vec2::new(BOX_HALF_WIDTH, BOX_HALF_LENGTH),
+                    )
+                }),
+                surfaces.clay(),
             );
             super::stadium::spawn_foul_poles(&mut commands, &mut meshes, &mut materials, &field);
             super::stadium::spawn_outfield_wall(&mut commands, &mut meshes, &mut materials, &field);
@@ -568,14 +584,14 @@ fn spawn_stadium_mound(
     // The sloped skirt: a broad, shallow ring under the mound proper.
     commands.spawn((
         GameplayEntity,
-        Mesh3d(meshes.add(Cylinder::new(3.6, 0.1))),
+        Mesh3d(surfaces.mesh(meshes, Cylinder::new(3.6, 0.1))),
         MeshMaterial3d(dirt.clone()),
         Transform::from_xyz(0.0, 0.05, field.pitch_distance),
     ));
     commands.spawn((
         super::PitchersMound,
         GameplayEntity,
-        Mesh3d(meshes.add(Cylinder::new(2.74, 0.25))), // 9 ft radius, 10 in high
+        Mesh3d(surfaces.mesh(meshes, Cylinder::new(2.74, 0.25))), // 9 ft radius, 10 in high
         MeshMaterial3d(dirt),
         Transform::from_xyz(0.0, 0.125, field.pitch_distance),
         RigidBody::Fixed,

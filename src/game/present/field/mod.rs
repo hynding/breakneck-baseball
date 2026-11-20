@@ -24,6 +24,7 @@ mod bowl;
 mod diamond;
 mod flags;
 mod stadium;
+mod surface;
 mod textures;
 mod zone;
 
@@ -40,6 +41,7 @@ pub use bowl::{SCOREBOARD_SIZE, scoreboard_centre, stands_height_under};
 pub use diamond::foul_line_spans;
 pub use flags::WindFlag;
 pub use stadium::WALL_HEIGHT;
+pub use surface::{CLEAT_STAGES, CleatMarks, CleatWear, SurfaceDecal, cleat_stage};
 
 // ── Field-object marker components ───────────────────────────────────────────
 /// Marks the entire playing-surface ground plane.
@@ -104,6 +106,15 @@ struct FieldSurfaces {
     dirt_tint: Color,
     /// Perceptual roughness of both surfaces: matte, or glossier when wet.
     roughness: f32,
+    /// The turf's and clay's normal maps, on tiers that budget them
+    /// (`RenderBudget::surface_detail`).
+    normals: Option<(Handle<Image>, Handle<Image>)>,
+    /// The turf varies in shade across the park
+    /// (`RenderBudget::surface_color`).
+    varied: bool,
+    /// The clay is worn down the runners' lanes and round home
+    /// (`RenderBudget::surface_detail`).
+    worn: bool,
 }
 
 /// Dry turf and clay: fully matte.
@@ -116,8 +127,16 @@ const WET_DARKEN: f32 = 0.78;
 
 impl FieldSurfaces {
     /// `wet` darkens both surfaces (rain); `glossy` also lowers their
-    /// roughness (rain on a tier with `RenderBudget::wet_reflections`).
-    fn build(images: &mut Assets<Image>, dressing: &FieldTheme, wet: bool, glossy: bool) -> Self {
+    /// roughness (rain on a tier with `RenderBudget::wet_reflections`);
+    /// `detail` is the tier's surface colour and detail
+    /// (`RenderBudget::surface_color`, `surface_detail`).
+    fn build(
+        images: &mut Assets<Image>,
+        dressing: &FieldTheme,
+        wet: bool,
+        glossy: bool,
+        detail: (bool, bool),
+    ) -> Self {
         let darken = |c: Color| {
             if !wet {
                 return c;
@@ -139,7 +158,39 @@ impl FieldSurfaces {
             } else {
                 DRY_ROUGHNESS
             },
+            normals: detail.1.then(|| {
+                (
+                    images.add(surface::grass_normal_image()),
+                    images.add(surface::dirt_normal_image()),
+                )
+            }),
+            varied: detail.0,
+            worn: detail.1,
         }
+    }
+
+    /// The clay's own colour, texture times tint: the cleat marks' base.
+    fn clay(&self) -> Color {
+        let [r, g, b] = textures::DIRT_RGB;
+        let base = Color::srgb_u8(r, g, b).to_linear();
+        let tint = self.dirt_tint.to_linear();
+        Color::LinearRgba(LinearRgba::rgb(
+            base.red * tint.red,
+            base.green * tint.green,
+            base.blue * tint.blue,
+        ))
+    }
+
+    /// Adds a mesh for turf or clay, with the tangents a normal map needs
+    /// on tiers that have them.
+    fn mesh(&self, meshes: &mut Assets<Mesh>, mesh: impl Into<Mesh>) -> Handle<Mesh> {
+        let mut mesh = mesh.into();
+        if self.normals.is_some()
+            && let Err(e) = mesh.generate_tangents()
+        {
+            warn!("surface detail: no tangents for a ground mesh ({e})");
+        }
+        meshes.add(mesh)
     }
 
     /// The grass material, tiled `repeats` times across a unit UV face.
@@ -151,6 +202,7 @@ impl FieldSurfaces {
         Self::tiled(
             materials,
             &self.grass,
+            self.normals.as_ref().map(|n| &n.0),
             self.grass_tint,
             self.roughness,
             repeats,
@@ -166,6 +218,7 @@ impl FieldSurfaces {
         Self::tiled(
             materials,
             &self.dirt,
+            self.normals.as_ref().map(|n| &n.1),
             self.dirt_tint,
             self.roughness,
             repeats,
@@ -177,6 +230,7 @@ impl FieldSurfaces {
     fn tiled(
         materials: &mut Assets<StandardMaterial>,
         texture: &Handle<Image>,
+        normal: Option<&Handle<Image>>,
         tint: Color,
         roughness: f32,
         repeats: f32,
@@ -184,6 +238,7 @@ impl FieldSurfaces {
         materials.add(StandardMaterial {
             base_color: tint,
             base_color_texture: Some(texture.clone()),
+            normal_map_texture: normal.cloned(),
             uv_transform: Affine2::from_scale(Vec2::splat(repeats)),
             perceptual_roughness: roughness,
             ..default()
@@ -196,35 +251,41 @@ pub struct FieldPlugin;
 
 impl Plugin for FieldPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            crate::game::game_start(),
-            (diamond::spawn_field, bowl::spawn_bowl),
-        )
-        .add_systems(
-            Update,
-            (
-                bowl::build_crowd,
-                bowl::cheer_crowd,
-                bowl::update_scoreboard,
-                bowl::tower_lights_follow_budget,
-                (flags::flags_follow_budget, flags::wave_flags).chain(),
+        app.init_resource::<surface::CleatWear>()
+            .add_systems(
+                crate::game::game_start(),
+                (
+                    diamond::spawn_field,
+                    bowl::spawn_bowl,
+                    surface::reset_cleat_wear,
+                ),
             )
-                .run_if(in_state(GameState::Playing)),
-        )
-        .add_systems(
-            Update,
-            // trigger/restore before visibility: a same-frame contact
-            // must land in `ZoneFlash` before `strike_zone_visibility`
-            // reads it, or the box hides for the one frame the read
-            // beat the write — see that system's doc comment.
-            (
-                zone::trigger_zone_flash,
-                zone::restore_zone_flash,
-                zone::strike_zone_visibility,
-                zone::pci_cursor_visibility,
+            .add_systems(
+                Update,
+                (
+                    bowl::build_crowd,
+                    bowl::cheer_crowd,
+                    bowl::update_scoreboard,
+                    bowl::tower_lights_follow_budget,
+                    (surface::count_pitches, surface::decals_follow_budget).chain(),
+                    (flags::flags_follow_budget, flags::wave_flags).chain(),
+                )
+                    .run_if(in_state(GameState::Playing)),
             )
-                .chain()
-                .run_if(in_state(GameState::Playing)),
-        );
+            .add_systems(
+                Update,
+                // trigger/restore before visibility: a same-frame contact
+                // must land in `ZoneFlash` before `strike_zone_visibility`
+                // reads it, or the box hides for the one frame the read
+                // beat the write — see that system's doc comment.
+                (
+                    zone::trigger_zone_flash,
+                    zone::restore_zone_flash,
+                    zone::strike_zone_visibility,
+                    zone::pci_cursor_visibility,
+                )
+                    .chain()
+                    .run_if(in_state(GameState::Playing)),
+            );
     }
 }

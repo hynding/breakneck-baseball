@@ -17,6 +17,8 @@
 //
 //   node tools/frame_cost.mjs <url> [out-dir] [seconds-per-tier] [viewport WxH] [menu-keys]
 //
+// `TIERS=medium,high` (env) measures only those tiers.
+//
 // `menu-keys` are main-menu hotkey letters pressed before the game starts,
 // e.g. `wwww` for Rain or `wwwwn` for Rain at Night (W cycles the weather
 // Fair, Hot, Cold, Windy, Rain; N cycles the time of day from Afternoon to
@@ -54,7 +56,7 @@ const browser = await chromium.launch({
   args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist'],
 });
 const report = {};
-for (const tier of ['low', 'medium', 'high']) {
+for (const tier of (process.env.TIERS||'low,medium,high').split(',')) {
   const page = await browser.newPage({ viewport: { width: vw, height: vh }, deviceScaleFactor: 1 });
   const logs = [];
   page.on('console', (m) => logs.push(m.text()));
@@ -76,6 +78,14 @@ for (const tier of ['low', 'medium', 'high']) {
   }
   await page.keyboard.press('Digit1');
   await until(/bb-state playing/, 120_000);
+  // Skip the PLAY BALL intro (any action press after its short grace) and
+  // wait for it to end, so every tier is measured on the game view, not
+  // the flyover. The press lands well inside the intro: one frame advances
+  // it at most 0.1 s, so it lasts at least its 5 s even on a fast machine.
+  await page.waitForTimeout(2500);
+  await page.keyboard.press('Space');
+  await until(/bb-intro over/, 120_000);
+  await page.waitForTimeout(3000);
   const startAt = logs.length;
   await page.waitForTimeout(secs * 1000);
   await page.screenshot({ path: join(outDir, `${tier}.png`) });

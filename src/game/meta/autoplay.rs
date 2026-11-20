@@ -465,6 +465,17 @@ mod beacon {
         fired.0 = false;
     }
 
+    /// The PLAY BALL intro finishing, played out or skipped, so a script
+    /// can wait for the game view (tools/frame_cost.mjs).
+    /// Keyed on the intro count, so an intro a Director skips on its first
+    /// frame still logs, and one left mid-way by quitting doesn't log late.
+    fn intro_beacon(intro: Res<crate::game::intro::Intro>, mut logged: Local<u32>) {
+        if !intro.is_playing() && intro.played > *logged {
+            *logged = intro.played;
+            log("bb-intro over");
+        }
+    }
+
     pub struct WebBeaconPlugin;
 
     impl Plugin for WebBeaconPlugin {
@@ -476,7 +487,7 @@ mod beacon {
                 .add_systems(crate::game::game_start(), reset_first_pitch)
                 .add_systems(
                     Update,
-                    (first_pitch, walk_up_beacon, contact_beacon)
+                    (first_pitch, walk_up_beacon, contact_beacon, intro_beacon)
                         .run_if(in_state(GameState::Playing)),
                 );
         }
