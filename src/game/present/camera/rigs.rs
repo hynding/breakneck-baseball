@@ -18,7 +18,6 @@ use crate::game::variant::FieldSpec;
 
 use super::framing::{LENS_BRUSH_RADIUS, OCCLUSION_NEAR, OCCLUSION_RADIUS, brushes_lens, occludes};
 use super::sequence::sequence_shot;
-use crate::game::replay::BigMomentCue;
 use super::shots::{
     BallState, FIELDER_CAM_MIN_HEIGHT, PlayRead, RUNNER_CAM_MIN_START_SECS, RigMotion, RunnerFrame,
     Shot, ShotCues, ShotInputs, pick_runner_subject, pick_shot, runner_cam_wanted, throw_secs_left,
@@ -27,6 +26,7 @@ use super::{
     BALL_FOLLOW_DELAY, BROADCAST_EYE, BROADCAST_FOV, BROADCAST_HOME_TARGET, CameraMode,
     DUEL_REFERENCE_ASPECT, DuelView,
 };
+use crate::game::replay::BigMomentCue;
 
 // ── Occlusion ─────────────────────────────────────────────────────────────────
 
@@ -393,7 +393,7 @@ pub(super) fn broadcast_camera(
         sequence: cue
             .playing()
             .filter(|_| play.phase == Phase::Result)
-            .and_then(|m| sequence_shot(m, play.result_elapsed_secs())),
+            .and_then(|m| sequence_shot(m, cue.since_call(now))),
     };
     let shot = pick_shot(&cues, rig.shot);
 

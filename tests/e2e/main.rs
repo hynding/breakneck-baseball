@@ -25,6 +25,7 @@ mod base_cam;
 mod baserunning_breaks;
 mod batter_runs;
 mod batting_styles;
+mod big_moments;
 mod call_beat;
 mod camera_views;
 mod catcher_crouch;
