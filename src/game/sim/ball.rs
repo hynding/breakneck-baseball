@@ -1,8 +1,9 @@
 //! Baseball physics — the ball entity and all systems that act on it.
 //!
 //! The ball is a dynamic Rapier rigid body with realistic restitution and
-//! friction coefficients, and an aerodynamic drag force applied every physics
-//! tick to simulate air resistance.
+//! friction coefficients, plus aerodynamic drag and Magnus lift applied once
+//! per frame (Rapier then integrates the whole frame in substeps; see
+//! `physics_clock`).
 //!
 //! **Key constants** (official MLB baseball):
 //! - Diameter: 2.9 – 3.0 in  ≈ **0.074 m** (radius ≈ 0.037 m)
@@ -141,12 +142,6 @@ fn detect_wall_bang(
 }
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
-
-/// The aero systems alone, in the plugin's order, for the flight tests.
-#[cfg(test)]
-fn add_aero_systems(app: &mut App, _when: fn() -> bool) {
-    app.add_systems(Update, (apply_drag, apply_magnus).chain());
-}
 
 pub struct BallPlugin;
 
