@@ -212,6 +212,12 @@ pub(super) fn decay_kick(real: Res<Time<Real>>, mut kick: ResMut<CameraKick>) {
     kick.0 *= (-14.0 * real.delta_secs()).exp();
 }
 
+/// Runners on a base path, and rigs that have left the field.
+type RunnerPaths<'w, 's> = (
+    Query<'w, 's, (Entity, &'static BasePath)>,
+    Query<'w, 's, (), With<Departed>>,
+);
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn broadcast_camera(
     time: Res<Time>,
@@ -226,8 +232,8 @@ pub(super) fn broadcast_camera(
     cue: Option<Res<BigMomentCue>>,
     ball_q: BallQuery,
     rigs: Query<&Transform, (Without<Baseball>, Without<Camera3d>)>,
-    paths: Query<(Entity, &BasePath)>,
-    departed: Query<(), With<Departed>>,
+    // (Paired to stay inside Bevy's 16-parameter system limit.)
+    (paths, departed): RunnerPaths,
     mut rig: ResMut<BroadcastRig>,
     mut trot_start: Local<Option<f32>>,
     mut cam_q: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
