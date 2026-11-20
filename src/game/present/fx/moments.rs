@@ -100,8 +100,12 @@ pub struct DirtSpray;
 #[derive(Component)]
 pub struct GlovePop;
 
-/// A pitch at least this fast (m/s, about 89 mph) pops dust off the mitt.
-pub(super) const GLOVE_POP_MPS: f32 = 39.8;
+/// A pitch at least this fast (flight m/s) pops dust off the mitt: 95% of
+/// a fresh fastball's flight speed, so a fastball pops (a tired arm's too,
+/// down to 95%) and the sinker, slider, curve and changeup never do.
+/// Flight speed runs under the broadcast mph (`rules::broadcast_mph`), so
+/// this is not an mph figure.
+pub(super) const GLOVE_POP_MPS: f32 = crate::game::rules::PITCH_SPEED * 0.95;
 /// Motes in a glove pop, at High.
 const GLOVE_POP_MOTES: usize = 8;
 

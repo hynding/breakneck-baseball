@@ -60,6 +60,20 @@ fn chalk_puffs_only_on_the_lines() {
 
 #[test]
 fn only_a_hard_fastball_pops_the_mitt() {
-    let mph = GLOVE_POP_MPS / crate::game::rules::MPS_PER_MPH;
-    assert!((85.0..95.0).contains(&mph), "{mph}");
+    use crate::game::rules::{PITCH_DISTANCE, PitchKind, pitch_velocity_kind};
+    // Real pitches, at every corner of the zone, as `pitch_velocity_kind`
+    // throws them: every fastball pops, nothing slower does.
+    for aim in [Vec2::ZERO, Vec2::new(1.0, 1.0), Vec2::new(-1.0, -1.0)] {
+        for kind in [
+            PitchKind::Fastball,
+            PitchKind::Sinker,
+            PitchKind::Slider,
+            PitchKind::Curveball,
+            PitchKind::Changeup,
+        ] {
+            let v = pitch_velocity_kind(kind, aim, PITCH_DISTANCE, 1.0).length();
+            let pops = v >= GLOVE_POP_MPS;
+            assert_eq!(pops, kind == PitchKind::Fastball, "{kind:?} at {aim}: {v}");
+        }
+    }
 }

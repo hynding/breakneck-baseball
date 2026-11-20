@@ -17,6 +17,7 @@ use breakneck_baseball::game::fx::{
 };
 use breakneck_baseball::game::player::CatcherRole;
 use breakneck_baseball::game::quality::{ActiveQuality, QualityTier};
+use breakneck_baseball::game::rules::{PITCH_DISTANCE, PitchKind, pitch_velocity_kind};
 use breakneck_baseball::game::settings::{GraphicsQuality, Settings};
 use breakneck_baseball::game::variant::FieldSpec;
 use breakneck_baseball::game::weather::Weather;
@@ -77,19 +78,28 @@ fn a_slide_and_a_dive_kick_up_dirt() {
 #[test]
 fn a_hard_fastball_pops_the_mitt_and_a_soft_one_does_not() {
     let mut app = game(Weather::Fair, QualityTier::Low);
-    let pitch = |app: &mut App, mps: f32| {
+    // Real pitches, as the pitcher throws them.
+    let pitch = |app: &mut App, kind: PitchKind| {
+        let velocity = pitch_velocity_kind(kind, Vec2::ZERO, PITCH_DISTANCE, 1.0);
         app.world_mut().write_message(PitchEvent {
-            velocity: Vec3::new(0.0, 0.0, -mps),
+            velocity,
             spin: Vec3::ZERO,
         });
         app.update();
         app.world_mut().write_message(PitchCaughtEvent);
         saw::<GlovePop>(app, 3)
     };
-    assert!(!pitch(&mut app, 33.0), "a 74 mph changeup popped the mitt");
     assert!(
-        pitch(&mut app, 43.0),
-        "a 96 mph fastball didn't pop the mitt"
+        !pitch(&mut app, PitchKind::Changeup),
+        "a changeup popped the mitt"
+    );
+    assert!(
+        !pitch(&mut app, PitchKind::Sinker),
+        "a sinker popped the mitt"
+    );
+    assert!(
+        pitch(&mut app, PitchKind::Fastball),
+        "a fastball didn't pop the mitt"
     );
 }
 
@@ -155,8 +165,15 @@ fn the_particle_cap_holds() {
     for tier in [QualityTier::Low, QualityTier::Medium, QualityTier::High] {
         let mut app = game(Weather::Rain, tier);
         let cap = tier.budget().particle_cap;
+        // Rain plus a fastball popping the mitt every frame: on Low and
+        // Medium that asks for more motes than the cap holds.
+        app.world_mut().write_message(PitchEvent {
+            velocity: pitch_velocity_kind(PitchKind::Fastball, Vec2::ZERO, PITCH_DISTANCE, 1.0),
+            spin: Vec3::ZERO,
+        });
         let mut peak = 0;
         for _ in 0..240 {
+            app.world_mut().write_message(PitchCaughtEvent);
             app.update();
             let motes = count::<Particle>(&mut app);
             let ledger = app.world().resource::<LiveParticles>().0;
@@ -164,8 +181,10 @@ fn the_particle_cap_holds() {
             assert!(motes <= cap, "{tier:?}: {motes} over {cap}");
             peak = peak.max(motes);
         }
-        if tier != QualityTier::Low {
-            assert!(peak > 0, "{tier:?}: no splashes to count");
+        if tier == QualityTier::High {
+            assert!(peak > 0, "{tier:?}: nothing to count");
+        } else {
+            assert_eq!(peak, cap, "{tier:?}: the bursts never reached the cap");
         }
     }
 }
