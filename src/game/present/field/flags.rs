@@ -8,7 +8,7 @@
 use bevy::prelude::*;
 
 use crate::game::GameplayEntity;
-use crate::game::quality::ActiveQuality;
+use crate::game::quality::{ActiveQuality, QualityTier};
 use crate::game::rules::{self, Wind};
 
 /// Flag size (m): fly (length) and hoist (height).
@@ -135,21 +135,24 @@ pub(super) fn wave_flags(
 }
 
 /// Flags show on tiers that budget weather effects and hide on Low, and
-/// follow a tier change mid-game.
+/// follow a tier change mid-game. With no tier resolved (a bare harness)
+/// they show, as the effects budget falls back to High.
 pub(super) fn flags_follow_budget(
     active: Option<Res<ActiveQuality>>,
     mut flags: Query<(&mut Visibility, Ref<WindFlag>)>,
 ) {
-    let Some(active) = active else {
-        return;
-    };
-    let want = if active.budget().weather_fx {
+    let changed = active.as_ref().is_some_and(|a| a.is_changed());
+    let shown = active
+        .as_ref()
+        .map_or(QualityTier::High.budget(), |a| a.budget())
+        .weather_fx;
+    let want = if shown {
         Visibility::Inherited
     } else {
         Visibility::Hidden
     };
     for (mut visibility, marker) in &mut flags {
-        if (active.is_changed() || marker.is_added()) && *visibility != want {
+        if (changed || marker.is_added()) && *visibility != want {
             *visibility = want;
         }
     }

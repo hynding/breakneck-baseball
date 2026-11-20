@@ -15,30 +15,47 @@ fn slides_and_dives_spray_inside_their_clips() {
 #[test]
 fn a_spray_fires_once_as_the_clip_passes_contact() {
     let at = 0.09;
-    let dt = 1.0 / 60.0;
-    let fired = (0..60).filter(|&f| crossed(at, f as f32 * dt, dt)).count();
+    // Uneven frames, a hitch included: the clip's own clock decides.
+    let clock = [0.0, 0.016, 0.033, 0.05, 0.08, 0.15, 0.166, 0.2, 0.3];
+    let fired = clock.windows(2).filter(|w| crossed(at, w[0], w[1])).count();
     assert_eq!(fired, 1);
-    assert!(crossed(0.0, 0.0, dt), "a contact at the clip's start fires");
+    assert!(
+        crossed(at, -1.0, 0.2),
+        "a clip first seen past contact fires"
+    );
+    assert!(!crossed(at, 0.1, 0.2), "already past");
 }
 
 #[test]
 fn chalk_puffs_only_on_the_lines() {
-    let field = VariantId::Standard.field();
-    for sign in [-1.0_f32, 1.0] {
-        let theta = sign * field.fair_half_angle;
-        let along = Vec3::new(theta.sin(), 0.0, theta.cos());
-        let outward = Vec3::new(along.z, 0.0, -along.x) * sign;
-        assert!(outward.x * sign > 0.0, "outward points away from centre");
-        let chalk = along * 40.0 + outward * HALF_BAG_M;
-        assert!(on_the_chalk(chalk, &field), "{sign}: on the line");
-        assert!(!on_the_chalk(chalk + outward * 0.5, &field), "{sign}: foul");
-        assert!(!on_the_chalk(chalk - outward * 0.5, &field), "{sign}: fair");
-        assert!(!on_the_chalk(-along * 10.0, &field), "{sign}: behind home");
+    for variant in [VariantId::Standard, VariantId::FrontYard] {
+        let field = variant.field();
+        let spans = crate::game::field::foul_line_spans(&field);
+        assert_eq!(spans.len(), 2, "{variant:?}");
+        for (a, b) in spans {
+            let along = (b - a).normalize();
+            let outward = Vec3::new(along.z, 0.0, -along.x) * along.x.signum();
+            assert!(outward.x * along.x > 0.0, "outward points away from centre");
+            let chalk = a + along * 20.0;
+            assert!(on_the_chalk(chalk, &field), "{variant:?}: on the line");
+            assert!(
+                !on_the_chalk(chalk + outward * 0.5, &field),
+                "{variant:?}: foul"
+            );
+            assert!(
+                !on_the_chalk(chalk - outward * 0.5, &field),
+                "{variant:?}: fair"
+            );
+            assert!(
+                !on_the_chalk(-along * 10.0, &field),
+                "{variant:?}: behind home"
+            );
+        }
+        assert!(
+            !on_the_chalk(Vec3::new(0.0, 0.0, 40.0), &field),
+            "{variant:?}: centre"
+        );
     }
-    assert!(
-        !on_the_chalk(Vec3::new(0.0, 0.0, 40.0), &field),
-        "dead centre"
-    );
 }
 
 #[test]

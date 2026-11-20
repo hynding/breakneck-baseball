@@ -33,28 +33,38 @@ pub(super) fn spray_at(clip: AnimClip) -> Option<f32> {
     }
 }
 
-/// True on the frame a clip's clock crosses `at`: it was short of it a
-/// frame ago (`elapsed - dt`) and has reached it now.
-pub(super) fn crossed(at: f32, elapsed: f32, dt: f32) -> bool {
-    elapsed >= at && elapsed - dt < at
+/// True on the frame a clip's clock crosses `at`: short of it last frame
+/// (`before`), at or past it now.
+pub(super) fn crossed(at: f32, before: f32, now: f32) -> bool {
+    before < at && now >= at
 }
 
 /// A slide into a bag or a dive for a ball throws up a spray of dirt where
-/// the body hits the ground.
+/// the body hits the ground. Each sliding or diving rig's clip time from
+/// the frame before is kept here, so the crossing is read off the clip's
+/// own clock whichever side of the animation systems this one runs.
 pub(super) fn slide_and_dive_spray(
-    rigs: Query<(&Transform, &Playing)>,
+    rigs: Query<(Entity, &Transform, &Playing)>,
     assets: Option<Res<FxAssets>>,
     time: Res<Time>,
+    mut last: Local<bevy::platform::collections::HashMap<Entity, (AnimClip, f32)>>,
     mut budget: FxBudget,
     mut commands: Commands,
 ) {
     let Some(assets) = assets else { return };
-    let dt = time.delta_secs();
-    for (tf, playing) in &rigs {
+    last.retain(|e, _| rigs.contains(*e));
+    for (rig, tf, playing) in &rigs {
         let Some(at) = spray_at(playing.clip) else {
+            last.remove(&rig);
             continue;
         };
-        if !crossed(at, playing.timer.elapsed_secs(), dt) {
+        let now = playing.timer.elapsed_secs();
+        // A new clip (or the same one restarted) starts from before 0.
+        let before = match last.insert(rig, (playing.clip, now)) {
+            Some((clip, t)) if clip == playing.clip && t <= now => t,
+            _ => -1.0,
+        };
+        if !crossed(at, before, now) {
             continue;
         }
         let ground = tf.translation.with_y(0.08);
@@ -147,28 +157,24 @@ pub(super) fn glove_pop(
 /// kick up chalk: the line is about 7.6 cm wide, and the ball's own radius
 /// reaches across it.
 const CHALK_REACH_M: f32 = 0.12;
-/// Half a base's width (an 18 in bag, per docs/BASEBALL.md): how far
-/// outside the home-to-base ray the chalk runs.
-const HALF_BAG_M: f32 = 0.457 / 2.0;
 /// Chalk motes in a puff, at High.
 const CHALK_MOTES: usize = 10;
 
-/// True when a first bounce at `pos` lands on a foul line's chalk, past
-/// home plate. The chalk runs along each line's foul-side edge, half a
-/// bag outside the home-to-base ray (`field::diamond::foul_line_span`).
+/// True when a first bounce at `pos` lands on a foul line's chalk (the
+/// spans `field::foul_line_spans` paints), past the batter's boxes.
 pub(super) fn on_the_chalk(pos: Vec3, field: &FieldSpec) -> bool {
     let p = Vec2::new(pos.x, pos.z);
     if p.length() < 1.0 {
         return false; // in the batter's boxes, not on a line
     }
-    [-1.0_f32, 1.0].into_iter().any(|sign| {
-        let theta = sign * field.fair_half_angle;
-        let along = Vec2::new(theta.sin(), theta.cos());
-        let outward = Vec2::new(along.y, -along.x) * sign; // away from x = 0
-        let along_m = p.dot(along);
-        let off = (p - along * along_m).dot(outward) - HALF_BAG_M;
-        along_m > 0.0 && off.abs() <= CHALK_REACH_M
-    })
+    crate::game::field::foul_line_spans(field)
+        .into_iter()
+        .any(|(a, b)| {
+            let (a, b) = (Vec2::new(a.x, a.z), Vec2::new(b.x, b.z));
+            let ab = b - a;
+            let t = ((p - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0);
+            p.distance(a + ab * t) <= CHALK_REACH_M
+        })
 }
 
 /// A ball that lands on a foul line throws up a puff of white chalk.

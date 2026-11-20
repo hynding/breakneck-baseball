@@ -10,7 +10,7 @@ use bevy::prelude::*;
 
 use breakneck_baseball::game::animation::{AnimClip, Playing};
 use breakneck_baseball::game::ball::PitchEvent;
-use breakneck_baseball::game::field::WindFlag;
+use breakneck_baseball::game::field::{WindFlag, foul_line_spans};
 use breakneck_baseball::game::flow::{LiveBallEvent, PitchCaughtEvent};
 use breakneck_baseball::game::fx::{
     ChalkPuff, DirtSpray, GlovePop, LiveParticles, Particle, RainSplash,
@@ -58,18 +58,20 @@ fn game(weather: Weather, tier: QualityTier) -> App {
 }
 
 #[test]
-fn a_slide_kicks_up_dirt() {
-    let mut app = game(Weather::Fair, QualityTier::Low);
-    let world = app.world_mut();
-    let rig = world
-        .query_filtered::<Entity, With<CatcherRole>>()
-        .single(world)
-        .expect("a catcher");
-    world.entity_mut(rig).insert(Playing::new(AnimClip::Slide));
-    assert!(
-        saw::<DirtSpray>(&mut app, 60),
-        "no dirt spray off the slide"
-    );
+fn a_slide_and_a_dive_kick_up_dirt() {
+    for clip in [AnimClip::Slide, AnimClip::Dive] {
+        let mut app = game(Weather::Fair, QualityTier::Low);
+        let world = app.world_mut();
+        let rig = world
+            .query_filtered::<Entity, With<CatcherRole>>()
+            .single(world)
+            .expect("a catcher");
+        world.entity_mut(rig).insert(Playing::new(clip));
+        assert!(
+            saw::<DirtSpray>(&mut app, 240),
+            "no dirt spray off the {clip:?}"
+        );
+    }
 }
 
 #[test]
@@ -95,11 +97,11 @@ fn a_hard_fastball_pops_the_mitt_and_a_soft_one_does_not() {
 fn a_ball_on_the_line_kicks_up_chalk() {
     let mut app = game(Weather::Fair, QualityTier::Low);
     let field = app.world().resource::<FieldSpec>().clone();
-    let theta = field.fair_half_angle;
-    let along = Vec3::new(theta.sin(), 0.0, theta.cos());
-    let outward = Vec3::new(along.z, 0.0, -along.x);
-    // On the first-base line's chalk, half a bag outside the ray.
-    let on_line = along * 50.0 + outward * (0.457 / 2.0);
+    // On the first-base line's chalk, 50 m out.
+    let (a, b) = foul_line_spans(&field)[0];
+    let along = (b - a).normalize();
+    let outward = Vec3::new(along.z, 0.0, -along.x) * along.x.signum();
+    let on_line = a + along * 50.0;
     app.world_mut().write_message(LiveBallEvent::Landed {
         pos: on_line + outward * 3.0,
     });
