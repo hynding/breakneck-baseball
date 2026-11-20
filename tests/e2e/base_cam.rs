@@ -94,8 +94,8 @@ fn a_grounder_cuts_to_the_ball_then_the_base_cam_and_holds_the_call_there() {
     );
     assert_eq!(
         shot(&app),
-        Some(Shot::BallFollow),
-        "the first cut after contact is to the ball"
+        Some(Shot::GroundBall),
+        "the first cut after a grounder is to the ground-ball shot"
     );
 
     // The throw brings the base cam, still during the live play.

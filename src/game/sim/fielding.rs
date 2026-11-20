@@ -108,6 +108,12 @@ impl ActivePlay {
     // Read-only observer seams (the Coach and the debug panel read these;
     // nothing outside this module may steer the play through them).
 
+    /// When the live ball first touched down, on the contact clock (the
+    /// fair/foul call point), if it has this play.
+    pub(crate) fn landed_at(&self) -> Option<f32> {
+        self.landed_at
+    }
+
     /// The fielder currently assigned to chase the live ball, if any.
     pub(crate) fn chaser(&self) -> Option<Entity> {
         match self.state {

@@ -54,6 +54,30 @@ pub fn framed_ndc_x(eye: Vec3, target: Vec3, vfov: f32, aspect: f32, p: Vec3) ->
     (v.dot(right) / depth) / ((vfov / 2.0).tan() * aspect)
 }
 
+/// The narrowest vertical FOV through a look-at camera at `eye` toward
+/// `target` that keeps every point of `points` within `margin` of the
+/// frame's centre (|NDC| ≤ `margin` on both axes) for a viewport of the
+/// given `aspect`. A point behind the lens can't be framed at any FOV, so
+/// it asks for a straight-down π (callers clamp). Pure, the inverse of
+/// [`framed_ndc_x`] / [`framed_ndc_y`].
+pub fn fit_vfov(eye: Vec3, target: Vec3, points: &[Vec3], aspect: f32, margin: f32) -> f32 {
+    let fwd = (target - eye).normalize();
+    let right = fwd.cross(Vec3::Y).normalize();
+    let up = right.cross(fwd);
+    let mut tan_half: f32 = 0.0;
+    for &p in points {
+        let v = p - eye;
+        let depth = v.dot(fwd);
+        if depth <= f32::EPSILON {
+            return std::f32::consts::PI;
+        }
+        let y = (v.dot(up) / depth).abs() / margin;
+        let x = (v.dot(right) / depth).abs() / (margin * aspect);
+        tan_half = tan_half.max(x).max(y);
+    }
+    2.0 * tan_half.atan()
+}
+
 /// Fraction of the viewport height the segment `bottom`→`top` spans through
 /// the same camera.
 pub fn framed_height_fraction(eye: Vec3, target: Vec3, vfov: f32, bottom: Vec3, top: Vec3) -> f32 {

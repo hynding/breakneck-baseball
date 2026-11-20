@@ -16,6 +16,7 @@ fn cues(phase: Phase) -> ShotCues {
         walkup: false,
         strikeout: false,
         thrown_base: None,
+        grounder: false,
         descending_to: None,
         duel_throw_base: None,
     }
@@ -325,7 +326,8 @@ fn the_ball_follow_splits_on_the_home_run() {
     let mut inp = inputs(&field);
     inp.ball = Some(ball);
     let fly = Shot::BallFollow.spec(&inp);
-    assert_eq!((fly.eye, fly.target), landing_zone_cam(ball, Vec3::ZERO));
+    let (eye, target, _) = landing_zone_cam(ball, Vec3::ZERO, -field.broadcast_eye.z);
+    assert_eq!((fly.eye, fly.target), (eye, target));
     inp.home_run = true;
     let hr = Shot::BallFollow.spec(&inp);
     assert_eq!((hr.eye, hr.target), home_run_follow(&field, ball.pos));
@@ -459,4 +461,376 @@ fn a_blend_moves_on_its_first_frame() {
     let to = spec(Vec3::new(10.0, 0.0, 0.0), Vec3::Z, 1.0);
     m.start(Transition::Ease { secs: 1.0 }, to, 0.1);
     assert!(m.eye.x > 0.0);
+}
+
+// ── Predictive framing (task 7) ───────────────────────────────────────────────
+
+/// A batted ball off the bat: launch angle and spray (degrees, spray > 0
+/// toward third, +X) and exit speed (m/s), with the bat's spin
+/// (`rules::hit_spin`).
+fn launch(angle: f32, spray: f32, speed: f32) -> BallState {
+    let (a, s) = (angle.to_radians(), spray.to_radians());
+    let vel = Vec3::new(s.sin() * a.cos(), a.sin(), s.cos() * a.cos()) * speed;
+    BallState {
+        pos: Vec3::new(0.0, 1.0, 0.0),
+        vel,
+        spin: rules::hit_spin(vel),
+    }
+}
+
+/// One 60 Hz step of the live ball's flight model (as
+/// `rules::predict_landing_from` integrates it), then rolling on the
+/// grass: the ground slab has no restitution, and Rapier combines the
+/// ball's `Min` rule with it to a dead ball (`sim/ball.rs`), so it never
+/// hops on the grass.
+fn fly_step(b: &mut BallState, dt: f32) {
+    use crate::game::ball::{BALL_DRAG_FACTOR, MAGNUS_FACTOR};
+    let speed = b.vel.length();
+    b.vel += -BALL_DRAG_FACTOR * speed * b.vel * dt;
+    b.vel += MAGNUS_FACTOR * b.spin.cross(b.vel) * dt;
+    b.spin /= 1.0 + dt * rules::SPIN_DAMPING;
+    b.vel.y -= rules::GRAVITY * dt;
+    b.pos += b.vel * dt;
+    if b.pos.y < 0.0 {
+        b.pos.y = 0.0;
+        b.vel.y = 0.0;
+        b.vel.x *= 0.8;
+        b.vel.z *= 0.8;
+        b.spin = Vec3::ZERO;
+    }
+}
+
+/// Fielding's first-bounce mark (`ActivePlay::landed_at`): the first time
+/// the ball is down low and not climbing, on the contact clock.
+fn mark_landing(b: &BallState, t: f32, landed_at: &mut Option<f32>) {
+    if landed_at.is_none() && b.pos.y < 0.25 && b.vel.y <= 0.0 {
+        *landed_at = Some(t);
+    }
+}
+
+/// Plays a batted ball through the broadcast rig's shot choice and lens
+/// motion at 60 fps and returns the worst |NDC| the ball reached on either
+/// axis once the plate hold ended, with the shot it happened in. The
+/// fielder waits under the predicted landing spot for a fly, and meets a
+/// grounder 1.2 s down its path.
+fn worst_ball_ndc(field: &FieldSpec, start: BallState, aspect: f32) -> (f32, Shot) {
+    use super::super::framing::{framed_ndc_x, framed_ndc_y};
+    let dt = 1.0 / 60.0;
+    let fielder_e = Entity::from_raw_u32(5).unwrap();
+    let (landing, _) = rules::predict_landing_from(
+        start.pos,
+        start.vel,
+        start.spin,
+        crate::game::ball::BALL_DRAG_FACTOR,
+        crate::game::ball::MAGNUS_FACTOR,
+        Vec3::ZERO,
+    );
+    let mut probe = start;
+    for _ in 0..72 {
+        fly_step(&mut probe, dt);
+    }
+    let meet = probe.pos.with_y(0.0);
+    let mut ball = start;
+    let mut motion = RigMotion::new(field.broadcast_eye, field.broadcast_target, BROADCAST_FOV);
+    let mut shot = None;
+    let mut read = PlayRead::default();
+    let mut landed_at = None;
+    let mut worst = (0.0_f32, Shot::BallFollow);
+    let mut t = 0.0;
+    let mut landed = false;
+    while t < 4.0 && !landed {
+        fly_step(&mut ball, dt);
+        t += dt;
+        mark_landing(&ball, t, &mut landed_at);
+        read.observe(
+            t >= BALL_FOLLOW_DELAY,
+            Some(ball),
+            landed_at,
+            false,
+            Vec3::ZERO,
+        );
+        let grounder = read.grounder() == Some(true);
+        let descending =
+            ball.pos.y > FIELDER_CAM_MIN_HEIGHT && ball.vel.y < 0.0 && !grounder && !read.landed();
+        let mut c = cues(Phase::InPlay);
+        c.since_contact = t;
+        c.grounder = grounder;
+        c.descending_to = descending.then_some(fielder_e);
+        let next = pick_shot(&c, shot);
+        let mut inp = inputs(field);
+        inp.aspect = aspect;
+        inp.ball = Some(ball);
+        inp.fielder = Some(if grounder { meet } else { landing });
+        let want = next.spec(&inp);
+        if shot != Some(next) {
+            motion.start(next.transition_from(shot), want, dt);
+            shot = Some(next);
+        } else {
+            motion.step(want, dt);
+        }
+        if t >= BALL_FOLLOW_DELAY {
+            let x = framed_ndc_x(motion.eye, motion.target, motion.fov, aspect, ball.pos);
+            let y = framed_ndc_y(motion.eye, motion.target, motion.fov, ball.pos);
+            let m = x.abs().max(y.abs());
+            if m > worst.0 {
+                worst = (m, next);
+            }
+        }
+        // A fly is over once it comes down; a grounder once it reaches the
+        // fielder.
+        landed = if grounder {
+            t > 1.2
+        } else {
+            t > BALL_FOLLOW_DELAY && ball.pos.y <= 0.0
+        };
+    }
+    worst
+}
+
+/// The ball never leaves the middle 80% of the frame, for a pop-up, a
+/// liner, a deep fly and a grounder through each hole, at 16:9 and on a
+/// narrower 4:3 window, and in the front yard (whose eye sits closer).
+#[test]
+fn the_ball_stays_in_the_middle_of_the_frame() {
+    let field = VariantId::Standard.field();
+    let hits = [
+        ("pop-up", launch(72.0, 5.0, 30.0)),
+        ("liner", launch(14.0, -10.0, 38.0)),
+        ("deep fly", launch(30.0, 15.0, 40.0)),
+        ("gapper", launch(22.0, -28.0, 39.0)),
+        ("grounder, 3B hole", launch(-6.0, 30.0, 36.0)),
+        ("grounder, SS hole", launch(-6.0, 12.0, 36.0)),
+        ("grounder, 2B hole", launch(-6.0, -12.0, 36.0)),
+        ("grounder, 1B hole", launch(-6.0, -30.0, 36.0)),
+    ];
+    for (aspect, field) in [
+        (16.0 / 9.0, field.clone()),
+        (4.0 / 3.0, field),
+        (16.0 / 9.0, VariantId::FrontYard.field()),
+    ] {
+        for (name, ball) in hits {
+            let (worst, shot) = worst_ball_ndc(&field, ball, aspect);
+            assert!(
+                worst <= LEAD_MARGIN + 0.02,
+                "{name} at {aspect:.2}: ball at |NDC| {worst:.2} in {shot:?}"
+            );
+        }
+    }
+}
+
+/// Grounders take the ground-ball shot; balls in the air never do, not
+/// even in their last half-metre, nor once a fielder holds the ball still
+/// at his glove.
+#[test]
+fn only_grounders_take_the_ground_ball_shot() {
+    let dt = 1.0 / 60.0;
+    for (ball, want) in [
+        (launch(-6.0, 12.0, 36.0), true),
+        (launch(-15.0, -20.0, 30.0), true),
+        // A hard chopper: down well inside the plate hold.
+        (launch(-20.0, 0.0, 40.0), true),
+        (launch(-35.0, 25.0, 45.0), true),
+        (launch(14.0, -10.0, 38.0), false),
+        (launch(72.0, 5.0, 30.0), false),
+        (launch(30.0, 15.0, 40.0), false),
+    ] {
+        let mut b = ball;
+        let mut read = PlayRead::default();
+        let mut landed_at = None;
+        let mut t = 0.0;
+        // Run past the landing and on through a held ball.
+        while t < 8.0 {
+            fly_step(&mut b, dt);
+            t += dt;
+            mark_landing(&b, t, &mut landed_at);
+            read.observe(
+                t >= BALL_FOLLOW_DELAY,
+                Some(b),
+                landed_at,
+                false,
+                Vec3::ZERO,
+            );
+            let mut c = cues(Phase::InPlay);
+            c.since_contact = t;
+            c.grounder = read.grounder() == Some(true);
+            if t < BALL_FOLLOW_DELAY {
+                assert_eq!(read.grounder(), None, "decided during the plate hold");
+                continue;
+            }
+            assert_eq!(
+                pick_shot(&c, None) == Shot::GroundBall,
+                want,
+                "{:?} at {t:.2}",
+                ball.vel
+            );
+        }
+        // Later frames — a fielder holding the ball chest-high, still —
+        // never reopen the call.
+        read.observe(
+            true,
+            Some(BallState {
+                pos: Vec3::new(5.0, 1.2, 60.0),
+                vel: Vec3::ZERO,
+                spin: Vec3::ZERO,
+            }),
+            landed_at,
+            false,
+            Vec3::ZERO,
+        );
+        assert_eq!(read.grounder(), Some(want), "the call never changes");
+        assert!(read.landed(), "every ball here came down");
+    }
+    // Nothing is decided before the plate hold ends, or without a ball.
+    let mut read = PlayRead::default();
+    read.observe(
+        false,
+        Some(launch(-6.0, 12.0, 36.0)),
+        None,
+        false,
+        Vec3::ZERO,
+    );
+    read.observe(true, None, None, false, Vec3::ZERO);
+    assert_eq!(read.grounder(), None);
+}
+
+/// A ball already down during the plate hold is a grounder whatever it is
+/// doing at the call; a touchdown after the hold is not.
+#[test]
+fn a_touchdown_in_the_hold_makes_a_grounder() {
+    let fly = launch(30.0, 0.0, 40.0);
+    let mut read = PlayRead::default();
+    read.observe(
+        true,
+        Some(fly),
+        Some(BALL_FOLLOW_DELAY * 0.4),
+        false,
+        Vec3::ZERO,
+    );
+    assert_eq!(read.grounder(), Some(true));
+    let mut read = PlayRead::default();
+    read.observe(true, Some(fly), None, false, Vec3::ZERO);
+    assert_eq!(read.grounder(), Some(false));
+    assert!(!read.landed());
+    // Called late (the broadcast view switched on mid-play) after a
+    // touchdown past the hold: a fly that came down, even rolling now.
+    let mut read = PlayRead::default();
+    let rolling = BallState {
+        pos: Vec3::new(0.0, 0.04, 70.0),
+        vel: Vec3::new(0.0, 0.0, 5.0),
+        spin: Vec3::ZERO,
+    };
+    read.observe(true, Some(rolling), Some(3.0), false, Vec3::ZERO);
+    assert_eq!(read.grounder(), Some(false));
+}
+
+/// The last play's touchdown mark, still set on the contact frame, never
+/// marks the new ball landed: only marks seen after the call count.
+#[test]
+fn a_stale_mark_before_the_call_is_ignored() {
+    let mut read = PlayRead::default();
+    read.observe(
+        false,
+        Some(launch(30.0, 0.0, 40.0)),
+        Some(3.0),
+        false,
+        Vec3::ZERO,
+    );
+    assert!(!read.landed());
+    read.observe(true, Some(launch(30.0, 0.0, 40.0)), None, false, Vec3::ZERO);
+    assert_eq!(read.grounder(), Some(false));
+    assert!(!read.landed());
+}
+
+/// A fly is done with the fielder cam once it has come down, or banged off
+/// the wall.
+#[test]
+fn a_fly_is_landed_after_touchdown_or_the_wall() {
+    let dt = 1.0 / 60.0;
+    let mut b = launch(35.0, 0.0, 34.0);
+    let mut read = PlayRead::default();
+    let mut landed_at = None;
+    let mut t = 0.0;
+    while landed_at.is_none() {
+        fly_step(&mut b, dt);
+        t += dt;
+        mark_landing(&b, t, &mut landed_at);
+        if landed_at.is_none() {
+            read.observe(t >= BALL_FOLLOW_DELAY, Some(b), None, false, Vec3::ZERO);
+            assert!(!read.landed(), "landed in the air at {t:.2}");
+        }
+    }
+    read.observe(true, Some(b), landed_at, false, Vec3::ZERO);
+    assert!(read.landed());
+
+    let mut read = PlayRead::default();
+    read.observe(true, Some(launch(35.0, 0.0, 34.0)), None, false, Vec3::ZERO);
+    read.observe(true, Some(launch(35.0, 0.0, 34.0)), None, true, Vec3::ZERO);
+    assert!(read.landed());
+}
+
+/// The ball-follow's lens is wider while the ball is high than as it drops
+/// to its landing spot, never tighter than the broadcast
+/// lens or wider than the cap.
+#[test]
+fn the_lens_widens_on_the_climb() {
+    let field = VariantId::Standard.field();
+    let mut b = launch(72.0, 5.0, 30.0);
+    let mut fovs = vec![];
+    for _ in 0..240 {
+        fly_step(&mut b, 1.0 / 60.0);
+        let mut inp = inputs(&field);
+        inp.ball = Some(b);
+        fovs.push(Shot::BallFollow.spec(&inp).fov);
+        if b.pos.y <= 0.0 {
+            break;
+        }
+    }
+    // Wider at the top of the flight than as it comes down to the spot.
+    let apex = fovs.len() / 2;
+    assert!(fovs[apex] > *fovs.last().unwrap(), "{fovs:?}");
+    assert!(
+        fovs.iter()
+            .all(|f| (BROADCAST_FOV - 1e-4..=MAX_LEAD_FOV + 1e-4).contains(f))
+    );
+}
+
+/// The ground-ball shot frames the ball, the fielder and first base.
+#[test]
+fn the_ground_ball_shot_holds_ball_fielder_and_first() {
+    use super::super::framing::{framed_ndc_x, framed_ndc_y};
+    let field = VariantId::Standard.field();
+    let first = field.base_positions[0];
+    let ball = Vec3::new(6.0, 0.2, 18.0);
+    let fielder = Vec3::new(9.0, 0.0, 26.0);
+    let (eye, target, fov) = ground_ball_cam(ball, Some(fielder), first, 16.0 / 9.0);
+    for p in [ball, fielder + Vec3::Y, first + Vec3::Y * 0.5] {
+        let x = framed_ndc_x(eye, target, fov, 16.0 / 9.0, p);
+        let y = framed_ndc_y(eye, target, fov, p);
+        assert!(x.abs() <= 0.81 && y.abs() <= 0.81, "{p}: ({x:.2}, {y:.2})");
+    }
+}
+
+/// `fit_vfov` is the inverse of the framing math: points it fits land on
+/// the margin, never past it.
+#[test]
+fn fit_vfov_puts_the_widest_point_on_the_margin() {
+    use super::super::framing::{fit_vfov, framed_ndc_x, framed_ndc_y};
+    let eye = Vec3::new(0.0, 10.0, -20.0);
+    let target = Vec3::new(0.0, 2.0, 30.0);
+    let pts = [Vec3::new(20.0, 0.0, 40.0), Vec3::new(-5.0, 25.0, 50.0)];
+    let fov = fit_vfov(eye, target, &pts, 1.5, 0.8);
+    let m = pts
+        .iter()
+        .map(|&p| {
+            framed_ndc_x(eye, target, fov, 1.5, p)
+                .abs()
+                .max(framed_ndc_y(eye, target, fov, p).abs())
+        })
+        .fold(0.0, f32::max);
+    assert!((m - 0.8).abs() < 1e-3, "{m}");
+    // Behind the lens: nothing fits.
+    assert_eq!(
+        fit_vfov(eye, target, &[eye - Vec3::Z], 1.5, 0.8),
+        std::f32::consts::PI
+    );
 }
