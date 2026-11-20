@@ -425,8 +425,13 @@ impl PlayRead {
             && ready
             && let Some(b) = ball
         {
-            let down_in_hold = landed_at.is_some_and(|t| t < BALL_FOLLOW_DELAY);
-            self.grounder = Some(down_in_hold || is_grounder(b, wind));
+            // A touchdown after the hold is a fly or a liner coming down:
+            // the call can be that late only when the broadcast camera was
+            // switched on mid-play.
+            self.grounder = Some(match landed_at {
+                Some(t) => t <= BALL_FOLLOW_DELAY,
+                None => is_grounder(b, wind),
+            });
         }
         // Only after the call: on the contact frame `landed_at` can still
         // hold the last play's mark.

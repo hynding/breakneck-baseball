@@ -137,6 +137,10 @@ pub struct BroadcastRig {
     /// Where the ground-ball shot last saw the chasing fielder, held once
     /// the chase ends so the framing doesn't jump as he gathers the ball.
     ground_fielder: Option<Vec3>,
+    /// The contact (on the virtual clock) the per-play state above belongs
+    /// to; a new contact clears it, even one this camera never saw the
+    /// lead-up to (the orbit view was on between plays).
+    play_contact: Option<f32>,
 }
 
 impl Default for BroadcastRig {
@@ -147,6 +151,7 @@ impl Default for BroadcastRig {
             thrown_base: None,
             read: PlayRead::default(),
             ground_fielder: None,
+            play_contact: None,
         }
     }
 }
@@ -230,8 +235,14 @@ pub(super) fn broadcast_camera(
         spin: vel.angvel,
     });
     // Between plays nothing carries over — also when this camera was off
-    // (the orbit view) for a whole play and never saw its duel frame.
-    if !matches!(play.phase, Phase::InPlay | Phase::Result) {
+    // (the orbit view) between plays and never saw the pitch.
+    let contact = now - play.since_contact(now);
+    let new_play =
+        play.phase == Phase::InPlay && rig.play_contact.is_none_or(|c| (c - contact).abs() > 0.01);
+    if new_play {
+        rig.play_contact = Some(contact);
+    }
+    if new_play || !matches!(play.phase, Phase::InPlay | Phase::Result) {
         rig.thrown_base = None;
         rig.read = PlayRead::default();
         rig.ground_fielder = None;

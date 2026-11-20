@@ -629,6 +629,7 @@ fn only_grounders_take_the_ground_ball_shot() {
         (launch(-15.0, -20.0, 30.0), true),
         // A hard chopper: down well inside the plate hold.
         (launch(-20.0, 0.0, 40.0), true),
+        (launch(-35.0, 25.0, 45.0), true),
         (launch(14.0, -10.0, 38.0), false),
         (launch(72.0, 5.0, 30.0), false),
         (launch(30.0, 15.0, 40.0), false),
@@ -710,6 +711,16 @@ fn a_touchdown_in_the_hold_makes_a_grounder() {
     read.observe(true, Some(fly), None, false, Vec3::ZERO);
     assert_eq!(read.grounder(), Some(false));
     assert!(!read.landed());
+    // Called late (the broadcast view switched on mid-play) after a
+    // touchdown past the hold: a fly that came down, even rolling now.
+    let mut read = PlayRead::default();
+    let rolling = BallState {
+        pos: Vec3::new(0.0, 0.04, 70.0),
+        vel: Vec3::new(0.0, 0.0, 5.0),
+        spin: Vec3::ZERO,
+    };
+    read.observe(true, Some(rolling), Some(3.0), false, Vec3::ZERO);
+    assert_eq!(read.grounder(), Some(false));
 }
 
 /// The last play's touchdown mark, still set on the contact frame, never
