@@ -64,6 +64,11 @@ pub enum Shot {
     /// A walk-off: low at the plate from the third-base side, the winning
     /// run scoring into the waiting team.
     PileUp,
+    /// Between half-innings, the first walk-up of the new half opens on
+    /// the park: the scoreboard and its line score in a stadium, a high
+    /// wide look over the yard elsewhere ([`half_inning_cam`]). Behind the
+    /// curtain's wipe, inside the walk-up hold, so it costs no game time.
+    HalfInning,
 }
 
 /// Everything the shot picker reads, gathered once per frame so the choice
@@ -80,6 +85,9 @@ pub(super) struct ShotCues {
     pub view: DuelView,
     /// The walk-up hold is on (`Play::walkup_active`).
     pub walkup: bool,
+    /// The walk-up opens a new half-inning and its cutaway is still up
+    /// (the rig decides; [`half_inning_cutaway`]).
+    pub cutaway: bool,
     /// The result pause is a strikeout's.
     pub strikeout: bool,
     /// The base the live ball was last thrown at, if any.
@@ -113,6 +121,7 @@ pub(super) fn pick_shot(cues: &ShotCues, current: Option<Shot>) -> Shot {
         return Shot::BaseCam(base);
     }
     match cues.phase {
+        Phase::PrePitch if cues.walkup && cues.cutaway => Shot::HalfInning,
         Phase::PrePitch if cues.walkup => Shot::WalkUp,
         Phase::PrePitch | Phase::WindUp | Phase::Pitch => Shot::Duel(cues.view),
         // Fresh contact: hold the plate framing for a beat — the crack and
@@ -195,6 +204,68 @@ pub(super) const PILE_UP_TARGET: Vec3 = Vec3::new(0.0, 0.9, -0.3);
 /// seats (`field::bowl`, ±8°).
 const CROWD_INTO_STANDS: f32 = 10.0;
 const CROWD_OFF_CENTRE: f32 = 12.0_f32.to_radians();
+
+/// How long the half-inning cutaway holds before the walk-up shot takes
+/// over (gameplay seconds, inside the walk-up hold).
+pub const CUTAWAY_SECS: f32 = 1.6;
+
+/// A half-inning, `(inning, top)`, and when its cutaway started.
+pub(super) type CutHalf = Option<((u32, bool), f32)>;
+
+/// Whether the walk-up on screen opens with the half-inning cutaway. A
+/// half is marked seen on its first pre-pitch frame (`pre_pitch`; `half` is
+/// `(inning, top)`), and the cutaway plays only if that frame opens on a
+/// walk-up: so never in the game's first half (the intro flyover has just
+/// shown the park), never later in a half, and not at all in a half whose
+/// leadoff has no walk-up (the last half ended on a caught stealing). It
+/// holds for [`CUTAWAY_SECS`] of the hold. `cut` is the half last seen and
+/// when its cutaway started on the gameplay clock. Returns the new `cut`
+/// and whether the cutaway is up.
+pub(super) fn half_inning_cutaway(
+    pre_pitch: bool,
+    walkup: bool,
+    half: (u32, bool),
+    now: f32,
+    cut: CutHalf,
+) -> (CutHalf, bool) {
+    let walkup = pre_pitch && walkup;
+    let cut = match cut {
+        Some((seen, _)) if seen == half => cut,
+        _ if pre_pitch => {
+            let opens = walkup && half != (1, true);
+            Some((half, if opens { now } else { f32::NEG_INFINITY }))
+        }
+        _ => cut,
+    };
+    let up = walkup && cut.is_some_and(|(seen, at)| seen == half && now - at < CUTAWAY_SECS);
+    (cut, up)
+}
+
+/// Eye, look-at and lens for the half-inning cutaway. In a stadium, the
+/// scoreboard square on from the outfield grass, the board filling most of
+/// the frame so the line score reads; with no scoreboard (the front yard),
+/// a high wide look over the whole yard from behind the plate.
+pub(super) fn half_inning_cam(field: &FieldSpec, aspect: f32) -> (Vec3, Vec3, f32) {
+    if field.scenery == crate::game::variant::Scenery::Stadium {
+        let board = crate::game::field::scoreboard_centre(field);
+        let toward_home = (-board).with_y(0.0).normalize_or(Vec3::NEG_Z);
+        let eye = board + toward_home * 46.0 - Vec3::Y * 8.0;
+        let half = crate::game::field::SCOREBOARD_SIZE / 2.0;
+        let across = Vec3::Y.cross(toward_home).normalize_or(Vec3::X);
+        let corners = [
+            board + across * half.x + Vec3::Y * half.y,
+            board - across * half.x - Vec3::Y * half.y,
+            board + across * half.x - Vec3::Y * half.y,
+            board - across * half.x + Vec3::Y * half.y,
+        ];
+        let fov = fit_vfov(eye, board, &corners, aspect, 0.8);
+        (eye, board, fov)
+    } else {
+        let eye = Vec3::new(0.0, 22.0, -26.0);
+        let target = Vec3::new(0.0, 0.0, field.fence_line * 0.45);
+        (eye, target, 55.0_f32.to_radians())
+    }
+}
 
 /// Eye and look-at for the crowd shot: from the outfield grass on the line
 /// the ball left by, up at the seats beyond the fence there (shifted off the
@@ -416,6 +487,10 @@ impl Shot {
                 None => wide(),
             },
             (Shot::PileUp, _) => ShotSpec::new(PILE_UP_EYE, PILE_UP_TARGET, PILE_UP_FOV),
+            (Shot::HalfInning, _) => {
+                let (eye, target, fov) = half_inning_cam(field, inp.aspect);
+                ShotSpec::new(eye, target, fov)
+            }
             // Result pause of a home run: orbit the diamond while the batter
             // trots the bases. The azimuth sweeps only through the
             // behind-home arc, so the outfield sky, where the fireworks

@@ -4,6 +4,7 @@ pub mod camera;
 pub mod field;
 pub mod frame_cost;
 pub mod fx;
+pub mod intro;
 pub mod jersey;
 pub mod juice;
 pub mod look;

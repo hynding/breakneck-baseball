@@ -13,6 +13,7 @@ mod banner;
 mod curtain;
 mod fit;
 mod hud;
+mod lineup;
 mod replay_tag;
 mod run_game;
 mod touch;
@@ -20,6 +21,7 @@ mod walkup;
 
 pub use curtain::{CurtainRoot, WipeLabel};
 pub use fit::DESIGN_SIZE;
+pub use lineup::{LineupLine, LineupText};
 pub use replay_tag::{ReplayTagLine, ReplayTagText, SKIP_PROMPT};
 pub use walkup::{WalkUpLine, WalkUpText};
 
@@ -355,6 +357,7 @@ impl Plugin for UiPlugin {
             (
                 spawn_hud,
                 spawn_walkup_card,
+                lineup::spawn_lineup_card,
                 spawn_replay_tag,
                 spawn_curtain,
                 touch::spawn_touch_overlay,
@@ -380,7 +383,11 @@ impl Plugin for UiPlugin {
                 show_pitch_speed,
                 fade_pitch_speed,
                 run_game::update_run_game_hint,
-                (paint_walkup_card, paint_replay_tag),
+                (
+                    paint_walkup_card,
+                    paint_replay_tag,
+                    lineup::paint_lineup_card,
+                ),
                 clear_read_outs_on_result_exit,
                 // Before flow: on the frame the phase flips, flow clears the
                 // finished curtain timer in the same pass, so a paint after

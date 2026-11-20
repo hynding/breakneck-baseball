@@ -107,6 +107,24 @@ pub fn top_height(theta: f32, field: &FieldSpec) -> f32 {
     front_height(theta, field) + BOWL_DEPTH * BOWL_SLOPE
 }
 
+/// The height of the stands under `p` (m): 0 over the field and in parks
+/// without a bowl, the seating's surface over it, the parapet's top past the
+/// back row. A camera flying over the park keeps above it.
+pub fn stands_height_under(p: Vec3, field: &FieldSpec) -> f32 {
+    if field.scenery != Scenery::Stadium {
+        return 0.0;
+    }
+    let theta = p.x.atan2(p.z);
+    let depth = p.with_y(0.0).length() - inner_radius(theta, field);
+    if depth <= 0.0 {
+        0.0
+    } else if depth >= BOWL_DEPTH {
+        top_height(theta, field) + PARAPET
+    } else {
+        front_height(theta, field) + depth * BOWL_SLOPE
+    }
+}
+
 /// One seat: where, which way it faces, its row and a stable hash.
 #[derive(Clone, Copy, Debug)]
 pub struct Seat {
@@ -373,6 +391,17 @@ pub(super) struct CrowdState {
     walk_off_seen: bool,
 }
 
+/// The scoreboard's face (m): width and height.
+pub const SCOREBOARD_SIZE: Vec2 = Vec2::new(24.0, 12.0);
+
+/// The middle of the scoreboard's face, over the left-centre seats at the
+/// back of the bowl (a stadium's; the half-inning cutaway frames it).
+pub fn scoreboard_centre(field: &FieldSpec) -> Vec3 {
+    let theta = 26.0_f32.to_radians();
+    let at = seat_point(theta, BOWL_DEPTH, field) + dir(theta) * 4.0;
+    at.with_y(at.y + PARAPET + SCOREBOARD_SIZE.y / 2.0 + 1.0)
+}
+
 /// The scoreboard's face, redrawn when the score changes.
 #[derive(Resource)]
 pub(super) struct ScoreboardFace(Handle<Image>);
@@ -577,10 +606,9 @@ pub(super) fn spawn_bowl(
     }
 
     // Scoreboard over the left-centre seats.
-    let theta = 26.0_f32.to_radians();
-    let at = seat_point(theta, BOWL_DEPTH, &field) + dir(theta) * 4.0;
-    let (bw, bh) = (24.0, 12.0);
-    let centre = at.with_y(at.y + PARAPET + bh / 2.0 + 1.0);
+    let (bw, bh) = (SCOREBOARD_SIZE.x, SCOREBOARD_SIZE.y);
+    let centre = scoreboard_centre(&field);
+    let at = centre.with_y(0.0);
     // A fresh game's board; `update_scoreboard` repaints it on the first
     // score change. Painted from scratch rather than read from `ScoreBoard`,
     // whose game_start reset may not have run yet.

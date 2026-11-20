@@ -231,6 +231,10 @@ fn build_headless_app(cfg: HeadlessConfig) -> App {
         // other timing-sensitive system reads. This insert is load-bearing,
         // not just belt-and-braces.
         .insert_resource(breakneck_baseball::game::juice::JuiceDisabled)
+        // The intro flyover holds the gameplay clock for five real seconds
+        // at every game start; tests start games by the hundred. Off by
+        // default, the `JuiceDisabled` pattern; `e2e/intro.rs` removes it.
+        .insert_resource(breakneck_baseball::game::intro::IntroDisabled)
         // The Coach observes every headless run (default-on in tests): it
         // never mutates gameplay, and any e2e may read its `CoachReport`.
         // `e2e/coach.rs` is the suite that asserts on it.

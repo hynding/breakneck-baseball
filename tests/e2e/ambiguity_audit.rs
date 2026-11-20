@@ -50,6 +50,10 @@ const GAMEPLAY: &[&str] = &[
     // pass, both writing `TouchGestures`) carries an explicit `.after`
     // edge at its registration instead.
     "animation::driver::locomote",
+    // The intro swallows every press while it plays by clearing `Intents`
+    // between input and flow: dropping that edge would let presses race
+    // flow again, so it is scored like the input layer.
+    "intro::advance_intro",
 ];
 
 fn is_gameplay(name: &str) -> bool {
