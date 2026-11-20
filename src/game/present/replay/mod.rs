@@ -66,6 +66,20 @@ impl Replay {
     pub fn is_playing(&self) -> bool {
         self.active.is_some()
     }
+
+    /// The segment on screen plays slower than it happened.
+    pub fn slow_motion(&self) -> bool {
+        self.active
+            .as_ref()
+            .and_then(|a| a.segments.get(a.seg))
+            .is_some_and(|s| s.speed < 1.0)
+    }
+
+    /// A press skips the replay now (past the grace that keeps the press
+    /// that ended the play from skipping it).
+    pub fn skippable(&self) -> bool {
+        self.active.as_ref().is_some_and(|a| a.shown >= SKIP_GRACE)
+    }
 }
 
 /// The recorder's ring.

@@ -13,12 +13,14 @@ mod banner;
 mod curtain;
 mod fit;
 mod hud;
+mod replay_tag;
 mod run_game;
 mod touch;
 mod walkup;
 
 pub use curtain::{CurtainRoot, WipeLabel};
 pub use fit::DESIGN_SIZE;
+pub use replay_tag::{ReplayTagLine, ReplayTagText, SKIP_PROMPT};
 pub use walkup::{WalkUpLine, WalkUpText};
 
 use banner::{
@@ -31,6 +33,7 @@ use hud::{
     spawn_hud, update_base_ring, update_count_dots, update_inning_text, update_meter_bar,
     update_score_text, update_wind_text,
 };
+use replay_tag::{paint_replay_tag, spawn_replay_tag};
 use walkup::{paint_walkup_card, spawn_walkup_card};
 
 // ── Markers ───────────────────────────────────────────────────────────────────
@@ -342,6 +345,7 @@ impl Plugin for UiPlugin {
             (
                 spawn_hud,
                 spawn_walkup_card,
+                spawn_replay_tag,
                 spawn_curtain,
                 touch::spawn_touch_overlay,
             )
@@ -366,7 +370,7 @@ impl Plugin for UiPlugin {
                 show_pitch_speed,
                 fade_pitch_speed,
                 run_game::update_run_game_hint,
-                paint_walkup_card,
+                (paint_walkup_card, paint_replay_tag),
                 clear_read_outs_on_result_exit,
                 drive_curtain,
             )
