@@ -307,7 +307,7 @@ fn budget_never_shrinks_as_the_tier_rises() {
             (lo.crowd_shadows, hi.crowd_shadows),
             (lo.crowd_motion, hi.crowd_motion),
             (lo.fog, hi.fog),
-            (lo.sky_dome, hi.sky_dome),
+            (lo.sky, hi.sky),
             (lo.bloom, hi.bloom),
             (lo.surface_detail, hi.surface_detail),
         ] {

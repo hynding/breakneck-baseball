@@ -129,8 +129,8 @@ pub struct RenderBudget {
     pub trail_scale: f32,
     /// Distance fog toward the horizon.
     pub fog: bool,
-    /// A gradient sky dome instead of the flat clear colour.
-    pub sky_dome: bool,
+    /// A gradient skybox instead of the flat clear colour.
+    pub sky: bool,
     /// HDR rendering plus bloom on the main camera.
     pub bloom: bool,
     /// Normal-mapped turf and dirt, worn paths.
@@ -154,7 +154,7 @@ impl RenderBudget {
                 particle_scale: 0.25,
                 trail_scale: 0.5,
                 fog: true,
-                sky_dome: false,
+                sky: false,
                 bloom: false,
                 surface_detail: false,
                 replay_secs: 8.0,
@@ -167,7 +167,7 @@ impl RenderBudget {
                 particle_scale: 0.6,
                 trail_scale: 1.0,
                 fog: true,
-                sky_dome: true,
+                sky: true,
                 bloom: false,
                 surface_detail: false,
                 replay_secs: 10.0,
@@ -180,7 +180,7 @@ impl RenderBudget {
                 particle_scale: 1.0,
                 trail_scale: 1.0,
                 fog: true,
-                sky_dome: true,
+                sky: true,
                 bloom: true,
                 surface_detail: true,
                 replay_secs: 12.0,

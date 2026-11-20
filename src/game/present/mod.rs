@@ -6,6 +6,7 @@ pub mod frame_cost;
 pub mod fx;
 pub mod jersey;
 pub mod juice;
+pub mod look;
 pub mod player;
 pub mod quality;
 pub mod ui;
