@@ -105,6 +105,105 @@ impl QualityTier {
     }
 }
 
+/// What each tier may spend on the presentation features the graphics and
+/// camera plan adds, in one place so a feature reads its allowance instead
+/// of matching on the tier. MSAA, the shadow map and render scale stay the
+/// [`QualityTier`] methods above; this covers everything after them.
+///
+/// Low is the phone tier and must hold 60 fps on a mid-range phone; High
+/// is for discrete GPUs. Every value is monotonic in the tier (pinned by
+/// `budget_never_shrinks_as_the_tier_rises`), and nothing here may need a
+/// WebGL2-missing feature at Low or Medium: a feature WebGL2 can't run is
+/// High-on-native only and checks [`RenderBudget::webgl2_safe`] itself.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RenderBudget {
+    /// Crowd instances in the stands (0 = an empty bowl).
+    pub crowd_instances: u32,
+    /// Whether crowd instances cast shadows.
+    pub crowd_shadows: bool,
+    /// Whether crowd instances move (a bob on big moments).
+    pub crowd_motion: bool,
+    /// Multiplier on every effect's particle count (1.0 = the authored count).
+    pub particle_scale: f32,
+    /// Multiplier on trail lengths (pitch and batted-ball trails).
+    pub trail_scale: f32,
+    /// Distance fog toward the horizon.
+    pub fog: bool,
+    /// A gradient sky dome instead of the flat clear colour.
+    pub sky_dome: bool,
+    /// HDR rendering plus bloom on the main camera.
+    pub bloom: bool,
+    /// Normal-mapped turf and dirt, worn paths.
+    pub surface_detail: bool,
+    /// Seconds of play the replay buffer holds.
+    pub replay_secs: f32,
+    /// Camera angles a replay plays back from.
+    pub replay_angles: u8,
+}
+
+impl RenderBudget {
+    /// The allowance for `tier`. Numbers are the plan's starting points;
+    /// each feature's PR re-measures its own with the frame-cost run
+    /// (`tools/frame_cost.mjs`) and adjusts here.
+    pub const fn for_tier(tier: QualityTier) -> Self {
+        match tier {
+            QualityTier::Low => RenderBudget {
+                crowd_instances: 1_500,
+                crowd_shadows: false,
+                crowd_motion: false,
+                particle_scale: 0.25,
+                trail_scale: 0.5,
+                fog: true,
+                sky_dome: false,
+                bloom: false,
+                surface_detail: false,
+                replay_secs: 8.0,
+                replay_angles: 1,
+            },
+            QualityTier::Medium => RenderBudget {
+                crowd_instances: 5_000,
+                crowd_shadows: false,
+                crowd_motion: false,
+                particle_scale: 0.6,
+                trail_scale: 1.0,
+                fog: true,
+                sky_dome: true,
+                bloom: false,
+                surface_detail: false,
+                replay_secs: 10.0,
+                replay_angles: 2,
+            },
+            QualityTier::High => RenderBudget {
+                crowd_instances: 12_000,
+                crowd_shadows: true,
+                crowd_motion: true,
+                particle_scale: 1.0,
+                trail_scale: 1.0,
+                fog: true,
+                sky_dome: true,
+                bloom: true,
+                surface_detail: true,
+                replay_secs: 12.0,
+                replay_angles: 2,
+            },
+        }
+    }
+
+    /// True on targets with WebGL2's feature set (the web build): no SSAO,
+    /// TAA or compute. Features that need them gate on this as well as on
+    /// the budget.
+    pub const fn webgl2_safe() -> bool {
+        cfg!(target_arch = "wasm32")
+    }
+}
+
+impl QualityTier {
+    /// This tier's [`RenderBudget`].
+    pub const fn budget(self) -> RenderBudget {
+        RenderBudget::for_tier(self)
+    }
+}
+
 /// The GPU's class, from the render adapter's device type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GpuClass {
@@ -312,6 +411,11 @@ pub struct ActiveQuality {
 }
 
 impl ActiveQuality {
+    /// The presentation budget of the tier in force.
+    pub fn budget(&self) -> RenderBudget {
+        self.tier.budget()
+    }
+
     /// Settings-row text: the choice plus what it means on this screen,
     /// e.g. "Auto: Medium, 2x AA, 75% res".
     pub fn describe(&self, scale_factor: f32) -> String {
@@ -378,14 +482,90 @@ impl Plugin for QualityPlugin {
             "graphics: platform {platform:?}, auto tier {:?}",
             platform.auto_tier()
         );
+        let forced = ForcedTier::from_launch();
+        if let Some(tier) = forced.0 {
+            info!("graphics: tier forced to {tier:?} for this run");
+        }
+        let active = forced.active().unwrap_or(ActiveQuality {
+            setting,
+            tier: resolve(setting, platform),
+            stepped: false,
+        });
         app.insert_resource(platform)
             .insert_resource(FrameBudget::new())
-            .insert_resource(ActiveQuality {
-                setting,
-                tier: resolve(setting, platform),
-                stepped: false,
-            });
+            .insert_resource(forced)
+            .insert_resource(active);
     }
+}
+
+/// A tier pinned for this run from outside the game, so the frame-cost run
+/// (`tools/frame_cost.mjs`) can measure each tier without touching the
+/// player's saved setting: `BREAKNECK_QUALITY=low|medium|high` natively,
+/// `?quality=low|medium|high` on the web. Absent (the normal case), the
+/// settings row and Auto decide.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ForcedTier(pub Option<QualityTier>);
+
+impl ForcedTier {
+    /// Reads the launch override; see the type docs.
+    pub fn from_launch() -> Self {
+        ForcedTier(launch_param("BREAKNECK_QUALITY", "quality").and_then(|v| parse_tier(&v)))
+    }
+
+    /// The [`ActiveQuality`] a forced tier pins, if one is forced.
+    pub fn active(self) -> Option<ActiveQuality> {
+        self.0.map(|tier| ActiveQuality {
+            setting: match tier {
+                QualityTier::Low => GraphicsQuality::Low,
+                QualityTier::Medium => GraphicsQuality::Medium,
+                QualityTier::High => GraphicsQuality::High,
+            },
+            tier,
+            stepped: false,
+        })
+    }
+}
+
+/// A tier name, case-insensitive (`low`, `Medium`, `HIGH`).
+pub fn parse_tier(value: &str) -> Option<QualityTier> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "low" => Some(QualityTier::Low),
+        "medium" => Some(QualityTier::Medium),
+        "high" => Some(QualityTier::High),
+        _ => None,
+    }
+}
+
+/// A launch option: the environment variable `env` natively, the URL query
+/// parameter `key` on the web. A bare `?key` reads as an empty value.
+pub fn launch_param(env: &str, key: &str) -> Option<String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = key;
+        std::env::var(env).ok()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = env;
+        let search = web_sys::window()
+            .map(|w| w.location())
+            .and_then(|l| l.search().ok())
+            .unwrap_or_default();
+        query_param(&search, key)
+    }
+}
+
+/// `key`'s value in a URL query string (`?a=1&b`); `Some("")` for a bare
+/// key. Pure, so the parsing is unit-tested on every target.
+pub fn query_param(search: &str, key: &str) -> Option<String> {
+    search
+        .trim_start_matches('?')
+        .split('&')
+        .find_map(|kv| match kv.split_once('=') {
+            Some((k, v)) if k == key => Some(v.to_string()),
+            None if kv == key => Some(String::new()),
+            _ => None,
+        })
 }
 
 /// The adaptive fallback: while the setting is Auto and a window is up
@@ -425,10 +605,15 @@ fn watch_frame_budget(
 fn resolve_quality(
     settings: Res<Settings>,
     platform: Res<Platform>,
+    forced: Option<Res<ForcedTier>>,
     budget: Option<ResMut<FrameBudget>>,
     mut active: ResMut<ActiveQuality>,
 ) {
     if !settings.is_changed() {
+        return;
+    }
+    // A forced run ignores the settings row (and never persists anything).
+    if forced.as_ref().is_some_and(|f| f.0.is_some()) {
         return;
     }
     if active.setting == settings.graphics && active.stepped {

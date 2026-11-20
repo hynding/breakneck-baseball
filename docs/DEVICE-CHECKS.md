@@ -58,6 +58,33 @@ No panics in either. Two things it surfaced that need a real phone:
   the touch pad and the at-bat card sits under the scoreboard. Landscape is
   the intended orientation, but portrait is what a phone opens in.
 
+## Frame cost per tier
+
+Every presentation change in the graphics and camera plan states what it
+costs per tier. The game prints a `bb-perf` line every 5 s when asked:
+`?perf` on the web, `BREAKNECK_PERF=1` natively. `?quality=low|medium|high`
+(natively `BREAKNECK_QUALITY=...`) pins a tier for that run only, without
+touching the saved setting. Each line gives the tier, the mean and worst
+frame, the entity count, and the meshes the main view drew.
+
+`node tools/frame_cost.mjs <url> [out-dir] [seconds-per-tier] [WxH]` runs
+all three tiers in a one-player game and prints the medians. Compare runs
+from the same machine only: under software WebGL the absolute times say
+nothing about a real device. The per-tier allowances each feature reads
+(crowd size, particles, fog, sky, bloom, replay length) live in
+`RenderBudget` in `src/game/present/quality.rs`.
+
+### Baseline (2026-11-20, Bevy 0.18, debug wasm, SwiftShader, 1280×720, 40 s per tier)
+
+| Tier | Mean frame (ms) | Worst frame (ms) | Entities | Meshes drawn |
+| --- | --- | --- | --- | --- |
+| Low | 438.7 | 461.0 | 1024 | 151 |
+| Medium | 975.7 | 1007.2 | 1024 | 151 |
+| High | 982.8 | 1010.4 | 1024 | 151 |
+
+Low's lower render scale and lack of MSAA halve the software-rendered frame;
+Medium and High differ only in MSAA 2x vs 4x and the shadow map here.
+
 ## What still needs a person with a device
 
 Use the GitHub Pages build for the web checks and `cargo run --release` for

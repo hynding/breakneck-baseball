@@ -2,6 +2,7 @@ pub mod animation;
 pub mod audio;
 pub mod camera;
 pub mod field;
+pub mod frame_cost;
 pub mod fx;
 pub mod jersey;
 pub mod juice;

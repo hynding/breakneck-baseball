@@ -22,7 +22,9 @@ pub mod coach {
 pub use self::meta::{appearance, autoplay, gear, input, menu, season_mode, settings, subs, touch};
 #[cfg(feature = "debug")]
 pub use self::meta::{creator, debug, portraits};
-pub use self::present::{animation, audio, camera, field, fx, jersey, juice, player, quality, ui};
+pub use self::present::{
+    animation, audio, camera, field, frame_cost, fx, jersey, juice, player, quality, ui,
+};
 pub use self::sim::{ai, ball, batting, director, fielding, flow, physics_clock, runner, scenario};
 
 use bevy::prelude::*;
@@ -326,6 +328,7 @@ impl Plugin for GamePlugin {
                 settings::SettingsPlugin,
                 season_mode::SeasonModePlugin,
                 quality::QualityPlugin,
+                frame_cost::FrameCostPlugin,
                 JuicePlugin,
                 sim::coach::CoachPlugin,
                 sim::director::DirectorPlugin,

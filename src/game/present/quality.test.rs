@@ -292,3 +292,71 @@ fn a_new_graphics_choice_clears_the_step() {
     assert!(!active.stepped);
     assert_eq!(app.world().resource::<FrameBudget>().steps, 0);
 }
+
+#[test]
+fn budget_never_shrinks_as_the_tier_rises() {
+    let tiers = [QualityTier::Low, QualityTier::Medium, QualityTier::High];
+    for pair in tiers.windows(2) {
+        let (lo, hi) = (pair[0].budget(), pair[1].budget());
+        assert!(lo.crowd_instances <= hi.crowd_instances, "{pair:?}");
+        assert!(lo.particle_scale <= hi.particle_scale, "{pair:?}");
+        assert!(lo.trail_scale <= hi.trail_scale, "{pair:?}");
+        assert!(lo.replay_secs <= hi.replay_secs, "{pair:?}");
+        assert!(lo.replay_angles <= hi.replay_angles, "{pair:?}");
+        for (l, h) in [
+            (lo.crowd_shadows, hi.crowd_shadows),
+            (lo.crowd_motion, hi.crowd_motion),
+            (lo.fog, hi.fog),
+            (lo.sky_dome, hi.sky_dome),
+            (lo.bloom, hi.bloom),
+            (lo.surface_detail, hi.surface_detail),
+        ] {
+            assert!(
+                !l || h,
+                "a feature on at {:?} is off at {:?}",
+                pair[0],
+                pair[1]
+            );
+        }
+    }
+}
+
+#[test]
+fn low_keeps_the_phone_budget_lean() {
+    let low = QualityTier::Low.budget();
+    assert!(!low.bloom && !low.crowd_shadows && !low.surface_detail);
+    assert!(low.particle_scale <= 0.5);
+    assert!(low.replay_angles == 1);
+}
+
+#[test]
+fn tier_names_parse_case_insensitively() {
+    assert_eq!(parse_tier("low"), Some(QualityTier::Low));
+    assert_eq!(parse_tier(" Medium "), Some(QualityTier::Medium));
+    assert_eq!(parse_tier("HIGH"), Some(QualityTier::High));
+    assert_eq!(parse_tier("ultra"), None);
+    assert_eq!(parse_tier(""), None);
+}
+
+#[test]
+fn query_params_read_values_and_bare_keys() {
+    assert_eq!(
+        query_param("?quality=low&perf", "quality"),
+        Some("low".into())
+    );
+    assert_eq!(
+        query_param("?quality=low&perf", "perf"),
+        Some(String::new())
+    );
+    assert_eq!(query_param("?perfx=1", "perf"), None);
+    assert_eq!(query_param("", "perf"), None);
+}
+
+#[test]
+fn a_forced_tier_pins_a_matching_manual_setting() {
+    assert_eq!(ForcedTier(None).active(), None);
+    let active = ForcedTier(Some(QualityTier::High)).active().unwrap();
+    assert_eq!(active.tier, QualityTier::High);
+    assert_eq!(active.setting, GraphicsQuality::High);
+    assert!(!active.stepped);
+}
