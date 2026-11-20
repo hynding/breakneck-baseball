@@ -63,7 +63,7 @@ Settings are managed via `src/game/meta/settings/`, persisting to the platform c
 
 **wasm/WebGL2 UI gotcha:** a UI element that is fully transparent (alpha 0, or a bare container root with no renderable component) when first extracted is never rendered again, even after its colours change or children are added — and UI roots spawned mid-`Playing` don't render at all. Keep every element's alpha nonzero (see `ui::hidden_tint`), give container roots a `BackgroundColor`, and show/hide by mutating children of roots that were painted at spawn.
 
-Cross-module communication is event-driven: `src/game/sim/ball.rs` defines `PitchEvent` / `HitEvent`, which player and UI systems consume rather than touching ball entities directly. Physics constants use real-world SI units (official MLB ball: 0.037 m radius, 0.148 kg) with a custom drag force applied per physics tick. The ball ignores player capsules via collision groups (`BALL_GROUP`/`PLAYER_GROUP`) — outcomes are resolved analytically at contact, and a pitch glancing off the batter's collider would corrupt the called count.
+Cross-module communication is event-driven: `src/game/sim/ball.rs` defines `PitchEvent` / `HitEvent`, which player and UI systems consume rather than touching ball entities directly. Physics constants use real-world SI units (official MLB ball: 0.037 m radius, 0.148 kg) with a custom drag and Magnus force applied once per frame (Rapier substeps the whole frame, `physics_clock.rs`). The ball ignores player capsules via collision groups (`BALL_GROUP`/`PLAYER_GROUP`) — outcomes are resolved analytically at contact, and a pitch glancing off the batter's collider would corrupt the called count.
 
 ## Dual-target constraints
 

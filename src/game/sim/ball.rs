@@ -1,8 +1,9 @@
 //! Baseball physics — the ball entity and all systems that act on it.
 //!
 //! The ball is a dynamic Rapier rigid body with realistic restitution and
-//! friction coefficients, and an aerodynamic drag force applied every physics
-//! tick to simulate air resistance.
+//! friction coefficients, plus aerodynamic drag and Magnus lift applied once
+//! per frame (Rapier then integrates the whole frame in substeps; see
+//! `physics_clock`).
 //!
 //! **Key constants** (official MLB baseball):
 //! - Diameter: 2.9 – 3.0 in  ≈ **0.074 m** (radius ≈ 0.037 m)
@@ -141,6 +142,7 @@ fn detect_wall_bang(
 }
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
+
 pub struct BallPlugin;
 
 impl Plugin for BallPlugin {
@@ -227,7 +229,7 @@ fn spawn_ball(
         // Allow rotation (spin) but dampen it slightly.
         Damping {
             linear_damping: 0.0,
-            angular_damping: 0.1,
+            angular_damping: crate::game::rules::SPIN_DAMPING,
         },
         CollisionGroups::new(BALL_GROUP, !PLAYER_GROUP),
         ActiveEvents::COLLISION_EVENTS,
@@ -393,3 +395,7 @@ fn reset_ball_if_out_of_bounds(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "ball.test.rs"]
+mod tests;

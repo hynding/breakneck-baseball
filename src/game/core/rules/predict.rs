@@ -188,9 +188,15 @@ fn roll_intercept(
     (None, point(GROUND_HORIZON_SECS))
 }
 
+/// Angular damping on the live ball (`ball::spawn_ball`'s `Damping`): how
+/// fast its spin, and so its Magnus bend, bleeds off in flight. Shared so
+/// the prediction and the ball can't drift apart.
+pub const SPIN_DAMPING: f32 = 0.1;
+
 /// Numerically integrates a batted ball's flight from contact height with the
 /// same gravity + drag + Magnus + wind model the live ball uses
-/// (`ball::apply_drag`, `ball::apply_magnus`, [`wind_accel`]), returning the landing point (y = 0) and hang time.
+/// (`ball::apply_drag`, `ball::apply_magnus`, [`wind_accel`], spin decaying
+/// at [`SPIN_DAMPING`]), returning the landing point (y = 0) and hang time.
 /// This is what fielder choreography chases — the *visual* ball's touchdown,
 /// not the balance-tuned range in [`classify_batted_ball`].
 pub fn predict_landing(
@@ -222,12 +228,17 @@ pub fn predict_landing_from(
 ) -> (Vec3, f32) {
     let mut pos = start;
     let mut v = vel;
+    let mut spin = spin;
     let dt = 1.0 / 120.0;
     let mut t = 0.0;
     while pos.y > 0.0 && t < 15.0 {
         let speed = v.length();
         v += -drag_factor * speed * v * dt;
         v += magnus_factor * spin.cross(v) * dt;
+        // The live ball's spin bleeds off through Rapier's angular damping
+        // (`ω /= 1 + dt·d` per step); without it a deep fly's Magnus carry
+        // was over-predicted by ~2 m at 100 mph.
+        spin /= 1.0 + dt * SPIN_DAMPING;
         v += wind_accel(v, wind) * dt;
         v.y -= GRAVITY * dt;
         pos += v * dt;
