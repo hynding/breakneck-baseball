@@ -90,8 +90,11 @@ clamps at 1.2 s while the pause runs on for the trot), and the broadcast rig tak
 (up into the seats the ball landed among) for `CROWD_SECS`, the replay, then the trot orbit;
 walk-off = `Shot::PileUp` on the plate for the whole pause, the replay inside it; dive =
 `Shot::DiveCam(fielder)` low and tight for `DIVE_SECS`, then the replay. `replay_at` delays the
-replay until the opening shot is done. An action press after the skip grace drops the sequence and
-its replay: the ordinary shot list is back the next frame. e2e `big_moments.rs` pins each sequence
+replay until the opening shot is done (the camera runs after `replay::BigMomentSystems`, so the call
+frame already shows it). The crowd shot is Stadium-only (the front yard has no stands; its homer
+goes straight to the orbit). An action press after the skip grace drops the sequence and its
+replay: the ordinary shot list is back the next frame, and a dive's shot that ended or was skipped
+hands the pause to the bag the throw went to, else the ball. e2e `big_moments.rs` pins each sequence
 and the skip.
 The grounder call is made once, just after the plate hold, by `shots::PlayRead` (low and coming
 down, or already down during the hold per `ActivePlay::landed_at`). The ball-follow leads the ball to its predicted landing spot and fits its

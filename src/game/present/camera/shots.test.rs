@@ -1081,6 +1081,13 @@ fn a_sequence_shot_takes_the_result_pause() {
     assert_eq!(pick_shot(&c, Some(Shot::BallFollow)), Shot::CrowdCam);
     c.sequence = None;
     assert_eq!(pick_shot(&c, Some(Shot::CrowdCam)), Shot::TrotOrbit);
+    // A dive's shot that ended hands the pause back to the play: the bag
+    // the throw went to, else the ball.
+    let f = Entity::from_raw_u32(3).unwrap();
+    let mut dive = cues(Phase::Result);
+    assert_eq!(pick_shot(&dive, Some(Shot::DiveCam(f))), Shot::BallFollow);
+    dive.thrown_base = Some(3);
+    assert_eq!(pick_shot(&dive, Some(Shot::DiveCam(f))), Shot::BaseCam(3));
     // Outside the result pause it is ignored.
     let mut live = cues(Phase::InPlay);
     live.since_contact = 1.0;

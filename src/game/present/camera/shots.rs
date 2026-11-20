@@ -139,6 +139,16 @@ pub(super) fn pick_shot(cues: &ShotCues, current: Option<Shot>) -> Shot {
         Phase::Result if matches!(current, Some(Shot::RunnerCam(_))) => {
             cues.thrown_base.map_or(Shot::BallFollow, Shot::BaseCam)
         }
+        // A sequence shot that ended (or was skipped) hands the rest of the
+        // pause to the play: the bag the throw went to, else the ball.
+        Phase::Result
+            if matches!(
+                current,
+                Some(Shot::DiveCam(_) | Shot::CrowdCam | Shot::PileUp)
+            ) =>
+        {
+            cues.thrown_base.map_or(Shot::BallFollow, Shot::BaseCam)
+        }
         Phase::Result => current.unwrap_or(Shot::Duel(cues.view)),
     }
 }

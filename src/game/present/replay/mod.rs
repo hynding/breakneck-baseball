@@ -31,7 +31,7 @@ use crate::game::input::Intents;
 use crate::game::player::{BatPivot, CatcherRole, PlateUmpire, RigUnitTag};
 use crate::game::quality::{ActiveQuality, QualityTier};
 use crate::game::settings::{ReplayMode, Settings};
-use crate::game::variant::FieldSpec;
+use crate::game::variant::{FieldSpec, Scenery};
 use crate::game::{GameState, ScoreBoard};
 
 use clip::{Moment, Recording, Sample, Segment};
@@ -93,6 +93,12 @@ impl Replay {
 /// after it, so it follows the replay rather than the live play.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ReplaySystems;
+
+/// The Update systems that follow the play and start or skip the replay;
+/// they write [`BigMomentCue`], so the broadcast camera runs after them
+/// (the call frame must see this frame's cue, not the cleared one).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BigMomentSystems;
 
 /// The play's big moment, if it is one, for the camera's sequence
 /// ([`crate::game::camera::sequence`]): set as the result pause begins,
@@ -192,6 +198,7 @@ impl Plugin for ReplayPlugin {
                 Update,
                 (watch_play, start_replay, advance_replay)
                     .chain()
+                    .in_set(BigMomentSystems)
                     .after(crate::game::GameplayOrder::Runners)
                     .run_if(in_state(GameState::Playing)),
             )
@@ -303,7 +310,9 @@ fn watch_play(
             if entered && watch.contact.is_some() {
                 watch.called_at = Some(now);
                 let moment = if play.is_home_run() {
-                    Some(BigMoment::HomeRun)
+                    // The crowd shot needs a crowd: only the stadium has
+                    // stands (the front yard's homer goes to the orbit).
+                    (field.scenery == Scenery::Stadium).then_some(BigMoment::HomeRun)
                 } else if play.is_walk_off() {
                     Some(BigMoment::WalkOff)
                 } else {
@@ -319,7 +328,10 @@ fn watch_play(
                     skipped: false,
                     called_at: now,
                 };
-                let big = moment.is_some() || watch.throw_home;
+                let big = moment.is_some()
+                    || play.is_home_run()
+                    || play.is_walk_off()
+                    || watch.throw_home;
                 // A play that ended the half has already re-dressed every
                 // rig for the next one (colours, names): the replay only
                 // carries poses, so it would show both teams in each

@@ -211,6 +211,9 @@ impl Plugin for CameraPlugin {
                     // picks its subject from those paths and this frame's
                     // positions.
                     .after(crate::game::GameplayOrder::Rigs)
+                    // And after the big-moment cue is written: on the call
+                    // frame the sequence's opening shot must be the first.
+                    .after(crate::game::replay::BigMomentSystems)
                     .run_if(in_state(GameState::Playing))
                     .run_if(is_broadcast),
             )

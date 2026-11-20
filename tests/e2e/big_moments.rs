@@ -11,7 +11,9 @@ use bevy_rapier3d::prelude::Velocity;
 
 use breakneck_baseball::game::animation::{AnimClip, Playing};
 use breakneck_baseball::game::ball::Baseball;
-use breakneck_baseball::game::camera::sequence::{BigMoment, CROWD_SECS};
+use breakneck_baseball::game::camera::sequence::{
+    BigMoment, CROWD_SECS, DIVE_SECS, PILE_UP_REPLAY_SECS,
+};
 use breakneck_baseball::game::camera::{BroadcastRig, Shot};
 use breakneck_baseball::game::flow::{Phase, Play, bat_arrival_z};
 use breakneck_baseball::game::input::Intents;
@@ -239,18 +241,26 @@ fn a_walk_off_holds_the_pile_up() {
         app.world().resource::<BigMomentCue>().moment,
         Some(BigMoment::WalkOff)
     );
+    let mut replay_at = None;
     while phase(&app) == Phase::Result
         && *app.world().resource::<State<GameState>>().get() == GameState::Playing
         && seen.len() < 10
     {
-        if !playing(&app)
-            && let Some(s) = shot(&app)
+        if playing(&app) {
+            let now = app.world().resource::<Time>().elapsed_secs();
+            replay_at.get_or_insert(app.world().resource::<BigMomentCue>().since_call(now));
+        } else if let Some(s) = shot(&app)
             && seen.last() != Some(&s)
         {
             seen.push(s);
         }
         app.update();
     }
+    let at = replay_at.expect("the walk-off replayed");
+    assert!(
+        (at - PILE_UP_REPLAY_SECS).abs() < 0.1,
+        "the replay plays inside the pile-up: {at:.2} s"
+    );
     assert_eq!(seen.first(), Some(&Shot::PileUp), "{seen:?}");
     assert!(
         seen.iter().all(|s| *s == Shot::PileUp),
@@ -322,7 +332,21 @@ fn a_dive_gets_its_low_angle() {
         Some(BigMoment::Dive(fielder))
     );
     assert_eq!(shot(&app), Some(Shot::DiveCam(fielder)));
-    // Then its replay.
-    let replayed = run_until(&mut app, 300, |app| playing(app));
+    // The low angle holds until its replay starts, after it.
+    let mut held = true;
+    let replayed = run_until(&mut app, 600, |app| {
+        if playing(app) {
+            return true;
+        }
+        held &= shot(app) == Some(Shot::DiveCam(fielder));
+        false
+    });
     assert!(replayed.is_some(), "the dive replayed");
+    assert!(held, "the dive cam held until the replay");
+    let now = app.world().resource::<Time>().elapsed_secs();
+    let at = app.world().resource::<BigMomentCue>().since_call(now);
+    assert!(
+        (at - DIVE_SECS).abs() < 0.1,
+        "the replay comes after the dive shot: {at:.2} s"
+    );
 }
