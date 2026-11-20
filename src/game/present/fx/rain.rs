@@ -142,7 +142,7 @@ pub(super) fn splashes_due(owed: &mut f32, per_sec: f32, scale: f32, dt: f32) ->
 }
 
 /// Raindrops splash on the ground ahead of the camera: small rings that
-/// spread and fade, on tiers that budget weather effects (Medium and up).
+/// spread for a moment and vanish, on tiers that budget weather effects (Medium and up).
 pub(super) fn rain_splashes(
     assets: Option<Res<SplashAssets>>,
     camera: Query<&GlobalTransform, With<MainCamera>>,
