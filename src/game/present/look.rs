@@ -131,7 +131,11 @@ impl Plugin for LookPlugin {
         app.add_systems(Startup, init_sky_texture)
             .add_systems(Update, (repaint_sky, apply_camera_look).chain())
             // After the camera rigs have moved the eye this frame.
-            .add_systems(PostUpdate, fog_follows_camera);
+            .add_systems(
+                PostUpdate,
+                // After a replay frame has moved the camera.
+                fog_follows_camera.after(crate::game::replay::ReplaySystems),
+            );
     }
 }
 
