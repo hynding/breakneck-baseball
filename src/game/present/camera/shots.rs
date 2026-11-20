@@ -212,28 +212,32 @@ pub const CUTAWAY_SECS: f32 = 1.6;
 /// A half-inning, `(inning, top)`, and when its cutaway started.
 pub(super) type CutHalf = Option<((u32, bool), f32)>;
 
-/// Whether the walk-up on screen opens with the half-inning cutaway: the
-/// first walk-up of a half (`half` is `(inning, top)`), never the game's
-/// first (the intro flyover has just shown the park), held for
-/// [`CUTAWAY_SECS`] of the hold. `cut_half` is the half whose cutaway
-/// already started, at `started` on the gameplay clock. Returns the new
-/// `(cut_half, started)` and whether the cutaway is up.
+/// Whether the walk-up on screen opens with the half-inning cutaway. A
+/// half is marked seen on its first pre-pitch frame (`pre_pitch`; `half` is
+/// `(inning, top)`), and the cutaway plays only if that frame opens on a
+/// walk-up: so never in the game's first half (the intro flyover has just
+/// shown the park), never later in a half, and not at all in a half whose
+/// leadoff has no walk-up (the last half ended on a caught stealing). It
+/// holds for [`CUTAWAY_SECS`] of the hold. `cut` is the half last seen and
+/// when its cutaway started on the gameplay clock. Returns the new `cut`
+/// and whether the cutaway is up.
 pub(super) fn half_inning_cutaway(
+    pre_pitch: bool,
     walkup: bool,
     half: (u32, bool),
     now: f32,
     cut: CutHalf,
 ) -> (CutHalf, bool) {
-    let opening = half == (1, true);
+    let walkup = pre_pitch && walkup;
     let cut = match cut {
         Some((seen, _)) if seen == half => cut,
-        // A new half's first walk-up starts its cutaway (the game's first
-        // half is marked seen without one).
-        _ if walkup => Some((half, if opening { f32::NEG_INFINITY } else { now })),
+        _ if pre_pitch => {
+            let opens = walkup && half != (1, true);
+            Some((half, if opens { now } else { f32::NEG_INFINITY }))
+        }
         _ => cut,
     };
-    let up =
-        walkup && !opening && cut.is_some_and(|(seen, at)| seen == half && now - at < CUTAWAY_SECS);
+    let up = walkup && cut.is_some_and(|(seen, at)| seen == half && now - at < CUTAWAY_SECS);
     (cut, up)
 }
 

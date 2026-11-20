@@ -101,8 +101,8 @@ pub(super) fn paint_walkup_card(
     mut lines: Query<(&WalkUpText, &mut Text, &mut TextColor)>,
 ) {
     let ui = &theme.ui;
-    // Not over the intro: the first walk-up's hold is frozen under it, and
-    // the lineup card has the screen.
+    // Not over the intro: the lineup card has the screen (and any walk-up
+    // hold is frozen under it with the clock).
     let on = play.walkup_active() && !intro.is_playing();
     for (mut bg, mut border, mut visibility) in &mut cards {
         let want_visibility = if on {

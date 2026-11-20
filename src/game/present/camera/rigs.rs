@@ -415,7 +415,8 @@ pub(super) fn broadcast_camera(
         rig.thrown_base
     };
     let (cut_half, cutaway) = super::shots::half_inning_cutaway(
-        play.walkup_active() && play.phase == Phase::PrePitch,
+        play.phase == Phase::PrePitch,
+        play.walkup_active(),
         (score.inning, score.top_of_inning),
         now,
         rig.cut_half,

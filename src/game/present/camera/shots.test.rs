@@ -1231,28 +1231,38 @@ fn reduce_motion_holds_the_trot_orbit_still() {
 
 /// The first walk-up of each half opens on the cutaway for its hold, then
 /// the walk-up shot takes over; the game's first half never gets one (the
-/// intro just showed the park), and a later walk-up in the same half
-/// doesn't either.
+/// intro just showed the park), a later walk-up in the same half doesn't
+/// either, and nor does a half that opens without a walk-up.
 #[test]
 fn each_new_half_opens_on_the_cutaway() {
     // Top of the first: marked seen, no cutaway.
-    let (cut, up) = half_inning_cutaway(true, (1, true), 0.0, None);
+    let (cut, up) = half_inning_cutaway(true, true, (1, true), 0.0, None);
+    assert!(!up);
+    // The half flips during the third out's result, before any pre-pitch
+    // frame: nothing is marked yet.
+    let (cut, up) = half_inning_cutaway(false, false, (1, false), 99.0, cut);
     assert!(!up);
     // Bottom of the first: the first walk-up's hold starts it.
-    let (cut, up) = half_inning_cutaway(true, (1, false), 100.0, cut);
+    let (cut, up) = half_inning_cutaway(true, true, (1, false), 100.0, cut);
     assert!(up);
-    let (cut, up) = half_inning_cutaway(true, (1, false), 100.0 + CUTAWAY_SECS * 0.9, cut);
+    let (cut, up) = half_inning_cutaway(true, true, (1, false), 100.0 + CUTAWAY_SECS * 0.9, cut);
     assert!(up, "held through its seconds");
-    let (cut, up) = half_inning_cutaway(true, (1, false), 100.0 + CUTAWAY_SECS + 0.01, cut);
+    let (cut, up) = half_inning_cutaway(true, true, (1, false), 100.0 + CUTAWAY_SECS + 0.01, cut);
     assert!(!up, "then the walk-up shot");
     // Between pitches and at the half's next walk-up: no second cutaway.
-    let (cut, up) = half_inning_cutaway(false, (1, false), 130.0, cut);
+    let (cut, up) = half_inning_cutaway(false, false, (1, false), 130.0, cut);
     assert!(!up);
-    let (cut, up) = half_inning_cutaway(true, (1, false), 160.0, cut);
+    let (cut, up) = half_inning_cutaway(true, true, (1, false), 160.0, cut);
     assert!(!up, "only the half's first walk-up");
     // Top of the second: a fresh one.
-    let (_, up) = half_inning_cutaway(true, (2, true), 300.0, cut);
+    let (cut, up) = half_inning_cutaway(true, true, (2, true), 300.0, cut);
     assert!(up);
+    // The bottom of the second opens with no walk-up (the top ended on a
+    // caught stealing): seen, and its second batter's walk-up stays plain.
+    let (cut, up) = half_inning_cutaway(true, false, (2, false), 400.0, cut);
+    assert!(!up);
+    let (_, up) = half_inning_cutaway(true, true, (2, false), 420.0, cut);
+    assert!(!up, "no cutaway mid-half");
 
     let mut c = cues(Phase::PrePitch);
     c.walkup = true;

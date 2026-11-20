@@ -13,7 +13,7 @@ use breakneck_baseball::game::GameState;
 use breakneck_baseball::game::ScoreBoard;
 use breakneck_baseball::game::camera::{BroadcastRig, MainCamera, Shot};
 use breakneck_baseball::game::director::{Director, Policy};
-use breakneck_baseball::game::flow::Play;
+use breakneck_baseball::game::flow::{Phase, Play};
 use breakneck_baseball::game::input::Intents;
 use breakneck_baseball::game::intro::{INTRO_SECS, Intro, IntroDisabled, LINEUP_FROM, SKIP_GRACE};
 use breakneck_baseball::game::ui::{LineupLine, LineupText};
@@ -131,6 +131,38 @@ fn a_press_skips_the_intro() {
     });
     assert!(ended.is_some(), "a press past the grace skips it");
     assert_eq!(intro(&app).skipped, 1);
+    // The skip press is swallowed: it never starts the first pitch.
+    for _ in 0..10 {
+        app.update();
+    }
+    assert_eq!(app.world().resource::<Play>().phase, Phase::PrePitch);
+}
+
+/// Presses `action` from the DriveGame seam inside the skip grace only.
+fn press_inside_grace(intro: Res<Intro>, mut intents: ResMut<Intents>) {
+    intents.home = default();
+    intents.away = default();
+    if intro.shown().is_some_and(|t| t < SKIP_GRACE - 0.05) {
+        intents.home.action = true;
+    }
+}
+
+/// A press too early to skip neither skips nor winds up a pitch that would
+/// go the moment the intro ends.
+#[test]
+fn an_early_press_does_nothing() {
+    let mut app = game_with_intro();
+    app.add_systems(DriveGame, press_inside_grace);
+    let ended = run_until(&mut app, frames(INTRO_SECS + 0.5), |app| {
+        assert_eq!(app.world().resource::<Play>().phase, Phase::PrePitch);
+        !intro(app).is_playing()
+    });
+    assert!(ended.is_some(), "the intro ends on its own");
+    assert_eq!(intro(&app).skipped, 0);
+    for _ in 0..10 {
+        app.update();
+    }
+    assert_eq!(app.world().resource::<Play>().phase, Phase::PrePitch);
 }
 
 #[test]

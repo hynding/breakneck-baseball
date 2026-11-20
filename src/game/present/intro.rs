@@ -131,7 +131,18 @@ impl Plugin for IntroPlugin {
             .add_systems(crate::game::game_start(), start_intro)
             .add_systems(OnEnter(GameState::GameOver), stop_intro)
             .add_systems(OnEnter(GameState::MainMenu), stop_intro)
-            .add_systems(Update, advance_intro.run_if(in_state(GameState::Playing)))
+            .add_systems(
+                Update,
+                advance_intro
+                    // After every intent writer that isn't gameplay (devices,
+                    // the Director's seam) and before flow reads them, so the
+                    // presses the intro swallows never reach the game; and
+                    // before the broadcast rig, so the frame it ends on is
+                    // already the rig's.
+                    .after(crate::game::GameplayOrder::Input)
+                    .before(crate::game::GameplayOrder::Flow)
+                    .run_if(in_state(GameState::Playing)),
+            )
             .add_systems(
                 PostUpdate,
                 fly_camera
@@ -163,16 +174,24 @@ fn start_intro(
 }
 
 /// Runs the intro on the real clock; a press past the grace, a Director,
-/// or the end gives the game its clock back.
+/// or the end gives the game its clock back. Every press made while it
+/// plays, the skip included, is swallowed: flow reads `Intents` with the
+/// clock held, and a press would otherwise start the first pitch under the
+/// flyover or throw it the instant the intro ends.
 fn advance_intro(
     real: Res<Time<Real>>,
-    intents: Res<Intents>,
+    mut intents: ResMut<Intents>,
     director: Option<Res<Director>>,
     disabled: Option<Res<IntroDisabled>>,
     mut intro: ResMut<Intro>,
     mut virt: ResMut<Time<Virtual>>,
     mut cam: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
 ) {
+    // Read without marking: `Intro` changes only while it plays (the lineup
+    // card repaints on its change).
+    if intro.active.is_none() {
+        return;
+    }
     let Some(run) = intro.active.as_mut() else {
         return;
     };
@@ -181,6 +200,7 @@ fn advance_intro(
     run.shown += real.delta_secs().min(MAX_STEP);
     let pressed = run.shown >= SKIP_GRACE && (intents.home.action || intents.away.action);
     let skip = pressed || director.is_some() || disabled.is_some();
+    *intents = Intents::default();
     if (skip || run.shown >= INTRO_SECS)
         && let Some(run) = intro.active.take()
     {
