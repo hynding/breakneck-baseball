@@ -137,7 +137,9 @@ pub(super) fn meter_stance_sink(
 const ARRIVE_EPS: f32 = 0.2;
 
 /// Steps every rig with a [`MoveIntent`] toward its target, faces it along the
-/// travel direction, and keeps `RunCycle` playing while it moves.
+/// travel direction, and keeps a gait playing while it moves: `RunCycle`
+/// unless something else already set one (the struck-out batter's
+/// `DejectedWalk`, see [`super::is_gait`]).
 pub(super) fn locomote(
     time: Res<Time>,
     mut commands: Commands,
@@ -146,9 +148,9 @@ pub(super) fn locomote(
     let dt = time.delta_secs();
     for (entity, mut transform, mut intent, playing) in &mut movers {
         let Some(target) = intent.target else {
-            // No target to run to: shed any lingering RunCycle so the rig
-            // settles instead of jogging in place forever. `RunCycle` is
-            // locomote's own clip, so locomote is what takes it back off —
+            // No target to run to: shed any lingering gait so the rig
+            // settles instead of jogging (or trudging) in place forever.
+            // Gaits are locomote's to end, so locomote takes them back off —
             // and it must do so whenever the target is gone, not only on the
             // frame the mover happens to arrive. Otherwise a target cleared
             // by another system (e.g. a fielder pulled off a cover as the play

@@ -417,6 +417,17 @@ fn home_run_without_an_authored_celebration_queues_the_fist_pump() {
     // Away idx0 has no authored celebration in data/players.ron (only
     // OKAFOR home/1, KANE home/8, FOX away/2 and MARSH away/10 do), so he
     // gets the stock fist pump.
+    {
+        use breakneck_baseball::game::animation::celebration_clip;
+        use breakneck_baseball::game::roster::Rosters;
+        let rosters = app.world().resource::<Rosters>();
+        let style = rosters.team(Team::Away).card(0).appearance.style;
+        assert_eq!(
+            celebration_clip(style.celebration),
+            None,
+            "precondition: away idx0 must have no authored celebration"
+        );
+    }
     let batter = app
         .world_mut()
         .query_filtered::<Entity, With<Batter>>()
