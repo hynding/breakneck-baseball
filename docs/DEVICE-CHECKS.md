@@ -86,6 +86,21 @@ nothing about a real device. The per-tier allowances each feature reads
 Low's lower render scale and lack of MSAA halve the software-rendered frame;
 Medium and High differ only in MSAA 2x vs 4x and the shadow map here.
 
+### Look pass (task 3; same machine, 640×360, 25 s per tier)
+
+| Tier | Before (ms) | After (ms) | What it added |
+| --- | --- | --- | --- |
+| Low | 97.6 | 122.1 | Fog and colour grading |
+| Medium | 238.2 | 304.3 | + gradient skybox |
+| High | 247.7 | 344.2 | + HDR and bloom |
+
+Software WebGL is bound by per-pixel ALU, so fog and grading look dearer
+here than on a GPU. The sky was first a 700 m dome mesh and cost about
+90 ms at Medium, because it shaded the whole screen before the field
+covered it. As a `Skybox` it shades only the visible sky, after the
+opaque pass, and costs about 9 ms. A real-device check of Low (fog on a
+weak phone) is still owed; see below.
+
 ## What still needs a person with a device
 
 Use the GitHub Pages build for the web checks and `cargo run --release` for
