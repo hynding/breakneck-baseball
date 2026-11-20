@@ -81,6 +81,14 @@ fn shot(app: &App) -> Option<Shot> {
     app.world().resource::<BroadcastRig>().shot()
 }
 
+fn now(app: &App) -> f32 {
+    app.world().resource::<Time>().elapsed_secs()
+}
+
+/// The least the bag's shot is up before a call that came off the runner
+/// cam: long enough for the slide and the tag to read.
+const MIN_BAG_SECS: f32 = 0.3;
+
 fn phase(app: &App) -> Phase {
     app.world().resource::<Play>().phase
 }
@@ -135,11 +143,14 @@ fn extra_base_hits_cut_ball_runner_then_bag() {
             frames += 1;
         }
         let mut log = Vec::new();
+        // When the shot on screen came up (virtual seconds).
+        let mut shot_since = now(&app);
         while phase(&app) == Phase::InPlay && frames < 400_000 {
             if let Some(s) = shot(&app)
                 && log.last() != Some(&s)
             {
                 log.push(s);
+                shot_since = now(&app);
             }
             app.update();
             frames += 1;
@@ -148,7 +159,10 @@ fn extra_base_hits_cut_ball_runner_then_bag() {
             && log.last() != Some(&s)
         {
             log.push(s);
+            shot_since = now(&app);
         }
+        // How long the shot the call landed in had been up.
+        let call_shot_secs = now(&app) - shot_since;
         let outcome = app.world().resource::<Play>().last_outcome();
         let good = follows_runner_then_bag(&log);
         // On every play: the runner cam never comes back once the base cam
@@ -175,6 +189,11 @@ fn extra_base_hits_cut_ball_runner_then_bag() {
             assert!(
                 matches!(log.last(), Some(Shot::BaseCam(_))),
                 "the call must land on the base cam: {outcome:?} {log:?}"
+            );
+            assert!(
+                call_shot_secs >= MIN_BAG_SECS,
+                "the base cam was up only {call_shot_secs:.2} s before the call: \
+                 {outcome:?} {log:?}"
             );
         }
         match hit_bases(outcome) {
