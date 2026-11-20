@@ -261,7 +261,7 @@ impl Shot {
                 ShotSpec::new(eye, target, fov)
             }
             (Shot::BallFollow, Some(ball)) if !inp.home_run => {
-                let (eye, target, focus) = landing_zone_cam(ball, inp.wind);
+                let (eye, target, focus) = landing_zone_cam(ball, inp.wind, -field.broadcast_eye.z);
                 // Fit where the ball is about to be too: the lens follows at a
                 // finite rate, so it must already have room for the next
                 // quarter-second of flight.
@@ -324,8 +324,9 @@ impl Shot {
 /// framed, not just the ball. Returns the eye, the look-at and the
 /// drop zone's focus (1 m over the predicted landing spot); the ball-follow then opens the lens until both
 /// the ball and the landing spot sit in the middle of the frame, wider as
-/// the ball climbs and tighter as it drops.
-pub(super) fn landing_zone_cam(ball: BallState, wind: Vec3) -> (Vec3, Vec3, Vec3) {
+/// the ball climbs and tighter as it drops. `max_behind` caps how far
+/// behind the plate the eye may go (the park's broadcast eye distance).
+pub(super) fn landing_zone_cam(ball: BallState, wind: Vec3, max_behind: f32) -> (Vec3, Vec3, Vec3) {
     // Re-predict from the live ball; as the ball settles this converges to
     // the ball itself, so the shot lands with the play.
     let (landing, _) = rules::predict_landing_from(
@@ -351,7 +352,9 @@ pub(super) fn landing_zone_cam(ball: BallState, wind: Vec3) -> (Vec3, Vec3, Vec3
         .max((lift * 1.6).min(MAX_BACK));
     let height = (depth * 0.30).clamp(8.0, 18.0).max(lift * 0.4);
     let ball_along = Vec2::new(ball.pos.x, ball.pos.z).dot(line);
-    let along = (depth - back).min(ball_along - TRAIL_BACK);
+    // Never further behind the plate than the park's own broadcast eye,
+    // which is known to be clear of the backstop and the scenery.
+    let along = (depth - back).min(ball_along - TRAIL_BACK).max(-max_behind);
     let eye = Vec3::new(line.x * along, height, line.y * along);
     // Look down the bisector of the ball and the drop zone as the eye sees
     // them, so a lens fitted to both opens the least: a high fly lifts the
@@ -389,10 +392,28 @@ const GROUND_CAM_MIN_FOV: f32 = 40.0_f32.to_radians();
 /// A ball counts as hit on the ground when it is this low and would be
 /// down again within [`GROUNDER_HANG`] seconds.
 const GROUNDER_HEIGHT: f32 = 1.5;
-const GROUNDER_HANG: f32 = 0.6;
+const GROUNDER_HANG: f32 = 1.0;
+
+/// Whether this play's ball was hit on the ground, decided **once**: at
+/// the first frame the plate hold is over (`ready`) with a live ball, from
+/// that ball's state, and then kept for the whole play (the rig clears it
+/// with the duel). Deciding later would read every fly ball as a grounder
+/// in its last half-metre, and a held ball as one too.
+pub(super) fn decide_grounder(
+    latch: Option<bool>,
+    ready: bool,
+    ball: Option<BallState>,
+    wind: Vec3,
+) -> Option<bool> {
+    match (latch, ready, ball) {
+        (Some(decided), _, _) => Some(decided),
+        (None, true, Some(b)) => Some(is_grounder(b, wind)),
+        _ => None,
+    }
+}
 
 /// True for a ball on (or skimming) the ground: low, and coming down at
-/// once. The rig latches it for the play, so a hop doesn't flip the shot.
+/// once. Only meaningful off the bat; see [`decide_grounder`].
 pub(super) fn is_grounder(ball: BallState, wind: Vec3) -> bool {
     if ball.pos.y > GROUNDER_HEIGHT {
         return false;

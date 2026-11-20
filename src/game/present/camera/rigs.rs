@@ -17,7 +17,7 @@ use crate::game::variant::FieldSpec;
 
 use super::framing::{LENS_BRUSH_RADIUS, OCCLUSION_NEAR, OCCLUSION_RADIUS, brushes_lens, occludes};
 use super::shots::{
-    BallState, FIELDER_CAM_MIN_HEIGHT, RigMotion, Shot, ShotCues, ShotInputs, is_grounder,
+    BallState, FIELDER_CAM_MIN_HEIGHT, RigMotion, Shot, ShotCues, ShotInputs, decide_grounder,
     pick_shot,
 };
 use super::{
@@ -131,9 +131,10 @@ pub struct BroadcastRig {
     /// The base the live ball was last thrown at, cleared once the shot
     /// returns to the duel.
     thrown_base: Option<usize>,
-    /// This play's ball was hit on the ground, latched so a hop doesn't
-    /// flip the shot; cleared with `thrown_base`.
-    grounder: bool,
+    /// Whether this play's ball was hit on the ground, decided once just
+    /// after the plate hold ([`decide_grounder`]); cleared with
+    /// `thrown_base`.
+    grounder: Option<bool>,
 }
 
 impl Default for BroadcastRig {
@@ -142,7 +143,7 @@ impl Default for BroadcastRig {
             motion: RigMotion::new(BROADCAST_EYE, BROADCAST_HOME_TARGET, BROADCAST_FOV),
             shot: None,
             thrown_base: None,
-            grounder: false,
+            grounder: None,
         }
     }
 }
@@ -224,17 +225,17 @@ pub(super) fn broadcast_camera(
         vel: vel.linvel,
         spin: vel.angvel,
     });
-    // Latch a ground ball once the plate hold is over and it is clear of
-    // the bat: a hop up off the infield stays a grounder.
-    if play.phase == Phase::InPlay
+    // Decide once, just after the plate hold, whether the ball was hit on
+    // the ground; the answer holds for the play.
+    let ready = play.phase == Phase::InPlay
         && !play.is_home_run()
-        && play.since_contact(now) >= BALL_FOLLOW_DELAY
-        && ball_state.is_some_and(|b| is_grounder(b, wind.0))
-    {
-        rig.grounder = true;
-    }
+        && play.since_contact(now) >= BALL_FOLLOW_DELAY;
+    rig.grounder = decide_grounder(rig.grounder, ready, ball_state, wind.0);
+    let grounder = rig.grounder == Some(true);
     let descending_to = ball.and_then(|(tf, vel)| {
-        let coming_down = tf.translation.y > FIELDER_CAM_MIN_HEIGHT && vel.linvel.y < 0.0;
+        // A chopper's high hop is still a grounder's play: no fielder cam.
+        let coming_down =
+            !grounder && tf.translation.y > FIELDER_CAM_MIN_HEIGHT && vel.linvel.y < 0.0;
         active
             .chaser()
             .filter(|f| coming_down && rigs.get(*f).is_ok())
@@ -249,7 +250,7 @@ pub(super) fn broadcast_camera(
         walkup: play.walkup_active(),
         strikeout: play.result_beat() == Some(ResultBeat::Strikeout),
         thrown_base: rig.thrown_base,
-        grounder: rig.grounder,
+        grounder,
         descending_to,
         duel_throw_base: play.duel_throw().map(|t| t.target),
     };
@@ -280,7 +281,7 @@ pub(super) fn broadcast_camera(
     }
     if matches!(shot, Shot::Duel(_)) {
         rig.thrown_base = None;
-        rig.grounder = false;
+        rig.grounder = None;
     }
 
     if rig.shot != Some(shot) {

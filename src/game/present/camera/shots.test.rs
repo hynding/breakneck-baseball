@@ -326,7 +326,7 @@ fn the_ball_follow_splits_on_the_home_run() {
     let mut inp = inputs(&field);
     inp.ball = Some(ball);
     let fly = Shot::BallFollow.spec(&inp);
-    let (eye, target, _) = landing_zone_cam(ball, Vec3::ZERO);
+    let (eye, target, _) = landing_zone_cam(ball, Vec3::ZERO, -field.broadcast_eye.z);
     assert_eq!((fly.eye, fly.target), (eye, target));
     inp.home_run = true;
     let hr = Shot::BallFollow.spec(&inp);
@@ -491,7 +491,7 @@ fn fly_step(b: &mut BallState, dt: f32) {
     b.pos += b.vel * dt;
     if b.pos.y < 0.0 {
         b.pos.y = 0.0;
-        b.vel.y = -b.vel.y * 0.35;
+        b.vel.y = -b.vel.y * 0.55; // ball.rs restitution
         b.vel.x *= 0.8;
         b.vel.z *= 0.8;
         b.spin = Vec3::ZERO;
@@ -523,16 +523,15 @@ fn worst_ball_ndc(field: &FieldSpec, start: BallState, aspect: f32) -> (f32, Sho
     let mut ball = start;
     let mut motion = RigMotion::new(field.broadcast_eye, field.broadcast_target, BROADCAST_FOV);
     let mut shot = None;
-    let mut grounder = false;
+    let mut latch = None;
     let mut worst = (0.0_f32, Shot::BallFollow);
     let mut t = 0.0;
     let mut landed = false;
     while t < 4.0 && !landed {
         fly_step(&mut ball, dt);
         t += dt;
-        if t >= BALL_FOLLOW_DELAY && is_grounder(ball, Vec3::ZERO) {
-            grounder = true;
-        }
+        latch = decide_grounder(latch, t >= BALL_FOLLOW_DELAY, Some(ball), Vec3::ZERO);
+        let grounder = latch == Some(true);
         let descending = ball.pos.y > FIELDER_CAM_MIN_HEIGHT && ball.vel.y < 0.0 && !grounder;
         let mut c = cues(Phase::InPlay);
         c.since_contact = t;
@@ -571,7 +570,7 @@ fn worst_ball_ndc(field: &FieldSpec, start: BallState, aspect: f32) -> (f32, Sho
 
 /// The ball never leaves the middle 80% of the frame, for a pop-up, a
 /// liner, a deep fly and a grounder through each hole, at 16:9 and on a
-/// narrower 4:3 window.
+/// narrower 4:3 window, and in the front yard (whose eye sits closer).
 #[test]
 fn the_ball_stays_in_the_middle_of_the_frame() {
     let field = VariantId::Standard.field();
@@ -585,7 +584,11 @@ fn the_ball_stays_in_the_middle_of_the_frame() {
         ("grounder, 2B hole", launch(-6.0, -12.0, 36.0)),
         ("grounder, 1B hole", launch(-6.0, -30.0, 36.0)),
     ];
-    for aspect in [16.0 / 9.0, 4.0 / 3.0] {
+    for (aspect, field) in [
+        (16.0 / 9.0, field.clone()),
+        (4.0 / 3.0, field),
+        (16.0 / 9.0, VariantId::FrontYard.field()),
+    ] {
         for (name, ball) in hits {
             let (worst, shot) = worst_ball_ndc(&field, ball, aspect);
             assert!(
@@ -596,25 +599,55 @@ fn the_ball_stays_in_the_middle_of_the_frame() {
     }
 }
 
-/// Grounders take the ground-ball shot; balls in the air never do.
+/// Grounders take the ground-ball shot; balls in the air never do, not
+/// even in their last half-metre, nor once a fielder holds the ball still
+/// at his glove.
 #[test]
 fn only_grounders_take_the_ground_ball_shot() {
     let dt = 1.0 / 60.0;
     for (ball, want) in [
         (launch(-6.0, 12.0, 36.0), true),
+        (launch(-15.0, -20.0, 30.0), true),
         (launch(14.0, -10.0, 38.0), false),
         (launch(72.0, 5.0, 30.0), false),
+        (launch(30.0, 15.0, 40.0), false),
     ] {
         let mut b = ball;
-        let mut seen = false;
+        let mut latch = None;
         let mut t = 0.0;
-        while t < 1.0 {
+        // Run past the landing and on through a held ball.
+        while t < 8.0 {
             fly_step(&mut b, dt);
             t += dt;
-            seen |= t >= BALL_FOLLOW_DELAY && is_grounder(b, Vec3::ZERO);
+            latch = decide_grounder(latch, t >= BALL_FOLLOW_DELAY, Some(b), Vec3::ZERO);
+            let mut c = cues(Phase::InPlay);
+            c.since_contact = t;
+            c.grounder = latch == Some(true);
+            if t < BALL_FOLLOW_DELAY {
+                continue;
+            }
+            assert_eq!(
+                pick_shot(&c, None) == Shot::GroundBall,
+                want,
+                "{:?} at {t:.2}",
+                ball.vel
+            );
         }
-        assert_eq!(seen, want, "{:?}", ball.vel);
+        let held = BallState {
+            pos: Vec3::new(5.0, 1.2, 60.0),
+            vel: Vec3::ZERO,
+            spin: Vec3::ZERO,
+        };
+        assert_eq!(
+            decide_grounder(latch, true, Some(held), Vec3::ZERO),
+            Some(want),
+            "a held ball never changes the call"
+        );
     }
+    // Nothing is decided before the plate hold ends, or without a ball.
+    let b = launch(-6.0, 12.0, 36.0);
+    assert_eq!(decide_grounder(None, false, Some(b), Vec3::ZERO), None);
+    assert_eq!(decide_grounder(None, true, None, Vec3::ZERO), None);
 }
 
 /// The ball-follow's lens is wider while the ball is high than as it drops
