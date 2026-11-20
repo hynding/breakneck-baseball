@@ -76,11 +76,14 @@ for (const tier of (process.env.TIERS||'low,medium,high').split(',')) {
   }
   await page.keyboard.press('Digit1');
   await until(/bb-state playing/, 120_000);
-  // Skip the PLAY BALL intro (any action press after its short grace) so
-  // every tier is measured on the game view, not the flyover.
-  await page.waitForTimeout(8000);
+  // Skip the PLAY BALL intro (any action press after its short grace) and
+  // wait for it to end, so every tier is measured on the game view, not
+  // the flyover. The press lands well inside the intro: one frame advances
+  // it at most 0.1 s, so it lasts at least its 5 s even on a fast machine.
+  await page.waitForTimeout(2500);
   await page.keyboard.press('Space');
-  await page.waitForTimeout(5000);
+  await until(/bb-intro over/, 120_000);
+  await page.waitForTimeout(3000);
   const startAt = logs.length;
   await page.waitForTimeout(secs * 1000);
   await page.screenshot({ path: join(outDir, `${tier}.png`) });

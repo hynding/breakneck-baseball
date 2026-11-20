@@ -122,6 +122,10 @@ fn the_clay_wears_where_the_runners_and_batters_go() {
         let at_bag = to + (from - to).normalize() * 0.5 + inward * LANE_INSET;
         if i < 3 {
             assert!(clay_wear(at_bag, &b, radius) < 0.05, "bag {i}");
+            // Still worn just inside the bag's cutout, so the fade shows on
+            // the (painted) cutout rather than hiding beneath it.
+            let in_pit = to + (from - to).normalize() * 3.0 + inward * LANE_INSET;
+            assert!(clay_wear(in_pit, &b, radius) > 0.3, "pit {i}");
         }
     }
     let rim = Vec2::new(0.0, -radius * 0.92);

@@ -111,9 +111,11 @@ pub(super) fn spawn_stadium_ground(
     // Rounded dirt cutouts at the corner bags (the ~13 ft sliding pits) and
     // the home-plate circle.
     let cutout = surfaces.mesh(meshes, Cylinder::new(CUTOUT_RADIUS, STADIUM_LAYER_HEIGHT));
-    for (i, corner) in corners.into_iter().enumerate() {
+    for corner in corners {
         let at = Transform::from_translation(corner + Vec3::Y * STADIUM_CUTOUT_Y);
-        let mesh = if i == 0 && surfaces.worn {
+        // Every cutout carries the wear, so the lanes run on into the bags'
+        // pits and fade there rather than stopping at their edge.
+        let mesh = if surfaces.worn {
             surfaces.mesh(
                 meshes,
                 super::surface::worn_clay_disc(CUTOUT_RADIUS, top, &at, wear),

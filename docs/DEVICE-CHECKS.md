@@ -272,11 +272,14 @@ native.
     grass and clay should look textured up close (normal maps), the base
     paths and the rim of the home circle should read worn and darker, and
     after the first pitch the batter's boxes should show cleat marks that
-    deepen over the game (around pitches 40, 120 and 220). Medium shows the
-    shade and cleat marks but flat clay; Low shows none of it. On a desktop
+    deepen over the game (around pitches 40, 120 and 220). The worn clay,
+    turf shade and normal maps are set at game start, so a tier change
+    mid-game shows them from the next game (the cleat marks follow at
+    once). Medium shows the shade and cleat marks but flat clay; Low shows
+    none of it. On a desktop
     GPU, note whether High holds the frame rate Medium does. In a software
-    browser renderer High cost about 9% more per frame than before this
-    change, Medium about 2%, Low nothing.
+    browser renderer High cost about 8% more per frame than before this
+    change, Medium about 3%, Low nothing.
 
 If something looks off, tell the thread the device, the browser, the tier,
 what the settings row read, and what you saw (a screenshot helps).

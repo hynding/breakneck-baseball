@@ -114,26 +114,27 @@ pub(super) fn dirt_normal_image() -> Image {
 /// How far the turf's shade wanders across the park (fraction of its
 /// colour, either way), and over what distance (m).
 const SHADE_SWING: f32 = 0.09;
-const SHADE_CELL_M: f32 = 14.0;
+const SHADE_CELL_M: f32 = 30.0;
 
 /// The ground's vertex shade at `(x, z)` (m): a multiplier near 1, the turf
 /// a touch warmer where it's lighter (sun-faded) and cooler where darker.
 pub(super) fn ground_shade(x: f32, z: f32) -> [f32; 4] {
     // A period far beyond the park, so nothing repeats on screen.
     let (u, v) = (x / SHADE_CELL_M + 400.0, z / SHADE_CELL_M + 400.0);
-    let broad = tiling_noise(u, v, 1024, 1.3);
-    let fine = tiling_noise(u * 2.7, v * 2.7, 1024, 7.7);
-    let s = ((broad * 0.7 + fine * 0.3) * 2.0 - 1.0) * SHADE_SWING;
+    // One octave: the grid samples it every ~10 m, three to a cell, so a
+    // finer octave would only alias.
+    let s = (tiling_noise(u, v, 1024, 1.3) * 2.0 - 1.0) * SHADE_SWING;
     [1.0 + s * 1.1, 1.0 + s, 1.0 + s * 0.6, 1.0]
 }
 
 /// The ground slab's visible top: a `half`-metre square at y = 0, gridded
-/// every few metres and vertex-coloured by [`ground_shade`].
+/// every ~10 m (on the stadium's 150 m half) and vertex-coloured by
+/// [`ground_shade`].
 pub(super) fn varied_ground_mesh(half: f32) -> Mesh {
     let mut mesh = Plane3d::default()
         .mesh()
         .size(half * 2.0, half * 2.0)
-        .subdivisions(9)
+        .subdivisions(29)
         .build();
     let colors: Vec<[f32; 4]> = match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
         Some(VertexAttributeValues::Float32x3(positions)) => {
