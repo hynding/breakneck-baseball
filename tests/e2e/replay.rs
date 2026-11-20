@@ -12,7 +12,7 @@ use bevy_rapier3d::prelude::Velocity;
 
 use breakneck_baseball::game::ball::Baseball;
 use breakneck_baseball::game::flow::{Phase, Play, bat_arrival_z};
-use breakneck_baseball::game::input::Intents;
+use breakneck_baseball::game::input::{Controllers, InputSource, Intents};
 use breakneck_baseball::game::player::RigUnitTag;
 use breakneck_baseball::game::quality::{ActiveQuality, QualityTier};
 use breakneck_baseball::game::replay::{Replay, SKIP_GRACE};
@@ -21,7 +21,7 @@ use breakneck_baseball::game::ui::{ReplayTagLine, ReplayTagText, SKIP_PROMPT};
 use breakneck_baseball::game::variant::Ruleset;
 use breakneck_baseball::game::{GameState, ScoreBoard, Team};
 
-use common::{DT, DriveGame, headless_app, run_until, start_game};
+use common::{DT, DriveGame, headless_app, run_until, start_game, tap_key};
 
 const MAX_FRAMES: u64 = 100_000;
 
@@ -228,4 +228,32 @@ fn replays_off_means_none() {
     to_home_run_call(&mut app);
     let none = run_until(&mut app, (3.0 / DT) as u64, |app| playing(app));
     assert!(none.is_none(), "a replay played with replays off");
+}
+
+/// The task's done-when: a whole CPU-vs-CPU game with a replay after every
+/// ball in play (`Always`, the heaviest load) finishes without a stall, and
+/// leaves the gameplay clock running.
+#[test]
+fn a_cpu_game_with_every_replay_finishes() {
+    let mut app = headless_app();
+    tap_key(&mut app, KeyCode::KeyI); // 9 innings -> 1
+    start_game(&mut app, KeyCode::Digit1);
+    *app.world_mut().resource_mut::<Controllers>() = Controllers {
+        home: InputSource::Cpu,
+        away: InputSource::Cpu,
+        ..Controllers::default()
+    };
+    app.world_mut().resource_mut::<Settings>().replays = ReplayMode::Always;
+    let finished = run_until(&mut app, 600_000, |app| {
+        *app.world().resource::<State<GameState>>().get() == GameState::GameOver
+    });
+    assert!(finished.is_some(), "the game never finished");
+    let replay = app.world().resource::<Replay>();
+    assert!(
+        replay.played >= 2,
+        "only {} replays in a game",
+        replay.played
+    );
+    assert!(!replay.is_playing());
+    assert!(!app.world().resource::<Time<Virtual>>().is_paused());
 }

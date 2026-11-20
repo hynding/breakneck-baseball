@@ -68,6 +68,19 @@ from the ball, so the throw comes into frame from beyond him; it hands over to t
 the ball is 0.6 s from the bag (a deep throw flies 1.2 s, so the two shots share it), and never returns after the base cam is up
 (`shots::runner_cam_wanted`; e2e `runner_cam.rs` checks a double and a triple). There is no
 cutoff-relay shot: the fielding sim has no outfield cutoff man, only the double-play pivot.
+
+**Instant replay** (`game::replay`, `src/game/present/replay/`): a recorder samples every rig root
+and bone plus the ball into a ring (`clip::Recording`, 30 Hz, `RenderBudget::replay_secs` of play:
+8/10/12 s on Low/Medium/High) in PostUpdate, after animation and Rapier writeback, before transform
+propagation. On a big play (home run, walk-off, a throw home, or a dive; `Settings.replays`:
+Off/BigPlays/Always) it starts 0.6 s into the result pause: it **pauses `Time<Virtual>`** (so flow,
+physics, animation and locomotion all freeze), plays `clip::plan`'s segments on real time (the
+dugout angle; a second, centre-field angle on Medium and High, at half speed around the key moment
+on High), writing recorded poses onto the rigs just before propagation and putting the live ones
+back in `Last`, so gameplay state is never touched and nothing is re-simulated. The action button
+skips it after a 0.35 s grace. The tag (`ui/replay_tag.rs`, "REPLAY" / "SLOW MOTION" / the skip
+prompt) follows the wasm UI rule like the walk-up card. e2e `replay.rs` pins frozen clock, untouched
+live transforms, a moving camera, the tag, skip, and Off. Memory per tier: docs/DEVICE-CHECKS.md.
 The grounder call is made once, just after the plate hold, by `shots::PlayRead` (low and coming
 down, or already down during the hold per `ActivePlay::landed_at`). The ball-follow leads the ball to its predicted landing spot and fits its
 lens to both, within an 80° cap; `shots::tests::the_ball_stays_in_the_middle_of_the_frame` pins the

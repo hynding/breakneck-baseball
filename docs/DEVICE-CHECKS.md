@@ -137,6 +137,27 @@ run's wide shot still holds frame rate with the stands in view, and
 score a run to check the scoreboard in right-centre updates (it repaints
 its texture in place, which no headless test sees).
 
+### Instant replay buffer (task 9)
+
+The recorder samples every rig root and bone, plus the ball, 30 times a
+second into a ring sized by the tier's `replay_secs`. Every replay logs
+its tier, segments and the ring's size (`replay: High tier, 2 segment(s),
+… buffer N samples, … KiB`). Measured headless on High over a full CPU
+game: 361 samples, 3.6–4.2 MB (10–11.5 KB a sample, more with runners
+aboard). Memory scales with samples, so:
+
+| Tier | Buffer | Samples | Ring size | Replay |
+| --- | --- | --- | --- | --- |
+| Low | 8 s | 241 | ~2.4–2.8 MB (derived) | dugout angle |
+| Medium | 10 s | 301 | ~3.0–3.5 MB (derived) | dugout, then centre field |
+| High | 12 s | 361 | 3.6–4.2 MB (measured) | dugout, then centre field at half speed |
+
+Playback writes recorded poses onto the rigs for rendering only and puts
+the live ones back before the next frame, so a replay costs about one
+extra transform copy per frame. On a phone at Low, hit a home run and
+check the replay plays smoothly and play resumes cleanly after it (or
+after skipping it with the action button).
+
 ## What still needs a person with a device
 
 Use the GitHub Pages build for the web checks and `cargo run --release` for
