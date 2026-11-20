@@ -119,7 +119,7 @@ impl TouchScheme {
 pub enum ReplayMode {
     /// Never.
     Off,
-    /// A home run, a walk-off, a throw home or a diving catch.
+    /// A home run, a walk-off on a ball in play, a throw home or a dive.
     #[default]
     BigPlays,
     /// Every ball hit (fouls that went into play included).
