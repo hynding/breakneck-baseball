@@ -62,6 +62,7 @@ mod season;
 #[cfg(feature = "profile")]
 mod sim_profile;
 mod skeletal_switch;
+mod surfaces;
 mod swing_startup;
 mod time_of_day;
 mod touch_pipeline;

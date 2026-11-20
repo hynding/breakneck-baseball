@@ -231,9 +231,9 @@ fn rain_darkens_everywhere_and_glosses_only_when_budgeted() {
     use super::super::FieldSurfaces;
     let field = ThemeId::DaylightClassic.build().field;
     let mut images = Assets::<Image>::default();
-    let dry = FieldSurfaces::build(&mut images, &field, false, true);
-    let wet = FieldSurfaces::build(&mut images, &field, true, false);
-    let glossy = FieldSurfaces::build(&mut images, &field, true, true);
+    let dry = FieldSurfaces::build(&mut images, &field, false, true, (false, false));
+    let wet = FieldSurfaces::build(&mut images, &field, true, false, (false, false));
+    let glossy = FieldSurfaces::build(&mut images, &field, true, true, (false, false));
     let lum = |c: Color| {
         let s = c.to_srgba();
         s.red + s.green + s.blue

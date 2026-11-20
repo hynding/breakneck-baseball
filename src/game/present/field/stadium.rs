@@ -26,11 +26,20 @@ fn spawn_ground_slab(
     commands.spawn((
         super::GroundPlane,
         GameplayEntity,
-        Mesh3d(meshes.add(Cuboid::new(
-            half_size * 2.0,
-            GROUND_HALF_DEPTH * 2.0,
-            half_size * 2.0,
-        ))),
+        // Its top face at y = 0; on tiers with surface colour, a gridded top
+        // that varies in shade instead (the collider is the same slab).
+        Mesh3d(if surfaces.varied {
+            surfaces.mesh(
+                meshes,
+                super::surface::varied_ground_mesh(half_size)
+                    .translated_by(Vec3::Y * GROUND_HALF_DEPTH),
+            )
+        } else {
+            surfaces.mesh(
+                meshes,
+                Cuboid::new(half_size * 2.0, GROUND_HALF_DEPTH * 2.0, half_size * 2.0),
+            )
+        }),
         // ~48 tiles across 300 m puts the mow stripes at ~0.8 m each.
         MeshMaterial3d(surfaces.grass(materials, 48.0)),
         Transform::from_xyz(0.0, -GROUND_HALF_DEPTH, 0.0),
@@ -54,11 +63,10 @@ pub(super) fn spawn_stadium_ground(
     let dirt = surfaces.dirt(materials, 8.0);
     commands.spawn((
         GameplayEntity,
-        Mesh3d(meshes.add(Cuboid::new(
-            INFIELD_HALF * 2.0,
-            STADIUM_LAYER_HEIGHT,
-            INFIELD_HALF * 2.0,
-        ))),
+        Mesh3d(surfaces.mesh(
+            meshes,
+            Cuboid::new(INFIELD_HALF * 2.0, STADIUM_LAYER_HEIGHT, INFIELD_HALF * 2.0),
+        )),
         MeshMaterial3d(dirt.clone()),
         Transform {
             translation: Vec3::new(0.0, STADIUM_DIRT_Y, HALF_DIAGONAL),
@@ -69,7 +77,7 @@ pub(super) fn spawn_stadium_ground(
 
     // Rounded dirt cutouts at the corner bags (the ~13 ft sliding pits) and
     // the home-plate circle.
-    let cutout = meshes.add(Cylinder::new(CUTOUT_RADIUS, STADIUM_LAYER_HEIGHT));
+    let cutout = surfaces.mesh(meshes, Cylinder::new(CUTOUT_RADIUS, STADIUM_LAYER_HEIGHT));
     let corners = [
         Vec3::ZERO,
         Vec3::new(-HALF_DIAGONAL, 0.0, HALF_DIAGONAL),
@@ -90,11 +98,10 @@ pub(super) fn spawn_stadium_ground(
     let inner_half = INFIELD_HALF - BASEPATH_WIDTH;
     commands.spawn((
         GameplayEntity,
-        Mesh3d(meshes.add(Cuboid::new(
-            inner_half * 2.0,
-            STADIUM_LAYER_HEIGHT,
-            inner_half * 2.0,
-        ))),
+        Mesh3d(surfaces.mesh(
+            meshes,
+            Cuboid::new(inner_half * 2.0, STADIUM_LAYER_HEIGHT, inner_half * 2.0),
+        )),
         MeshMaterial3d(surfaces.grass(materials, 5.0)),
         Transform {
             translation: Vec3::new(0.0, STADIUM_GRASS_INTERIOR_Y, HALF_DIAGONAL),
@@ -120,7 +127,7 @@ pub(super) fn spawn_stadium_ground(
 const INFIELD_HALF: f32 = super::BASE_DISTANCE / 2.0;
 
 /// Dirt-cutout radius at each bag and around home (~13 ft, docs/BASEBALL.md).
-const CUTOUT_RADIUS: f32 = 3.96;
+pub(super) const CUTOUT_RADIUS: f32 = 3.96;
 /// Width of the dirt basepath band framing the grass infield.
 const BASEPATH_WIDTH: f32 = 4.0;
 

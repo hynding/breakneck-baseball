@@ -145,8 +145,12 @@ pub struct RenderBudget {
     /// Weather you can see move: rain splashing on the ground and flags
     /// on the foul poles and scoreboard streaming in the wind.
     pub weather_fx: bool,
-    /// Normal-mapped turf and dirt, worn paths.
-    pub surface_detail: bool,
+    /// Ground colour detail: turf and clay that vary in shade across the
+    /// park instead of repeating one tile, worn base paths, the dirt halo
+    /// at home and cleat marks that build in the batter's boxes.
+    pub surface_color: bool,
+    /// Normal-mapped turf and clay, on top of [`Self::surface_color`].
+    pub surface_normals: bool,
     /// Seconds of play the replay buffer holds.
     pub replay_secs: f32,
     /// Camera angles a replay plays back from.
@@ -172,7 +176,8 @@ impl RenderBudget {
                 tower_lights: false,
                 wet_reflections: false,
                 weather_fx: false,
-                surface_detail: false,
+                surface_color: false,
+                surface_normals: false,
                 replay_secs: 8.0,
                 replay_angles: 1,
             },
@@ -189,7 +194,8 @@ impl RenderBudget {
                 tower_lights: true,
                 wet_reflections: false,
                 weather_fx: true,
-                surface_detail: false,
+                surface_color: true,
+                surface_normals: false,
                 replay_secs: 10.0,
                 replay_angles: 2,
             },
@@ -206,7 +212,8 @@ impl RenderBudget {
                 tower_lights: true,
                 wet_reflections: true,
                 weather_fx: true,
-                surface_detail: true,
+                surface_color: true,
+                surface_normals: true,
                 replay_secs: 12.0,
                 replay_angles: 2,
             },
