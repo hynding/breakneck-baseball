@@ -105,7 +105,8 @@ python3 -m http.server --directory web 8080
 
 Load it with the Chrome DevTools tooling, **click the canvas first** (audio
 needs a user gesture), and watch the console: `bb-state menu/playing`,
-`bb-first-pitch`, `COACH_FINDING …`. The native env switches ride the URL
+`bb-first-pitch`, `bb-contact speed=… angle=…` (one per batted ball, to time
+screenshots of a fly), `COACH_FINDING …`. The native env switches ride the URL
 on wasm — `?innings=1&script=balanced` plays a one-inning game with Home
 scripted (omit both for the 9-inning CPU-vs-CPU attract loop). Pull the
 report any time from `localStorage.getItem('bb-coach-report')` (flushed

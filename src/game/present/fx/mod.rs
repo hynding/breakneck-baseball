@@ -9,6 +9,7 @@ use bevy::prelude::*;
 use crate::game::GameState;
 use crate::game::settings::PitchTrailStyle;
 
+mod ball_read;
 mod particles;
 mod rain;
 mod throw;
@@ -58,6 +59,7 @@ impl Plugin for FxPlugin {
                 crate::game::game_start(),
                 (
                     build_fx_assets,
+                    ball_read::spawn_ball_readability,
                     spawn_landing_ring,
                     spawn_ball_halo,
                     rain::spawn_rain,
@@ -72,12 +74,24 @@ impl Plugin for FxPlugin {
                     bounce_dust,
                     update_landing_ring,
                     update_ball_halo,
+                    ball_read::spawn_flight_ghosts,
+                    ball_read::fade_flight_ghosts,
                     tick_particles,
                     pitch_trail,
                     tick_trail,
                     throw::stage_duel_throw,
                     rain::fall_rain,
                 )
+                    .run_if(in_state(GameState::Playing)),
+            )
+            // After Rapier writes the ball's pose for this frame and before
+            // it propagates, so the proxy and shadow sit on the ball being
+            // drawn rather than one physics step behind it.
+            .add_systems(
+                PostUpdate,
+                (ball_read::place_ball_shadow, ball_read::place_ball_proxy)
+                    .after(bevy_rapier3d::plugin::PhysicsSet::Writeback)
+                    .before(bevy::transform::TransformSystems::Propagate)
                     .run_if(in_state(GameState::Playing)),
             );
     }
