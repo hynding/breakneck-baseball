@@ -131,6 +131,14 @@ type Recorded<'w, 's> = Query<
     ),
 >;
 
+/// The ball, for the replay frame's writes and their undo.
+type LiveBall<'w, 's> = Query<
+    'w,
+    's,
+    (&'static mut Transform, &'static mut Visibility),
+    (With<Baseball>, Without<Camera3d>),
+>;
+
 pub struct ReplayPlugin;
 
 impl Plugin for ReplayPlugin {
@@ -417,7 +425,7 @@ fn apply_replay(
     field: Res<FieldSpec>,
     mut copy: ResMut<LiveCopy>,
     mut transforms: Query<&mut Transform, (Without<Camera3d>, Without<Baseball>)>,
-    mut ball: Query<(&mut Transform, &mut Visibility), (With<Baseball>, Without<Camera3d>)>,
+    mut ball: LiveBall,
     mut visibility: Query<
         (
             Entity,
@@ -506,7 +514,7 @@ fn apply_replay(
 fn restore_live(
     mut copy: ResMut<LiveCopy>,
     mut transforms: Query<&mut Transform, (Without<Camera3d>, Without<Baseball>)>,
-    mut ball: Query<(&mut Transform, &mut Visibility), (With<Baseball>, Without<Camera3d>)>,
+    mut ball: LiveBall,
     mut vis: Query<&mut Visibility, Without<Baseball>>,
 ) {
     if let (Some(live), Ok((_, mut v))) = (copy.ball_visibility.take(), ball.single_mut()) {
