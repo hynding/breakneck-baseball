@@ -217,7 +217,7 @@ pub(super) fn place_ball_proxy(
     // Straight-line distance, not view depth: off-centre that oversizes
     // the proxy a little, which errs toward visible.
     let floor = min_world_radius(eye.distance(ball.translation), fov, h, MIN_BALL_PX);
-    if shown == &Visibility::Hidden || floor <= visual {
+    if *shown == Visibility::Hidden || floor <= visual {
         set_visible(visibility, false);
         return;
     }
