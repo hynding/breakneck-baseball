@@ -381,8 +381,9 @@ fn slide_into_base(
 }
 
 /// Mirrors `Bases` after every change: existing runners advance (greedy,
-/// most-advanced first), a new runner appears for the batter's base, and
-/// leftovers (scored, or wiped by a half-inning flip) run home and leave.
+/// most-advanced first), the batter's run-out ghost (or a new rig) takes the
+/// batter's base, and leftovers run home and leave (scored) or leave at once
+/// (stranded by a half-inning flip).
 ///
 /// On a walk/HBP/dropped-third strike, flow mutates `Bases` *and* advances
 /// `BattingOrder` in the same frame, and there is no ghost rig to inherit
@@ -404,7 +405,7 @@ pub(crate) fn sync_runners(
     assets: Option<Res<crate::game::jersey::JerseyAssets>>,
     batter_identity: Query<&crate::game::roster::PlayerIdentity, With<Batter>>,
     mut runners: Query<(Entity, &mut Runner)>,
-    ghosts: Query<(Entity, &Transform, &crate::game::roster::PlayerIdentity), With<BatterGhost>>,
+    ghosts: Query<(Entity, Has<Departed>), With<BatterGhost>>,
     mut commands: Commands,
     mut last_half: Local<Option<bool>>,
 ) {
@@ -445,20 +446,42 @@ pub(crate) fn sync_runners(
         }
     }
 
-    // The batter reaching base: spawn a fresh runner — from wherever the
-    // run-out ghost already got to, if one is still on the basepath.
+    // The batter reaching base: the run-out ghost, if there is one, becomes
+    // the runner (kept, not re-spawned, so the replay of this play still
+    // has him); otherwise a fresh runner leaves the plate.
+    let mut ghost = ghosts.iter().next();
     for target in unmatched {
-        let inherited = ghosts
-            .iter()
-            .next()
-            .map(|(_, _, id)| *id)
-            .or_else(|| batter_identity.single().ok().copied());
-        let start = ghosts.iter().next().map_or(PLATE_START, |(ghost, tf, _)| {
-            commands.entity(ghost).despawn();
-            tf.translation
-        });
+        if let Some((entity, departed)) = ghost.take() {
+            commands
+                .entity(entity)
+                .remove::<(BatterGhost, DespawnAtPathEnd)>()
+                .insert((
+                    Runner { base: target },
+                    Legs(bases.speed_factor(target)),
+                    BasePath {
+                        waypoints: path_between(&field, None, target),
+                        next: 0,
+                    },
+                    PathSpeed(DEAD_BALL_ADVANCE_SPEED),
+                ));
+            if departed {
+                commands
+                    .entity(entity)
+                    .remove::<Departed>()
+                    .insert(Visibility::Inherited);
+            }
+            continue;
+        }
+        let inherited = batter_identity.single().ok().copied();
         let mats = palette.for_team(score.batting_team());
-        let entity = spawn_rig(&mut commands, &rig_model, RigUnit::Batter, mats, start, 1.0);
+        let entity = spawn_rig(
+            &mut commands,
+            &rig_model,
+            RigUnit::Batter,
+            mats,
+            PLATE_START,
+            1.0,
+        );
         commands.entity(entity).insert((
             Runner { base: target },
             Legs(bases.speed_factor(target)),
@@ -493,7 +516,13 @@ pub(crate) fn sync_runners(
         .map(|t| t.runner);
     for (entity, from) in pool {
         if half_flipped {
-            commands.entity(entity).despawn();
+            // Off the field at once, but kept (hidden) for the replay of
+            // the play that ended the half: no base path, so nothing waits
+            // on him.
+            commands
+                .entity(entity)
+                .remove::<(Runner, BasePath)>()
+                .insert((Departed, Visibility::Hidden));
             continue;
         }
         if retired == Some(from) {
@@ -665,7 +694,7 @@ fn run_out_pending_call(
     play: Res<Play>,
     field: Res<FieldSpec>,
     mut handled: Local<bool>,
-    ghosts: Query<Entity, With<BatterGhost>>,
+    ghosts: Query<(Entity, Has<Departed>), With<BatterGhost>>,
     mut runners: Query<(Entity, &mut Runner), Without<BatterGhost>>,
     mut commands: Commands,
 ) {
@@ -741,12 +770,18 @@ fn run_out_pending_call(
     // — see `game::rules`'s `resolve_catch`/`resolve_thrown` construction sites),
     // but saturate rather than trust that invariant across future callers.
     let batter_dest = (hit_bases as usize).min(count).saturating_sub(1);
-    if let Some(ghost) = ghosts.iter().next() {
+    if let Some((ghost, departed)) = ghosts.iter().next() {
         commands
             .entity(ghost)
-            .remove::<(BatterGhost, DespawnAtPathEnd, Departed)>()
-            // He may already have reached first and left the field.
-            .insert((Runner { base: batter_dest }, Visibility::Inherited));
+            .remove::<(BatterGhost, DespawnAtPathEnd)>()
+            .insert(Runner { base: batter_dest });
+        if departed {
+            // He had already reached first and left the field: back on it.
+            commands
+                .entity(ghost)
+                .remove::<Departed>()
+                .insert(Visibility::Inherited);
+        }
         if batter_dest > 0 {
             // Queued behind the leg to first that's already running.
             commands.entity(ghost).insert(BasePath {
