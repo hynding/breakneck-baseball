@@ -81,10 +81,10 @@ fn the_shadow_follows_the_ball_and_hides_with_it() {
     world.entity_mut(ball).insert(Visibility::Hidden);
     app.update();
     let world = app.world_mut();
-    for vis in world
-        .query_filtered::<&Visibility, Or<(With<BallShadow>, With<BallProxy>)>>()
-        .iter(world)
-    {
-        assert_eq!(*vis, Visibility::Hidden);
-    }
+    // (The proxy is hidden throughout: there is no rendered view here.)
+    let vis = world
+        .query_filtered::<&Visibility, With<BallShadow>>()
+        .single(world)
+        .unwrap();
+    assert_eq!(*vis, Visibility::Hidden);
 }

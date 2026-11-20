@@ -10,9 +10,9 @@
 //! - **Minimum on-screen size.** When the ball shrinks under
 //!   [`MIN_BALL_PX`] pixels of radius in the rendered image, a proxy sphere
 //!   in the ball's own material sits over it, sized to exactly that, so it
-//!   never drops below ~3 px across. Both are placed after Rapier's
-//!   writeback each frame, so they sit on the ball as drawn. The ball's own transform is never
-//!   scaled: it carries the regulation collider.
+//!   never drops below ~3 px across. The ball's own transform is never
+//!   scaled: it carries the regulation collider. Shadow and proxy are both
+//!   placed after Rapier's writeback, so they sit on the ball as drawn.
 //! - **Flight ghosts.** Fading spheres dropped behind any fast-flying ball,
 //!   pitch or batted (they lived in `sim::ball` before; they are cosmetic).
 //!   Their lifetime follows the tier's `trail_scale`, so the trail is
