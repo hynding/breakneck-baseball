@@ -138,7 +138,8 @@ impl DayLook {
 
 /// Pure: the theme's sky and lights at `time`. The afternoon is the theme
 /// exactly as authored. A theme that is already a night game (Midnight
-/// Neon) stays one whatever the clock says. Morning lowers and warms the
+/// Neon) keeps its own sky and lights whatever the clock says, and is lit
+/// from the towers only when the setting is Night. Morning lowers and warms the
 /// sun and pales the sky; night swaps in a dark sky and floodlight-cool key
 /// and fill lights, with the turf cooled the way Midnight Neon cools it.
 pub(crate) fn day_look(
@@ -147,17 +148,22 @@ pub(crate) fn day_look(
     time: crate::game::weather::TimeOfDay,
 ) -> DayLook {
     use crate::game::weather::TimeOfDay;
-    let themed_night = crate::game::look::is_night(sky);
     let mut look = DayLook {
         sky,
         lights: field.clone(),
         elevation: time.key_elevation(),
         fill: 1.0,
-        night: themed_night,
+        night: false,
     };
-    if themed_night {
-        // The theme is already lit for a night game: keep it, from the towers.
-        look.elevation = TimeOfDay::Night.key_elevation();
+    if crate::game::look::is_night(sky) {
+        // The theme is already lit for a night game: keep its sky and
+        // lights as authored. Only an explicit Night setting moves the key
+        // onto the key tower and adds the other towers' fill spots, so the
+        // default (Afternoon) plays exactly as the theme always has.
+        look.night = time == TimeOfDay::Night;
+        if !look.night {
+            look.elevation = TimeOfDay::Afternoon.key_elevation();
+        }
         return look;
     }
     let tint = |c: Color, k: [f32; 3]| {

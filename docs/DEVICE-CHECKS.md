@@ -101,10 +101,11 @@ covered it. As a `Skybox` it shades only the visible sky, after the
 opaque pass, and costs about 9 ms. HDR and bloom on High were off for a
 while: the scene was over-exposed (a 50k lux sun at Bevy's default
 exposure, EV100 9.7), and HDR tonemapping greyed the sky toward purple.
-The time-of-day task fixed both: every tier now renders at EV100 11.7
-(`look::SCENE_EV100`), and High's HDR path skips tonemapping so its sky and
-grass match the LDR tiers, with bloom back on for the floodlights. A
-real-device check of Low (fog on a weak phone) is still owed; see below.
+The time-of-day task fixed the exposure: every tier now renders at EV100
+11.7 (`look::SCENE_EV100`). Bloom stays off, because every HDR tonemapping
+curve still tints the sky (purple by day, teal at night), and skipping the
+curve also skips colour grading; see `look.rs`. A real-device check of Low
+(fog on a weak phone) is still owed; see below.
 
 ### Ball readability (task 4; same machine and settings as the look pass)
 
@@ -175,8 +176,9 @@ streaks (twice the visible meshes) cost about 2 ms. Glossy wet turf on High
 is a material roughness, not an extra pass. Night costs about 35–40 ms on
 Medium and High under software WebGL, from the three unshadowed tower
 spotlights that relight the infield; Low skips them and lights the field
-from the key tower alone, so it gets no dearer at night. Bloom on High
-(back since this task) is inside the High column. `tools/frame_cost.mjs`
+from the key tower alone, so it gets no dearer at night. These runs had
+bloom on High, since turned off again, so High is now a little cheaper.
+`tools/frame_cost.mjs`
 takes main-menu hotkeys as a fifth argument (`wwww` for Rain, `n` for
 Night) to repeat these runs. On a phone at Low, play an inning at Night
 and check the field is still readable without the tower spotlights.
@@ -208,10 +210,10 @@ native.
 3. **Switch tiers mid-game on the phone.** Cycle Low → Medium → High → Auto
    from the pause menu. The UI must never go blank (the wasm/WebGL2 failure
    the single render route exists to avoid), and the view should re-sharpen
-   or soften right away with no black frame that sticks. High turns on HDR
-   and bloom: check no frame goes blank when you pick it, since they need
-   float render targets (`EXT_color_buffer_float`) that some phone drivers
-   lack, and at Night check the floodlights glow.
+   or soften right away with no black frame that sticks. (HDR and bloom
+   are off on every tier for now; when they return on High, check no
+   frame goes blank, since they need float render targets,
+   `EXT_color_buffer_float`, that some phone drivers lack.)
 4. **Rotate the phone at each tier.** Portrait to landscape and back. The 3D
    view should refill the screen at the new size, with nothing stretched or
    letterboxed. In portrait, note whether the HUD cards overlap each other

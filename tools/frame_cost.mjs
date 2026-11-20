@@ -34,7 +34,7 @@ const secs = Number(process.argv[4] || 60);
 const [vw, vh] = (process.argv[5] || '1280x720').split('x').map(Number);
 const menuKeys = process.argv[6] || '';
 if (!base) {
-  console.error('usage: frame_cost.mjs <url> [out-dir] [seconds-per-tier] [WxH]');
+  console.error('usage: frame_cost.mjs <url> [out-dir] [seconds-per-tier] [WxH] [menu-keys]');
   process.exit(2);
 }
 mkdirSync(outDir, { recursive: true });

@@ -191,7 +191,7 @@ impl RenderBudget {
                 trail_scale: 1.0,
                 fog: true,
                 sky: true,
-                bloom: true,
+                bloom: false,
                 tower_lights: true,
                 wet_reflections: true,
                 surface_detail: true,
