@@ -50,6 +50,7 @@ fn the_bottom_cards_step_clear_of_the_zone_pad() {
         Vec2::new(430.0, 932.0),
         Vec2::new(932.0, 430.0),
         Vec2::new(568.0, 320.0),
+        Vec2::new(320.0, 568.0),
         Vec2::new(1366.0, 1024.0),
         Vec2::new(744.0, 1133.0),
         Vec2::new(768.0, 1024.0),
