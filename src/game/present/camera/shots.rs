@@ -417,28 +417,34 @@ const RUNNER_CAM_MIN_FOV: f32 = 40.0_f32.to_radians();
 /// the across-the-street fielder (34 m) takes it, never the sidewalks
 /// (23 m).
 pub(super) const OUTFIELD_FRACTION: f32 = 0.75;
-/// The runner cam hands over to the base cam once the throw is this close
-/// to the bag, as a fraction of the throw's length: the last stretch and
-/// the call belong to the bag.
-pub(super) const RUNNER_CAM_HANDOFF: f32 = 0.3;
+/// The runner cam hands over to the base cam once the throw is this many
+/// seconds from the bag: a deep throw flies about 1.2 s, so the bag's shot
+/// gets as long as the runner's — the slide and the tag read before the
+/// call.
+pub(super) const RUNNER_CAM_HANDOFF_SECS: f32 = 0.6;
+/// A ball slower than this (m/s, flat) is no longer a throw in flight
+/// (it bounced short or is rolling): the bag's shot takes over.
+const THROW_MIN_SPEED: f32 = 5.0;
 
 /// Whether the rig should be on the runner cam: a throw in from the
-/// outfield ([`OUTFIELD_FRACTION`]) from `throw_from` to `bag` whose ball
-/// is still more than [`RUNNER_CAM_HANDOFF`] of the throw away from the
-/// bag, while the base cam hasn't taken the play yet (a cut back from the
-/// bag would read as a stutter).
+/// outfield ([`OUTFIELD_FRACTION`]) from `throw_from` to `bag`, still in
+/// flight and more than [`RUNNER_CAM_HANDOFF_SECS`] from the bag, while the
+/// base cam hasn't taken the play yet (a cut back from the bag would read
+/// as a stutter).
 pub(super) fn runner_cam_wanted(
     throw_from: Vec3,
     bag: Vec3,
     ball: Vec3,
+    ball_vel: Vec3,
     fence_line: f32,
     base_cam_shown: bool,
 ) -> bool {
     let flat = |v: Vec3| Vec2::new(v.x, v.z);
-    let length = flat(throw_from).distance(flat(bag));
+    let speed = flat(ball_vel).length();
     !base_cam_shown
         && flat(throw_from).length() > fence_line * OUTFIELD_FRACTION
-        && flat(ball).distance(flat(bag)) > length * RUNNER_CAM_HANDOFF
+        && speed > THROW_MIN_SPEED
+        && flat(ball).distance(flat(bag)) / speed > RUNNER_CAM_HANDOFF_SECS
 }
 
 /// The runner cam: standing off the runner's race to the bag he is bound

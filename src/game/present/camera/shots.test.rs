@@ -172,12 +172,25 @@ fn the_runner_cam_hands_over_to_the_bag() {
     let second = field.base_positions[1];
     let fence = field.fence_line;
     let from = Vec3::new(-25.0, 1.8, 80.0);
-    assert!(runner_cam_wanted(from, second, from, fence, false));
-    // The ball most of the way in: the bag's shot now.
-    let near = second.lerp(from, RUNNER_CAM_HANDOFF * 0.9);
-    assert!(!runner_cam_wanted(from, second, near, fence, false));
+    // A deep throw flies 1.2 s (`fielding::lob_velocity`).
+    let vel = (second - from).with_y(0.0) / 1.2;
+    assert!(runner_cam_wanted(from, second, from, vel, fence, false));
+    // Halfway in, it is under the hand-over time: the bag's shot now.
+    let half = second.lerp(from, 0.45);
+    assert!(!runner_cam_wanted(from, second, half, vel, fence, false));
+    let early = second.lerp(from, 0.6);
+    assert!(runner_cam_wanted(from, second, early, vel, fence, false));
+    // A ball that died short of the bag is no throw in flight.
+    assert!(!runner_cam_wanted(
+        from,
+        second,
+        early,
+        vel * 0.05,
+        fence,
+        false
+    ));
     // Once the base cam is up it keeps the play.
-    assert!(!runner_cam_wanted(from, second, from, fence, true));
+    assert!(!runner_cam_wanted(from, second, from, vel, fence, true));
     // A shortstop ranging deep into the hole, or an outfielder gathering
     // a single in shallow, is not a ball run down in the gap.
     for short in [Vec3::new(12.0, 1.8, 52.0), Vec3::new(20.0, 1.8, 62.0)] {
@@ -185,6 +198,7 @@ fn the_runner_cam_hands_over_to_the_bag() {
             short,
             field.base_positions[0],
             short,
+            Vec3::new(-20.0, 0.0, -40.0),
             fence,
             false
         ));
@@ -200,7 +214,7 @@ fn the_runner_cam_hands_over_to_the_bag() {
     ] {
         let from = spot + Vec3::Y * 1.5;
         assert_eq!(
-            runner_cam_wanted(from, to, from, lawn.fence_line, false),
+            runner_cam_wanted(from, to, from, (to - from) / 1.0, lawn.fence_line, false),
             want,
             "{spot}"
         );

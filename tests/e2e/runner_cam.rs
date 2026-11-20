@@ -159,6 +159,18 @@ fn extra_base_hits_cut_ball_runner_then_bag() {
                 "runner cam after the base cam: {outcome:?} {log:?}"
             );
         }
+        let mut subjects: Vec<_> = log
+            .iter()
+            .filter_map(|s| match s {
+                Shot::RunnerCam(e) => Some(*e),
+                _ => None,
+            })
+            .collect();
+        subjects.dedup();
+        assert!(
+            subjects.len() <= 1,
+            "the runner cam changed subject mid-throw: {outcome:?} {log:?}"
+        );
         if log.iter().any(|s| matches!(s, Shot::RunnerCam(_))) {
             assert!(
                 matches!(log.last(), Some(Shot::BaseCam(_))),
