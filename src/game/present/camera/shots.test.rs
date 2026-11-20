@@ -17,6 +17,7 @@ fn cues(phase: Phase) -> ShotCues {
         strikeout: false,
         thrown_base: None,
         grounder: false,
+        runner_cam: None,
         descending_to: None,
         duel_throw_base: None,
     }
@@ -141,6 +142,91 @@ fn in_play_cuts_plate_then_ball_then_fielder_then_base() {
     assert_eq!(pick_shot(&c, None), Shot::BaseCam(1));
 }
 
+/// A throw in from the outfield takes the runner cam ahead of the base cam
+/// while it is wanted; the plate hold and a home run still come first.
+#[test]
+fn the_runner_cam_comes_before_the_base_cam() {
+    let runner = Entity::from_raw_u32(11).unwrap();
+    let mut c = cues(Phase::InPlay);
+    c.thrown_base = Some(1);
+    c.runner_cam = Some(runner);
+    assert_eq!(pick_shot(&c, None), Shot::RunnerCam(runner));
+    c.runner_cam = None;
+    assert_eq!(
+        pick_shot(&c, Some(Shot::RunnerCam(runner))),
+        Shot::BaseCam(1)
+    );
+    c.runner_cam = Some(runner);
+    c.since_contact = BALL_FOLLOW_DELAY * 0.5;
+    assert!(matches!(pick_shot(&c, None), Shot::Duel(_)));
+    c.since_contact = 10.0;
+    c.home_run = true;
+    assert_eq!(pick_shot(&c, None), Shot::BallFollow);
+}
+
+/// Only a throw from the outfield takes the runner cam, only while the
+/// ball is still well out, and never back once the base cam is up.
+#[test]
+fn the_runner_cam_hands_over_to_the_bag() {
+    let field = VariantId::Standard.field();
+    let second = field.base_positions[1];
+    let fence = field.fence_line;
+    let from = Vec3::new(-25.0, 1.8, 80.0);
+    assert!(runner_cam_wanted(from, second, from, fence, false));
+    // The ball most of the way in: the bag's shot now.
+    let near = second.lerp(from, RUNNER_CAM_HANDOFF * 0.9);
+    assert!(!runner_cam_wanted(from, second, near, fence, false));
+    // Once the base cam is up it keeps the play.
+    assert!(!runner_cam_wanted(from, second, from, fence, true));
+    // A deep shortstop's throw across the diamond is an infield play.
+    let short = Vec3::new(8.0, 1.8, 36.0);
+    assert!(!runner_cam_wanted(
+        short,
+        field.base_positions[0],
+        short,
+        fence,
+        false
+    ));
+}
+
+/// The runner cam stands off the runner's race on the side away from the
+/// throw, above the ground, and keeps the runner, the bag and the incoming
+/// ball in the middle of the frame.
+#[test]
+fn the_runner_cam_frames_runner_bag_and_ball() {
+    use super::super::framing::{framed_ndc_x, framed_ndc_y};
+    let field = VariantId::Standard.field();
+    let aspect = 16.0 / 9.0;
+    for (from, to, ball) in [
+        // A double: rounding first for second, throw from left-centre.
+        (0usize, 1usize, Vec3::new(10.0, 3.0, 70.0)),
+        // A triple: rounding second for third, throw from the right-field corner.
+        (1, 2, Vec3::new(-55.0, 3.5, 60.0)),
+        // A double into the right-centre gap: the throw comes from behind him.
+        (0, 1, Vec3::new(-30.0, 2.5, 75.0)),
+        // A triple down the left-field line: the throw comes from ahead.
+        (1, 2, Vec3::new(45.0, 3.0, 55.0)),
+    ] {
+        let bag = field.base_positions[to];
+        let runner = field.base_positions[from].lerp(bag, 0.3);
+        let (eye, target, fov) = runner_cam(runner, bag, ball, aspect);
+        assert!(eye.y > 2.0, "{eye}");
+        // The ball comes in from beyond the race, never from behind the lens.
+        assert!(
+            eye.distance(ball) > eye.distance(bag) && eye.distance(ball) > eye.distance(runner)
+        );
+        assert!((RUNNER_CAM_MIN_FOV..=MAX_LEAD_FOV + 1e-4).contains(&fov));
+        for p in [runner + Vec3::Y, bag + Vec3::Y * 0.5, ball] {
+            let x = framed_ndc_x(eye, target, fov, aspect, p);
+            let y = framed_ndc_y(eye, target, fov, p);
+            assert!(
+                x.abs() <= LEAD_MARGIN + 0.02 && y.abs() <= LEAD_MARGIN + 0.02,
+                "{p} at ({x:.2}, {y:.2}) for {from}->{to}"
+            );
+        }
+    }
+}
+
 /// A home run in flight is followed, never fielder- or base-cammed, and its
 /// result pause is the trot orbit.
 #[test]
@@ -244,6 +330,7 @@ fn inputs(field: &FieldSpec) -> ShotInputs<'_> {
         aspect: DUEL_REFERENCE_ASPECT,
         ball: None,
         fielder: None,
+        runner: None,
         wind: Vec3::ZERO,
         home_run: false,
         trot_secs: 0.0,

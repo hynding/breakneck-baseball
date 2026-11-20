@@ -13,11 +13,13 @@ use crate::game::fielding::ActivePlay;
 use crate::game::flow::{LiveBallEvent, Phase, Play, ResultBeat};
 use crate::game::player::{CatcherRole, PlateUmpire};
 use crate::game::rules;
+use crate::game::runner::{BatterGhost, Runner};
 use crate::game::variant::FieldSpec;
 
 use super::framing::{LENS_BRUSH_RADIUS, OCCLUSION_NEAR, OCCLUSION_RADIUS, brushes_lens, occludes};
 use super::shots::{
     BallState, FIELDER_CAM_MIN_HEIGHT, PlayRead, RigMotion, Shot, ShotCues, ShotInputs, pick_shot,
+    runner_cam_wanted,
 };
 use super::{
     BALL_FOLLOW_DELAY, BROADCAST_EYE, BROADCAST_FOV, BROADCAST_HOME_TARGET, CameraMode,
@@ -130,6 +132,14 @@ pub struct BroadcastRig {
     /// The base the live ball was last thrown at, cleared once the shot
     /// returns to the duel.
     thrown_base: Option<usize>,
+    /// Where that throw left the fielder's hand.
+    throw_from: Option<Vec3>,
+    /// The runner the runner cam settled on for this throw, kept so the
+    /// shot never hops between runners.
+    runner_subject: Option<Entity>,
+    /// The runner cam has been on screen for this throw: once it has, the
+    /// play never waits on a runner again (it goes to the bag).
+    runner_shown: bool,
     /// What this play's batted ball has done: the grounder call (made once
     /// just after the plate hold) and whether it has come down
     /// ([`PlayRead`]); cleared with `thrown_base`.
@@ -149,6 +159,9 @@ impl Default for BroadcastRig {
             motion: RigMotion::new(BROADCAST_EYE, BROADCAST_HOME_TARGET, BROADCAST_FOV),
             shot: None,
             thrown_base: None,
+            throw_from: None,
+            runner_subject: None,
+            runner_shown: false,
             read: PlayRead::default(),
             ground_fielder: None,
             play_contact: None,
@@ -167,6 +180,9 @@ impl BroadcastRig {
 /// kick rides through the hit-stop.
 #[derive(Resource, Default)]
 pub(super) struct CameraKick(Vec3);
+
+/// A runner this close to his bag (m, flat) is in, not racing a throw.
+const RUNNER_ARRIVED: f32 = 1.0;
 
 /// The live ball as the broadcast camera reads it.
 type BallQuery<'w, 's> =
@@ -205,6 +221,8 @@ pub(super) fn broadcast_camera(
     mut walls: MessageReader<WallBangEvent>,
     ball_q: BallQuery,
     rigs: Query<&Transform, (Without<Baseball>, Without<Camera3d>)>,
+    runners: Query<(Entity, &Runner)>,
+    ghosts: Query<Entity, With<BatterGhost>>,
     mut rig: ResMut<BroadcastRig>,
     mut trot_start: Local<Option<f32>>,
     mut cam_q: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
@@ -222,8 +240,11 @@ pub(super) fn broadcast_camera(
     // throw and announced at the arrival (`flow::resolve_live_play`), so
     // this is exactly the shot the call lands in.
     for ev in live.read() {
-        if let LiveBallEvent::Thrown { base, .. } = *ev {
+        if let LiveBallEvent::Thrown { pos, base, .. } = *ev {
             rig.thrown_base = Some(base);
+            rig.throw_from = Some(pos);
+            rig.runner_subject = None;
+            rig.runner_shown = false;
         }
     }
 
@@ -244,6 +265,9 @@ pub(super) fn broadcast_camera(
     }
     if new_play || !matches!(play.phase, Phase::InPlay | Phase::Result) {
         rig.thrown_base = None;
+        rig.throw_from = None;
+        rig.runner_subject = None;
+        rig.runner_shown = false;
         rig.read = PlayRead::default();
         rig.ground_fielder = None;
     }
@@ -267,6 +291,74 @@ pub(super) fn broadcast_camera(
             .chaser()
             .filter(|f| coming_down && rigs.get(*f).is_ok())
     });
+    // A long throw in from the outfield first trails the runner racing it
+    // (the one bound for the thrown-to bag), then hands over to the base
+    // cam for the last stretch and the call.
+    let bag_at = |base: usize| {
+        field
+            .base_positions
+            .get(base)
+            .copied()
+            .unwrap_or(Vec3::ZERO)
+    };
+    let long_throw = match (rig.thrown_base, rig.throw_from, ball_state) {
+        (Some(base), Some(from), Some(b)) if play.phase == Phase::InPlay && !play.is_home_run() => {
+            runner_cam_wanted(
+                from,
+                bag_at(base),
+                b.pos,
+                field.fence_line,
+                matches!(rig.shot, Some(Shot::BaseCam(_))),
+            )
+        }
+        _ => false,
+    };
+    // A rig racing for a bag: a runner's own bag, or first for the batter
+    // still out of the box as the run-out ghost.
+    let runner_bag = |e: Entity| -> Option<(Vec3, usize)> {
+        if let Ok((_, r)) = runners.get(e) {
+            Some((bag_at(r.base), r.base))
+        } else {
+            ghosts.get(e).ok().map(|_| (bag_at(0), 0))
+        }
+    };
+    let runner_cam = if long_throw {
+        let base = rig.thrown_base.expect("long_throw needs a throw");
+        let thrown_bag = bag_at(base);
+        // Once picked, the subject stays for the throw (a runner on a
+        // triple races on past the bag the throw went to).
+        let kept = rig.runner_subject.filter(|e| runner_bag(*e).is_some());
+        let subject = kept.or_else(|| {
+            // Still running for a bag: the one bound for the thrown-to bag
+            // first, else the one nearest it (on a double the throw can go
+            // in behind the batter, to first).
+            runners
+                .iter()
+                .map(|(e, _)| e)
+                .chain(ghosts.iter())
+                .filter_map(|e| {
+                    let at = rigs.get(e).ok()?.translation;
+                    let (bag, bound_base) = runner_bag(e)?;
+                    let flat = |v: Vec3| v.with_y(0.0);
+                    (flat(at).distance(flat(bag)) > RUNNER_ARRIVED)
+                        .then(|| (e, bound_base != base, at.distance(thrown_bag)))
+                })
+                .min_by(|a, b| a.1.cmp(&b.1).then(a.2.total_cmp(&b.2)))
+                .map(|(e, _, _)| e)
+        });
+        rig.runner_subject = subject;
+        subject
+    } else {
+        None
+    };
+    // The runner bound for the bag can surface a frame after the throw
+    // (the batter becomes a runner once the call is pending): hold the
+    // current shot rather than cut to the bag and straight back.
+    let thrown_base = if long_throw && runner_cam.is_none() && !rig.runner_shown {
+        None
+    } else {
+        rig.thrown_base
+    };
     let cues = ShotCues {
         phase: play.phase,
         since_contact: play.since_contact(now),
@@ -276,8 +368,9 @@ pub(super) fn broadcast_camera(
         view: *view,
         walkup: play.walkup_active(),
         strikeout: play.result_beat() == Some(ResultBeat::Strikeout),
-        thrown_base: rig.thrown_base,
+        thrown_base,
         grounder,
+        runner_cam,
         descending_to,
         duel_throw_base: play.duel_throw().map(|t| t.target),
     };
@@ -300,6 +393,14 @@ pub(super) fn broadcast_camera(
             }
             _ => None,
         },
+        runner: match shot {
+            Shot::RunnerCam(r) => rigs
+                .get(r)
+                .ok()
+                .zip(runner_bag(r))
+                .map(|(tf, (bag, _))| (tf.translation, bag)),
+            _ => None,
+        },
         wind: wind.0,
         home_run: play.is_home_run(),
         trot_secs: now - start,
@@ -316,12 +417,23 @@ pub(super) fn broadcast_camera(
         rig.thrown_base = None;
     }
 
-    if rig.shot != Some(shot) {
+    if matches!(shot, Shot::RunnerCam(_)) {
+        rig.runner_shown = true;
+    }
+    // The runner cam's subject handing over (the batter's ghost becomes a
+    // fresh runner rig mid-race) keeps the shot moving, never a cut.
+    let same_shot = rig.shot == Some(shot)
+        || matches!(
+            (rig.shot, shot),
+            (Some(Shot::RunnerCam(_)), Shot::RunnerCam(_))
+        );
+    if !same_shot {
         // A new subject: the shot says how to get there (a cut, today).
         let kind = shot.transition_from(rig.shot);
         rig.shot = Some(shot);
         rig.motion.start(kind, want, time.delta_secs());
     } else {
+        rig.shot = Some(shot);
         rig.motion.step(want, time.delta_secs());
     }
 

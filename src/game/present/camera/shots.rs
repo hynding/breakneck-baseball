@@ -38,6 +38,10 @@ pub enum Shot {
     /// A ball on the ground: a high, wide infield shot that holds the ball,
     /// the fielder going for it, and first base.
     GroundBall,
+    /// A throw in from the outfield: trailing the runner it races as he
+    /// heads for the bag, the throw coming into frame. Hands over to
+    /// the base cam as the ball nears the bag.
+    RunnerCam(Entity),
     /// Behind and above the fielder about to make the catch, ball in frame.
     FielderCam(Entity),
     /// Low beside the bag a throw is headed for (`base_count()` = home):
@@ -75,6 +79,9 @@ pub(super) struct ShotCues {
     /// The ball was hit on the ground ([`is_grounder`], latched by the rig
     /// for the rest of the play).
     pub grounder: bool,
+    /// The runner racing a long throw that is still far from its bag (the
+    /// rig decides; [`runner_cam_wanted`]).
+    pub runner_cam: Option<Entity>,
     /// The chasing fielder, when the ball is in the air and coming down —
     /// the fielder cam's subject.
     pub descending_to: Option<Entity>,
@@ -101,6 +108,9 @@ pub(super) fn pick_shot(cues: &ShotCues, current: Option<Shot>) -> Shot {
         // the bat coming through — then cut to the ball.
         Phase::InPlay if cues.since_contact < BALL_FOLLOW_DELAY => Shot::Duel(cues.view),
         Phase::InPlay if cues.home_run => Shot::BallFollow,
+        Phase::InPlay if cues.runner_cam.is_some() => {
+            Shot::RunnerCam(cues.runner_cam.expect("checked"))
+        }
         Phase::InPlay => match (cues.thrown_base, cues.descending_to) {
             (Some(base), _) => Shot::BaseCam(base),
             (None, Some(fielder)) => Shot::FielderCam(fielder),
@@ -244,6 +254,8 @@ pub(super) struct ShotInputs<'a> {
     /// The fielder the shot is about (the fielder cam's subject, the
     /// grounder's chaser), where it stands.
     pub fielder: Option<Vec3>,
+    /// The runner cam's subject: where he is and the bag he is running to.
+    pub runner: Option<(Vec3, Vec3)>,
     pub wind: Vec3,
     pub home_run: bool,
     /// Seconds since the trot orbit began.
@@ -293,6 +305,14 @@ impl Shot {
                 let (eye, target) = fielder_cam(inp.fielder.unwrap_or(ball.pos), ball.pos);
                 ShotSpec::new(eye, target, PLAY_CAM_FOV)
             }
+            (Shot::RunnerCam(_), Some(ball)) => match inp.runner {
+                Some((runner, bag)) => {
+                    let (eye, target, fov) = runner_cam(runner, bag, ball.pos, inp.aspect);
+                    ShotSpec::new(eye, target, fov)
+                }
+                None => wide(),
+            },
+            (Shot::RunnerCam(_), None) => wide(),
             (Shot::BaseCam(base), _) => {
                 let (eye, target) = base_cam(field, base);
                 ShotSpec::new(eye, target, PLAY_CAM_FOV)
@@ -379,6 +399,71 @@ const MAX_BACK: f32 = 60.0;
 /// The ball-follow tracks faster than the other shots: its eye trails a
 /// ball flying at up to 45 m/s.
 const BALL_FOLLOW_RATE: f32 = 10.0;
+
+/// The runner cam: standoff from the runner's race (beyond half its
+/// length) and height.
+const RUNNER_CAM_BACK: f32 = 9.0;
+const RUNNER_CAM_HEIGHT: f32 = 4.0;
+const RUNNER_CAM_MIN_FOV: f32 = 40.0_f32.to_radians();
+/// A throw is in from the outfield (worth the runner cam) when it leaves
+/// the fielder's hand this far from home, as a fraction of the park's
+/// foul-line fence distance: 50 m in the stadium, beyond the deepest
+/// infielder, so a grounder's throw across the diamond never takes it.
+pub(super) const OUTFIELD_FRACTION: f32 = 0.5;
+/// The runner cam hands over to the base cam once the throw is this close
+/// to the bag, as a fraction of the throw's length: the last stretch and
+/// the call belong to the bag.
+pub(super) const RUNNER_CAM_HANDOFF: f32 = 0.4;
+
+/// Whether the rig should be on the runner cam: a throw in from the
+/// outfield ([`OUTFIELD_FRACTION`]) from `throw_from` to `bag` whose ball
+/// is still more than [`RUNNER_CAM_HANDOFF`] of the throw away from the
+/// bag, while the base cam hasn't taken the play yet (a cut back from the
+/// bag would read as a stutter).
+pub(super) fn runner_cam_wanted(
+    throw_from: Vec3,
+    bag: Vec3,
+    ball: Vec3,
+    fence_line: f32,
+    base_cam_shown: bool,
+) -> bool {
+    let flat = |v: Vec3| Vec2::new(v.x, v.z);
+    let length = flat(throw_from).distance(flat(bag));
+    !base_cam_shown
+        && flat(throw_from).length() > fence_line * OUTFIELD_FRACTION
+        && flat(ball).distance(flat(bag)) > length * RUNNER_CAM_HANDOFF
+}
+
+/// The runner cam: behind and above the runner on his line to the bag,
+/// swung round to the side away from the throw so the ball comes in from
+/// beyond the runner and the bag (a throw from behind him — right field on
+/// a run to third — would otherwise come from behind the lens), the lens
+/// fitted to the runner, the bag and the ball.
+pub(super) fn runner_cam(runner: Vec3, bag: Vec3, ball: Vec3, aspect: f32) -> (Vec3, Vec3, f32) {
+    let flat = |v: Vec3| Vec3::new(v.x, 0.0, v.z);
+    let run = flat(bag - runner).normalize_or(flat(bag).normalize_or(Vec3::Z));
+    let centre = (runner + bag) / 2.0;
+    let from_ball = flat(centre - ball).normalize_or(-run);
+    // Outward from the diamond, for a ball straight behind the runner
+    // (the two directions cancel).
+    let side = Vec3::new(-run.z, 0.0, run.x);
+    let outward = if side.dot(flat(centre)) >= 0.0 {
+        side
+    } else {
+        -side
+    };
+    // Mostly straight away from the ball (so it comes in from beyond the
+    // race), drawn a little behind the runner.
+    let back = (from_ball * 2.0 - run).normalize_or(outward);
+    let reach = RUNNER_CAM_BACK + flat(bag - runner).length() / 2.0;
+    let eye = centre.with_y(0.0) + back * reach + Vec3::Y * RUNNER_CAM_HEIGHT;
+    let subjects = [runner + Vec3::Y, bag + Vec3::Y * 0.5, ball];
+    // Look between the runner's race and the ball, leaning to the race.
+    let target = (subjects[0] + subjects[1]).lerp(ball * 2.0, 0.25) / 2.0;
+    let fov = fit_vfov(eye, target, &subjects, aspect, LEAD_MARGIN)
+        .clamp(RUNNER_CAM_MIN_FOV, MAX_LEAD_FOV);
+    (eye, target, fov)
+}
 
 /// How far from the frame's centre (in NDC) the lead shots keep their
 /// subjects: the middle 80%.
