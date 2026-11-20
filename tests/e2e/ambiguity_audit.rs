@@ -83,7 +83,7 @@ fn no_gameplay_system_ambiguities_in_update() {
         let graph = schedule.graph();
         let mut gameplay_pairs = Vec::new();
         let mut allowed = 0usize;
-        for (a, b, _components) in graph.conflicting_systems() {
+        for (a, b, _components) in graph.conflicting_systems().iter() {
             let name_of = |id: &_| names.get(id).cloned().unwrap_or_else(|| format!("{id:?}"));
             let (an, bn) = (name_of(a), name_of(b));
             if is_gameplay(&an) && is_gameplay(&bn) {

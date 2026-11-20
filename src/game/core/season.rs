@@ -202,7 +202,11 @@ impl Season {
             others.next().expect("three CPU clubs"),
             others.next().expect("three CPU clubs"),
         );
-        let (home, away) = if round % 2 == 0 { (a, b) } else { (b, a) };
+        let (home, away) = if round.is_multiple_of(2) {
+            (a, b)
+        } else {
+            (b, a)
+        };
         self.simulated(home, away, u64::from(round))
     }
 
@@ -286,7 +290,7 @@ impl Season {
     pub fn is_valid(&self) -> bool {
         let game_ok = |g: &GameResult| g.home < TEAMS && g.away < TEAMS && g.home != g.away;
         SEASON_LENGTHS.contains(&self.length)
-            && self.results.len() % 2 == 0
+            && self.results.len().is_multiple_of(2)
             && self.played() <= self.length
             && self.results.iter().all(game_ok)
             && self

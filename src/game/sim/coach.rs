@@ -222,12 +222,12 @@ fn track_frame_facts(
         }
     }
     let ball = rigs.ball.single().ok();
-    if facts.play.phase == Phase::Pitch {
-        if let Some((tf, _, _)) = ball {
-            // Mirror flow's plate-crossing record (same z-gate).
-            if state.crossing.is_none() && tf.translation.z <= 0.1 {
-                state.crossing = Some(Vec2::new(tf.translation.x, tf.translation.y));
-            }
+    if facts.play.phase == Phase::Pitch
+        && let Some((tf, _, _)) = ball
+    {
+        // Mirror flow's plate-crossing record (same z-gate).
+        if state.crossing.is_none() && tf.translation.z <= 0.1 {
+            state.crossing = Some(Vec2::new(tf.translation.x, tf.translation.y));
         }
     }
     if let (Some((tf, vel, in_flight)), Ok(catcher_tf)) = (ball, rigs.catcher.single()) {
@@ -242,10 +242,11 @@ fn track_frame_facts(
             state.glove_y = Some(tf.translation.y);
         }
     }
-    if facts.play.phase == Phase::Result && state.last_phase != Phase::Result {
-        if let Some((tf, _, Some(_))) = ball {
-            state.result_y = Some(tf.translation.y);
-        }
+    if facts.play.phase == Phase::Result
+        && state.last_phase != Phase::Result
+        && let Some((tf, _, Some(_))) = ball
+    {
+        state.result_y = Some(tf.translation.y);
     }
     // A fresh at-bat: clear the per-facts.play facts. (The pure Coach resets its
     // own facts.play memory on the same PrePitch edge.)

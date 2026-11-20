@@ -157,7 +157,7 @@ fn enter_creator(
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     if keyboard.just_pressed(KeyCode::KeyC) {
-        next_state.set(GameState::Creator);
+        (*next_state).set_if_neq(GameState::Creator);
     }
 }
 
@@ -166,7 +166,7 @@ fn enter_creator(
 /// keypress so it fires on every exit path, not just this one.
 fn exit_creator(keyboard: Res<ButtonInput<KeyCode>>, mut next_state: ResMut<NextState<GameState>>) {
     if keyboard.just_pressed(KeyCode::Escape) {
-        next_state.set(GameState::MainMenu);
+        (*next_state).set_if_neq(GameState::MainMenu);
     }
 }
 

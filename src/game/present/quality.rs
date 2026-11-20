@@ -473,7 +473,7 @@ fn spawn_upscale_view(mut commands: Commands, images: Option<ResMut<Assets<Image
     let Some(mut images) = images else {
         return;
     };
-    let mut image = Image::new_target_texture(1, 1, TextureFormat::Rgba8UnormSrgb);
+    let mut image = Image::new_target_texture(1, 1, TextureFormat::Rgba8UnormSrgb, None);
     // GPU-only: a render target needs no CPU copy, and `resize` would
     // otherwise drag a zeroed buffer of the full size along every time.
     image.data = None;
@@ -526,7 +526,10 @@ fn apply_render_scale(
     view: Option<Res<ScaledView>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     mut images: ResMut<Assets<Image>>,
-    mut main_cameras: Query<&mut Camera, (With<MainCamera>, Without<UpscaleCamera>)>,
+    mut main_cameras: Query<
+        (&Camera, &mut RenderTarget),
+        (With<MainCamera>, Without<UpscaleCamera>),
+    >,
     mut upscale_cameras: Query<&mut Msaa, (With<UpscaleCamera>, Without<MainCamera>)>,
     mut sprites: Query<(&mut Sprite, &mut Visibility), With<UpscaleSprite>>,
 ) {
@@ -534,11 +537,11 @@ fn apply_render_scale(
     let (Some(view), Ok(window)) = (view, windows.single()) else {
         return;
     };
-    let Ok(mut main) = main_cameras.single_mut() else {
+    let Ok((main, mut main_target)) = main_cameras.single_mut() else {
         return;
     };
-    if !matches!(&main.target, RenderTarget::Image(t) if t.handle == view.0) {
-        main.target = RenderTarget::Image(view.0.clone().into());
+    if !matches!(&*main_target, RenderTarget::Image(t) if t.handle == view.0) {
+        *main_target = RenderTarget::Image(view.0.clone().into());
     }
 
     let scale = active.tier.render_scale(window.scale_factor());

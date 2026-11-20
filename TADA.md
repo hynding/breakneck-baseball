@@ -459,3 +459,19 @@ the probe that now guards it.
     (`skipping_skeletal_sampling_does_not_change_the_inning`) and the in-process determinism
     control are live tests. The shipped game's trajectory is unchanged (the sampled path never
     lagged), but kinematic rigs no longer depend on animation churn to follow their transforms.
+109. [x] TODO 29 step 3 — **Bevy 0.17.3 → 0.18.1** (bevy_rapier3d 0.33, bevy-inspector-egui 0.36,
+    wgpu-types 27, MSRV 1.85 → 1.89). API moves: `GlobalAmbientLight` for the ambient
+    resource, `RenderTarget` as its own camera component (`quality::apply_render_scale`),
+    `border_radius` inside `Node`, `AnimatedBy` for the harness's skeletal-sampling strip,
+    `ConflictingSystems::iter`, `EntityIndex`. Behaviour moves: `NextState::set` now re-runs
+    `OnEnter`/`OnExit` for the same state, so every game-state write is `set_if_neq` (the 0.17
+    semantics; tests keep `set`); gear props hang on their bone through a world command that
+    drops the prop if the bone was despawned earlier in the same flush (0.18's `add_child` on a
+    dead entity panicked `ball_possession::` after ~100k frames). The three `B0004` boot
+    warnings were the base-indicator pips: a 3D `Transform` on UI nodes, which never rotated
+    them; they now turn through `UiTransform`, so the bases finally draw as diamonds. Gates:
+    clippy `-D warnings` default / dev+debug+autoplay / wasm, `--features debug` wasm check,
+    full `cargo test`, `creator::` under `debug`, and a browser run (menu, duel HUD, pause
+    board all render on WebGL2).
+    Headless sim on 0.18: 1.72 ms/frame with skeletal sampling skipped (1.82 on 0.17), 1.86
+    with it (`sim_profile::`, one CPU-vs-CPU inning).

@@ -55,9 +55,9 @@ fn infield_diamond_corners_align_with_bases() {
 /// Regression for a units bug: `spawn_lighting`'s `ambient_fraction`
 /// call sites (0.15 Stadium, 0.20 FrontYard — retuned for contrast in
 /// the Task 20 polish sweep, previously 0.25/0.35) were passed straight
-/// through as `AmbientLight::brightness` — fine under Bevy's pre-0.14
+/// through as `GlobalAmbientLight::brightness` — fine under Bevy's pre-0.14
 /// small-multiplier semantics, but in 0.15 `brightness` is an absolute
-/// lux-like value (`AmbientLight::default()` is 80.0), so a raw 0.25 was
+/// lux-like value (`GlobalAmbientLight::default()` is 80.0), so a raw 0.25 was
 /// indistinguishable from "no ambient light at all" next to a 50,000 lux
 /// sun. Every scenery's resulting ambient must clear Bevy's own default
 /// fill (else it's *darker* than doing nothing) and stay a sane fraction
@@ -67,10 +67,10 @@ fn ambient_fraction_scales_with_sun_illuminance_not_raw() {
     for ambient_fraction in [0.15_f32, 0.20] {
         let brightness = ambient_fraction * SUN_ILLUMINANCE;
         assert!(
-            brightness > AmbientLight::default().brightness,
+            brightness > GlobalAmbientLight::default().brightness,
             "ambient {brightness} lux is dimmer than Bevy's own default ({}) — \
              shadowed surfaces will render darker than out-of-the-box Bevy",
-            AmbientLight::default().brightness
+            GlobalAmbientLight::default().brightness
         );
         assert!(
             brightness < SUN_ILLUMINANCE,

@@ -260,15 +260,15 @@ pub fn adapt_swings(
         // later resolves to PCI (a touch scheme flipping mid-session),
         // whereupon the first pitch graded from that stale offset instead
         // of zone center.
-        if style_for(team, &controllers, &settings) == BattingStyle::PciCursor {
-            if let Some(abs) = intent.cursor {
-                // Clamped like the in-pitch path: `ScriptAction::Cursor` is
-                // unvalidated RON, and an out-of-zone park would draw the
-                // reticle far off the strike zone for the whole windup.
-                let c = pci.cursor_mut(team);
-                *c = abs;
-                PciState::clamp_to_zone(c);
-            }
+        if style_for(team, &controllers, &settings) == BattingStyle::PciCursor
+            && let Some(abs) = intent.cursor
+        {
+            // Clamped like the in-pitch path: `ScriptAction::Cursor` is
+            // unvalidated RON, and an out-of-zone park would draw the
+            // reticle far off the strike zone for the whole windup.
+            let c = pci.cursor_mut(team);
+            *c = abs;
+            PciState::clamp_to_zone(c);
         }
         // `set_if_neq`: an unconditional write marks the resource changed every
         // frame, which defeats `ui::hud::update_meter_bar`'s change guard and

@@ -140,7 +140,17 @@ fn spawn_prop(
     let prop = commands
         .spawn((GearProp, Mesh3d(mesh), MeshMaterial3d(material), transform))
         .id();
-    commands.entity(bone).add_child(prop);
+    // The bone can be despawned earlier in this same command flush (a runner
+    // swapped for his run-out stand-in the frame he is dressed), and adding a
+    // child to a dead entity is an error the default handler panics on. Hang
+    // the prop only if the bone is still there; otherwise drop it with him.
+    commands.queue(move |world: &mut World| {
+        if let Ok(mut bone) = world.get_entity_mut(bone) {
+            bone.add_child(prop);
+        } else if let Ok(prop) = world.get_entity_mut(prop) {
+            prop.despawn();
+        }
+    });
     prop
 }
 
@@ -207,17 +217,17 @@ fn dress_rigs(
             Visibility::Hidden
         };
         for &mesh in &cap_meshes.0 {
-            if let Ok(mut vis) = cap_visibilities.get_mut(mesh) {
-                if *vis != cap_visibility {
-                    *vis = cap_visibility;
-                }
+            if let Ok(mut vis) = cap_visibilities.get_mut(mesh)
+                && *vis != cap_visibility
+            {
+                *vis = cap_visibility;
             }
         }
 
         // 2. Despawn this rig's old props before rebuilding.
         if let Some(mut rig_gear) = rig_gear {
             for e in take(&mut rig_gear.0) {
-                commands.entity(e).despawn();
+                commands.entity(e).try_despawn();
             }
         }
 
@@ -358,7 +368,7 @@ fn dress_rigs(
         }
 
         // 4. Record what's spawned and re-stamp the look.
-        commands.entity(rig).insert((target, RigGear(props)));
+        commands.entity(rig).try_insert((target, RigGear(props)));
     }
 }
 

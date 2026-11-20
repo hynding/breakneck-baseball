@@ -56,11 +56,11 @@ pub(super) fn spawn_hud(
                         border: UiRect::all(Val::Px(1.5)),
                         flex_direction: FlexDirection::Column,
                         justify_content: JustifyContent::FlexEnd, // fill grows from the base
+                        border_radius: BorderRadius::all(Val::Px(6.0)),
                         ..default()
                     },
                     BackgroundColor(hidden_tint(ui.panel_bg)),
                     BorderColor::all(hidden_tint(ui.panel_border)),
-                    BorderRadius::all(Val::Px(6.0)),
                 ))
                 .with_children(|track| {
                     track.spawn((
@@ -68,10 +68,10 @@ pub(super) fn spawn_hud(
                         Node {
                             width: Val::Percent(100.0),
                             height: Val::Percent(0.0),
+                            border_radius: BorderRadius::all(Val::Px(5.0)),
                             ..default()
                         },
                         BackgroundColor(ui.accent),
-                        BorderRadius::all(Val::Px(5.0)),
                     ));
                 });
 
@@ -83,11 +83,11 @@ pub(super) fn spawn_hud(
                         flex_direction: FlexDirection::Column,
                         row_gap: Val::Px(6.0),
                         border: UiRect::all(Val::Px(1.5)),
+                        border_radius: BorderRadius::all(Val::Px(12.0)),
                         ..default()
                     },
                     BackgroundColor(ui.panel_bg),
                     BorderColor::all(ui.panel_border),
-                    BorderRadius::all(Val::Px(12.0)),
                 ))
                 .with_children(|card| {
                     card.spawn((
@@ -155,10 +155,10 @@ pub(super) fn spawn_hud(
                                         Node {
                                             width: Val::Px(10.0),
                                             height: Val::Px(10.0),
+                                            border_radius: BorderRadius::MAX,
                                             ..default()
                                         },
                                         BackgroundColor(ui.pip_off),
-                                        BorderRadius::MAX,
                                     ));
                                 }
                             });
@@ -209,11 +209,11 @@ pub(super) fn spawn_hud(
                     // this cap instead of running into the px-anchored
                     // corner cards on narrow windows (TODO 66).
                     max_width: Val::Percent(60.0),
+                    border_radius: BorderRadius::all(Val::Px(26.0)),
                     ..default()
                 },
                 BackgroundColor(hidden_tint(ui.panel_bg)),
                 BorderColor::all(hidden_tint(ui.panel_border)),
-                BorderRadius::all(Val::Px(26.0)),
             ))
             .with_children(|pill| {
                 pill.spawn((
@@ -334,11 +334,11 @@ fn spawn_base_ring(commands: &mut Commands, base_count: usize, theme: &Theme) {
                 width: Val::Px(BOX),
                 height: Val::Px(BOX),
                 border: UiRect::all(Val::Px(1.5)),
+                border_radius: BorderRadius::all(Val::Px(12.0)),
                 ..default()
             },
             BackgroundColor(theme.ui.panel_bg),
             BorderColor::all(theme.ui.panel_border),
-            BorderRadius::all(Val::Px(12.0)),
         ))
         .with_children(|ring| {
             let step = std::f32::consts::TAU / (base_count as f32 + 1.0);
@@ -354,12 +354,14 @@ fn spawn_base_ring(commands: &mut Commands, base_count: usize, theme: &Theme) {
                         left: Val::Px(left),
                         width: Val::Px(PIP),
                         height: Val::Px(PIP),
+                        border_radius: BorderRadius::all(Val::Px(4.0)),
                         ..default()
                     },
                     BackgroundColor(theme.ui.pip_off),
-                    BorderRadius::all(Val::Px(4.0)),
-                    // Rotate 45° so the square reads as a base.
-                    Transform::from_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_4)),
+                    // Rotate 45° so the square reads as a base. UI nodes
+                    // rotate through `UiTransform`; a 3D `Transform` here did
+                    // nothing since Bevy 0.17 and drew the B0004 warnings.
+                    UiTransform::from_rotation(Rot2::degrees(45.0)),
                 ));
             }
         });

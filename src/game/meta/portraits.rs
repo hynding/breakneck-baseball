@@ -168,7 +168,7 @@ fn drive_portraits(
     match &mut run.phase {
         Phase::WaitForMenu => {
             if *state.get() == GameState::MainMenu {
-                next_state.set(GameState::Creator);
+                (*next_state).set_if_neq(GameState::Creator);
                 run.phase = Phase::WaitForCreatorEnter;
             }
         }

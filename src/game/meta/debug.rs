@@ -275,22 +275,22 @@ fn coach_gizmo(
         return;
     }
     // The chaser's current intercept order.
-    if let Some((tf, intent)) = active.chaser().and_then(|e| fielders.get(e).ok()) {
-        if let Some(target) = intent.target {
-            gizmos.line(
-                tf.translation + Vec3::Y * 0.2,
-                target + Vec3::Y * 0.2,
-                css::MAGENTA,
-            );
-            gizmos.circle(
-                Isometry3d::new(
-                    target + Vec3::Y * 0.05,
-                    Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2),
-                ),
-                0.7,
-                css::MAGENTA,
-            );
-        }
+    if let Some((tf, intent)) = active.chaser().and_then(|e| fielders.get(e).ok())
+        && let Some(target) = intent.target
+    {
+        gizmos.line(
+            tf.translation + Vec3::Y * 0.2,
+            target + Vec3::Y * 0.2,
+            css::MAGENTA,
+        );
+        gizmos.circle(
+            Isometry3d::new(
+                target + Vec3::Y * 0.05,
+                Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2),
+            ),
+            0.7,
+            css::MAGENTA,
+        );
     }
     let Some(contact) = coach_state.contact_facts() else {
         return;

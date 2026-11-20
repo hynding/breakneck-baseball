@@ -59,11 +59,11 @@ pub(super) fn spawn_walkup_card(mut commands: Commands, theme: Res<Theme>) {
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(6.0),
                 border: UiRect::all(Val::Px(1.5)),
+                border_radius: BorderRadius::all(Val::Px(14.0)),
                 ..default()
             },
             BackgroundColor(hidden_tint(ui.panel_bg)),
             BorderColor::all(hidden_tint(ui.panel_border)),
-            BorderRadius::all(Val::Px(14.0)),
         ))
         .with_children(|card| {
             for (line, size) in [

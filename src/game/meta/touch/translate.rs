@@ -204,10 +204,10 @@ pub fn read_touch(
             let crossing_pitch =
                 gestures.last_phase == Some(Phase::Pitch) || play.phase == Phase::Pitch;
             if crossing_pitch {
-                if let Some(primary) = gestures.primary.as_mut() {
-                    if let Some(touch) = touches.get_pressed(primary.id) {
-                        primary.anchor = touch.position();
-                    }
+                if let Some(primary) = gestures.primary.as_mut()
+                    && let Some(touch) = touches.get_pressed(primary.id)
+                {
+                    primary.anchor = touch.position();
                 }
                 // Everything keyed on *entering* the pitch window lives in this
                 // one block, so the edge has a single encoding.
@@ -711,8 +711,9 @@ fn adopt_orphan_stick(f: &Frame, touches: &Touches, gestures: &mut TouchGestures
     // aim-neutral until the finger actually moves. Not during a Hold+Release
     // pitch: adopting there would read the resting finger as a fresh hold
     // and re-load the meter for a swing already spent.
-    if gestures.primary.is_none() && !(f.swing_phase && f.scheme == TouchScheme::HoldRelease) {
-        if let Some(touch) = touches.iter().find(|t| {
+    if gestures.primary.is_none()
+        && !(f.swing_phase && f.scheme == TouchScheme::HoldRelease)
+        && let Some(touch) = touches.iter().find(|t| {
             Some(t.id()) != gestures.pad
             && Some(t.id()) != gestures.button
             && chrome_free(&gestures.pause_fingers, f.live_chrome, t)
@@ -722,14 +723,14 @@ fn adopt_orphan_stick(f: &Frame, touches: &Touches, gestures: &mut TouchGestures
             // input" must hold here too, or that thumb is adopted as
             // the stick and its slide inside the pad steers runners.
             && !(f.in_zone_region(t.position()))
-        }) {
-            gestures.primary = Some(PrimaryTouch::tracked_from(
-                touch.id(),
-                touch.position(),
-                f.now,
-                false,
-            ));
-        }
+        })
+    {
+        gestures.primary = Some(PrimaryTouch::tracked_from(
+            touch.id(),
+            touch.position(),
+            f.now,
+            false,
+        ));
     }
 }
 
