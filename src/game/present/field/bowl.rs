@@ -397,7 +397,7 @@ fn scoreboard_image(score: &ScoreBoard) -> Image {
     let half = if score.top_of_inning { "T" } else { "B" };
     let line = format!("{half}{} OUT {}", score.inning, score.outs);
     draw(&mut canvas, w, 4, 37, 1, &line, amber);
-    Image::new(
+    let mut image = Image::new(
         Extent3d {
             width: w as u32,
             height: h as u32,
@@ -407,7 +407,10 @@ fn scoreboard_image(score: &ScoreBoard) -> Image {
         canvas,
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD,
-    )
+    );
+    // Crisp bulbs: the 5×7 font goes soft under linear filtering.
+    image.sampler = bevy::image::ImageSampler::nearest();
+    image
 }
 
 /// A box facing home plate from `at`, `size` = (width, height, depth).
@@ -626,7 +629,9 @@ pub(super) fn cheer_crowd(
         .read()
         .any(|ev| matches!(ev.kind, ContactKind::HomeRun));
     let walk_off = play.is_walk_off() && !state.walk_off_seen;
-    state.walk_off_seen = play.is_walk_off();
+    if state.walk_off_seen != play.is_walk_off() {
+        state.walk_off_seen = play.is_walk_off();
+    }
     let motion = active.is_some_and(|a| a.budget().crowd_motion);
     if motion && (homer || walk_off) {
         state.cheer = 4.0;
