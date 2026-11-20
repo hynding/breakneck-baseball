@@ -90,9 +90,11 @@ pub(super) fn spawn_field(
             0.15 * day.fill,
             &lights,
         ),
+        // The yard has no light towers: a night game there keeps the key
+        // light on the day sun's bearing (a porch light, in effect).
         Scenery::FrontYard => super::stadium::spawn_lighting(
             &mut commands,
-            day.key_yaw(std::f32::consts::PI + std::f32::consts::FRAC_PI_6),
+            std::f32::consts::PI + std::f32::consts::FRAC_PI_6,
             day.elevation,
             0.20 * day.fill,
             &lights,
@@ -105,11 +107,11 @@ pub(super) fn spawn_field(
 const NIGHT_SKY: Color = Color::srgb(0.02, 0.03, 0.08);
 
 /// Which way the night key light shines from (yaw, radians; a directional
-/// light with yaw θ shines from the bowl bearing θ, `bowl::dir`): the light
-/// tower at 118°, behind the plate on the same side as the day sun, so the
-/// cameras see players lit the same way by day and night. Its shadows are
-/// the only shadows at night; the other towers are unshadowed fill
-/// (`bowl::spawn_bowl`).
+/// light with yaw θ shines from the bowl bearing θ, `bowl::dir`): the
+/// stadium's light tower at 118°, behind the plate on the same side as the
+/// stadium's day sun, so the cameras see players lit the same way by day
+/// and night. Its shadows are the only shadows at night; the other towers
+/// are unshadowed fill (`bowl::spawn_bowl`).
 pub(crate) const KEY_TOWER_DEG: f32 = 118.0;
 const NIGHT_KEY_YAW: f32 = KEY_TOWER_DEG * std::f32::consts::PI / 180.0;
 

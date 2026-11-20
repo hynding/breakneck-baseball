@@ -45,3 +45,35 @@ fn a_night_game_is_played_under_the_lights() {
     );
     assert_eq!(night_spots, 3, "the three non-key towers throw fill spots");
 }
+
+/// The towers' fill spots follow the tier: hidden on Low, shown from
+/// Medium up, and they track a mid-game change (Auto stepping down).
+#[test]
+fn the_tower_spots_follow_the_tier() {
+    use breakneck_baseball::game::quality::{ActiveQuality, QualityTier};
+    use breakneck_baseball::game::settings::GraphicsQuality;
+    let mut app = headless_app();
+    app.world_mut().resource_mut::<Settings>().time_of_day = TimeOfDay::Night;
+    start_game(&mut app, KeyCode::Digit1);
+    app.update();
+    for (tier, shown) in [
+        (QualityTier::Medium, true),
+        (QualityTier::Low, false),
+        (QualityTier::High, true),
+    ] {
+        app.insert_resource(ActiveQuality {
+            setting: GraphicsQuality::Auto,
+            tier,
+            stepped: false,
+        });
+        app.update();
+        let world = app.world_mut();
+        let seen: Vec<bool> = world
+            .query_filtered::<&Visibility, With<SpotLight>>()
+            .iter(world)
+            .map(|v| *v != Visibility::Hidden)
+            .collect();
+        assert_eq!(seen.len(), 3, "{tier:?}");
+        assert!(seen.iter().all(|&s| s == shown), "{tier:?}: {seen:?}");
+    }
+}
