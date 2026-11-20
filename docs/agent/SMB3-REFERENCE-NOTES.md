@@ -272,7 +272,7 @@ must read the per-outcome value.
 Goal: replace the plate hold + glide with SMB3's grammar: cut at ≤0.25 s, one subject per
 shot, the call announced in the shot where the play ends.
 
-1. `Shot` enum in `present/camera/rigs.rs`: `Duel`, `ContactInsert`, `BallFollow`,
+1. `Shot` enum in `present/camera/shots.rs` (was `rigs.rs` until the shot catalog): `Duel`, `ContactInsert`, `BallFollow`,
    `FielderCam { entity }`, `BaseCam { base }`, `ResultHold`, `TrotOrbit` (exists).
    `BroadcastRig::cut()` snaps eye/target/fov; the existing exponential smoothing remains
    only *within* `BallFollow` (tracking the ball) and `FielderCam`.
