@@ -383,7 +383,7 @@ fn scoreboard_image(score: &ScoreBoard) -> Image {
     use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
     let (w, h) = BOARD_PX;
     let mut canvas = vec![0u8; w * h * 4];
-    for px in canvas.chunks_exact_mut(4) {
+    for px in canvas.as_chunks_mut::<4>().0 {
         px.copy_from_slice(&[10, 14, 12, 255]);
     }
     let amber = [255, 196, 64, 255];
