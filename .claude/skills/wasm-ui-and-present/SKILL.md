@@ -60,7 +60,10 @@ framings (batting view / catcher POV / behind-pitcher / broadcast plate). The ca
 (`CatcherRole`, any fielder spawned at z < 0) and plate umpire are auto-hidden when they'd block
 the active broadcast view. After contact the broadcast camera holds the plate framing for
 `camera::BALL_FOLLOW_DELAY` (0.25 s), then **cuts** through a one-subject shot list (`camera::Shot`:
-ball-follow → fielder cam on a descending fly → base cam on the throw, where the call lands;
+ball-follow (or the ground-ball shot on a grounder) → fielder cam on a descending fly → base cam on
+the throw, where the call lands. The ball-follow leads the ball to its predicted landing spot and
+fits its lens to both, keeping the ball in the middle 80% of the frame (pinned by
+`shots::tests::the_ball_stays_in_the_middle_of_the_frame`);
 smoothing only within a shot). The shots live in a pure catalog, `camera/shots.rs`: `pick_shot`
 chooses, `Shot::spec` frames (a `ShotSpec`: eye, look-at, FOV, follow rate) and
 `Shot::transition_from` says how to get there (`Transition::Cut` for every shot today; `Ease` and

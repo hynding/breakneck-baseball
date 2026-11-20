@@ -16,7 +16,7 @@ use crate::game::flow::Phase;
 use crate::game::rules;
 use crate::game::variant::FieldSpec;
 
-use super::framing::{TROT_ORBIT_RATE, trot_orbit_eye};
+use super::framing::{TROT_ORBIT_RATE, fit_vfov, trot_orbit_eye};
 use super::{BALL_FOLLOW_DELAY, BROADCAST_FOV, DuelView};
 
 // ── The shot list ─────────────────────────────────────────────────────────────
@@ -32,8 +32,12 @@ use super::{BALL_FOLLOW_DELAY, BROADCAST_FOV, DuelView};
 pub enum Shot {
     /// The duel framing of the active [`DuelView`] (a V press is a cut too).
     Duel(DuelView),
-    /// Chasing the live ball toward where it comes down.
+    /// Chasing the live ball toward where it comes down, the lens leading
+    /// it to the predicted landing spot.
     BallFollow,
+    /// A ball on the ground: a high, wide infield shot that holds the ball,
+    /// the fielder going for it, and first base.
+    GroundBall,
     /// Behind and above the fielder about to make the catch, ball in frame.
     FielderCam(Entity),
     /// Low beside the bag a throw is headed for (`base_count()` = home):
@@ -68,6 +72,9 @@ pub(super) struct ShotCues {
     pub strikeout: bool,
     /// The base the live ball was last thrown at, if any.
     pub thrown_base: Option<usize>,
+    /// The ball was hit on the ground ([`is_grounder`], latched by the rig
+    /// for the rest of the play).
+    pub grounder: bool,
     /// The chasing fielder, when the ball is in the air and coming down —
     /// the fielder cam's subject.
     pub descending_to: Option<Entity>,
@@ -97,6 +104,7 @@ pub(super) fn pick_shot(cues: &ShotCues, current: Option<Shot>) -> Shot {
         Phase::InPlay => match (cues.thrown_base, cues.descending_to) {
             (Some(base), _) => Shot::BaseCam(base),
             (None, Some(fielder)) => Shot::FielderCam(fielder),
+            (None, None) if cues.grounder => Shot::GroundBall,
             (None, None) => Shot::BallFollow,
         },
         Phase::Result if cues.home_run || cues.walk_off => Shot::TrotOrbit,
@@ -233,7 +241,8 @@ pub(super) struct ShotInputs<'a> {
     /// The camera's width / height.
     pub aspect: f32,
     pub ball: Option<BallState>,
-    /// The fielder cam's subject, where it stands.
+    /// The fielder the shot is about (the fielder cam's subject, the
+    /// grounder's chaser), where it stands.
     pub fielder: Option<Vec3>,
     pub wind: Vec3,
     pub home_run: bool,
@@ -252,14 +261,34 @@ impl Shot {
                 ShotSpec::new(eye, target, fov)
             }
             (Shot::BallFollow, Some(ball)) if !inp.home_run => {
-                let (eye, target) = landing_zone_cam(ball, inp.wind);
-                ShotSpec::new(eye, target, BROADCAST_FOV)
+                let (eye, target, focus) = landing_zone_cam(ball, inp.wind);
+                // Fit where the ball is about to be too: the lens follows at a
+                // finite rate, so it must already have room for the next
+                // quarter-second of flight.
+                let ahead = ball.pos + ball.vel * LEAD_SECS;
+                let fov = fit_vfov(
+                    eye,
+                    target,
+                    &[ball.pos, ahead, focus],
+                    inp.aspect,
+                    LEAD_MARGIN,
+                )
+                .clamp(BROADCAST_FOV, MAX_LEAD_FOV);
+                ShotSpec {
+                    follow: BALL_FOLLOW_RATE,
+                    ..ShotSpec::new(eye, target, fov)
+                }
+            }
+            (Shot::GroundBall, Some(ball)) => {
+                let first = field.base_positions.first().copied().unwrap_or(Vec3::ZERO);
+                let (eye, target, fov) = ground_ball_cam(ball.pos, inp.fielder, first, inp.aspect);
+                ShotSpec::new(eye, target, fov)
             }
             (Shot::BallFollow, Some(ball)) => {
                 let (eye, target) = home_run_follow(field, ball.pos);
                 ShotSpec::new(eye, target, BROADCAST_FOV)
             }
-            (Shot::BallFollow, None) | (Shot::FielderCam(_), None) => wide(),
+            (Shot::BallFollow | Shot::FielderCam(_) | Shot::GroundBall, None) => wide(),
             (Shot::FielderCam(_), Some(ball)) => {
                 let (eye, target) = fielder_cam(inp.fielder.unwrap_or(ball.pos), ball.pos);
                 ShotSpec::new(eye, target, PLAY_CAM_FOV)
@@ -292,8 +321,11 @@ impl Shot {
 /// A live, uncalled play: where the ball is coming down. The eye stations
 /// itself between home and the predicted landing spot, a medium shot of the
 /// drop zone, so the chasing fielder and the play about to happen are
-/// framed, not just the ball.
-pub(super) fn landing_zone_cam(ball: BallState, wind: Vec3) -> (Vec3, Vec3) {
+/// framed, not just the ball. Returns the eye, the look-at and the
+/// drop zone's focus (1 m over the predicted landing spot); the ball-follow then opens the lens until both
+/// the ball and the landing spot sit in the middle of the frame, wider as
+/// the ball climbs and tighter as it drops.
+pub(super) fn landing_zone_cam(ball: BallState, wind: Vec3) -> (Vec3, Vec3, Vec3) {
     // Re-predict from the live ball; as the ball settles this converges to
     // the ball itself, so the shot lands with the play.
     let (landing, _) = rules::predict_landing_from(
@@ -305,18 +337,104 @@ pub(super) fn landing_zone_cam(ball: BallState, wind: Vec3) -> (Vec3, Vec3) {
         wind,
     );
     let focus = Vec3::new(landing.x, 1.0, landing.z);
-    // Keep the ball's flight in frame: a high fly pulls the look-at up
-    // toward it, a grounder barely moves it off the landing spot.
-    let target = focus.lerp(ball.pos, 0.5);
     let flat = Vec2::new(focus.x, focus.z);
     let depth = flat.length();
-    // Not too close: back off along the home→landing line, higher and
-    // further for deeper plays.
-    let back = (depth * 0.45).clamp(12.0, 30.0);
-    let height = (depth * 0.30).clamp(8.0, 18.0);
-    let toward_home = -flat.normalize_or_zero();
-    let eye = focus + Vec3::new(toward_home.x * back, height, toward_home.y * back);
-    (eye, target)
+    let line = flat.normalize_or(Vec2::Y);
+    // Not too close: the eye parks back along the home→landing line from
+    // the drop zone, higher and further for deeper plays, and for a ball
+    // climbing high (a pop-up would otherwise go straight over the lens).
+    // While the ball is still short of that spot the eye trails behind it
+    // instead, so the ball is always ahead of the lens.
+    let lift = ball.pos.y.max(0.0);
+    let back = (depth * 0.45)
+        .clamp(12.0, 30.0)
+        .max((lift * 1.6).min(MAX_BACK));
+    let height = (depth * 0.30).clamp(8.0, 18.0).max(lift * 0.4);
+    let ball_along = Vec2::new(ball.pos.x, ball.pos.z).dot(line);
+    let along = (depth - back).min(ball_along - TRAIL_BACK);
+    let eye = Vec3::new(line.x * along, height, line.y * along);
+    // Look down the bisector of the ball and the drop zone as the eye sees
+    // them, so a lens fitted to both opens the least: a high fly lifts the
+    // look-at toward the ball, a grounder barely moves it off the spot.
+    let to = |p: Vec3| (p - eye).normalize_or(Vec3::Z);
+    let axis = (to(ball.pos) + to(focus)).normalize_or(to(focus));
+    let target = eye + axis * (focus - eye).length().max(1.0);
+    (eye, target, focus)
+}
+
+/// How far behind the ball (m, along the home→landing line) the
+/// ball-follow's eye trails while the ball is still short of where the eye
+/// parks.
+const TRAIL_BACK: f32 = 14.0;
+/// How far ahead along its flight (s) the ball-follow leaves room for the
+/// ball, so the following lens never lets it slip toward the edge.
+const LEAD_SECS: f32 = 0.25;
+/// The furthest the ball-follow's eye backs off a high ball (m).
+const MAX_BACK: f32 = 60.0;
+/// The ball-follow tracks faster than the other shots: its eye trails a
+/// ball flying at up to 45 m/s.
+const BALL_FOLLOW_RATE: f32 = 10.0;
+
+/// How far from the frame's centre (in NDC) the lead shots keep their
+/// subjects: the middle 80%.
+pub(super) const LEAD_MARGIN: f32 = 0.8;
+/// The widest the lens opens to keep a climbing ball and its landing spot
+/// both in frame.
+pub(super) const MAX_LEAD_FOV: f32 = 80.0_f32.to_radians();
+/// The ground-ball shot: eye height and distance behind home, and its
+/// narrowest lens.
+const GROUND_CAM_HEIGHT: f32 = 11.0;
+const GROUND_CAM_BACK: f32 = 9.0;
+const GROUND_CAM_MIN_FOV: f32 = 40.0_f32.to_radians();
+/// A ball counts as hit on the ground when it is this low and would be
+/// down again within [`GROUNDER_HANG`] seconds.
+const GROUNDER_HEIGHT: f32 = 1.5;
+const GROUNDER_HANG: f32 = 0.6;
+
+/// True for a ball on (or skimming) the ground: low, and coming down at
+/// once. The rig latches it for the play, so a hop doesn't flip the shot.
+pub(super) fn is_grounder(ball: BallState, wind: Vec3) -> bool {
+    if ball.pos.y > GROUNDER_HEIGHT {
+        return false;
+    }
+    let (_, hang) = rules::predict_landing_from(
+        ball.pos,
+        ball.vel,
+        ball.spin,
+        BALL_DRAG_FACTOR,
+        MAGNUS_FACTOR,
+        wind,
+    );
+    hang < GROUNDER_HANG
+}
+
+/// The ground-ball shot: high behind home, looking at the middle of the
+/// ball, the fielder going for it and first base, the lens opened just
+/// enough to keep all three in the middle of the frame.
+pub(super) fn ground_ball_cam(
+    ball: Vec3,
+    fielder: Option<Vec3>,
+    first: Vec3,
+    aspect: f32,
+) -> (Vec3, Vec3, f32) {
+    let ball = ball.with_y(ball.y.max(0.3));
+    let mut subjects = vec![ball, first + Vec3::Y * 0.5];
+    subjects.extend(fielder.map(|f| f + Vec3::Y));
+    let centre = subjects.iter().copied().sum::<Vec3>() / subjects.len() as f32;
+    // Behind home on the line through the play's centre, so the infield
+    // opens out in front of the lens.
+    let flat = Vec2::new(centre.x, centre.z);
+    let away = -flat.normalize_or(Vec2::Y);
+    let eye = Vec3::new(
+        away.x * GROUND_CAM_BACK,
+        GROUND_CAM_HEIGHT,
+        away.y * GROUND_CAM_BACK,
+    );
+    // Lean the look-at toward the ball, the subject that must never leave.
+    let target = centre.lerp(ball, 0.35);
+    let fov = fit_vfov(eye, target, &subjects, aspect, LEAD_MARGIN)
+        .clamp(GROUND_CAM_MIN_FOV, MAX_LEAD_FOV);
+    (eye, target, fov)
 }
 
 /// Home-run flights: sweep with the ball. The eye slides laterally and
