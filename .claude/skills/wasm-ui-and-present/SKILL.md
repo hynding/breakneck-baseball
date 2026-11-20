@@ -65,7 +65,7 @@ throw, where the call lands; a grounder takes the ground-ball shot instead and s
 A throw in from the outfield (released beyond three quarters of the foul-line fence distance, 75 m in the stadium) first takes the
 runner cam (`Shot::RunnerCam`): standing off the race of the runner it chases, on the side away
 from the ball, so the throw comes into frame from beyond him; it hands over to the base cam once
-the ball is within 30% of the throw from the bag, and never returns after the base cam is up
+the ball is 0.6 s from the bag (a deep throw flies 1.2 s, so the two shots share it), and never returns after the base cam is up
 (`shots::runner_cam_wanted`; e2e `runner_cam.rs` checks a double and a triple). There is no
 cutoff-relay shot: the fielding sim has no outfield cutoff man, only the double-play pivot.
 The grounder call is made once, just after the plate hold, by `shots::PlayRead` (low and coming

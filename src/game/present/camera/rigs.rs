@@ -308,6 +308,7 @@ pub(super) fn broadcast_camera(
                 from,
                 bag_at(base),
                 b.pos,
+                b.vel,
                 field.fence_line,
                 matches!(rig.shot, Some(Shot::BaseCam(_))),
             )
@@ -321,32 +322,42 @@ pub(super) fn broadcast_camera(
         let base = rig.thrown_base.expect("long_throw needs a throw");
         let thrown_bag = bag_at(base);
         let flat = |v: Vec3| v.with_y(0.0);
-        // Once picked, the subject stays for the throw (a runner on a
-        // triple races on past the bag the throw went to).
-        let kept = rig.runner_subject.filter(|(e, _)| rigs.get(*e).is_ok());
-        let subject = kept.or_else(|| {
-            // Every rig still running a base path — runners aboard, the
-            // batter, a runner scoring or about to be cut down: the one
-            // bound for the thrown-to bag first, else the one nearest it
-            // (on a double the throw can go in behind the batter, to first).
-            paths
-                .iter()
-                .filter_map(|(e, path)| {
-                    let at = rigs.get(e).ok()?.translation;
-                    let dest = path.destination()?;
-                    let bound_elsewhere = flat(dest).distance(flat(thrown_bag)) > RUNNER_ARRIVED;
-                    Some((e, dest, bound_elsewhere, at.distance(thrown_bag)))
-                })
-                .min_by(|a, b| a.2.cmp(&b.2).then(a.3.total_cmp(&b.3)))
-                .map(|(e, dest, _, _)| (e, dest))
-        });
-        rig.runner_subject = subject;
+        // Picked once per throw, then kept (a runner on a triple races on
+        // past the bag the throw went to). A subject that is gone — a
+        // runner scoring despawns at the plate — ends the runner cam
+        // rather than cutting to someone else.
+        let subject = match rig.runner_subject {
+            Some((e, dest)) => rigs.get(e).is_ok().then_some((e, dest)),
+            None if rig.runner_shown => None,
+            None => {
+                // Every rig still running a base path — runners aboard,
+                // the batter, a runner scoring or about to be cut down:
+                // the one bound for the thrown-to bag first, else the one
+                // nearest it (on a double the throw can go in behind the
+                // batter, to first).
+                paths
+                    .iter()
+                    .filter_map(|(e, path)| {
+                        let at = rigs.get(e).ok()?.translation;
+                        let dest = path.destination()?;
+                        let bound_elsewhere =
+                            flat(dest).distance(flat(thrown_bag)) > RUNNER_ARRIVED;
+                        Some((e, dest, bound_elsewhere, at.distance(thrown_bag)))
+                    })
+                    .min_by(|a, b| a.2.cmp(&b.2).then(a.3.total_cmp(&b.3)))
+                    .map(|(e, dest, _, _)| (e, dest))
+            }
+        };
+        if subject.is_some() {
+            rig.runner_subject = subject;
+        }
         subject.map(|(e, _)| e)
     } else {
         None
     };
-    // Until the call is decided, or while its runner hasn't surfaced, hold
-    // the current shot rather than cut to the bag and straight back.
+    // Until the call is decided, or while its runner hasn't surfaced, keep
+    // the base cam back (the shot stays on the ball: the chase is over, so
+    // no fielder cam) rather than cut to the bag and straight back.
     let thrown_base = if long_throw && runner_cam.is_none() && !rig.runner_shown {
         None
     } else {
