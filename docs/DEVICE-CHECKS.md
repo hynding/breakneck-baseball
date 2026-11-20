@@ -133,7 +133,9 @@ colours, sized by the tier's crowd allowance, so the draw count barely
 moves. The cost is fill: the stands cover a lot of the screen in the
 wide shots, and software WebGL pays per pixel. High adds the crowd's
 shadows and the cheer on big moments. On a phone at Low, check a home
-run's wide shot still holds frame rate with the stands in view.
+run's wide shot still holds frame rate with the stands in view, and
+score a run to check the scoreboard in right-centre updates (it repaints
+its texture in place, which no headless test sees).
 
 ## What still needs a person with a device
 

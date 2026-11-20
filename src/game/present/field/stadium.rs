@@ -306,8 +306,8 @@ pub(super) fn spawn_front_yard(
     spawn_front_yard_dressing(commands, meshes, materials);
 }
 
-/// Street trees between and behind the houses across the road, one in each back
-/// corner of our lot, and white picket fences on the far lot lines. Every
+/// Street trees between and behind the houses across the road, one in each
+/// back corner of our lot, and white picket fences on the far lot lines. Every
 /// piece shares one mesh and material per kind, so Bevy batches them into a
 /// handful of draws. Visual only, like the rest of the yard.
 fn spawn_front_yard_dressing(
@@ -327,8 +327,8 @@ fn spawn_front_yard_dressing(
     // Between the houses across the street, and our back corners.
     for (x, z, scale) in [
         (-33.0, 40.0, 1.1),
-        (-11.0, 47.0, 1.0),
-        (11.0, 47.0, 0.9),
+        (-11.0, 53.0, 1.0),
+        (11.0, 53.0, 0.9),
         (33.0, 40.0, 1.15),
         (-20.0, -11.0, 1.2),
         (20.0, -11.0, 1.05),
@@ -351,12 +351,13 @@ fn spawn_front_yard_dressing(
         ));
     }
 
-    // Picket fences on the lot lines of the yards across the street, from
-    // the sidewalk back to the houses. One picket every 0.3 m.
+    // Picket fences on the outer lot lines of the yards across the street,
+    // from the sidewalk back to the houses (the inner lines are in play).
+    // One picket every 0.3 m.
     let picket_mesh = meshes.add(Cuboid::new(0.08, 1.0, 0.04));
     let rail_mesh = meshes.add(Cuboid::new(0.04, 0.06, 7.0));
     let white = materials.add(matte(Color::srgb(0.92, 0.92, 0.88)));
-    for x in [-33.0, -11.0, 11.0, 33.0] {
+    for x in [-33.0, 33.0] {
         for y in [0.35, 0.8] {
             commands.spawn((
                 GameplayEntity,
