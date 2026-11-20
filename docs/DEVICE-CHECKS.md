@@ -128,7 +128,11 @@ native.
 3. **Switch tiers mid-game on the phone.** Cycle Low → Medium → High → Auto
    from the pause menu. The UI must never go blank (the wasm/WebGL2 failure
    the single render route exists to avoid), and the view should re-sharpen
-   or soften right away with no black frame that sticks.
+   or soften right away with no black frame that sticks. High turns on HDR
+   and bloom, which need float render targets (`EXT_color_buffer_float`)
+   that some phone WebGL2 drivers lack: on High, the floodlights and
+   fireworks should glow and no frame should go blank. Auto never picks
+   High on the web, so only a hand-picked High is at risk.
 4. **Rotate the phone at each tier.** Portrait to landscape and back. The 3D
    view should refill the screen at the new size, with nothing stretched or
    letterboxed. In portrait, note whether the HUD cards overlap each other

@@ -27,8 +27,10 @@ use crate::game::settings::Settings;
 /// Fog distances (m) on a clear day: nothing on the field fogs (the wall is
 /// ~130 m from the plate); the stands and the light towers soften.
 pub const FOG_CLEAR: (f32, f32) = (170.0, 800.0);
-/// Fog distances in full overcast: the outfield seats start to soften.
-pub const FOG_OVERCAST: (f32, f32) = (110.0, 520.0);
+/// Fog distances in full overcast: the stands past the wall soften. Fog
+/// is measured from the camera, which sits behind the plate, so starting
+/// past the ~130 m wall keeps the outfield itself clear.
+pub const FOG_OVERCAST: (f32, f32) = (140.0, 520.0);
 
 /// Bloom on High: gentler than Bevy's `NATURAL` so the white chalk and the
 /// sunlit uniforms don't haze; emissive balls, fireworks and night lights
@@ -86,7 +88,9 @@ impl CameraLook {
         let lerp = |a: f32, b: f32| a + (b - a) * o;
         let fog = budget.fog.then(|| {
             (
-                horizon_haze(sky),
+                // Fade toward what is behind the far geometry: the skybox's
+                // horizon haze from Medium, the flat sky colour on Low.
+                if budget.sky { horizon_haze(sky) } else { sky },
                 lerp(FOG_CLEAR.0, FOG_OVERCAST.0),
                 lerp(FOG_CLEAR.1, FOG_OVERCAST.1),
             )
@@ -173,6 +177,8 @@ fn apply_camera_look(
             // cd/m², scaled by the camera's exposure: cancel that so the
             // texture shows the sky colour as authored, as the clear colour
             // under it does.
+            // Read once per re-apply: nothing changes a camera's
+            // `Exposure` today; a writer would need to re-run this.
             let exposure = exposure.get(camera).copied().unwrap_or_default();
             e.insert(Skybox {
                 image: sky.0.clone(),

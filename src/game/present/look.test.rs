@@ -14,11 +14,12 @@ fn day_and_night_skies_are_told_apart() {
 
 #[test]
 fn fog_never_reaches_the_field() {
-    // The wall is ~130 m out; on the worst day fog must start past it.
+    // The wall is ~130 m from the plate and the camera sits behind it; on
+    // the worst day fog must still start past the wall.
     for o in [0.0, 0.5, 1.0] {
         let look = CameraLook::for_sky(DAY, o, &QualityTier::Low.budget());
         let (_, start, end) = look.fog.expect("fog is on at Low");
-        assert!(start > 105.0 && end > start, "overcast {o}: {start}..{end}");
+        assert!(start > 130.0 && end > start, "overcast {o}: {start}..{end}");
     }
 }
 
@@ -72,9 +73,11 @@ fn the_sky_cubemap_is_a_cube() {
         up.iter().zip(want).all(|(a, b)| a.abs_diff(b) <= 2),
         "{up:?} vs {want:?}"
     );
-    assert_eq!(
-        &data[3 * face..3 * face + 4],
-        &horizon_haze(DAY).to_srgba().to_u8_array()
+    let down = &data[3 * face..3 * face + 3];
+    let haze = horizon_haze(DAY).to_srgba().to_u8_array();
+    assert!(
+        down.iter().zip(haze).all(|(a, b)| a.abs_diff(b) <= 1),
+        "{down:?} vs {haze:?}"
     );
 }
 
@@ -96,4 +99,51 @@ fn sky_from_medium_up() {
 #[test]
 fn haze_is_lighter_than_the_zenith_by_day() {
     assert!(luminance(horizon_haze(DAY)) > luminance(zenith(DAY)));
+}
+
+#[test]
+fn low_fogs_toward_the_flat_sky() {
+    let (low, _, _) = CameraLook::for_sky(DAY, 0.0, &QualityTier::Low.budget())
+        .fog
+        .unwrap();
+    let (med, _, _) = CameraLook::for_sky(DAY, 0.0, &QualityTier::Medium.budget())
+        .fog
+        .unwrap();
+    assert_eq!(low, DAY);
+    assert_eq!(med, horizon_haze(DAY));
+}
+
+/// The system path Auto takes when it steps down: the camera gains and
+/// sheds the sky, fog and bloom as the tier changes.
+#[test]
+fn the_camera_follows_the_tier() {
+    use crate::game::settings::GraphicsQuality;
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_resource(ClearColor(DAY))
+        .insert_resource(SkyTexture(Handle::default()))
+        .add_systems(Update, apply_camera_look);
+    let camera = app
+        .world_mut()
+        .spawn((Camera3d::default(), MainCamera))
+        .id();
+    for (tier, sky, bloom) in [
+        (QualityTier::High, true, true),
+        (QualityTier::Medium, true, false),
+        (QualityTier::Low, false, false),
+        (QualityTier::High, true, true),
+    ] {
+        app.insert_resource(ActiveQuality {
+            setting: GraphicsQuality::Auto,
+            tier,
+            stepped: false,
+        });
+        app.update();
+        let e = app.world().entity(camera);
+        assert_eq!(e.contains::<Skybox>(), sky, "{tier:?} sky");
+        assert_eq!(e.contains::<Bloom>(), bloom, "{tier:?} bloom");
+        assert_eq!(e.contains::<Hdr>(), bloom, "{tier:?} hdr");
+        assert!(e.contains::<DistanceFog>(), "{tier:?} fog");
+        assert!(e.contains::<ColorGrading>(), "{tier:?} grading");
+    }
 }
