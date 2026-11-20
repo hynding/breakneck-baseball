@@ -2,6 +2,7 @@
 //! moving between shots.
 
 use super::super::DUEL_REFERENCE_ASPECT;
+use super::super::framing::{framed_ndc_x, framed_ndc_y};
 use super::*;
 use crate::game::variant::VariantId;
 
@@ -20,6 +21,7 @@ fn cues(phase: Phase) -> ShotCues {
         runner_cam: None,
         descending_to: None,
         duel_throw_base: None,
+        sequence: None,
     }
 }
 
@@ -480,6 +482,7 @@ fn inputs(field: &FieldSpec) -> ShotInputs<'_> {
         wind: Vec3::ZERO,
         home_run: false,
         trot_secs: 0.0,
+        exit: None,
     }
 }
 
@@ -1066,4 +1069,99 @@ fn fit_vfov_puts_the_widest_point_on_the_margin() {
         fit_vfov(eye, target, &[eye - Vec3::Z], 1.5, 0.8),
         std::f32::consts::PI
     );
+}
+
+/// A big moment's sequence owns the result pause while it runs, ahead of
+/// the trot orbit and the kept shot.
+#[test]
+fn a_sequence_shot_takes_the_result_pause() {
+    let mut c = cues(Phase::Result);
+    c.home_run = true;
+    c.sequence = Some(Shot::CrowdCam);
+    assert_eq!(pick_shot(&c, Some(Shot::BallFollow)), Shot::CrowdCam);
+    c.sequence = None;
+    assert_eq!(pick_shot(&c, Some(Shot::CrowdCam)), Shot::TrotOrbit);
+    // Outside the result pause it is ignored.
+    let mut live = cues(Phase::InPlay);
+    live.since_contact = 1.0;
+    live.sequence = Some(Shot::PileUp);
+    assert_eq!(pick_shot(&live, None), Shot::BallFollow);
+}
+
+fn in_frame(eye: Vec3, target: Vec3, fov: f32, p: Vec3) -> bool {
+    let ahead = (p - eye).dot(target - eye) > 0.0;
+    ahead
+        && framed_ndc_x(eye, target, fov, 16.0 / 9.0, p).abs() < 0.9
+        && framed_ndc_y(eye, target, fov, p).abs() < 0.9
+}
+
+/// The crowd shot stands on the grass inside the fence and looks up into
+/// the seats on the line the ball left by, never at the batter's eye.
+#[test]
+fn the_crowd_shot_looks_up_into_the_seats() {
+    let field = VariantId::Standard.field();
+    let mut inp = inputs(&field);
+    for exit in [
+        Vec3::new(-90.0, 5.0, 80.0),
+        Vec3::new(70.0, 8.0, 95.0),
+        Vec3::new(0.0, 10.0, 130.0),
+    ] {
+        inp.exit = Some(exit);
+        let s = Shot::CrowdCam.spec(&inp);
+        let fence = rules::fence_at(s.target, &field);
+        let flat = |v: Vec3| Vec2::new(v.x, v.z).length();
+        assert!(flat(s.eye) < fence, "eye inside the park: {s:?}");
+        assert!(flat(s.target) > fence, "looking past the fence: {s:?}");
+        assert!(s.target.y > s.eye.y, "looking up at the stands: {s:?}");
+        let angle = s.target.x.atan2(s.target.z).abs();
+        assert!(angle > 10.0_f32.to_radians(), "off the batter's eye");
+        // On the side the ball went out.
+        if exit.x.abs() > 1.0 {
+            assert_eq!(s.target.x.signum(), exit.x.signum());
+        }
+    }
+}
+
+/// The dive cam is low and close, the fielder in frame, wherever he dove.
+#[test]
+fn the_dive_cam_frames_the_fielder_low() {
+    let field = VariantId::Standard.field();
+    let mut inp = inputs(&field);
+    let f = Entity::from_raw_u32(9).unwrap();
+    for fielder in [
+        Vec3::new(-12.0, 0.0, 28.0),
+        Vec3::new(30.0, 0.0, 80.0),
+        Vec3::new(0.0, 0.0, 95.0),
+        Vec3::ZERO,
+    ] {
+        inp.fielder = Some(fielder);
+        let s = Shot::DiveCam(f).spec(&inp);
+        assert!(s.eye.is_finite() && s.target.is_finite());
+        assert!(s.eye.y < 1.0, "low: {s:?}");
+        assert!(s.eye.distance(fielder) < 5.0, "close: {s:?}");
+        for p in [fielder + Vec3::Y * 0.2, fielder + Vec3::Y * 1.0] {
+            assert!(in_frame(s.eye, s.target, s.fov, p), "{p} out of {s:?}");
+        }
+    }
+    inp.fielder = None;
+    assert_eq!(
+        Shot::DiveCam(f).spec(&inp).eye,
+        field.broadcast_eye,
+        "no fielder: the wide shot"
+    );
+}
+
+/// The pile-up frames the plate and the ground around it.
+#[test]
+fn the_pile_up_frames_the_plate() {
+    let field = VariantId::Standard.field();
+    let s = Shot::PileUp.spec(&inputs(&field));
+    for p in [
+        Vec3::ZERO,
+        Vec3::new(0.0, 1.8, 0.0),
+        Vec3::new(1.5, 0.0, -1.0),
+        Vec3::new(-1.5, 1.0, 0.5),
+    ] {
+        assert!(in_frame(s.eye, s.target, s.fov, p), "{p} out of {s:?}");
+    }
 }

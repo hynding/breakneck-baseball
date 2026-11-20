@@ -27,6 +27,7 @@ use crate::game::variant::FieldSpec;
 
 mod framing;
 mod rigs;
+pub mod sequence;
 mod shots;
 
 pub use framing::{

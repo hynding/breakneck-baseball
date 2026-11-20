@@ -17,6 +17,8 @@ use crate::game::runner::BasePath;
 use crate::game::variant::FieldSpec;
 
 use super::framing::{LENS_BRUSH_RADIUS, OCCLUSION_NEAR, OCCLUSION_RADIUS, brushes_lens, occludes};
+use super::sequence::sequence_shot;
+use crate::game::replay::BigMomentCue;
 use super::shots::{
     BallState, FIELDER_CAM_MIN_HEIGHT, PlayRead, RUNNER_CAM_MIN_START_SECS, RigMotion, RunnerFrame,
     Shot, ShotCues, ShotInputs, pick_runner_subject, pick_shot, runner_cam_wanted, throw_secs_left,
@@ -221,6 +223,7 @@ pub(super) fn broadcast_camera(
     wind: Res<rules::Wind>,
     mut live: MessageReader<LiveBallEvent>,
     mut walls: MessageReader<WallBangEvent>,
+    cue: Option<Res<BigMomentCue>>,
     ball_q: BallQuery,
     rigs: Query<&Transform, (Without<Baseball>, Without<Camera3d>)>,
     paths: Query<(Entity, &BasePath)>,
@@ -228,6 +231,7 @@ pub(super) fn broadcast_camera(
     mut trot_start: Local<Option<f32>>,
     mut cam_q: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
 ) {
+    let cue = cue.as_deref().copied().unwrap_or_default();
     // The camera's actual aspect ratio (width / height), read before the
     // framing decision so the duel FOV can correct for it — see
     // `aspect_safe_duel_vfov`. Falls back to the reference aspect (a no-op
@@ -386,6 +390,10 @@ pub(super) fn broadcast_camera(
         runner_cam,
         descending_to,
         duel_throw_base: play.duel_throw().map(|t| t.target),
+        sequence: cue
+            .playing()
+            .filter(|_| play.phase == Phase::Result)
+            .and_then(|m| sequence_shot(m, play.result_elapsed_secs())),
     };
     let shot = pick_shot(&cues, rig.shot);
 
@@ -395,7 +403,7 @@ pub(super) fn broadcast_camera(
         aspect,
         ball: ball_state,
         fielder: match shot {
-            Shot::FielderCam(f) => rigs.get(f).ok().map(|tf| tf.translation),
+            Shot::FielderCam(f) | Shot::DiveCam(f) => rigs.get(f).ok().map(|tf| tf.translation),
             Shot::GroundBall => {
                 let chaser = active
                     .chaser()
@@ -419,6 +427,7 @@ pub(super) fn broadcast_camera(
         wind: wind.0,
         home_run: play.is_home_run(),
         trot_secs: now - start,
+        exit: cue.exit,
     };
     let want = shot.spec(&inputs);
 
