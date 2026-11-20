@@ -396,42 +396,41 @@ const GROUND_CAM_MIN_FOV: f32 = 40.0_f32.to_radians();
 const GROUNDER_HEIGHT: f32 = 1.5;
 const GROUNDER_HANG: f32 = 1.0;
 
-/// A ball under this height whose climb starts again has bounced: only
-/// the ground turns a falling ball around (the ball ignores the player
-/// capsules), and no pitch is put in play this low, so the swing itself
-/// never reads as a bounce.
-const BOUNCE_HEIGHT: f32 = 0.3;
-
 /// What the rig has learned about this play's batted ball, fed once a frame
-/// from contact ([`PlayRead::observe`]) and cleared between plays.
+/// while it is live ([`PlayRead::observe`]) and cleared between plays.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct PlayRead {
-    last_vy: Option<f32>,
-    bounced: bool,
     grounder: Option<bool>,
     landed: bool,
 }
 
 impl PlayRead {
     /// One frame of the live play. `ready` is the first frame after the
-    /// plate hold: the grounder call is made **once**, then — from the ball
-    /// at that frame, or from a bounce already seen during the hold (a hard
-    /// chopper can be up on its first hop by then) — and kept for the whole
-    /// play. Deciding later would read every fly ball as a grounder in its
-    /// last half-metre, and a held ball as one too.
-    pub fn observe(&mut self, ready: bool, ball: Option<BallState>, wind: Vec3) {
-        let Some(b) = ball else {
-            return;
-        };
-        let turned_up = self.last_vy.is_some_and(|vy| vy < 0.0) && b.vel.y > 0.0;
-        if turned_up && b.pos.y < BOUNCE_HEIGHT {
-            self.bounced = true;
+    /// plate hold: the grounder call is made **once**, at that frame, and
+    /// kept for the whole play — a ball that already touched down during
+    /// the hold (`landed_at`, on the contact clock: fielding's first-bounce
+    /// mark) is a grounder, else the ball's state then decides
+    /// ([`is_grounder`]). Deciding later would read every fly ball as a
+    /// grounder in its last half-metre, and a held ball as one too.
+    /// `off_wall` is the ball having banged off the fence.
+    pub fn observe(
+        &mut self,
+        ready: bool,
+        ball: Option<BallState>,
+        landed_at: Option<f32>,
+        off_wall: bool,
+        wind: Vec3,
+    ) {
+        if self.grounder.is_none()
+            && ready
+            && let Some(b) = ball
+        {
+            let down_in_hold = landed_at.is_some_and(|t| t < BALL_FOLLOW_DELAY);
+            self.grounder = Some(down_in_hold || is_grounder(b, wind));
         }
-        self.last_vy = Some(b.vel.y);
-        if self.grounder.is_none() && ready {
-            self.grounder = Some(self.bounced || is_grounder(b, wind));
-        }
-        if self.grounder.is_some() && (self.bounced || b.pos.y < BOUNCE_HEIGHT) {
+        // Only after the call: on the contact frame `landed_at` can still
+        // hold the last play's mark.
+        if self.grounder.is_some() && (landed_at.is_some() || off_wall) {
             self.landed = true;
         }
     }
@@ -441,9 +440,9 @@ impl PlayRead {
         self.grounder
     }
 
-    /// The ball has come down once since the call: a fly that took a high
-    /// hop or came off the wall is not caught on the way down any more, so
-    /// the fielder cam is done for the play.
+    /// The ball has come down (or off the wall) since the call: it is not
+    /// caught on the way down any more, so the fielder cam is done for the
+    /// play.
     pub fn landed(&self) -> bool {
         self.landed
     }

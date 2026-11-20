@@ -197,6 +197,7 @@ pub(super) fn broadcast_camera(
     active: Res<ActivePlay>,
     wind: Res<rules::Wind>,
     mut live: MessageReader<LiveBallEvent>,
+    mut walls: MessageReader<WallBangEvent>,
     ball_q: BallQuery,
     rigs: Query<&Transform, (Without<Baseball>, Without<Camera3d>)>,
     mut rig: ResMut<BroadcastRig>,
@@ -237,9 +238,11 @@ pub(super) fn broadcast_camera(
     }
     // Watch the batted ball from contact; just after the plate hold it is
     // called a grounder or not, and the call holds for the play.
+    let off_wall = walls.read().count() > 0;
     if play.phase == Phase::InPlay {
         let ready = !play.is_home_run() && play.since_contact(now) >= BALL_FOLLOW_DELAY;
-        rig.read.observe(ready, ball_state, wind.0);
+        rig.read
+            .observe(ready, ball_state, active.landed_at(), off_wall, wind.0);
     }
     let grounder = rig.read.grounder() == Some(true);
     let landed = rig.read.landed();
