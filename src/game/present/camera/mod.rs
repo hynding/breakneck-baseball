@@ -205,6 +205,10 @@ impl Plugin for CameraPlugin {
             .add_systems(
                 Update,
                 broadcast_camera
+                    // After the runners: on the frame a call is decided they
+                    // are re-pathed, and the runner cam picks its subject
+                    // from those paths.
+                    .after(crate::game::GameplayOrder::Runners)
                     .run_if(in_state(GameState::Playing))
                     .run_if(is_broadcast),
             )

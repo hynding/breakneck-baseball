@@ -13,13 +13,13 @@ use crate::game::fielding::ActivePlay;
 use crate::game::flow::{LiveBallEvent, Phase, Play, ResultBeat};
 use crate::game::player::{CatcherRole, PlateUmpire};
 use crate::game::rules;
-use crate::game::runner::{BatterGhost, Runner};
+use crate::game::runner::BasePath;
 use crate::game::variant::FieldSpec;
 
 use super::framing::{LENS_BRUSH_RADIUS, OCCLUSION_NEAR, OCCLUSION_RADIUS, brushes_lens, occludes};
 use super::shots::{
-    BallState, FIELDER_CAM_MIN_HEIGHT, PlayRead, RigMotion, Shot, ShotCues, ShotInputs, pick_shot,
-    runner_cam_wanted,
+    BallState, FIELDER_CAM_MIN_HEIGHT, PlayRead, RigMotion, RunnerFrame, Shot, ShotCues,
+    ShotInputs, pick_shot, runner_cam_wanted,
 };
 use super::{
     BALL_FOLLOW_DELAY, BROADCAST_EYE, BROADCAST_FOV, BROADCAST_HOME_TARGET, CameraMode,
@@ -134,9 +134,10 @@ pub struct BroadcastRig {
     thrown_base: Option<usize>,
     /// Where that throw left the fielder's hand.
     throw_from: Option<Vec3>,
-    /// The runner the runner cam settled on for this throw, kept so the
-    /// shot never hops between runners.
-    runner_subject: Option<Entity>,
+    /// The runner the runner cam settled on for this throw and the bag he
+    /// is bound for, kept so the shot never hops between runners (and
+    /// still frames him once his run ends).
+    runner_subject: Option<(Entity, Vec3)>,
     /// The runner cam has been on screen for this throw: once it has, the
     /// play never waits on a runner again (it goes to the bag).
     runner_shown: bool,
@@ -181,7 +182,8 @@ impl BroadcastRig {
 #[derive(Resource, Default)]
 pub(super) struct CameraKick(Vec3);
 
-/// A runner this close to his bag (m, flat) is in, not racing a throw.
+/// A base path ending this close to the thrown-to bag (m, flat) is bound
+/// for it.
 const RUNNER_ARRIVED: f32 = 1.0;
 
 /// The live ball as the broadcast camera reads it.
@@ -221,8 +223,7 @@ pub(super) fn broadcast_camera(
     mut walls: MessageReader<WallBangEvent>,
     ball_q: BallQuery,
     rigs: Query<&Transform, (Without<Baseball>, Without<Camera3d>)>,
-    runners: Query<(Entity, &Runner)>,
-    ghosts: Query<Entity, With<BatterGhost>>,
+    paths: Query<(Entity, &BasePath)>,
     mut rig: ResMut<BroadcastRig>,
     mut trot_start: Local<Option<f32>>,
     mut cam_q: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
@@ -313,47 +314,39 @@ pub(super) fn broadcast_camera(
         }
         _ => false,
     };
-    // A rig racing for a bag: a runner's own bag, or first for the batter
-    // still out of the box as the run-out ghost.
-    let runner_bag = |e: Entity| -> Option<(Vec3, usize)> {
-        if let Ok((_, r)) = runners.get(e) {
-            Some((bag_at(r.base), r.base))
-        } else {
-            ghosts.get(e).ok().map(|_| (bag_at(0), 0))
-        }
-    };
-    let runner_cam = if long_throw {
+    // Pick the subject only once the call is decided: that is when the
+    // runners are re-pathed for it (this system runs after them), so a
+    // runner aboard no longer reads his old bag.
+    let runner_cam = if long_throw && play.pending_call().is_some() {
         let base = rig.thrown_base.expect("long_throw needs a throw");
         let thrown_bag = bag_at(base);
+        let flat = |v: Vec3| v.with_y(0.0);
         // Once picked, the subject stays for the throw (a runner on a
         // triple races on past the bag the throw went to).
-        let kept = rig.runner_subject.filter(|e| runner_bag(*e).is_some());
+        let kept = rig.runner_subject.filter(|(e, _)| rigs.get(*e).is_ok());
         let subject = kept.or_else(|| {
-            // Still running for a bag: the one bound for the thrown-to bag
-            // first, else the one nearest it (on a double the throw can go
-            // in behind the batter, to first).
-            runners
+            // Every rig still running a base path — runners aboard, the
+            // batter, a runner scoring or about to be cut down: the one
+            // bound for the thrown-to bag first, else the one nearest it
+            // (on a double the throw can go in behind the batter, to first).
+            paths
                 .iter()
-                .map(|(e, _)| e)
-                .chain(ghosts.iter())
-                .filter_map(|e| {
+                .filter_map(|(e, path)| {
                     let at = rigs.get(e).ok()?.translation;
-                    let (bag, bound_base) = runner_bag(e)?;
-                    let flat = |v: Vec3| v.with_y(0.0);
-                    (flat(at).distance(flat(bag)) > RUNNER_ARRIVED)
-                        .then(|| (e, bound_base != base, at.distance(thrown_bag)))
+                    let dest = path.destination()?;
+                    let bound_elsewhere = flat(dest).distance(flat(thrown_bag)) > RUNNER_ARRIVED;
+                    Some((e, dest, bound_elsewhere, at.distance(thrown_bag)))
                 })
-                .min_by(|a, b| a.1.cmp(&b.1).then(a.2.total_cmp(&b.2)))
-                .map(|(e, _, _)| e)
+                .min_by(|a, b| a.2.cmp(&b.2).then(a.3.total_cmp(&b.3)))
+                .map(|(e, dest, _, _)| (e, dest))
         });
         rig.runner_subject = subject;
-        subject
+        subject.map(|(e, _)| e)
     } else {
         None
     };
-    // The runner bound for the bag can surface a frame after the throw
-    // (the batter becomes a runner once the call is pending): hold the
-    // current shot rather than cut to the bag and straight back.
+    // Until the call is decided, or while its runner hasn't surfaced, hold
+    // the current shot rather than cut to the bag and straight back.
     let thrown_base = if long_throw && runner_cam.is_none() && !rig.runner_shown {
         None
     } else {
@@ -393,12 +386,14 @@ pub(super) fn broadcast_camera(
             }
             _ => None,
         },
-        runner: match shot {
-            Shot::RunnerCam(r) => rigs
-                .get(r)
-                .ok()
-                .zip(runner_bag(r))
-                .map(|(tf, (bag, _))| (tf.translation, bag)),
+        runner: match (shot, rig.runner_subject, rig.thrown_base) {
+            (Shot::RunnerCam(r), Some((_, dest)), Some(base)) => {
+                rigs.get(r).ok().map(|tf| RunnerFrame {
+                    runner: tf.translation,
+                    bound_for: dest,
+                    call_bag: bag_at(base),
+                })
+            }
             _ => None,
         },
         wind: wind.0,
@@ -420,20 +415,12 @@ pub(super) fn broadcast_camera(
     if matches!(shot, Shot::RunnerCam(_)) {
         rig.runner_shown = true;
     }
-    // The runner cam's subject handing over (the batter's ghost becomes a
-    // fresh runner rig mid-race) keeps the shot moving, never a cut.
-    let same_shot = rig.shot == Some(shot)
-        || matches!(
-            (rig.shot, shot),
-            (Some(Shot::RunnerCam(_)), Shot::RunnerCam(_))
-        );
-    if !same_shot {
+    if rig.shot != Some(shot) {
         // A new subject: the shot says how to get there (a cut, today).
         let kind = shot.transition_from(rig.shot);
         rig.shot = Some(shot);
         rig.motion.start(kind, want, time.delta_secs());
     } else {
-        rig.shot = Some(shot);
         rig.motion.step(want, time.delta_secs());
     }
 

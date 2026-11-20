@@ -151,6 +151,20 @@ fn extra_base_hits_cut_ball_runner_then_bag() {
         }
         let outcome = app.world().resource::<Play>().last_outcome();
         let good = follows_runner_then_bag(&log);
+        // On every play: the runner cam never comes back once the base cam
+        // is up, and when it showed, the call lands on a base cam.
+        if let Some(bag) = log.iter().position(|s| matches!(s, Shot::BaseCam(_))) {
+            assert!(
+                !log[bag..].iter().any(|s| matches!(s, Shot::RunnerCam(_))),
+                "runner cam after the base cam: {outcome:?} {log:?}"
+            );
+        }
+        if log.iter().any(|s| matches!(s, Shot::RunnerCam(_))) {
+            assert!(
+                matches!(log.last(), Some(Shot::BaseCam(_))),
+                "the call must land on the base cam: {outcome:?} {log:?}"
+            );
+        }
         match hit_bases(outcome) {
             Some(2) if good => double = true,
             Some(3) if good => triple = true,

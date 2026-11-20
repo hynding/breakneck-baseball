@@ -43,10 +43,21 @@ pub struct Runner {
 }
 
 /// Waypoints the rig visits in order (fed one at a time into `MoveIntent`).
+/// Removed when the rig reaches the last one, so a rig carrying one is
+/// still running; the broadcast camera reads it ([`BasePath::destination`])
+/// to find the runner racing a throw.
 #[derive(Component)]
-struct BasePath {
+pub(crate) struct BasePath {
     waypoints: Vec<Vec3>,
     next: usize,
+}
+
+impl BasePath {
+    /// Where this run ends: the bag it is bound for (home for a runner
+    /// scoring), read-only for presentation.
+    pub(crate) fn destination(&self) -> Option<Vec3> {
+        self.waypoints.last().copied()
+    }
 }
 
 /// Despawn the rig when its path is exhausted (scored / cleared / ghost run).

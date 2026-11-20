@@ -254,8 +254,8 @@ pub(super) struct ShotInputs<'a> {
     /// The fielder the shot is about (the fielder cam's subject, the
     /// grounder's chaser), where it stands.
     pub fielder: Option<Vec3>,
-    /// The runner cam's subject: where he is and the bag he is running to.
-    pub runner: Option<(Vec3, Vec3)>,
+    /// The runner cam's subject.
+    pub runner: Option<RunnerFrame>,
     pub wind: Vec3,
     pub home_run: bool,
     /// Seconds since the trot orbit began.
@@ -306,9 +306,13 @@ impl Shot {
                 ShotSpec::new(eye, target, PLAY_CAM_FOV)
             }
             (Shot::RunnerCam(_), Some(ball)) => match inp.runner {
-                Some((runner, bag)) => {
-                    let (eye, target, fov) = runner_cam(runner, bag, ball.pos, inp.aspect);
-                    ShotSpec::new(eye, target, fov)
+                Some(r) => {
+                    let (eye, target, fov) = runner_cam(r, ball.pos, inp.aspect);
+                    // Quick to follow: the throw is in frame at up to 40 m/s.
+                    ShotSpec {
+                        follow: BALL_FOLLOW_RATE,
+                        ..ShotSpec::new(eye, target, fov)
+                    }
                 }
                 None => wide(),
             },
@@ -405,15 +409,18 @@ const BALL_FOLLOW_RATE: f32 = 10.0;
 const RUNNER_CAM_BACK: f32 = 9.0;
 const RUNNER_CAM_HEIGHT: f32 = 4.0;
 const RUNNER_CAM_MIN_FOV: f32 = 40.0_f32.to_radians();
-/// A throw is in from the outfield (worth the runner cam) when it leaves
-/// the fielder's hand this far from home, as a fraction of the park's
-/// foul-line fence distance: 50 m in the stadium, beyond the deepest
-/// infielder, so a grounder's throw across the diamond never takes it.
-pub(super) const OUTFIELD_FRACTION: f32 = 0.5;
+/// A throw is in from deep (worth the runner cam) when it leaves the
+/// fielder's hand this far from home, as a fraction of the park's
+/// foul-line fence distance: 75 m in the stadium, well past the middle
+/// infielders' 45 m depth — a ball run down in the gap or the corner, not
+/// a single gathered in shallow — and 28.5 m on the front lawn, so only
+/// the across-the-street fielder (34 m) takes it, never the sidewalks
+/// (23 m).
+pub(super) const OUTFIELD_FRACTION: f32 = 0.75;
 /// The runner cam hands over to the base cam once the throw is this close
 /// to the bag, as a fraction of the throw's length: the last stretch and
 /// the call belong to the bag.
-pub(super) const RUNNER_CAM_HANDOFF: f32 = 0.4;
+pub(super) const RUNNER_CAM_HANDOFF: f32 = 0.3;
 
 /// Whether the rig should be on the runner cam: a throw in from the
 /// outfield ([`OUTFIELD_FRACTION`]) from `throw_from` to `bag` whose ball
@@ -434,15 +441,18 @@ pub(super) fn runner_cam_wanted(
         && flat(ball).distance(flat(bag)) > length * RUNNER_CAM_HANDOFF
 }
 
-/// The runner cam: behind and above the runner on his line to the bag,
-/// swung round to the side away from the throw so the ball comes in from
-/// beyond the runner and the bag (a throw from behind him — right field on
-/// a run to third — would otherwise come from behind the lens), the lens
-/// fitted to the runner, the bag and the ball.
-pub(super) fn runner_cam(runner: Vec3, bag: Vec3, ball: Vec3, aspect: f32) -> (Vec3, Vec3, f32) {
+/// The runner cam: standing off the runner's race to the bag he is bound
+/// for, swung round to the side away from the throw so the ball comes in
+/// from beyond the runner (a throw from behind him — right field on a run to
+/// third — would otherwise come from behind the lens), the lens fitted to
+/// the runner, his bag, the bag the call lands on and the ball.
+pub(super) fn runner_cam(r: RunnerFrame, ball: Vec3, aspect: f32) -> (Vec3, Vec3, f32) {
     let flat = |v: Vec3| Vec3::new(v.x, 0.0, v.z);
+    let (runner, bag) = (r.runner, r.bound_for);
     let run = flat(bag - runner).normalize_or(flat(bag).normalize_or(Vec3::Z));
-    let centre = (runner + bag) / 2.0;
+    // The ground the shot must hold: the race and the bag the call lands on.
+    let ground = [runner, bag, r.call_bag];
+    let centre = ground.iter().copied().sum::<Vec3>() / 3.0;
     let from_ball = flat(centre - ball).normalize_or(-run);
     // Outward from the diamond, for a ball straight behind the runner
     // (the two directions cancel).
@@ -455,11 +465,20 @@ pub(super) fn runner_cam(runner: Vec3, bag: Vec3, ball: Vec3, aspect: f32) -> (V
     // Mostly straight away from the ball (so it comes in from beyond the
     // race), drawn a little behind the runner.
     let back = (from_ball * 2.0 - run).normalize_or(outward);
-    let reach = RUNNER_CAM_BACK + flat(bag - runner).length() / 2.0;
+    let spread = ground
+        .iter()
+        .map(|p| flat(*p - centre).length())
+        .fold(0.0, f32::max);
+    let reach = RUNNER_CAM_BACK + spread;
     let eye = centre.with_y(0.0) + back * reach + Vec3::Y * RUNNER_CAM_HEIGHT;
-    let subjects = [runner + Vec3::Y, bag + Vec3::Y * 0.5, ball];
+    let subjects = [
+        runner + Vec3::Y,
+        bag + Vec3::Y * 0.5,
+        r.call_bag + Vec3::Y * 0.5,
+        ball,
+    ];
     // Look between the runner's race and the ball, leaning to the race.
-    let target = (subjects[0] + subjects[1]).lerp(ball * 2.0, 0.25) / 2.0;
+    let target = (centre + Vec3::Y * 0.75).lerp(ball, 0.25);
     let fov = fit_vfov(eye, target, &subjects, aspect, LEAD_MARGIN)
         .clamp(RUNNER_CAM_MIN_FOV, MAX_LEAD_FOV);
     (eye, target, fov)
@@ -480,6 +499,16 @@ const GROUND_CAM_MIN_FOV: f32 = 40.0_f32.to_radians();
 /// down again within [`GROUNDER_HANG`] seconds.
 const GROUNDER_HEIGHT: f32 = 1.5;
 const GROUNDER_HANG: f32 = 1.0;
+
+/// The runner cam's subject: where the runner is, the bag he is bound for,
+/// and the bag the throw is going to (the call lands there; it can differ,
+/// e.g. a throw in behind the batter on a double).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct RunnerFrame {
+    pub runner: Vec3,
+    pub bound_for: Vec3,
+    pub call_bag: Vec3,
+}
 
 /// What the rig has learned about this play's batted ball, fed once a frame
 /// while it is live ([`PlayRead::observe`]) and cleared between plays.

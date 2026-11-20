@@ -62,10 +62,10 @@ the active broadcast view. After contact the broadcast camera holds the plate fr
 `camera::BALL_FOLLOW_DELAY` (0.25 s), then **cuts** through a one-subject shot list (`camera::Shot`:
 ball-follow → fielder cam on a descending fly (until the ball first comes down or hits the wall) → base cam on the
 throw, where the call lands; a grounder takes the ground-ball shot instead and skips the fielder cam.
-A throw in from the outfield (released beyond half the foul-line fence distance) first takes the
+A throw in from the outfield (released beyond three quarters of the foul-line fence distance, 75 m in the stadium) first takes the
 runner cam (`Shot::RunnerCam`): standing off the race of the runner it chases, on the side away
 from the ball, so the throw comes into frame from beyond him; it hands over to the base cam once
-the ball is within 40% of the throw from the bag, and never returns after the base cam is up
+the ball is within 30% of the throw from the bag, and never returns after the base cam is up
 (`shots::runner_cam_wanted`; e2e `runner_cam.rs` checks a double and a triple). There is no
 cutoff-relay shot: the fielding sim has no outfield cutoff man, only the double-play pivot.
 The grounder call is made once, just after the plate hold, by `shots::PlayRead` (low and coming
