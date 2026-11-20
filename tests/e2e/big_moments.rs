@@ -19,7 +19,7 @@ use breakneck_baseball::game::flow::{Phase, Play, bat_arrival_z};
 use breakneck_baseball::game::input::Intents;
 use breakneck_baseball::game::player::Fielder;
 use breakneck_baseball::game::replay::{BigMomentCue, Replay, SKIP_GRACE};
-use breakneck_baseball::game::runner::Runner;
+use breakneck_baseball::game::runner::{Runner, RunnersSettled};
 use breakneck_baseball::game::scenario::{self, Scenario};
 use breakneck_baseball::game::variant::Ruleset;
 use breakneck_baseball::game::{GameState, ScoreBoard, Team};
@@ -243,10 +243,14 @@ fn a_walk_off_holds_the_pile_up() {
     );
     let mut replay_at = None;
     let mut high_five = false;
-    while phase(&app) == Phase::Result
+    // Runs until the pause ends (or the game does), and at least until the
+    // runners have settled, so the batter-runner has stopped at first.
+    while (phase(&app) == Phase::Result
         && *app.world().resource::<State<GameState>>().get() == GameState::Playing
-        && seen.len() < 10
+        && seen.len() < 10)
+        || (!high_five && !app.world().resource::<RunnersSettled>().0 && frames < MAX_FRAMES)
     {
+        frames += 1;
         if playing(&app) {
             let now = app.world().resource::<Time>().elapsed_secs();
             replay_at.get_or_insert(app.world().resource::<BigMomentCue>().since_call(now));

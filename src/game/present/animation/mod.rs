@@ -141,7 +141,7 @@ impl AnimClip {
             AnimClip::FidgetBatTap => 0.8,
             AnimClip::FidgetHalfSwing => 0.9,
             AnimClip::CelebrateBatFlip => 0.85,
-            AnimClip::FistPump => 1.0,
+            AnimClip::FistPump => 0.85,
             AnimClip::CapTip => 1.1,
             AnimClip::DejectedWalk => 1.0,
             AnimClip::HighFive => 1.0,

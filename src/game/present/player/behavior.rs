@@ -334,13 +334,14 @@ pub(super) fn trigger_swing(
 
 /// A homer chains a celebration after the swing follow-through
 /// (`Playing.next`): the batter's authored one, else the stock `FistPump`,
-/// so it rides the same rig the camera is holding on. The trot rig takes over at `RunDelay` expiry
-/// (`TROT_DELAY` 0.9 s) — the flip's 0.85 s mostly fits; the handoff
-/// truncating the last frames on slow swings is an accepted arcade trade
-/// (the HR orbit camera is already moving by then). The `next.is_none()`
-/// guard keeps re-entrancy safe if the event ever double-fires, and never
-/// touches a batter without `Playing::clip == BatterSwing` — no in-flight
-/// swing, no flip.
+/// so it rides the same rig the camera is holding on. The trot rig takes
+/// over at `RunDelay` expiry (`TROT_DELAY` 0.9 s); both stock celebrations
+/// are 0.85 s, so they mostly fit, and the handoff truncating the last
+/// frames on slow swings is an accepted arcade trade (the HR orbit camera is
+/// already moving by then). The `next.is_none()` guard keeps re-entrancy
+/// safe if the event ever double-fires, and nothing is chained onto a batter
+/// without `Playing::clip == BatterSwing` — no in-flight swing, no
+/// celebration.
 pub(super) fn celebrate_home_run(
     mut events: MessageReader<BallInPlayEvent>,
     rosters: Res<Rosters>,
@@ -376,7 +377,7 @@ pub(super) fn result_reactions(
     play: Res<Play>,
     mut prev_phase: Local<Option<Phase>>,
     mut celebrated: Local<Vec<Entity>>,
-    pitchers: Query<Entity, With<Pitcher>>,
+    pitchers: Query<(Entity, &MoveIntent), With<Pitcher>>,
     batters: Query<(Entity, &MoveIntent, Option<&Playing>), With<Batter>>,
     runners: Query<
         (Entity, &MoveIntent, Option<&Playing>),
@@ -393,10 +394,14 @@ pub(super) fn result_reactions(
     }
     let strikeout = play.result_beat() == Some(ResultBeat::Strikeout);
     if entered && strikeout {
-        for pitcher in &pitchers {
-            commands
-                .entity(pitcher)
-                .insert(Playing::new(AnimClip::CapTip));
+        // Not while he is moving: a playing clip keeps `locomote` from
+        // starting his run, so he would glide.
+        for (pitcher, intent) in &pitchers {
+            if intent.target.is_none() {
+                commands
+                    .entity(pitcher)
+                    .insert(Playing::new(AnimClip::CapTip));
+            }
         }
     }
     if strikeout {

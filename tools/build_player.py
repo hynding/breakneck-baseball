@@ -401,7 +401,7 @@ CLIPS = {
     # rig in bpy: Head/Spine +rx tips forward, LowerArm -rx flexes the elbow.
     # Fist pump with the LEFT (glove) arm, so a batter's bat stays in his
     # right hand: the arm drives up twice, then drops back toward Idle.
-    "FistPump": (1.0, False, {
+    "FistPump": (0.85, False, {
         "UpperArm.L": {"rx": [(0, 0), (0.2, -2.6), (0.35, -1.9), (0.5, -2.6), (0.65, -1.9), (0.85, -1.6), (1, -0.4)],
                         "rz": [(0, 0), (0.2, 0.25), (0.85, 0.25), (1, -0.05)]},
         "LowerArm.L": {"rx": [(0, 0), (0.2, -1.1), (0.85, -1.1), (1, -0.2)]},

@@ -10,7 +10,7 @@ use bevy_rapier3d::prelude::Velocity;
 
 use breakneck_baseball::game::GameState;
 use breakneck_baseball::game::ScoreBoard;
-use breakneck_baseball::game::animation::{AnimClip, Playing};
+use breakneck_baseball::game::animation::{AnimClip, Playing, is_stance};
 use breakneck_baseball::game::ball::Baseball;
 use breakneck_baseball::game::flow::{Phase, Play, ResultBeat, bat_arrival_z};
 use breakneck_baseball::game::input::Intents;
@@ -98,8 +98,8 @@ fn strike_three_gets_a_cap_tip_and_a_dejected_walk_off() {
     assert!(next_duel.is_some(), "the next pitch never came");
     let clip = clip_of::<Batter>(&mut app);
     assert!(
-        clip != Some(AnimClip::DejectedWalk),
-        "the dejected walk outlived the strikeout: {clip:?}"
+        clip.is_some_and(is_stance),
+        "the batter must be back in his stance, not {clip:?}"
     );
 }
 
@@ -120,7 +120,6 @@ fn only_fielders_wear_the_mitt() {
         roots > 0 && done == roots
     });
     assert!(wired.is_some(), "rigs never wired");
-    app.update(); // the wiring's visibility inserts land
 
     let glove = app
         .world()

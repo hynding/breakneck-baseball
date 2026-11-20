@@ -203,6 +203,8 @@ fn start_clip(
     if clip == AnimClip::Idle {
         // The breathing layer: start each rig somewhere different in the
         // breath so a team standing around never inhales in unison.
+        // `seek_to` takes clip-local (authored) seconds, which is
+        // `duration() * speed` by the definition of the speed factor.
         anim.seek_to(idle_phase(rig.player) * clip.duration() * speed);
     }
     rig.current = Some(clip);
