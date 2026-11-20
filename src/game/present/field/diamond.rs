@@ -43,7 +43,7 @@ pub(super) fn spawn_field(
     let budget = active.map(|a| a.budget());
     let glossy = budget.is_some_and(|b| b.wet_reflections);
     // Surface detail too, though its decals follow a mid-game change.
-    let detail = budget.map_or((false, false), |b| (b.surface_color, b.surface_normals));
+    let detail = budget.map_or((false, false), |b| (b.surface_color, b.surface_detail));
     let surfaces = FieldSurfaces::build(&mut images, &lights, weather.rain, glossy, detail);
     match field.scenery {
         Scenery::Stadium => {
@@ -60,27 +60,19 @@ pub(super) fn spawn_field(
                 &surfaces,
                 &field,
             );
-            if let [first, second, third] = field.base_positions[..] {
-                let plan = super::surface::DecalPlan {
-                    bases: [Vec3::ZERO, first, second, third],
-                    home_radius: super::stadium::CUTOUT_RADIUS,
-                    boxes: [-1.0, 1.0].map(|side| {
-                        (
-                            Vec3::new(side * BOX_CENTER_X, 0.0, 0.0),
-                            Vec2::new(BOX_HALF_WIDTH, BOX_HALF_LENGTH),
-                        )
-                    }),
-                    clay: surfaces.clay(),
-                };
-                super::surface::spawn_decals(
-                    &mut commands,
-                    &mut meshes,
-                    &mut materials,
-                    &mut images,
-                    &plan,
-                    detail.0,
-                );
-            }
+            super::surface::spawn_cleat_marks(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &mut images,
+                [-1.0, 1.0].map(|side| {
+                    (
+                        Vec3::new(side * BOX_CENTER_X, 0.0, 0.0),
+                        Vec2::new(BOX_HALF_WIDTH, BOX_HALF_LENGTH),
+                    )
+                }),
+                surfaces.clay(),
+            );
             super::stadium::spawn_foul_poles(&mut commands, &mut meshes, &mut materials, &field);
             super::stadium::spawn_outfield_wall(&mut commands, &mut meshes, &mut materials, &field);
         }

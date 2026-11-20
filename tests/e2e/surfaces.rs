@@ -1,8 +1,7 @@
 //! End-to-end: ground surface detail (graphics plan task 16). On Medium and
-//! High the stadium's base paths are worn, home has its halo and the
-//! batter's boxes pick up cleat marks as the pitches mount; High also
-//! normal-maps the turf and clay. Low keeps the plain park, and the decals
-//! follow a mid-game tier change.
+//! High the turf varies in shade and the batter's boxes pick up cleat marks
+//! as the pitches mount; High also normal-maps the turf and clay. Low keeps
+//! the plain park, and the cleat marks follow a mid-game tier change.
 
 use crate::common;
 
@@ -95,7 +94,7 @@ fn low_keeps_the_plain_park() {
         QualityTier::Low
     );
     let (total, shown, _) = decals(&mut app);
-    assert_eq!(total, 7, "four lanes, the halo and two boxes");
+    assert_eq!(total, 2, "one per batter's box");
     assert_eq!(shown, 0);
     assert_eq!(ground(&mut app), (false, false));
 }
@@ -104,7 +103,7 @@ fn low_keeps_the_plain_park() {
 fn medium_varies_the_ground_without_normal_maps() {
     let mut app = game_on(QualityTier::Medium);
     let (_, shown, _) = decals(&mut app);
-    assert_eq!(shown, 5, "lanes and halo; the boxes wait for a pitch");
+    assert_eq!(shown, 0, "the boxes wait for a pitch");
     assert_eq!(ground(&mut app), (true, false));
 }
 
@@ -125,7 +124,7 @@ fn high_wears_the_boxes_in_as_the_game_goes() {
     app.update();
     assert_eq!(app.world().resource::<CleatWear>().pitches, 1);
     let (_, shown, first) = decals(&mut app);
-    assert_eq!(shown, 7, "the boxes show their first marks");
+    assert_eq!(shown, 2, "the boxes show their first marks");
     assert_eq!(first.len(), 2);
 
     app.world_mut().resource_mut::<CleatWear>().pitches = CLEAT_STAGES[2];

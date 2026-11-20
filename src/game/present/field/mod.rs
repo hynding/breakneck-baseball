@@ -106,11 +106,14 @@ struct FieldSurfaces {
     /// Perceptual roughness of both surfaces: matte, or glossier when wet.
     roughness: f32,
     /// The turf's and clay's normal maps, on tiers that budget them
-    /// (`RenderBudget::surface_normals`).
+    /// (`RenderBudget::surface_detail`).
     normals: Option<(Handle<Image>, Handle<Image>)>,
-    /// The ground varies in shade across the park
+    /// The turf varies in shade across the park
     /// (`RenderBudget::surface_color`).
     varied: bool,
+    /// The clay is worn down the runners' lanes and round home
+    /// (`RenderBudget::surface_detail`).
+    worn: bool,
 }
 
 /// Dry turf and clay: fully matte.
@@ -124,8 +127,8 @@ const WET_DARKEN: f32 = 0.78;
 impl FieldSurfaces {
     /// `wet` darkens both surfaces (rain); `glossy` also lowers their
     /// roughness (rain on a tier with `RenderBudget::wet_reflections`);
-    /// `detail` is the tier's surface detail, colour and normal maps
-    /// (`RenderBudget::surface_color`, `surface_normals`).
+    /// `detail` is the tier's surface colour and detail
+    /// (`RenderBudget::surface_color`, `surface_detail`).
     fn build(
         images: &mut Assets<Image>,
         dressing: &FieldTheme,
@@ -161,6 +164,7 @@ impl FieldSurfaces {
                 )
             }),
             varied: detail.0,
+            worn: detail.1,
         }
     }
 

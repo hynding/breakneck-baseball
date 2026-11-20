@@ -1,17 +1,23 @@
 //! Ground surface detail (graphics plan task 16), by tier
-//! ([`RenderBudget::surface_color`], [`RenderBudget::surface_normals`]):
+//! ([`RenderBudget::surface_color`], [`RenderBudget::surface_detail`]):
 //!
-//! - Medium and High: turf and clay that vary in shade across the park (a
-//!   vertex-coloured ground instead of one repeating tile), base paths worn
-//!   darker where the runners go, a dirt halo round the home-plate circle,
-//!   and cleat marks in the batter's boxes that build as the game goes on.
-//! - High also: procedural normal maps on the turf and the clay.
+//! - Medium and High: turf that varies in shade across the park (vertex
+//!   colours on a coarse grid) and cleat marks in the batter's boxes that
+//!   build as the game goes on (two small blended decals).
+//! - High also: clay worn darker down the runners' lanes and round the
+//!   home-plate circle (vertex colours on gridded clay, opaque so it costs
+//!   no extra fill), and procedural normal maps on the turf and the clay.
 //! - Low: none of it; the park is exactly as before.
 //!
+//! The split is measured (`tools/frame_cost.mjs`): under software WebGL the
+//! worn clay's few thousand triangles cost Medium ~7% a frame, so it is
+//! High's, and blended overlay decals for the lanes and the halo cost ~25%
+//! (a full PBR pass over much of the batting view), so they are baked into
+//! the clay instead.
+//!
 //! Like the rest of the park, the ground mesh and the normal maps are picked
-//! once at game start (a mid-game step-down keeps them). The decals are flat
-//! alpha-blended quads that follow the tier mid-game by `Visibility`, as the
-//! towers' fill spots do. Every texture is generated at runtime from hashes,
+//! once at game start (a mid-game step-down keeps them). The cleat decals
+//! follow the tier mid-game by `Visibility`, as the towers' fill spots do. Every texture is generated at runtime from hashes,
 //! no asset files, the same as `textures.rs`.
 
 use bevy::asset::RenderAssetUsages;
@@ -99,7 +105,7 @@ pub(super) fn dirt_normal_image() -> Image {
             let pebble = hash01(x as f32 * 31.7 + y as f32 * 57.3 * 1.7) > 0.93;
             tile_height(x, y, NORMAL_SIZE, 4, 5.9) + if pebble { 0.35 } else { 0.0 }
         },
-        4.0,
+        2.5,
     )
 }
 
@@ -127,7 +133,7 @@ pub(super) fn varied_ground_mesh(half: f32) -> Mesh {
     let mut mesh = Plane3d::default()
         .mesh()
         .size(half * 2.0, half * 2.0)
-        .subdivisions(99)
+        .subdivisions(9)
         .build();
     let colors: Vec<[f32; 4]> = match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
         Some(VertexAttributeValues::Float32x3(positions)) => {
@@ -139,9 +145,168 @@ pub(super) fn varied_ground_mesh(half: f32) -> Mesh {
     mesh
 }
 
-// ── Decals (Medium and High) ──────────────────────────────────────────────────
+// ── Worn clay (High) ──────────────────────────────────────────────────
 
-/// Marks a ground decal: worn paths, the halo at home, cleat marks.
+/// A worn lane's half-width (m) and how far inside the base line its centre
+/// runs (on the clay band, where the runners' feet land).
+const LANE_HALF: f32 = 0.6;
+const LANE_INSET: f32 = 0.6;
+/// How much the most-worn clay darkens.
+const WEAR_DARKEN: f32 = 0.32;
+
+/// How worn the clay is at `p` (x, z; m), 0 to 1: the runners' lanes a
+/// little inside each base line, fading out near the bags, and the
+/// home-plate circle, raked smooth in the middle and scuffed out at its
+/// rim. `bases` are home, first, second and third.
+pub(super) fn clay_wear(p: Vec2, bases: &[Vec2; 4], home_radius: f32) -> f32 {
+    let centre = (bases[0] + bases[2]) / 2.0;
+    let lane = (0..4)
+        .map(|i| {
+            let (a, b) = (bases[i], bases[(i + 1) % 4]);
+            let inward = (centre - (a + b) / 2.0).normalize_or_zero() * LANE_INSET;
+            let (a, b) = (a + inward, b + inward);
+            let len = a.distance(b);
+            let t = (p - a).dot(b - a) / (len * len).max(1e-6);
+            let from_bag = t.min(1.0 - t) * len;
+            let fade = ((from_bag - 1.0) / 2.5).clamp(0.0, 1.0);
+            let d = segment_distance(p, a, b) / LANE_HALF;
+            (1.0 - d * d).max(0.0) * fade
+        })
+        .fold(0.0, f32::max);
+    let r = p.distance(bases[0]);
+    let rim = (-((r - home_radius * 0.92) / 0.5).powi(2)).exp();
+    let circle = if r < home_radius { 0.25 } else { 0.0 };
+    let ragged = 0.85 + 0.3 * tiling_noise(p.x * 0.9 + 300.0, p.y * 0.9 + 300.0, 1024, 8.8);
+    (lane.max(rim * 0.9).max(circle) * ragged).clamp(0.0, 1.0)
+}
+
+/// The vertex shade for clay worn `wear` deep: darker, a touch redder.
+fn wear_shade(wear: f32) -> [f32; 4] {
+    let k = 1.0 - WEAR_DARKEN * wear;
+    [k, k * 0.97, k * 0.94, 1.0]
+}
+
+/// Paints `mesh`'s vertices by `wear` at each one's world position under
+/// `transform`.
+fn paint_wear(mut mesh: Mesh, transform: &Transform, wear: impl Fn(Vec2) -> f32) -> Mesh {
+    let colors: Vec<[f32; 4]> = match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+        Some(VertexAttributeValues::Float32x3(positions)) => positions
+            .iter()
+            .map(|p| wear_shade(wear(transform.transform_point(Vec3::from(*p)).xz())))
+            .collect(),
+        _ => Vec::new(),
+    };
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+    mesh
+}
+
+/// The clay band round a square of clay (`half` m), `band` m deep from
+/// its edges in: drawn as its top face at `top` m and painted by `wear`
+/// where it will stand. Only the band, since the grass interior covers the
+/// rest; finest across the lane a little in from each edge.
+pub(super) fn worn_clay_frame(
+    half: f32,
+    band: f32,
+    top: f32,
+    transform: &Transform,
+    wear: impl Fn(Vec2) -> f32,
+) -> Mesh {
+    const ALONG: u32 = 24;
+    let depths = [0.0, 0.3, 0.6, 0.9, 1.3, 2.2, band];
+    let mut positions = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+    // Each side as a mitred strip: its edge along +x at z = half, rotated
+    // a quarter turn per side.
+    for side in 0..4 {
+        let turn = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2 * side as f32);
+        let first = positions.len() as u32;
+        for &d in &depths {
+            let reach = half - d;
+            for i in 0..=ALONG {
+                let x = -reach + 2.0 * reach * i as f32 / ALONG as f32;
+                positions.push((turn * Vec3::new(x, top, half - d)).to_array());
+            }
+        }
+        let row = ALONG + 1;
+        for r in 0..depths.len() as u32 - 1 {
+            for i in 0..ALONG {
+                let (a, b) = (first + r * row + i, first + r * row + i + 1);
+                let (c, d) = (a + row, b + row);
+                indices.extend([a, b, d, a, d, c]);
+            }
+        }
+    }
+    let uvs: Vec<[f32; 2]> = positions
+        .iter()
+        .map(|p| [p[0] / (2.0 * half) + 0.5, p[2] / (2.0 * half) + 0.5])
+        .collect();
+    let mesh = up_facing_mesh(positions, uvs, indices);
+    paint_wear(mesh, transform, wear)
+}
+
+/// A flat mesh facing +Y, with every triangle wound to face up.
+fn up_facing_mesh(positions: Vec<[f32; 3]>, uvs: Vec<[f32; 2]>, mut indices: Vec<u32>) -> Mesh {
+    for tri in indices.chunks_mut(3) {
+        let [a, b, c] = [tri[0], tri[1], tri[2]].map(|i| Vec3::from(positions[i as usize]));
+        if (b - a).cross(c - a).y < 0.0 {
+            tri.swap(1, 2);
+        }
+    }
+    let normals = vec![[0.0, 1.0, 0.0]; positions.len()];
+    Mesh::new(
+        bevy::mesh::PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+    .with_inserted_indices(bevy::mesh::Indices::U32(indices))
+}
+
+/// A thin disc of clay (`radius` m), drawn as its top face at `top` m in
+/// rings placed to carry the wear, painted by `wear` where it will stand.
+/// Textured like a cylinder's cap.
+pub(super) fn worn_clay_disc(
+    radius: f32,
+    top: f32,
+    transform: &Transform,
+    wear: impl Fn(Vec2) -> f32,
+) -> Mesh {
+    // Rings where the wear changes: the raked middle, then close in to
+    // the scuffed rim.
+    const RINGS: [f32; 6] = [0.35, 0.65, 0.8, 0.9, 0.96, 1.0];
+    const SEGMENTS: u32 = 40;
+    let mut positions = vec![[0.0, top, 0.0]];
+    for f in RINGS {
+        let r = radius * f;
+        for seg in 0..SEGMENTS {
+            let a = std::f32::consts::TAU * seg as f32 / SEGMENTS as f32;
+            positions.push([r * a.cos(), top, r * a.sin()]);
+        }
+    }
+    let uvs: Vec<[f32; 2]> = positions
+        .iter()
+        .map(|p| [p[0] / (2.0 * radius) + 0.5, p[2] / (2.0 * radius) + 0.5])
+        .collect();
+    let at = |ring: u32, seg: u32| 1 + ring * SEGMENTS + seg % SEGMENTS;
+    let mut indices = Vec::new();
+    for seg in 0..SEGMENTS {
+        indices.extend([0, at(0, seg + 1), at(0, seg)]);
+    }
+    for ring in 0..RINGS.len() as u32 - 1 {
+        for seg in 0..SEGMENTS {
+            let (a, b) = (at(ring, seg), at(ring, seg + 1));
+            let (c, d) = (at(ring + 1, seg), at(ring + 1, seg + 1));
+            indices.extend([a, b, d, a, d, c]);
+        }
+    }
+    let mesh = up_facing_mesh(positions, uvs, indices);
+    paint_wear(mesh, transform, wear)
+}
+
+// ── Cleat marks (Medium and High) ─────────────────────────────────────────────
+
+/// Marks a ground decal (the cleat marks in the batter's boxes).
 #[derive(Component)]
 pub struct SurfaceDecal;
 
@@ -183,48 +348,6 @@ fn mask_image(alpha: impl Fn(f32, f32) -> f32) -> Image {
     }
     clamp_image(n as u32, data)
 }
-
-/// A worn lane between two bases: darkest down its middle, ragged at the
-/// sides, fading out over the last stretch at each end (the bag cutouts
-/// take over there). `u` runs across the lane, `v` along it.
-pub(super) fn path_mask() -> Image {
-    mask_image(|u, v| {
-        let across = 1.0 - ((u - 0.5).abs() * 2.0).powf(1.6);
-        let ends = ((v.min(1.0 - v) - 0.02) / 0.12).clamp(0.0, 1.0);
-        let ragged = 0.75 + 0.25 * tiling_noise(u * 6.0, v * 40.0, 1024, 2.2);
-        0.42 * across * ends * ragged
-    })
-}
-
-/// The halo at home: the raked circle's edge scuffed out over the grass
-/// line, and a faint, uneven wash across the circle itself. `r` is the
-/// distance from the centre as a fraction of the decal's radius.
-pub(super) fn halo_mask() -> Image {
-    mask_image(|u, v| {
-        let (x, y) = (u * 2.0 - 1.0, v * 2.0 - 1.0);
-        let r = (x * x + y * y).sqrt();
-        let angle = y.atan2(x);
-        let fray = tiling_noise(angle * 6.0 + 50.0, r * 8.0, 1024, 4.4);
-        let edge = HALO_EDGE + (fray - 0.5) * 0.08;
-        if r >= 1.0 {
-            0.0
-        } else if r > edge {
-            // The scuffed rim, thinning out past the grass line.
-            0.5 * (1.0 - (r - edge) / (1.0 - edge)) * (0.6 + 0.4 * fray)
-        } else {
-            // The circle: worn darker where the batter, catcher and umpire
-            // stand, lighter at the sides.
-            let worn = 0.12 + 0.12 * tiling_noise(u * 9.0, v * 9.0, 1024, 6.6);
-            worn + 0.3 * (r / edge).powi(6)
-        }
-    })
-}
-
-/// Where the home circle's edge falls on the halo decal (fraction of its
-/// radius); the decal reaches a little past it, over the grass.
-const HALO_EDGE: f32 = 1.0 / HALO_OVERHANG;
-/// How far past the home circle the halo reaches (multiple of its radius).
-const HALO_OVERHANG: f32 = 1.15;
 
 /// Cleat marks in a box at wear `stage` (index into [`CLEAT_STAGES`]): short
 /// scuffs, densest where the feet plant (the box's middle and front half),
@@ -280,35 +403,18 @@ pub(super) fn coverage(image: &Image) -> f32 {
 /// interior is the topmost at 0.0027 m) and under the chalk.
 pub(super) const DECAL_Y: f32 = 0.0045;
 
-/// Where the decals go and how they look: the parts `spawn_decals` needs
-/// from the field and the clay.
-pub(super) struct DecalPlan {
-    /// Home, first, second, third.
-    pub bases: [Vec3; 4],
-    /// Radius of the home-plate dirt circle (m).
-    pub home_radius: f32,
-    /// Each batter's box: centre and half-size (x, z).
-    pub boxes: [(Vec3, Vec2); 2],
-    /// The clay's own colour (texture times tint), which worn ground darkens.
-    pub clay: Color,
-}
-
-/// Spawns the decals, hidden unless the tier at game start budgets them
-/// (`decals_follow_budget` keeps them in step after).
-pub(super) fn spawn_decals(
+/// Spawns the cleat-mark decals in `boxes` (centre and half-size, x and z),
+/// tinted from the `clay`'s own colour; hidden until the first pitch, and
+/// shown only on tiers that budget them (`decals_follow_budget`).
+pub(super) fn spawn_cleat_marks(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
     images: &mut Assets<Image>,
-    plan: &DecalPlan,
-    shown: bool,
+    boxes: [(Vec3, Vec2); 2],
+    clay: Color,
 ) {
-    let visibility = if shown {
-        Visibility::Inherited
-    } else {
-        Visibility::Hidden
-    };
-    let clay = plan.clay.to_linear();
+    let clay = clay.to_linear();
     let shade =
         |k: f32| Color::LinearRgba(LinearRgba::rgb(clay.red * k, clay.green * k, clay.blue * k));
     let decal_material =
@@ -323,46 +429,9 @@ pub(super) fn spawn_decals(
         };
     let quad = meshes.add(Plane3d::default().mesh().size(1.0, 1.0));
 
-    // Worn lanes, a little inside each base line, where the runners go.
-    let path = decal_material(materials, images.add(path_mask()), 0.62);
-    let centre = (plan.bases[0] + plan.bases[2]) / 2.0;
-    for i in 0..4 {
-        let (from, to) = (plan.bases[i], plan.bases[(i + 1) % 4]);
-        let along = to - from;
-        let inward = (centre - (from + to) / 2.0).normalize_or_zero();
-        let mid = (from + to) / 2.0 + inward * LANE_INSET;
-        commands.spawn((
-            SurfaceDecal,
-            GameplayEntity,
-            Mesh3d(quad.clone()),
-            MeshMaterial3d(path.clone()),
-            Transform {
-                translation: mid.with_y(DECAL_Y),
-                rotation: Quat::from_rotation_y(along.x.atan2(along.z)),
-                scale: Vec3::new(LANE_WIDTH, 1.0, along.length()),
-            },
-            visibility,
-        ));
-    }
-
-    // The halo round home.
-    let halo = decal_material(materials, images.add(halo_mask()), 0.7);
-    commands.spawn((
-        SurfaceDecal,
-        GameplayEntity,
-        Mesh3d(quad.clone()),
-        MeshMaterial3d(halo),
-        Transform {
-            translation: plan.bases[0].with_y(DECAL_Y),
-            scale: Vec3::new(1.0, 1.0, 1.0) * plan.home_radius * HALO_OVERHANG * 2.0,
-            ..default()
-        },
-        visibility,
-    ));
-
     // Cleat marks: one decal per box, its texture swapped as the wear grows,
     // hidden until the first pitch.
-    for (i, (at, half)) in plan.boxes.iter().enumerate() {
+    for (i, (at, half)) in boxes.iter().enumerate() {
         let stages: Vec<Handle<Image>> = (0..CLEAT_STAGES.len())
             .map(|stage| images.add(cleat_mask(stage, i as f32 + 0.37)))
             .collect();
@@ -383,11 +452,6 @@ pub(super) fn spawn_decals(
         ));
     }
 }
-
-/// The worn lane's width (m) and how far inside the base line its centre
-/// runs (on the clay band, where the runners' feet land).
-const LANE_WIDTH: f32 = 1.1;
-const LANE_INSET: f32 = 0.6;
 
 /// Counts the game's pitches for the cleat marks; a new game starts with
 /// fresh-raked boxes.

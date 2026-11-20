@@ -54,7 +54,7 @@ const browser = await chromium.launch({
   args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist'],
 });
 const report = {};
-for (const tier of ['low', 'medium', 'high']) {
+for (const tier of (process.env.TIERS||'low,medium,high').split(',')) {
   const page = await browser.newPage({ viewport: { width: vw, height: vh }, deviceScaleFactor: 1 });
   const logs = [];
   page.on('console', (m) => logs.push(m.text()));
