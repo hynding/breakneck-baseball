@@ -21,16 +21,27 @@ pub(super) fn spawn_field(
     field: Res<FieldSpec>,
     theme: Res<crate::game::theme::Theme>,
     settings: Option<Res<crate::game::settings::Settings>>,
+    active: Option<Res<crate::game::quality::ActiveQuality>>,
 ) {
     // The day's weather greys the sky and dims the sun (`Weather::spec`).
-    let weather = settings.map_or_else(Default::default, |s| s.weather).spec();
+    let weather = settings
+        .as_ref()
+        .map_or_else(Default::default, |s| s.weather)
+        .spec();
+    let time = settings.map_or_else(Default::default, |s| s.time_of_day);
     // The sky is theme data like everything else — a bright day or a night
-    // game. Matters most from the catcher's-eye duel camera, which looks up
-    // past the wall into nothing but clear colour.
-    commands.insert_resource(ClearColor(weather_sky(theme.sky, weather.overcast)));
-    let mut lights = theme.field.clone();
+    // game — shifted by the time of day. Matters most from the
+    // catcher's-eye duel camera, which looks up past the wall into nothing
+    // but clear colour.
+    let day = day_look(theme.sky, &theme.field, time);
+    commands.insert_resource(ClearColor(weather_sky(day.sky, weather.overcast)));
+    let mut lights = day.lights.clone();
     lights.sun_scale *= weather.sun;
-    let surfaces = FieldSurfaces::build(&mut images, &theme.field);
+    // Rain soaks the ground: darker everywhere, glossy where the tier
+    // budgets the reflections. Picked once at game start like the rest of
+    // the park (a mid-game tier step-down keeps the wet sheen it has).
+    let glossy = active.is_some_and(|a| a.budget().wet_reflections);
+    let surfaces = FieldSurfaces::build(&mut images, &lights, weather.rain, glossy);
     match field.scenery {
         Scenery::Stadium => {
             super::stadium::spawn_stadium_ground(
@@ -74,17 +85,124 @@ pub(super) fn spawn_field(
     match field.scenery {
         Scenery::Stadium => super::stadium::spawn_lighting(
             &mut commands,
-            std::f32::consts::PI - std::f32::consts::FRAC_PI_6,
-            0.15,
+            day.key_yaw(std::f32::consts::PI - std::f32::consts::FRAC_PI_6),
+            day.elevation,
+            0.15 * day.fill,
             &lights,
         ),
+        // The yard has no light towers: a night game there keeps the key
+        // light on the day sun's bearing (a porch light, in effect).
         Scenery::FrontYard => super::stadium::spawn_lighting(
             &mut commands,
             std::f32::consts::PI + std::f32::consts::FRAC_PI_6,
-            0.20,
+            day.elevation,
+            0.20 * day.fill,
             &lights,
         ),
     }
+}
+
+/// The night sky for a daytime theme played under the lights (Midnight
+/// Neon's own navy).
+const NIGHT_SKY: Color = Color::srgb(0.02, 0.03, 0.08);
+
+/// Which way the night key light shines from (yaw, radians; a directional
+/// light with yaw θ shines from the bowl bearing θ, `bowl::dir`): the
+/// stadium's light tower at 118°, behind the plate on the same side as the
+/// stadium's day sun, so the cameras see players lit the same way by day
+/// and night. Its shadows are the only shadows at night; the other towers
+/// are unshadowed fill (`bowl::spawn_bowl`).
+pub(crate) const KEY_TOWER_DEG: f32 = 118.0;
+const NIGHT_KEY_YAW: f32 = KEY_TOWER_DEG * std::f32::consts::PI / 180.0;
+
+/// How a game's time of day dresses the theme: the sky colour, the key
+/// light (colour, strength, height) and the ambient fill.
+#[derive(Clone, Debug)]
+pub(crate) struct DayLook {
+    pub sky: Color,
+    pub lights: crate::game::theme::FieldTheme,
+    /// The key light's angle above the horizon (radians).
+    pub elevation: f32,
+    /// Multiplier on the scenery's ambient fill fraction.
+    pub fill: f32,
+    /// Whether the park is lit by its towers (the lamps glow, the towers
+    /// add their fill lights).
+    pub night: bool,
+}
+
+impl DayLook {
+    /// The key light's yaw: the scenery's sun bearing by day, the key tower
+    /// at night.
+    pub fn key_yaw(&self, day_yaw: f32) -> f32 {
+        if self.night { NIGHT_KEY_YAW } else { day_yaw }
+    }
+}
+
+/// Pure: the theme's sky and lights at `time`. The afternoon is the theme
+/// exactly as authored. A theme that is already a night game (Midnight
+/// Neon) keeps its own sky and lights whatever the clock says, and is lit
+/// from the towers only when the setting is Night. Morning lowers and warms the
+/// sun and pales the sky; night swaps in a dark sky and floodlight-cool key
+/// and fill lights, with the turf cooled the way Midnight Neon cools it.
+pub(crate) fn day_look(
+    sky: Color,
+    field: &crate::game::theme::FieldTheme,
+    time: crate::game::weather::TimeOfDay,
+) -> DayLook {
+    use crate::game::weather::TimeOfDay;
+    let mut look = DayLook {
+        sky,
+        lights: field.clone(),
+        elevation: time.key_elevation(),
+        fill: 1.0,
+        night: false,
+    };
+    if crate::game::look::is_night(sky) {
+        // The theme is already lit for a night game: keep its sky and
+        // lights as authored. Only an explicit Night setting moves the key
+        // onto the key tower and adds the other towers' fill spots, so the
+        // default (Afternoon) plays exactly as the theme always has.
+        look.night = time == TimeOfDay::Night;
+        if !look.night {
+            look.elevation = TimeOfDay::Afternoon.key_elevation();
+        }
+        return look;
+    }
+    let tint = |c: Color, k: [f32; 3]| {
+        let s = c.to_srgba();
+        Color::srgb(s.red * k[0], s.green * k[1], s.blue * k[2])
+    };
+    match time {
+        TimeOfDay::Afternoon => {}
+        TimeOfDay::Morning => {
+            // Paler and a touch warmer toward the horizon-side of the day.
+            let s = sky.to_srgba();
+            let toward = |a: f32, b: f32| a + (b - a) * 0.35;
+            look.sky = Color::srgb(
+                toward(s.red, 0.92),
+                toward(s.green, 0.86),
+                toward(s.blue, 0.80),
+            );
+            look.lights.sun = tint(field.sun, [1.0, 0.80, 0.58]);
+            look.lights.sun_scale = field.sun_scale * 0.6;
+            look.lights.ambient = tint(field.ambient, [0.92, 0.94, 1.0]);
+        }
+        TimeOfDay::Night => {
+            look.sky = NIGHT_SKY;
+            look.night = true;
+            // The key tower alone is a fraction of the sun (about 8,000 lux
+            // on the field) and the night fill is dim, so the stands and
+            // the sky fall dark; on Medium and High the other towers' fill
+            // spots (`bowl::TowerLight`) bring the infield back up.
+            look.lights.sun = Color::srgb(0.86, 0.92, 1.0);
+            look.lights.sun_scale = field.sun_scale * 0.16;
+            look.lights.ambient = Color::srgb(0.45, 0.58, 0.88);
+            look.fill = 0.25;
+            look.lights.grass_tint = tint(field.grass_tint, [0.62, 0.72, 0.86]);
+            look.lights.dirt_tint = tint(field.dirt_tint, [0.60, 0.64, 0.80]);
+        }
+    }
+    look
 }
 
 /// The theme's sky pulled `overcast` (0..1) of the way to storm grey — kept

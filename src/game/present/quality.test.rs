@@ -310,6 +310,8 @@ fn budget_never_shrinks_as_the_tier_rises() {
             (lo.sky, hi.sky),
             (lo.bloom, hi.bloom),
             (lo.surface_detail, hi.surface_detail),
+            (lo.tower_lights, hi.tower_lights),
+            (lo.wet_reflections, hi.wet_reflections),
         ] {
             assert!(
                 !l || h,
@@ -325,6 +327,7 @@ fn budget_never_shrinks_as_the_tier_rises() {
 fn low_keeps_the_phone_budget_lean() {
     let low = QualityTier::Low.budget();
     assert!(!low.bloom && !low.crowd_shadows && !low.surface_detail);
+    assert!(!low.tower_lights && !low.wet_reflections);
     assert!(low.particle_scale <= 0.5);
     assert!(low.replay_angles == 1);
 }

@@ -150,3 +150,98 @@ fn weather_greys_the_sky_without_brightening_it() {
     let lum = |c: Srgba| 0.2126 * c.red + 0.7152 * c.green + 0.0722 * c.blue;
     assert!(lum(wet_night) <= lum(night.to_srgba()) + 1e-4);
 }
+
+use crate::game::theme::ThemeId;
+use crate::game::weather::TimeOfDay;
+
+fn lum(c: Color) -> f32 {
+    let s = c.to_srgba();
+    0.2126 * s.red + 0.7152 * s.green + 0.0722 * s.blue
+}
+
+#[test]
+fn the_afternoon_is_the_theme_as_authored() {
+    let theme = ThemeId::DaylightClassic.build();
+    let day = day_look(theme.sky, &theme.field, TimeOfDay::Afternoon);
+    assert_eq!(day.sky, theme.sky);
+    assert_eq!(day.lights.sun, theme.field.sun);
+    assert_eq!(day.lights.sun_scale, theme.field.sun_scale);
+    assert_eq!(day.fill, 1.0);
+    assert!(!day.night);
+    assert!((day.elevation - std::f32::consts::FRAC_PI_4).abs() < 1e-6);
+    assert_eq!(day.key_yaw(1.0), 1.0, "the sun keeps the scenery's bearing");
+}
+
+#[test]
+fn night_darkens_the_sky_and_lights_from_the_key_tower() {
+    let theme = ThemeId::DaylightClassic.build();
+    let night = day_look(theme.sky, &theme.field, TimeOfDay::Night);
+    assert!(night.night);
+    assert!(
+        crate::game::look::is_night(night.sky),
+        "the grading reads it as night"
+    );
+    assert!(night.lights.sun_scale < theme.field.sun_scale);
+    assert!((night.key_yaw(1.0) - KEY_TOWER_DEG.to_radians()).abs() < 1e-6);
+}
+
+#[test]
+fn morning_is_a_lower_warmer_sun_under_a_paler_sky() {
+    let theme = ThemeId::DaylightClassic.build();
+    let morning = day_look(theme.sky, &theme.field, TimeOfDay::Morning);
+    assert!(!morning.night);
+    assert!(morning.elevation < std::f32::consts::FRAC_PI_4);
+    let sun = morning.lights.sun.to_srgba();
+    assert!(sun.red > sun.blue, "a warm sun");
+    assert!(lum(morning.sky) > lum(theme.sky), "a paler sky");
+}
+
+#[test]
+fn a_night_theme_stays_a_night_game_at_any_time() {
+    let theme = ThemeId::MidnightNeon.build();
+    for time in TimeOfDay::ALL {
+        let look = day_look(theme.sky, &theme.field, time);
+        assert_eq!(look.sky, theme.sky, "{time:?}");
+        assert_eq!(look.lights.sun_scale, theme.field.sun_scale, "{time:?}");
+        assert_eq!(look.fill, 1.0, "{time:?}");
+    }
+}
+
+/// The default setting leaves a night theme's key light where it always
+/// was; only an explicit Night setting adds the tower lighting.
+#[test]
+fn a_night_theme_gets_tower_lighting_only_at_night() {
+    let theme = ThemeId::MidnightNeon.build();
+    let day_yaw = std::f32::consts::PI - std::f32::consts::FRAC_PI_6;
+    for time in [TimeOfDay::Afternoon, TimeOfDay::Morning] {
+        let look = day_look(theme.sky, &theme.field, time);
+        assert!(!look.night, "{time:?}");
+        assert_eq!(look.elevation, TimeOfDay::Afternoon.key_elevation());
+        assert_eq!(look.key_yaw(day_yaw), day_yaw);
+    }
+    let night = day_look(theme.sky, &theme.field, TimeOfDay::Night);
+    assert!(night.night);
+    assert_eq!(night.key_yaw(day_yaw), NIGHT_KEY_YAW);
+}
+
+/// Rain darkens the turf and clay on every tier; only a tier that budgets
+/// wet reflections also makes them glossy.
+#[test]
+fn rain_darkens_everywhere_and_glosses_only_when_budgeted() {
+    use super::super::FieldSurfaces;
+    let field = ThemeId::DaylightClassic.build().field;
+    let mut images = Assets::<Image>::default();
+    let dry = FieldSurfaces::build(&mut images, &field, false, true);
+    let wet = FieldSurfaces::build(&mut images, &field, true, false);
+    let glossy = FieldSurfaces::build(&mut images, &field, true, true);
+    let lum = |c: Color| {
+        let s = c.to_srgba();
+        s.red + s.green + s.blue
+    };
+    assert_eq!(dry.grass_tint, field.grass_tint);
+    assert!(lum(wet.grass_tint) < lum(dry.grass_tint));
+    assert!(lum(wet.dirt_tint) < lum(dry.dirt_tint));
+    assert_eq!(wet.roughness, dry.roughness, "no gloss without the budget");
+    assert!(glossy.roughness < dry.roughness);
+    assert_eq!(glossy.grass_tint, wet.grass_tint);
+}

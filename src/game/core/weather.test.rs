@@ -66,3 +66,16 @@ fn fences_move_the_wall_to_real_park_depths() {
     }
     assert_eq!(f, Fences::Standard);
 }
+
+#[test]
+fn time_of_day_cycles_through_all_three_and_defaults_to_the_afternoon() {
+    assert_eq!(TimeOfDay::default(), TimeOfDay::Afternoon);
+    let mut t = TimeOfDay::Morning;
+    for _ in 0..TimeOfDay::ALL.len() {
+        t = t.next();
+    }
+    assert_eq!(t, TimeOfDay::Morning, "next() visits every time once");
+    // The afternoon keeps the long-standing 45° sun; the morning sun is low.
+    assert!((TimeOfDay::Afternoon.key_elevation() - std::f32::consts::FRAC_PI_4).abs() < 1e-6);
+    assert!(TimeOfDay::Morning.key_elevation() < TimeOfDay::Afternoon.key_elevation());
+}

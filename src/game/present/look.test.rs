@@ -36,7 +36,7 @@ fn no_tier_blooms_yet() {
     for (tier, want) in [
         (QualityTier::Low, false),
         (QualityTier::Medium, false),
-        (QualityTier::High, false), // held off until the exposure rework
+        (QualityTier::High, false), // held off: see the module doc
     ] {
         assert_eq!(
             CameraLook::for_sky(DAY, 0.0, &tier.budget()).bloom,
@@ -145,6 +145,16 @@ fn the_camera_follows_the_tier() {
         assert_eq!(e.contains::<Hdr>(), bloom, "{tier:?} hdr");
         assert!(e.contains::<DistanceFog>(), "{tier:?} fog");
         assert!(e.contains::<ColorGrading>(), "{tier:?} grading");
+        assert_eq!(
+            e.get::<Exposure>().map(|x| x.ev100),
+            Some(SCENE_EV100),
+            "{tier:?} exposure"
+        );
+        assert_eq!(
+            e.get::<Tonemapping>(),
+            Some(&Tonemapping::TonyMcMapface),
+            "{tier:?} tonemapping"
+        );
     }
 }
 

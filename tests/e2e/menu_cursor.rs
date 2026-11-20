@@ -115,8 +115,8 @@ fn pad_steps_cpu_difficulty_into_the_game() {
         Difficulty::Normal
     );
     // Rows: One Player, Two Players, Season, Field, Innings, Weather,
-    // Fences, Theme, CPU difficulty.
-    for _ in 0..8 {
+    // Time of day, Fences, Theme, CPU difficulty.
+    for _ in 0..9 {
         tap_pad(&mut app, GamepadButton::DPadDown);
     }
     assert!(

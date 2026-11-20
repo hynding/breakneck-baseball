@@ -496,7 +496,7 @@ pub(super) fn spawn_outfield_wall(
 const SUN_ILLUMINANCE: f32 = 50_000.0;
 
 /// Sunlight angled to cast shadows, with the azimuth (`yaw`) chosen per
-/// scenery, plus an ambient fill so shadows aren't pitch-black. `ambient_fraction`
+/// scenery and the height (`elevation`) by the time of day, plus an ambient fill so shadows aren't pitch-black. `ambient_fraction`
 /// is relative to [`SUN_ILLUMINANCE`] (e.g. 0.25 = a quarter of the sun's
 /// illuminance) rather than an absolute brightness — passing a raw lux value
 /// here (as opposed to a 0..1-ish fraction) would make every unlit surface
@@ -516,6 +516,7 @@ const SUN_ILLUMINANCE: f32 = 50_000.0;
 pub(super) fn spawn_lighting(
     commands: &mut Commands,
     yaw: f32,
+    elevation: f32,
     ambient_fraction: f32,
     lights: &FieldTheme,
 ) {
@@ -529,12 +530,7 @@ pub(super) fn spawn_lighting(
             shadows_enabled: true,
             ..default()
         },
-        Transform::from_rotation(Quat::from_euler(
-            EulerRot::YXZ,
-            yaw,
-            -std::f32::consts::FRAC_PI_4,
-            0.0,
-        )),
+        Transform::from_rotation(Quat::from_euler(EulerRot::YXZ, yaw, -elevation, 0.0)),
     ));
 
     commands.insert_resource(GlobalAmbientLight {

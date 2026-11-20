@@ -15,7 +15,12 @@
 // `BREAKNECK_PERF=1 BREAKNECK_QUALITY=low cargo run --release` prints the
 // same lines.
 //
-//   node tools/frame_cost.mjs <url> [out-dir] [seconds-per-tier] [viewport WxH]
+//   node tools/frame_cost.mjs <url> [out-dir] [seconds-per-tier] [viewport WxH] [menu-keys]
+//
+// `menu-keys` are main-menu hotkey letters pressed before the game starts,
+// e.g. `wwww` for Rain or `wwwwn` for Rain at Night (W cycles the weather
+// Fair, Hot, Cold, Windy, Rain; N cycles the time of day from Afternoon to
+// Night, then Morning).
 
 import { createRequire } from 'node:module';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -27,8 +32,9 @@ const base = process.argv[2];
 const outDir = process.argv[3] || 'frame-cost';
 const secs = Number(process.argv[4] || 60);
 const [vw, vh] = (process.argv[5] || '1280x720').split('x').map(Number);
+const menuKeys = process.argv[6] || '';
 if (!base) {
-  console.error('usage: frame_cost.mjs <url> [out-dir] [seconds-per-tier] [WxH]');
+  console.error('usage: frame_cost.mjs <url> [out-dir] [seconds-per-tier] [WxH] [menu-keys]');
   process.exit(2);
 }
 mkdirSync(outDir, { recursive: true });
@@ -64,6 +70,10 @@ for (const tier of ['low', 'medium', 'high']) {
   await until(/bb-state menu/, 240_000);
   await page.waitForTimeout(2000);
   await page.mouse.click(10, 10);
+  for (const k of menuKeys) {
+    await page.keyboard.press(`Key${k.toUpperCase()}`);
+    await page.waitForTimeout(300);
+  }
   await page.keyboard.press('Digit1');
   await until(/bb-state playing/, 120_000);
   const startAt = logs.length;

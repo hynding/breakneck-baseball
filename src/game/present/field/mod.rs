@@ -98,15 +98,43 @@ struct FieldSurfaces {
     dirt: Handle<Image>,
     grass_tint: Color,
     dirt_tint: Color,
+    /// Perceptual roughness of both surfaces: matte, or glossier when wet.
+    roughness: f32,
 }
 
+/// Dry turf and clay: fully matte.
+const DRY_ROUGHNESS: f32 = 0.95;
+/// Rain-soaked turf and clay on tiers that budget wet reflections: glossy
+/// enough to catch the sky and the lights.
+const WET_ROUGHNESS: f32 = 0.65;
+/// How much darker rain-soaked ground reads, at every tier.
+const WET_DARKEN: f32 = 0.78;
+
 impl FieldSurfaces {
-    fn build(images: &mut Assets<Image>, dressing: &FieldTheme) -> Self {
+    /// `wet` darkens both surfaces (rain); `glossy` also lowers their
+    /// roughness (rain on a tier with `RenderBudget::wet_reflections`).
+    fn build(images: &mut Assets<Image>, dressing: &FieldTheme, wet: bool, glossy: bool) -> Self {
+        let darken = |c: Color| {
+            if !wet {
+                return c;
+            }
+            let s = c.to_srgba();
+            Color::srgb(
+                s.red * WET_DARKEN,
+                s.green * WET_DARKEN,
+                s.blue * WET_DARKEN,
+            )
+        };
         Self {
             grass: images.add(textures::grass_image()),
             dirt: images.add(textures::dirt_image()),
-            grass_tint: dressing.grass_tint,
-            dirt_tint: dressing.dirt_tint,
+            grass_tint: darken(dressing.grass_tint),
+            dirt_tint: darken(dressing.dirt_tint),
+            roughness: if wet && glossy {
+                WET_ROUGHNESS
+            } else {
+                DRY_ROUGHNESS
+            },
         }
     }
 
@@ -116,7 +144,13 @@ impl FieldSurfaces {
         materials: &mut Assets<StandardMaterial>,
         repeats: f32,
     ) -> Handle<StandardMaterial> {
-        Self::tiled(materials, &self.grass, self.grass_tint, repeats)
+        Self::tiled(
+            materials,
+            &self.grass,
+            self.grass_tint,
+            self.roughness,
+            repeats,
+        )
     }
 
     /// The infield-dirt material, tiled `repeats` times across a unit UV face.
@@ -125,7 +159,13 @@ impl FieldSurfaces {
         materials: &mut Assets<StandardMaterial>,
         repeats: f32,
     ) -> Handle<StandardMaterial> {
-        Self::tiled(materials, &self.dirt, self.dirt_tint, repeats)
+        Self::tiled(
+            materials,
+            &self.dirt,
+            self.dirt_tint,
+            self.roughness,
+            repeats,
+        )
     }
 
     /// A material tiling `texture` `repeats` times across a unit UV face,
@@ -134,13 +174,14 @@ impl FieldSurfaces {
         materials: &mut Assets<StandardMaterial>,
         texture: &Handle<Image>,
         tint: Color,
+        roughness: f32,
         repeats: f32,
     ) -> Handle<StandardMaterial> {
         materials.add(StandardMaterial {
             base_color: tint,
             base_color_texture: Some(texture.clone()),
             uv_transform: Affine2::from_scale(Vec2::splat(repeats)),
-            perceptual_roughness: 0.95,
+            perceptual_roughness: roughness,
             ..default()
         })
     }
@@ -161,6 +202,7 @@ impl Plugin for FieldPlugin {
                 bowl::build_crowd,
                 bowl::cheer_crowd,
                 bowl::update_scoreboard,
+                bowl::tower_lights_follow_budget,
             )
                 .run_if(in_state(GameState::Playing)),
         )

@@ -5,13 +5,23 @@
 //!
 //! Each piece follows the tier's [`RenderBudget`]: grading and fog are on at
 //! every tier (both are a few shader instructions), the sky from Medium,
-//! and bloom wherever the budget allows it (no tier does until the exposure
-//! rework: HDR tonemapping greys today's over-exposed sky). The camera's look is re-applied whenever the
-//! tier, the sky (theme or weather) or the camera itself changes.
+//! and bloom wherever the budget allows it. No tier does yet: see below.
+//! The camera's look is re-applied whenever the tier, the sky (theme or
+//! weather) or the camera itself changes.
 //!
 //! Bloom renders through the same offscreen route as every other tier
 //! (`quality::apply_render_scale`): the main camera's HDR target is
 //! tonemapped into the scaled image, which the upscale camera stretches.
+//!
+//! Exposure (time-of-day task): every tier renders at [`SCENE_EV100`]
+//! rather than Bevy's default, which over-exposed the 50k lux sun. Bloom
+//! stays off. Under HDR the tonemapping pass also runs over the skybox
+//! (drawn after tonemapping on the LDR tiers), and every curve tried
+//! (TonyMcMapface, AgX, ReinhardLuminance) turned the sky purple and the
+//! night teal on the web build (screenshots, 2026-11-20); skipping the curve
+//! (`Tonemapping::None`) kept the colours but also skips colour grading,
+//! which runs in that pass. Bloom returns when the sky renders in a way the
+//! HDR curve leaves alone.
 
 use bevy::camera::Exposure;
 use bevy::core_pipeline::Skybox;
@@ -33,10 +43,19 @@ pub const FOG_CLEAR: (f32, f32) = (170.0, 800.0);
 /// past the ~130 m wall keeps the outfield itself clear.
 pub const FOG_OVERCAST: (f32, f32) = (140.0, 520.0);
 
-/// Bloom on High: gentler than Bevy's `NATURAL` so the white chalk and the
+/// Bloom, on a tier that budgets it: gentler than Bevy's `NATURAL` so the white chalk and the
 /// sunlit uniforms don't haze; emissive balls, fireworks and night lights
 /// still glow.
 const BLOOM_INTENSITY: f32 = 0.08;
+
+/// The main camera's exposure (EV100). Bevy's default (9.7, Blender's)
+/// over-exposed the 50,000 lux sun by about two stops, so the tonemapper
+/// flattened every lit surface; two stops down, the field keeps its colour
+/// and halving a light visibly halves it (the night game depends on that).
+/// Unlit and emissive materials (jersey lettering, the scoreboard, the
+/// strike zone, particles) ignore exposure, so they read a little brighter
+/// against the field than before.
+pub const SCENE_EV100: f32 = 11.7;
 
 /// The look the main camera should wear for a sky colour, an overcast
 /// fraction and a tier: pure, so the tier and weather rules are unit-tested.
@@ -183,7 +202,6 @@ fn apply_camera_look(
     settings: Option<Res<Settings>>,
     sky: Res<SkyTexture>,
     cameras: Query<(Entity, Ref<MainCamera>), With<Camera3d>>,
-    exposure: Query<&Exposure>,
 ) {
     let Some(active) = active else {
         return;
@@ -195,7 +213,11 @@ fn apply_camera_look(
         }
         let look = CameraLook::for_sky(clear.0, overcast(settings.as_deref()), &active.budget());
         let mut e = commands.entity(camera);
-        e.insert((Tonemapping::TonyMcMapface, look.grading));
+        e.insert((
+            Tonemapping::TonyMcMapface,
+            look.grading,
+            Exposure { ev100: SCENE_EV100 },
+        ));
         match look.fog {
             Some((color, start, end)) => {
                 e.insert((
@@ -218,9 +240,7 @@ fn apply_camera_look(
             // cd/m², scaled by the camera's exposure: cancel that so the
             // texture shows the sky colour as authored, as the clear colour
             // under it does.
-            // Read once per re-apply: nothing changes a camera's
-            // `Exposure` today; a writer would need to re-run this.
-            let exposure = exposure.get(camera).copied().unwrap_or_default();
+            let exposure = Exposure { ev100: SCENE_EV100 };
             e.insert(Skybox {
                 image: sky.0.clone(),
                 brightness: exposure.exposure().recip(),
