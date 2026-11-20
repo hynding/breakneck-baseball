@@ -169,7 +169,7 @@ impl FieldSurfaces {
         }
     }
 
-    /// The clay's own colour, texture times tint: what worn ground darkens.
+    /// The clay's own colour, texture times tint: the cleat marks' base.
     fn clay(&self) -> Color {
         let [r, g, b] = textures::DIRT_RGB;
         let base = Color::srgb_u8(r, g, b).to_linear();

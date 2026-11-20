@@ -86,6 +86,26 @@ fn ground(app: &mut App) -> (bool, bool) {
     )
 }
 
+/// How many meshes in the scene carry both vertex colours and tangents:
+/// on High, the varied ground plus the worn clay frame and its four pits.
+fn worn_and_normal_mapped(app: &mut App) -> usize {
+    let world = app.world_mut();
+    let handles: Vec<Handle<Mesh>> = world
+        .query::<&Mesh3d>()
+        .iter(world)
+        .map(|m| m.0.clone())
+        .collect();
+    let meshes = world.resource::<Assets<Mesh>>();
+    handles
+        .iter()
+        .filter_map(|h| meshes.get(h))
+        .filter(|m| {
+            m.attribute(Mesh::ATTRIBUTE_COLOR).is_some()
+                && m.attribute(Mesh::ATTRIBUTE_TANGENT).is_some()
+        })
+        .count()
+}
+
 #[test]
 fn low_keeps_the_plain_park() {
     let mut app = game_on(QualityTier::Low);
@@ -105,6 +125,7 @@ fn medium_varies_the_ground_without_normal_maps() {
     let (_, shown, _) = decals(&mut app);
     assert_eq!(shown, 0, "the boxes wait for a pitch");
     assert_eq!(ground(&mut app), (true, false));
+    assert_eq!(worn_and_normal_mapped(&mut app), 0);
 }
 
 /// High: the normal-mapped ground, and cleat marks that arrive with the
@@ -114,6 +135,10 @@ fn medium_varies_the_ground_without_normal_maps() {
 fn high_wears_the_boxes_in_as_the_game_goes() {
     let mut app = game_on(QualityTier::High);
     assert_eq!(ground(&mut app), (true, true));
+    assert!(
+        worn_and_normal_mapped(&mut app) >= 6,
+        "the ground, the worn clay band and its four pits"
+    );
     assert_eq!(app.world().resource::<CleatWear>().pitches, 0);
 
     app.world_mut().write_message(PitchEvent {

@@ -123,12 +123,14 @@ pub(super) fn spawn_stadium_ground(
         } else {
             cutout.clone()
         };
-        commands.spawn((
-            GameplayEntity,
-            Mesh3d(mesh),
-            MeshMaterial3d(dirt.clone()),
-            at,
-        ));
+        commands
+            .spawn((
+                GameplayEntity,
+                Mesh3d(mesh),
+                MeshMaterial3d(dirt.clone()),
+                at,
+            ))
+            .insert_if(bevy::light::NotShadowCaster, || surfaces.worn);
     }
 
     // The grass interior of the diamond: dirt shows only as the basepath

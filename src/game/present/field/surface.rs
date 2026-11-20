@@ -17,8 +17,9 @@
 //!
 //! Like the rest of the park, the ground mesh and the normal maps are picked
 //! once at game start (a mid-game step-down keeps them). The cleat decals
-//! follow the tier mid-game by `Visibility`, as the towers' fill spots do. Every texture is generated at runtime from hashes,
-//! no asset files, the same as `textures.rs`.
+//! follow the tier mid-game by `Visibility`, as the towers' fill spots do.
+//! Every texture is generated at runtime from hashes, no asset files, the
+//! same as `textures.rs`.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};

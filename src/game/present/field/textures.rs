@@ -33,7 +33,7 @@ pub(super) fn grass_image() -> Image {
     tiling_image(SIZE as u32, data)
 }
 
-/// The clay's colour before speckles (sRGB): what worn-ground decals darken.
+/// The clay's colour before speckles (sRGB): what the cleat marks and worn clay darken.
 pub(super) const DIRT_RGB: [u8; 3] = [194, 153, 108];
 
 /// Infield dirt: warm clay with darker speckles.

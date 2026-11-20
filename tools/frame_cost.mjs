@@ -17,6 +17,8 @@
 //
 //   node tools/frame_cost.mjs <url> [out-dir] [seconds-per-tier] [viewport WxH] [menu-keys]
 //
+// `TIERS=medium,high` (env) measures only those tiers.
+//
 // `menu-keys` are main-menu hotkey letters pressed before the game starts,
 // e.g. `wwww` for Rain or `wwwwn` for Rain at Night (W cycles the weather
 // Fair, Hot, Cold, Windy, Rain; N cycles the time of day from Afternoon to
