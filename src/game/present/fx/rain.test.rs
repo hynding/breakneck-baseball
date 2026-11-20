@@ -52,3 +52,14 @@ fn the_spread_fills_the_unit_interval() {
     assert!(xs.iter().all(|x| (0.0..=1.0).contains(x)));
     assert!(xs.iter().any(|x| *x < 0.2) && xs.iter().any(|x| *x > 0.8));
 }
+
+#[test]
+fn splashes_keep_their_rate_across_frames() {
+    let mut owed = 0.0;
+    let dt = 1.0 / 60.0;
+    let total: usize = (0..60)
+        .map(|_| splashes_due(&mut owed, SPLASHES_PER_SEC, 0.6, dt))
+        .sum();
+    let want = (SPLASHES_PER_SEC * 0.6) as usize;
+    assert!(total.abs_diff(want) <= 1, "{total} vs {want}");
+}

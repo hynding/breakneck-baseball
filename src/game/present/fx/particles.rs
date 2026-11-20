@@ -15,17 +15,43 @@ use crate::game::settings::Settings;
 use crate::game::theme::Theme;
 
 use super::FxAssets;
+use super::budget::FxBudget;
 use super::trail::build_trail_assets;
 
-/// One transient effect mote: moves, scales, dies.
+/// One transient effect mote: moves, scales, dies. Public so the e2e
+/// checks can count the motes against the tier's cap.
 #[derive(Component)]
-pub(super) struct Particle {
+pub struct Particle {
     vel: Vec3,
     timer: Timer,
     gravity: f32,
     /// Positive = expands to (1 + grow); negative = shrinks to nothing.
     grow: f32,
+    /// Air drag (1/s): confetti drifts down instead of dropping.
+    drag: f32,
 }
+
+impl Particle {
+    pub(super) fn new(vel: Vec3, secs: f32, gravity: f32, grow: f32) -> Self {
+        Self {
+            vel,
+            timer: Timer::from_seconds(secs, TimerMode::Once),
+            gravity,
+            grow,
+            drag: 0.0,
+        }
+    }
+
+    pub(super) fn with_drag(mut self, drag: f32) -> Self {
+        self.drag = drag;
+        self
+    }
+}
+
+/// A mote that tumbles as it flies (confetti, streamers): radians per
+/// second about each axis.
+#[derive(Component)]
+pub(super) struct Flutter(pub Vec3);
 
 pub(super) fn build_fx_assets(
     mut commands: Commands,
@@ -35,6 +61,22 @@ pub(super) fn build_fx_assets(
     settings: Res<Settings>,
 ) {
     build_trail_assets(&mut commands, &mut meshes, &mut materials, &settings);
+    // The last game's motes went with `cleanup_gameplay`.
+    commands.insert_resource(super::budget::LiveParticles::default());
+    let paper = |base_color: Color| StandardMaterial {
+        base_color,
+        unlit: true,
+        double_sided: true,
+        cull_mode: None,
+        ..default()
+    };
+    let confetti = theme
+        .fx
+        .fireworks
+        .into_iter()
+        .chain([Color::WHITE])
+        .map(|c| materials.add(paper(c)))
+        .collect();
     let firework = theme
         .fx
         .fireworks
@@ -62,6 +104,14 @@ pub(super) fn build_fx_assets(
             ..default()
         }),
         firework,
+        chalk: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.96, 0.96, 0.94),
+            unlit: true,
+            ..default()
+        }),
+        flake_mesh: meshes.add(Rectangle::new(0.14, 0.09)),
+        streamer_mesh: meshes.add(Rectangle::new(0.05, 0.9)),
+        confetti,
     });
     // A fresh show state each game (this system runs on `game_start()`).
     commands.insert_resource(Fireworks::default());
@@ -233,6 +283,7 @@ pub(super) fn contact_burst(
     ball_q: Query<&Transform, With<Baseball>>,
     assets: Option<Res<FxAssets>>,
     time: Res<Time>,
+    mut budget: FxBudget,
     mut commands: Commands,
 ) {
     let Some(assets) = assets else { return };
@@ -240,7 +291,7 @@ pub(super) fn contact_burst(
         let Ok(ball) = ball_q.single() else {
             continue;
         };
-        for i in 0..10 {
+        for i in 0..budget.allow(10) {
             let seed = time.elapsed_secs() * 13.7 + i as f32 * 1.618;
             let dir = Vec3::new(
                 noise(seed),
@@ -249,12 +300,7 @@ pub(super) fn contact_burst(
             )
             .normalize_or_zero();
             commands.spawn((
-                Particle {
-                    vel: dir * (4.0 + hash01(seed * 2.1) * 5.0),
-                    timer: Timer::from_seconds(0.35, TimerMode::Once),
-                    gravity: 4.0,
-                    grow: -1.0,
-                },
+                Particle::new(dir * (4.0 + hash01(seed * 2.1) * 5.0), 0.35, 4.0, -1.0),
                 GameplayEntity,
                 Mesh3d(assets.spark_mesh.clone()),
                 MeshMaterial3d(assets.spark.clone()),
@@ -269,24 +315,20 @@ pub(super) fn wall_bang_burst(
     mut bangs: MessageReader<WallBangEvent>,
     assets: Option<Res<FxAssets>>,
     time: Res<Time>,
+    mut budget: FxBudget,
     mut commands: Commands,
 ) {
     let Some(assets) = assets else { return };
     for bang in bangs.read() {
         // Spray hemisphere back toward the infield (the wall is behind).
         let inward = -Vec3::new(bang.pos.x, 0.0, bang.pos.z).normalize_or_zero();
-        for i in 0..8 {
+        for i in 0..budget.allow(8) {
             let seed = time.elapsed_secs() * 11.3 + i as f32 * 1.618;
             let dir = (inward * (0.6 + hash01(seed))
                 + Vec3::new(noise(seed * 1.3), hash01(seed * 1.7), noise(seed * 2.1)) * 0.7)
                 .normalize_or_zero();
             commands.spawn((
-                Particle {
-                    vel: dir * (3.0 + hash01(seed * 2.9) * 4.0),
-                    timer: Timer::from_seconds(0.4, TimerMode::Once),
-                    gravity: 5.0,
-                    grow: -1.0,
-                },
+                Particle::new(dir * (3.0 + hash01(seed * 2.9) * 4.0), 0.4, 5.0, -1.0),
                 GameplayEntity,
                 Mesh3d(assets.spark_mesh.clone()),
                 MeshMaterial3d(assets.spark.clone()),
@@ -339,6 +381,7 @@ pub(super) fn home_run_fireworks(
     assets: Option<Res<FxAssets>>,
     time: Res<Time>,
     mut show: ResMut<Fireworks>,
+    mut budget: FxBudget,
     mut commands: Commands,
 ) {
     let Some(assets) = assets else { return };
@@ -391,16 +434,11 @@ pub(super) fn home_run_fireworks(
     } else {
         FIREWORKS_SPARKS
     };
-    for i in 0..sparks {
+    for i in 0..budget.allow(sparks) {
         let seed = s * 17.3 + i as f32 * 1.618;
         let dir = Vec3::new(noise(seed), noise(seed * 1.3), noise(seed * 1.7)).normalize_or_zero();
         commands.spawn((
-            Particle {
-                vel: dir * (5.0 + hash01(seed * 2.1) * 4.0),
-                timer: Timer::from_seconds(0.9, TimerMode::Once),
-                gravity: 3.0,
-                grow: -1.0,
-            },
+            Particle::new(dir * (5.0 + hash01(seed * 2.1) * 4.0), 0.9, 3.0, -1.0),
             FireworkSpark,
             GameplayEntity,
             Mesh3d(assets.firework_mesh.clone()),
@@ -419,6 +457,7 @@ pub(super) fn bounce_dust(
     ball_q: Query<(Entity, &Transform, &Velocity), With<Baseball>>,
     assets: Option<Res<FxAssets>>,
     time: Res<Time>,
+    mut budget: FxBudget,
     mut commands: Commands,
 ) {
     let Some(assets) = assets else { return };
@@ -435,19 +474,19 @@ pub(super) fn bounce_dust(
         if vel.linvel.length() < DUST_MIN_SPEED {
             continue;
         }
-        for i in 0..6 {
+        for i in 0..budget.allow(6) {
             let seed = time.elapsed_secs() * 9.1 + i as f32 * 2.399;
             commands.spawn((
-                Particle {
-                    vel: Vec3::new(
+                Particle::new(
+                    Vec3::new(
                         noise(seed) * 1.6,
                         0.6 + hash01(seed * 1.9),
                         noise(seed * 2.3) * 1.6,
                     ),
-                    timer: Timer::from_seconds(0.4, TimerMode::Once),
-                    gravity: 0.8,
-                    grow: 1.6,
-                },
+                    0.4,
+                    0.8,
+                    1.6,
+                ),
                 GameplayEntity,
                 Mesh3d(assets.dust_mesh.clone()),
                 MeshMaterial3d(assets.dust.clone()),
@@ -464,13 +503,22 @@ pub(super) fn bounce_dust(
 /// Moves, scales, and expires every live particle.
 pub(super) fn tick_particles(
     time: Res<Time>,
-    mut particles: Query<(Entity, &mut Particle, &mut Transform)>,
+    mut particles: Query<(Entity, &mut Particle, &mut Transform, Option<&Flutter>)>,
+    live: Option<ResMut<super::budget::LiveParticles>>,
     mut commands: Commands,
 ) {
     let dt = time.delta_secs();
-    for (entity, mut particle, mut transform) in &mut particles {
+    let mut retired = 0;
+    for (entity, mut particle, mut transform, flutter) in &mut particles {
         let gravity = particle.gravity;
         particle.vel.y -= gravity * dt;
+        let drag = particle.drag;
+        if drag > 0.0 {
+            particle.vel *= (-drag * dt).exp();
+        }
+        if let Some(Flutter(spin)) = flutter {
+            transform.rotate(Quat::from_scaled_axis(*spin * dt));
+        }
         let step = particle.vel * dt;
         transform.translation += step;
         let f = particle.timer.tick(time.delta()).fraction();
@@ -481,6 +529,10 @@ pub(super) fn tick_particles(
         });
         if particle.timer.is_finished() {
             commands.entity(entity).despawn();
+            retired += 1;
         }
+    }
+    if let Some(mut live) = live {
+        live.0 = live.0.saturating_sub(retired);
     }
 }

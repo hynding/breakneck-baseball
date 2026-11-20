@@ -614,6 +614,14 @@ pub(super) fn spawn_bowl(
         Transform::from_translation(centre + turn * Vec3::Z * 0.55).with_rotation(turn),
         NotShadowCaster,
     ));
+    // A flag over the board, streaming in the day's wind (`flags`).
+    super::flags::FlagKit::new(&mut meshes, &mut materials).spawn_flagpole(
+        &mut commands,
+        &mut meshes,
+        centre + Vec3::Y * (bh / 2.0 + 0.5),
+        7.0,
+        4.4,
+    );
 
     commands.insert_resource(CrowdState {
         material: materials.add(StandardMaterial {

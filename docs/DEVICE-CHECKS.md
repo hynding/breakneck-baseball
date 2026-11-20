@@ -183,6 +183,24 @@ takes main-menu hotkeys as a fifth argument (`wwww` for Rain, `n` for
 Night) to repeat these runs. On a phone at Low, play an inning at Night
 and check the field is still readable without the tower spotlights.
 
+### Effects pass (task 13; same machine, 640×360, 25 s per tier)
+
+| Tier | Rain before (ms) | Rain after (ms) | Windy after (ms) | Particle cap |
+| --- | --- | --- | --- | --- |
+| Low | 158.4 | 153.8 | 153.3 | 150 |
+| Medium | 412.9 | 415.2 | 379.3 | 400 |
+| High | 475.6 | 449.7 | 436.7 | 900 |
+
+"Before" is the task 12 run, which still had bloom on High; that, not the
+effects, is High's drop. Every burst (contact sparks, wall bangs, dust,
+fireworks, and the new slide and dive dirt, glove pop, chalk puff and
+walk-off confetti) is authored at its High count, scaled by the tier's
+`particle_scale` (25%, 60%, 100%) and clipped so the motes alive never pass
+`particle_cap` (`fx::budget`). Rain splashes and the wind flags (both foul
+poles and the scoreboard) are Medium and up, so Low pays nothing for them.
+On a phone at Medium, play a Rain game and check the splashes don't cost
+frames, and at Low hit a walk-off to check the confetti stays smooth.
+
 ## What still needs a person with a device
 
 Use the GitHub Pages build for the web checks and `cargo run --release` for

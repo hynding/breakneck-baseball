@@ -125,6 +125,9 @@ pub struct RenderBudget {
     pub crowd_motion: bool,
     /// Multiplier on every effect's particle count (1.0 = the authored count).
     pub particle_scale: f32,
+    /// Most effect particles alive at once: a burst that would pass it
+    /// spawns only what fits (`fx::budget`).
+    pub particle_cap: usize,
     /// Multiplier on trail lengths (pitch and batted-ball trails).
     pub trail_scale: f32,
     /// Distance fog toward the horizon.
@@ -139,6 +142,9 @@ pub struct RenderBudget {
     /// In the rain, glossy (lower-roughness) turf and clay that catch the
     /// sky and lights; every tier still darkens wet ground.
     pub wet_reflections: bool,
+    /// Weather you can see move: rain splashing on the ground and flags
+    /// on the foul poles and scoreboard streaming in the wind.
+    pub weather_fx: bool,
     /// Normal-mapped turf and dirt, worn paths.
     pub surface_detail: bool,
     /// Seconds of play the replay buffer holds.
@@ -158,12 +164,14 @@ impl RenderBudget {
                 crowd_shadows: false,
                 crowd_motion: false,
                 particle_scale: 0.25,
+                particle_cap: 150,
                 trail_scale: 0.5,
                 fog: true,
                 sky: false,
                 bloom: false,
                 tower_lights: false,
                 wet_reflections: false,
+                weather_fx: false,
                 surface_detail: false,
                 replay_secs: 8.0,
                 replay_angles: 1,
@@ -173,12 +181,14 @@ impl RenderBudget {
                 crowd_shadows: false,
                 crowd_motion: false,
                 particle_scale: 0.6,
+                particle_cap: 400,
                 trail_scale: 1.0,
                 fog: true,
                 sky: true,
                 bloom: false,
                 tower_lights: true,
                 wet_reflections: false,
+                weather_fx: true,
                 surface_detail: false,
                 replay_secs: 10.0,
                 replay_angles: 2,
@@ -188,12 +198,14 @@ impl RenderBudget {
                 crowd_shadows: true,
                 crowd_motion: true,
                 particle_scale: 1.0,
+                particle_cap: 900,
                 trail_scale: 1.0,
                 fog: true,
                 sky: true,
                 bloom: false,
                 tower_lights: true,
                 wet_reflections: true,
+                weather_fx: true,
                 surface_detail: true,
                 replay_secs: 12.0,
                 replay_angles: 2,

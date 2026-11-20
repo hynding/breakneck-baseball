@@ -22,6 +22,7 @@ use crate::game::theme::FieldTheme;
 
 mod bowl;
 mod diamond;
+mod flags;
 mod stadium;
 mod textures;
 mod zone;
@@ -35,6 +36,8 @@ mod zone;
 /// resolves unchanged.
 pub use crate::game::rules::{BASE_DISTANCE_M as BASE_DISTANCE, HALF_DIAGONAL, PITCH_DISTANCE};
 
+pub use diamond::foul_line_spans;
+pub use flags::WindFlag;
 pub use stadium::WALL_HEIGHT;
 
 // ── Field-object marker components ───────────────────────────────────────────
@@ -203,6 +206,7 @@ impl Plugin for FieldPlugin {
                 bowl::cheer_crowd,
                 bowl::update_scoreboard,
                 bowl::tower_lights_follow_budget,
+                (flags::flags_follow_budget, flags::wave_flags).chain(),
             )
                 .run_if(in_state(GameState::Playing)),
         )

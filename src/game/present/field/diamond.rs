@@ -496,6 +496,16 @@ fn foul_line_span(field: &FieldSpec, base_index: usize) -> Option<(Vec3, Vec3)> 
     Some((offset, dir * rules::fence_at(dir, field) + offset))
 }
 
+/// Both foul lines' chalk, home to fence (first-base line, then third),
+/// exactly as `spawn_chalk_lines` paints them: the effects puff chalk off
+/// a ball that lands on one.
+pub fn foul_line_spans(field: &FieldSpec) -> Vec<(Vec3, Vec3)> {
+    [0, field.base_count() - 1]
+        .into_iter()
+        .filter_map(|i| foul_line_span(field, i))
+        .collect()
+}
+
 /// Spawns the chalk quad for `foul_line_span(field, base_index)`.
 fn spawn_foul_line(
     commands: &mut Commands,
