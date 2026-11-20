@@ -266,7 +266,7 @@ pub(super) fn umpire_signals(
         Some(ResultBeat::Strike) => (plate, AnimClip::UmpStrike),
         Some(ResultBeat::Strikeout) => (plate, AnimClip::UmpPunchOut),
         Some(ResultBeat::InPlay) => match play.last_outcome() {
-            Some(Outcome::Out(_) | Outcome::DoublePlay | Outcome::FieldersChoice { .. }) => {
+            Some(Outcome::Out(_) | Outcome::DoublePlay { .. } | Outcome::FieldersChoice { .. }) => {
                 (nearest_to_call(), AnimClip::UmpPunchOut)
             }
             Some(Outcome::ExtraBase { safe: false, .. }) => {

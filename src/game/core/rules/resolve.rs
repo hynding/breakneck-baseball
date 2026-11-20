@@ -428,7 +428,7 @@ pub fn resolve_thrown(
         if forced_runner_at(leg, false, forced_speed(bases, 0), &rules.pace)
             > relay_arrival + rules.pace.runner_margin_secs
         {
-            return Outcome::DoublePlay;
+            return Outcome::DoublePlay { out_base: target };
         }
         return Outcome::FieldersChoice { out_base: target };
     }

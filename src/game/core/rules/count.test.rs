@@ -144,7 +144,7 @@ fn batting_home(outs: u32) -> ScoreBoard {
 fn double_play_retires_the_batter_and_the_forced_runner() {
     let mut score = batting_home(0);
     let mut bases = with(&[0]);
-    let play = apply_double_play(&mut score, &mut bases, &std_rules());
+    let play = apply_double_play(&mut score, &mut bases, &std_rules(), 1);
     assert!(play.double_play);
     assert_eq!(play.outs, 2);
     assert_eq!(score.outs, 2);
@@ -157,7 +157,7 @@ fn double_play_still_scores_the_runner_from_third() {
     // because the inning does not end on the play.
     let mut score = batting_home(0);
     let mut bases = with(&[0, 2]);
-    let play = apply_double_play(&mut score, &mut bases, &std_rules());
+    let play = apply_double_play(&mut score, &mut bases, &std_rules(), 1);
     assert!(play.double_play);
     assert_eq!(play.runs, 1);
     assert_eq!(score.home_runs, 1);
@@ -170,7 +170,7 @@ fn inning_ending_double_play_scores_nothing() {
     // force ends the inning and the run never counts.
     let mut score = batting_home(1);
     let mut bases = with(&[0, 2]);
-    let play = apply_double_play(&mut score, &mut bases, &std_rules());
+    let play = apply_double_play(&mut score, &mut bases, &std_rules(), 1);
     assert!(play.double_play);
     assert_eq!(play.runs, 0);
     assert_eq!(score.home_runs, 0);
@@ -184,7 +184,7 @@ fn double_play_with_two_outs_only_counts_the_force() {
     // into the next half.
     let mut score = batting_home(2);
     let mut bases = with(&[0]);
-    let play = apply_double_play(&mut score, &mut bases, &std_rules());
+    let play = apply_double_play(&mut score, &mut bases, &std_rules(), 1);
     assert_eq!(play.outs, 1);
     assert_eq!(score.outs, 0); // half flipped cleanly
     assert!(score.top_of_inning);
@@ -212,6 +212,79 @@ fn fielders_choice_at_home_keeps_the_bases_loaded() {
     assert_eq!(play.runs, 0);
     assert_eq!(score.home_runs, 0);
     assert_eq!(bases, loaded());
+}
+
+#[test]
+fn home_to_first_double_play_scores_nobody() {
+    // Bases loaded, nobody out, force at the plate and the relay to first:
+    // the runner from third is out at home, the others move up behind him.
+    let mut score = batting_home(0);
+    let mut bases = loaded();
+    let home = bases.count();
+    let play = apply_double_play(&mut score, &mut bases, &std_rules(), home);
+    assert_eq!(play.outs, 2);
+    assert_eq!(play.runs, 0);
+    assert_eq!(score.home_runs, 0);
+    assert_eq!(bases, with(&[1, 2]));
+}
+
+#[test]
+fn double_play_at_third_retires_the_runner_from_second() {
+    // Runners on first and second: 5-3 after the force at third. The man
+    // from second is out; the man from first is safe at second.
+    let mut score = batting_home(0);
+    let mut bases = with(&[0, 1]);
+    let play = apply_double_play(&mut score, &mut bases, &std_rules(), 2);
+    assert_eq!(play.outs, 2);
+    assert_eq!(play.runs, 0);
+    assert_eq!(bases, with(&[1]));
+}
+
+#[test]
+fn double_play_at_third_with_the_bases_loaded_scores_the_runner_from_third() {
+    // Everyone was forced, so the runner from third crosses before the relay.
+    let mut score = batting_home(0);
+    let mut bases = loaded();
+    let play = apply_double_play(&mut score, &mut bases, &std_rules(), 2);
+    assert_eq!(play.runs, 1);
+    assert_eq!(score.home_runs, 1);
+    assert_eq!(bases, with(&[1]));
+}
+
+#[test]
+fn fielders_choice_at_second_with_the_bases_loaded_scores_the_runner_from_third() {
+    // Every runner was forced by the batter: the man from first dies at
+    // second, the other two move up, and the run counts.
+    let mut score = batting_home(0);
+    let mut bases = loaded();
+    let play = apply_fielders_choice(&mut score, &mut bases, &std_rules(), 1);
+    assert_eq!(play.runs, 1);
+    assert_eq!(score.home_runs, 1);
+    assert_eq!(score.outs, 1);
+    assert_eq!(bases, with(&[0, 2]));
+}
+
+#[test]
+fn fielders_choice_leaves_an_unforced_runner_where_he_is() {
+    // Runners on first and third: only the man on first was forced. He is
+    // out at second, the batter takes first, and the runner on third holds.
+    let mut score = batting_home(0);
+    let mut bases = with(&[0, 2]);
+    let play = apply_fielders_choice(&mut score, &mut bases, &std_rules(), 1);
+    assert_eq!(play.runs, 0);
+    assert_eq!(bases, with(&[0, 2]));
+}
+
+#[test]
+fn inning_ending_fielders_choice_scores_nothing() {
+    // Two out, bases loaded, force at second: the third out comes before
+    // any run can count.
+    let mut score = batting_home(2);
+    let mut bases = loaded();
+    let play = apply_fielders_choice(&mut score, &mut bases, &std_rules(), 1);
+    assert_eq!(play.runs, 0);
+    assert_eq!(score.home_runs, 0);
+    assert!(score.top_of_inning); // half flipped
 }
 
 #[test]

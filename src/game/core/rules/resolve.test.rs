@@ -318,7 +318,7 @@ fn quick_force_at_second_turns_two() {
             &std_field(),
             &std_rules()
         ),
-        Outcome::DoublePlay
+        Outcome::DoublePlay { out_base: 1 }
     );
 }
 
@@ -369,7 +369,9 @@ fn bases_loaded_quick_throw_home_turns_two() {
             &field,
             &std_rules()
         ),
-        Outcome::DoublePlay
+        Outcome::DoublePlay {
+            out_base: field.base_count()
+        }
     );
 }
 

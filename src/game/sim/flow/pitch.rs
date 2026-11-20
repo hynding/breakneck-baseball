@@ -763,9 +763,9 @@ fn judge_whiff(
     order: &mut BattingOrder,
     batter: crate::game::Team,
 ) -> ResultBeat {
-    // Swinging through a curveball in the dirt with first base open: the
+    // Swinging through a pitch in the dirt with first base open: the
     // catcher can't hold strike three and the batter runs.
-    let dropped = play.pitch.kind == Some(rules::PitchKind::Curveball) && !ump.bases_occupied(0);
+    let dropped = rules::drops_third_strike(cross, ump.bases_occupied(0));
     let call = ump.add_strike(true, dropped);
     play.pitch.last_strike_call = Some(call);
     // The catcher gloves everything except the strike three that got away

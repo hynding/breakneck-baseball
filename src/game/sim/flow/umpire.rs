@@ -245,8 +245,8 @@ impl<'a, 'w> Umpire<'a, 'w> {
                     self.announce_out(base_text, BannerTone::Bad, before);
                 }
             }
-            Outcome::DoublePlay => {
-                let play = rules::apply_double_play(self.score, self.bases, self.rules);
+            Outcome::DoublePlay { out_base } => {
+                let play = rules::apply_double_play(self.score, self.bases, self.rules, out_base);
                 if play.runs > 0 {
                     self.announce_scoring(format!("DOUBLE PLAY!  +{}", play.runs), BannerTone::Bad);
                 } else {
@@ -254,8 +254,16 @@ impl<'a, 'w> Umpire<'a, 'w> {
                 }
             }
             Outcome::FieldersChoice { out_base } => {
-                rules::apply_fielders_choice(self.score, self.bases, self.rules, out_base);
-                self.announce_out("FIELDER'S CHOICE", BannerTone::Bad, before);
+                let play =
+                    rules::apply_fielders_choice(self.score, self.bases, self.rules, out_base);
+                if play.runs > 0 {
+                    self.announce_scoring(
+                        format!("FIELDER'S CHOICE  +{}", play.runs),
+                        BannerTone::Bad,
+                    );
+                } else {
+                    self.announce_out("FIELDER'S CHOICE", BannerTone::Bad, before);
+                }
             }
             Outcome::Hit(n) => {
                 self.hit(n, &hit_label(n), BannerTone::Good, runners_going);

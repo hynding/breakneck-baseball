@@ -548,7 +548,7 @@ fn hold_and_throw(
         )
     });
     let relay_to = outcome
-        .filter(|outcome| matches!(outcome, rules::Outcome::DoublePlay))
+        .filter(|outcome| matches!(outcome, rules::Outcome::DoublePlay { .. }))
         .map(|_| 0);
     // A throw the race says sails goes high and on past the bag, over the
     // first baseman's glove, and rolls out toward the fence.

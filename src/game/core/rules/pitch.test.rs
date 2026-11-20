@@ -232,3 +232,24 @@ fn bunts_go_down_the_third_base_line_unless_pushed_to_first() {
     assert!(third.y < 0.0, "chopped down into the grass");
     assert!((third.length() - BUNT_SPEED).abs() < 1e-3);
 }
+
+// ── Dropped third strike ──────────────────────────────────────────────────
+
+#[test]
+fn only_a_pitch_in_the_dirt_drops_strike_three() {
+    // A chased curveball at the knees is held; one in the dirt is not.
+    assert!(!drops_third_strike(Vec2::new(0.0, ZONE_LOW - 0.1), false));
+    assert!(drops_third_strike(
+        Vec2::new(0.0, WILD_PITCH_LOW_M - 0.05),
+        false
+    ));
+}
+
+#[test]
+fn an_occupied_first_base_takes_the_dropped_third_away() {
+    // With first occupied the batter is out even if the ball gets away.
+    assert!(!drops_third_strike(
+        Vec2::new(0.0, WILD_PITCH_LOW_M - 0.05),
+        true
+    ));
+}
