@@ -155,6 +155,13 @@ fn a_home_run_replays_with_play_frozen_and_untouched() {
             .any(|(live, drawn)| *live == Visibility::Hidden && *drawn),
         "the replay must draw the batter the live play has hidden: {at_start:?}"
     );
+    let roots: Vec<Entity> = {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<Entity, (With<RigUnitTag>, Without<ChildOf>)>();
+        q.iter(app.world()).collect()
+    };
+    assert!(!roots.is_empty());
     let mut rendered_differs = false;
     let mut cameras = Vec::new();
     let mut frames = 0u64;
@@ -187,7 +194,9 @@ fn a_home_run_replays_with_play_frozen_and_untouched() {
                 t.translation == t0.translation && t.rotation.dot(t0.rotation).abs() > 1.0 - 1e-6,
                 "rig {e} moved for real during the replay: {t:?} vs {t0:?}"
             );
-            if g.translation().distance(t0.translation) > 0.5 {
+            // Roots are top-level, so their world pose is their local one:
+            // drawn somewhere other than where they live stand.
+            if roots.contains(e) && g.translation().distance(t0.translation) > 0.5 {
                 rendered_differs = true;
             }
         }

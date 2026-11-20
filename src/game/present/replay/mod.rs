@@ -11,7 +11,7 @@
 //! clock resumes exactly where it stopped.
 //!
 //! Which plays get one is the [`ReplayMode`] setting: big plays (a home
-//! run, a walk-off, a throw home, a diving catch) by default. Any action
+//! run, a walk-off on a ball in play, a throw home, a dive) by default. Any action
 //! press skips (the Director's presses too, so scripts and autoplay never
 //! stall on one). Buffer length and angle count come from the quality
 //! tier's [`RenderBudget`](crate::game::quality::RenderBudget).
@@ -29,7 +29,7 @@ use crate::game::ball::Baseball;
 use crate::game::camera::sequence::{self, BigMoment};
 use crate::game::flow::{LiveBallEvent, Phase, Play};
 use crate::game::input::Intents;
-use crate::game::player::{CatcherRole, PlateUmpire, RigUnitTag};
+use crate::game::player::{BatPivot, CatcherRole, PlateUmpire, RigUnitTag};
 use crate::game::quality::{ActiveQuality, QualityTier};
 use crate::game::settings::{ReplayMode, Settings};
 use crate::game::variant::FieldSpec;
@@ -155,7 +155,12 @@ type Recorded<'w, 's> = Query<
     's,
     (Entity, &'static Transform, Option<&'static Visibility>),
     (
-        Or<(With<RigUnitTag>, With<RigLimb>, With<AnimationTargetId>)>,
+        Or<(
+            With<RigUnitTag>,
+            With<RigLimb>,
+            With<AnimationTargetId>,
+            With<BatPivot>,
+        )>,
         Without<Baseball>,
         Without<Camera3d>,
     ),
@@ -505,7 +510,12 @@ fn apply_replay(
             Has<PlateUmpire>,
         ),
         (
-            Or<(With<RigUnitTag>, With<RigLimb>, With<AnimationTargetId>)>,
+            Or<(
+                With<RigUnitTag>,
+                With<RigLimb>,
+                With<AnimationTargetId>,
+                With<BatPivot>,
+            )>,
             Without<Baseball>,
         ),
     >,
