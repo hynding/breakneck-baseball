@@ -50,10 +50,10 @@ fn drive(
             intents.get_mut(fielding).action = true;
         }
         Phase::Pitch => {
-            if let Ok((t, v)) = ball.single() {
-                if (5.0..=6.0).contains(&bat_arrival_z(t.translation.z, v.linvel.z)) {
-                    intents.get_mut(batting).action = true;
-                }
+            if let Ok((t, v)) = ball.single()
+                && (5.0..=6.0).contains(&bat_arrival_z(t.translation.z, v.linvel.z))
+            {
+                intents.get_mut(batting).action = true;
             }
         }
         _ => {}

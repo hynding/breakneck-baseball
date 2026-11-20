@@ -240,19 +240,20 @@ pub(super) fn pre_pitch(
     // bag — any time before the delivery, one throw per reload, so a held
     // button can't spam the bag. The race is decided as the ball leaves
     // and called when it lands.
-    if intent.secondary && play.duel.pickoff_cooldown.is_finished() {
-        if let Some(runner) = candidate {
-            play.duel.pickoff_cooldown =
-                Timer::from_seconds(rules_res.pace.pickoff_cooldown_secs, TimerMode::Once);
-            play.duel.throw = Some(super::DuelThrow::new(
-                super::DuelThrowKind::Pickoff,
-                runner,
-                rules::pickoff_throw_timing(),
-                !rules::pickoff_beats_runner(lead.lead_m),
-            ));
-            play.duel.pitch_queued = false;
-            return;
-        }
+    if intent.secondary
+        && play.duel.pickoff_cooldown.is_finished()
+        && let Some(runner) = candidate
+    {
+        play.duel.pickoff_cooldown =
+            Timer::from_seconds(rules_res.pace.pickoff_cooldown_secs, TimerMode::Once);
+        play.duel.throw = Some(super::DuelThrow::new(
+            super::DuelThrowKind::Pickoff,
+            runner,
+            rules::pickoff_throw_timing(),
+            !rules::pickoff_beats_runner(lead.lead_m),
+        ));
+        play.duel.pitch_queued = false;
+        return;
     }
 
     if play.in_steal_window() {
@@ -505,13 +506,13 @@ pub(super) fn pitch_live(
     // A press starts the swing; the bat comes through the zone
     // `SWING_CONTACT_SECS` later, and that is when it is judged. A second
     // press mid-swing is nothing (the rig ignores it too: `trigger_swing`).
-    if let Some(input) = swing_commands.take(batter) {
-        if play.pitch.swing.is_none() {
-            play.pitch.swing = Some(PendingSwing {
-                input,
-                at: time.elapsed_secs() + SWING_CONTACT_SECS,
-            });
-        }
+    if let Some(input) = swing_commands.take(batter)
+        && play.pitch.swing.is_none()
+    {
+        play.pitch.swing = Some(PendingSwing {
+            input,
+            at: time.elapsed_secs() + SWING_CONTACT_SECS,
+        });
     }
 
     // A batter squared around to bunt offers as the pitch reaches the front

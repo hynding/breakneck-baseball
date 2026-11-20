@@ -232,10 +232,10 @@ fn bat_shows_only_on_the_batter() {
         let mut bat_meshes = Vec::new();
         let mut stack = vec![root];
         while let Some(e) = stack.pop() {
-            if let Ok(mat) = mats_q.get(world, e) {
-                if mat.0 == bat_material {
-                    bat_meshes.push(e);
-                }
+            if let Ok(mat) = mats_q.get(world, e)
+                && mat.0 == bat_material
+            {
+                bat_meshes.push(e);
             }
             if let Ok(children) = children_q.get(world, e) {
                 stack.extend(children.iter());

@@ -348,10 +348,11 @@ pub(super) fn celebrate_home_run(
         }
         for (id, mut playing) in &mut batters {
             let card = rosters.team(id.team).card(id.index);
-            if let Some(clip) = animation::celebration_clip(card.appearance.style.celebration) {
-                if playing.clip == AnimClip::BatterSwing && playing.next.is_none() {
-                    playing.next = Some(clip);
-                }
+            if let Some(clip) = animation::celebration_clip(card.appearance.style.celebration)
+                && playing.clip == AnimClip::BatterSwing
+                && playing.next.is_none()
+            {
+                playing.next = Some(clip);
             }
         }
     }

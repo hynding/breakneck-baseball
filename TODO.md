@@ -11,7 +11,7 @@ needs a human (11, 33) or is a deliberate non-action (98).
 
 | Item | Work | Done when |
 |---|---|---|
-| 29 · sim slowdown | Headless sim ~72% slower since Bevy 0.15. Levers 1 and 2 shipped (TADA 108): frame 2.5 → 1.82 ms, `balance_sim` ~450 → 299 s, lever 3 ruled out. What remains is engine-level: ~52% of the frame is executor overhead across ~380 system runs. Details in `docs/agent/BEVY-UPGRADE-ASSESSMENT.md` | Re-profile with `tests/e2e/sim_profile.rs` after the 0.18 step (TODO 29 step 3); close when the per-frame cost is within ~20% of 0.15's or attributed to the engine |
+| 29 · sim slowdown | Headless sim ~72% slower since Bevy 0.15. Levers 1 and 2 shipped (TADA 108): frame 2.5 → 1.82 ms, `balance_sim` ~450 → 299 s, lever 3 ruled out. What remains is engine-level: ~52% of the frame is executor overhead across ~380 system runs. Details in `docs/agent/BEVY-UPGRADE-ASSESSMENT.md` | Re-profiled on 0.18 (2026-11-20): 1.72 ms/frame with skeletal sampling skipped (1.82 on 0.17), 1.86 with it. Re-profile after the 0.19 step; close when the per-frame cost is within ~20% of 0.15's or attributed to the engine |
 | 78 · remainder | Pause-board height cap for < 530 px viewports | `/run-web` screenshot at a 400 px-tall viewport shows the whole board; `cargo test --test e2e pause_subs::` green |
 
 ## Test-suite gaps

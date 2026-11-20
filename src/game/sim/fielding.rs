@@ -801,13 +801,12 @@ fn cover_duel_throw(
 ) {
     let Some(throw) = play.duel_throw() else {
         // The throw is over: send the cover man home.
-        if let Some((_, _, entity)) = cover.take() {
-            if let Ok((_, fielder, _, mut intent, _)) = fielders.get_mut(entity) {
-                if let Some(spot) = field.fielder_positions.get(fielder.index) {
-                    intent.target = Some(*spot);
-                    intent.speed = RETURN_SPEED;
-                }
-            }
+        if let Some((_, _, entity)) = cover.take()
+            && let Ok((_, fielder, _, mut intent, _)) = fielders.get_mut(entity)
+            && let Some(spot) = field.fielder_positions.get(fielder.index)
+        {
+            intent.target = Some(*spot);
+            intent.speed = RETURN_SPEED;
         }
         *gloved = false;
         return;

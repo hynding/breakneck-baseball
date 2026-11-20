@@ -50,12 +50,12 @@ fn drive(
             intent.action = true;
         }
         Phase::Pitch => {
-            if let Ok((t, v)) = ball.single() {
-                if (-0.1..=0.05).contains(&bat_arrival_z(t.translation.z, v.linvel.z)) {
-                    let intent = intents.get_mut(batting);
-                    intent.aim = Vec2::new(0.0, -1.0);
-                    intent.action = true;
-                }
+            if let Ok((t, v)) = ball.single()
+                && (-0.1..=0.05).contains(&bat_arrival_z(t.translation.z, v.linvel.z))
+            {
+                let intent = intents.get_mut(batting);
+                intent.aim = Vec2::new(0.0, -1.0);
+                intent.action = true;
             }
         }
         _ => {}
@@ -189,10 +189,10 @@ fn drive_fly(
             // `rules::hit_velocity` launch retune; the fly this probe wants
             // needs the uppercut.
             intents.get_mut(score.batting_team()).aim = Vec2::new(0.0, 0.8);
-            if let Ok((t, v)) = ball.single() {
-                if (-0.3..=0.3).contains(&bat_arrival_z(t.translation.z, v.linvel.z)) {
-                    intents.get_mut(score.batting_team()).action = true;
-                }
+            if let Ok((t, v)) = ball.single()
+                && (-0.3..=0.3).contains(&bat_arrival_z(t.translation.z, v.linvel.z))
+            {
+                intents.get_mut(score.batting_team()).action = true;
             }
         }
         _ => {}
@@ -219,10 +219,10 @@ fn a_fly_ball_takes_the_fielder_cam_on_the_way_down() {
     let mut frames = 0u64;
     let mut peak_y = 0.0f32;
     while phase(&app) == Phase::InPlay {
-        if let Some(s) = shot(&app) {
-            if seen.last() != Some(&s) {
-                seen.push(s);
-            }
+        if let Some(s) = shot(&app)
+            && seen.last() != Some(&s)
+        {
+            seen.push(s);
         }
         if let Ok(t) = app
             .world_mut()

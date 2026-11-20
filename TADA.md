@@ -473,3 +473,5 @@ the probe that now guards it.
     clippy `-D warnings` default / dev+debug+autoplay / wasm, `--features debug` wasm check,
     full `cargo test`, `creator::` under `debug`, and a browser run (menu, duel HUD, pause
     board all render on WebGL2).
+    Headless sim on 0.18: 1.72 ms/frame with skeletal sampling skipped (1.82 on 0.17), 1.86
+    with it (`sim_profile::`, one CPU-vs-CPU inning).

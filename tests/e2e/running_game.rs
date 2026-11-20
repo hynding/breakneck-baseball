@@ -77,10 +77,11 @@ fn drive(
     }
     let defense = intents.get_mut(fielding);
     defense.aim = thumbs.aim;
-    if let Some(past) = thumbs.pickoff_past_lead {
-        if lead.lead_m > past && play.duel_throw().is_none() {
-            defense.secondary = true;
-        }
+    if let Some(past) = thumbs.pickoff_past_lead
+        && lead.lead_m > past
+        && play.duel_throw().is_none()
+    {
+        defense.secondary = true;
     }
     if thumbs.pitch == PitchPress::OnceInWindow && play.in_steal_window() && !pressed.0 {
         pressed.0 = true;

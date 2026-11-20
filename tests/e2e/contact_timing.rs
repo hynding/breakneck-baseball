@@ -129,10 +129,10 @@ fn capture(
     }
     if matches!(play.as_deref().map(|p| p.phase), Some(Phase::InPlay)) {
         let slot = cap.live_slot;
-        if slot < 3 {
-            if let Ok(v) = ball.single() {
-                cap.speed[slot] = cap.speed[slot].max(v.linvel.length());
-            }
+        if slot < 3
+            && let Ok(v) = ball.single()
+        {
+            cap.speed[slot] = cap.speed[slot].max(v.linvel.length());
         }
     }
 }

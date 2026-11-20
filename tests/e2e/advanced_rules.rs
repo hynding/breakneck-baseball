@@ -257,10 +257,10 @@ fn drive_whiffs(
             intent.action = true;
         }
         Phase::Pitch => {
-            if let Ok((t, v)) = ball.single() {
-                if bat_arrival_z(t.translation.z, v.linvel.z) > 5.0 {
-                    intents.get_mut(score.batting_team()).action = true;
-                }
+            if let Ok((t, v)) = ball.single()
+                && bat_arrival_z(t.translation.z, v.linvel.z) > 5.0
+            {
+                intents.get_mut(score.batting_team()).action = true;
             }
         }
         _ => {}

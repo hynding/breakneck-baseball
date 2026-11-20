@@ -217,17 +217,17 @@ fn dress_rigs(
             Visibility::Hidden
         };
         for &mesh in &cap_meshes.0 {
-            if let Ok(mut vis) = cap_visibilities.get_mut(mesh) {
-                if *vis != cap_visibility {
-                    *vis = cap_visibility;
-                }
+            if let Ok(mut vis) = cap_visibilities.get_mut(mesh)
+                && *vis != cap_visibility
+            {
+                *vis = cap_visibility;
             }
         }
 
         // 2. Despawn this rig's old props before rebuilding.
         if let Some(mut rig_gear) = rig_gear {
             for e in take(&mut rig_gear.0) {
-                commands.entity(e).despawn();
+                commands.entity(e).try_despawn();
             }
         }
 
@@ -368,7 +368,7 @@ fn dress_rigs(
         }
 
         // 4. Record what's spawned and re-stamp the look.
-        commands.entity(rig).insert((target, RigGear(props)));
+        commands.entity(rig).try_insert((target, RigGear(props)));
     }
 }
 

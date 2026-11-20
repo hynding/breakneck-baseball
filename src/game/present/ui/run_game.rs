@@ -36,19 +36,19 @@ pub(super) fn hint_line(c: &HintCues) -> String {
     }
     let mut parts: Vec<String> = Vec::new();
     // The pickoff is only on before the delivery starts.
-    if c.phase == Phase::PrePitch {
-        if let Some(key) = c.defense_key {
-            parts.push(format!("{key}  PICKOFF {}", rules::base_name(runner)));
-        }
+    if c.phase == Phase::PrePitch
+        && let Some(key) = c.defense_key
+    {
+        parts.push(format!("{key}  PICKOFF {}", rules::base_name(runner)));
     }
-    if matches!(c.phase, Phase::PrePitch | Phase::WindUp) {
-        if let Some(key) = c.offense_key {
-            parts.push(if c.called {
-                "STEAL ON!".to_string()
-            } else {
-                format!("{key}  STEAL {}", rules::base_name(runner + 1))
-            });
-        }
+    if matches!(c.phase, Phase::PrePitch | Phase::WindUp)
+        && let Some(key) = c.offense_key
+    {
+        parts.push(if c.called {
+            "STEAL ON!".to_string()
+        } else {
+            format!("{key}  STEAL {}", rules::base_name(runner + 1))
+        });
     }
     parts.join("      ")
 }
