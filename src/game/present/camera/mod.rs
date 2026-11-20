@@ -4,7 +4,9 @@
 //!
 //! - **Broadcast** (default): the duel framing for the pitch, then a shot
 //!   list that *cuts* between one-subject shots while the ball is live —
-//!   ball-follow, fielder cam, base cam ([`Shot`]).
+//!   ball-follow, fielder cam, base cam ([`Shot`]). Each shot's framing is
+//!   a [`ShotSpec`] and each change of shot a [`Transition`], both in the
+//!   pure shot catalog (`shots.rs`); the rig (`rigs.rs`) only applies them.
 //! - **Orbit**: the free stadium camera (WASD / arrows to orbit, Q/E or wheel to
 //!   zoom, R to reset) for looking around.
 //!
@@ -25,12 +27,14 @@ use crate::game::variant::FieldSpec;
 
 mod framing;
 mod rigs;
+mod shots;
 
 pub use framing::{
     aspect_safe_duel_vfov, brushes_lens, framed_height_fraction, framed_ndc_x, framed_ndc_y,
     occludes,
 };
-pub use rigs::{BroadcastRig, OrbitState, Shot};
+pub use rigs::{BroadcastRig, OrbitState};
+pub use shots::{Shot, ShotSpec, Transition};
 
 use rigs::{
     CameraKick, broadcast_camera, decay_kick, hide_occluders, kick_on_hit, kick_on_wall_bang,

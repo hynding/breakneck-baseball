@@ -61,7 +61,11 @@ framings (batting view / catcher POV / behind-pitcher / broadcast plate). The ca
 the active broadcast view. After contact the broadcast camera holds the plate framing for
 `camera::BALL_FOLLOW_DELAY` (0.25 s), then **cuts** through a one-subject shot list (`camera::Shot`:
 ball-follow → fielder cam on a descending fly → base cam on the throw, where the call lands;
-smoothing only within a shot). The strike zone (`rules::ZONE_*`) is
+smoothing only within a shot). The shots live in a pure catalog, `camera/shots.rs`: `pick_shot`
+chooses, `Shot::spec` frames (a `ShotSpec`: eye, look-at, FOV, follow rate) and
+`Shot::transition_from` says how to get there (`Transition::Cut` for every shot today; `Ease` and
+`WhipPan` exist for new shots). Adding a shot is a `Shot` variant, its `spec` arm and a `pick_shot`
+arm; `rigs.rs` only gathers inputs and moves the lens (`RigMotion`). The strike zone (`rules::ZONE_*`) is
 drawn as a floating box; the batter finishes `BatterSwing` before the hidden run-out rig takes
 over after its `RunDelay`.
 

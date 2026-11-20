@@ -1,5 +1,7 @@
-//! Tests for [`super`] — the shot list (TODO 102) and the play cams.
+//! Tests for [`super`]: the shot list (TODO 102), the play cams, and
+//! moving between shots.
 
+use super::super::DUEL_REFERENCE_ASPECT;
 use super::*;
 use crate::game::variant::VariantId;
 
@@ -231,4 +233,203 @@ fn fielder_cam_looks_across_the_fielder_at_the_ball() {
         to_ball.dot(to_target) > 0.9,
         "the ball must be near the centre of frame"
     );
+}
+
+// ── ShotSpec and transitions ──────────────────────────────────────────────────
+
+fn inputs(field: &FieldSpec) -> ShotInputs<'_> {
+    ShotInputs {
+        field,
+        aspect: DUEL_REFERENCE_ASPECT,
+        ball: None,
+        fielder: None,
+        wind: Vec3::ZERO,
+        home_run: false,
+        trot_secs: 0.0,
+    }
+}
+
+/// The catalog frames each shot exactly as the rig did before it existed:
+/// the duel views, the fixed plate shots and the play cams.
+#[test]
+fn every_shot_keeps_its_framing() {
+    let field = VariantId::Standard.field();
+    let inp = inputs(&field);
+    for view in [DuelView::BattingZoom, DuelView::CatcherPov] {
+        let (eye, target, fov) = view.framing(&field, DUEL_REFERENCE_ASPECT);
+        assert_eq!(Shot::Duel(view).spec(&inp), ShotSpec::new(eye, target, fov));
+    }
+    let walk = Shot::WalkUp.spec(&inp);
+    assert_eq!((walk.eye, walk.target), (WALKUP_EYE, WALKUP_TARGET));
+    let react = Shot::ReactionCam.spec(&inp);
+    assert_eq!((react.eye, react.target), (REACTION_EYE, REACTION_TARGET));
+    let (eye, target) = base_cam(&field, 2);
+    let base = Shot::BaseCam(2).spec(&inp);
+    assert_eq!(
+        (base.eye, base.target, base.fov),
+        (eye, target, PLAY_CAM_FOV)
+    );
+    // No ball: the play cams fall back to the wide broadcast shot.
+    let wide = Shot::BallFollow.spec(&inp);
+    assert_eq!(
+        (wide.eye, wide.target),
+        (field.broadcast_eye, field.broadcast_target)
+    );
+    let f = Entity::from_raw_u32(4).unwrap();
+    assert_eq!(Shot::FielderCam(f).spec(&inp), wide);
+}
+
+/// The fielder cam frames the fielder it was given, or the ball if the
+/// fielder's rig is gone.
+#[test]
+fn the_fielder_cam_reads_its_fielder() {
+    let field = VariantId::Standard.field();
+    let ball = BallState {
+        pos: Vec3::new(4.0, 8.0, 52.0),
+        vel: Vec3::new(0.0, -5.0, 0.0),
+        spin: Vec3::ZERO,
+    };
+    let fielder = Vec3::new(10.0, 0.0, 60.0);
+    let mut inp = inputs(&field);
+    inp.ball = Some(ball);
+    inp.fielder = Some(fielder);
+    let shot = Shot::FielderCam(Entity::from_raw_u32(4).unwrap());
+    let (eye, target) = fielder_cam(fielder, ball.pos);
+    let spec = shot.spec(&inp);
+    assert_eq!((spec.eye, spec.target), (eye, target));
+    inp.fielder = None;
+    let (eye, _) = fielder_cam(ball.pos, ball.pos);
+    assert_eq!(shot.spec(&inp).eye, eye);
+}
+
+/// A home run in flight sweeps with the ball; anything else frames where
+/// it will come down.
+#[test]
+fn the_ball_follow_splits_on_the_home_run() {
+    let field = VariantId::Standard.field();
+    let ball = BallState {
+        pos: Vec3::new(5.0, 20.0, 60.0),
+        vel: Vec3::new(2.0, 10.0, 30.0),
+        spin: Vec3::ZERO,
+    };
+    let mut inp = inputs(&field);
+    inp.ball = Some(ball);
+    let fly = Shot::BallFollow.spec(&inp);
+    assert_eq!((fly.eye, fly.target), landing_zone_cam(ball, Vec3::ZERO));
+    inp.home_run = true;
+    let hr = Shot::BallFollow.spec(&inp);
+    assert_eq!((hr.eye, hr.target), home_run_follow(&field, ball.pos));
+}
+
+/// The trot orbit sweeps the behind-home arc and then holds its far end.
+#[test]
+fn the_trot_orbit_sweeps_then_holds() {
+    let field = VariantId::Standard.field();
+    let at = |secs| {
+        let mut inp = inputs(&field);
+        inp.trot_secs = secs;
+        Shot::TrotOrbit.spec(&inp).eye
+    };
+    assert_ne!(at(0.0), at(1.0));
+    assert_eq!(at(100.0), at(200.0));
+}
+
+/// Every shot still cuts in: the catalog changes no transitions.
+#[test]
+fn every_shot_cuts_in_today() {
+    let f = Entity::from_raw_u32(1).unwrap();
+    for shot in [
+        Shot::Duel(DuelView::BattingZoom),
+        Shot::BallFollow,
+        Shot::FielderCam(f),
+        Shot::BaseCam(0),
+        Shot::TrotOrbit,
+        Shot::WalkUp,
+        Shot::ReactionCam,
+    ] {
+        assert_eq!(
+            shot.transition_from(Some(Shot::BallFollow)),
+            Transition::Cut
+        );
+    }
+}
+
+fn spec(eye: Vec3, target: Vec3, fov: f32) -> ShotSpec {
+    ShotSpec::new(eye, target, fov)
+}
+
+/// A cut lands on the new framing the same frame.
+#[test]
+fn a_cut_snaps() {
+    let mut m = RigMotion::new(Vec3::ZERO, Vec3::Z, 1.0);
+    let to = spec(Vec3::new(10.0, 5.0, 0.0), Vec3::new(0.0, 0.0, 50.0), 0.8);
+    m.start(Transition::Cut, to);
+    assert_eq!((m.eye, m.target, m.fov), (to.eye, to.target, to.fov));
+    assert!(!m.blending());
+}
+
+/// Within a shot the lens follows its subject at the shot's rate, never
+/// overshooting.
+#[test]
+fn within_a_shot_the_lens_follows() {
+    let mut m = RigMotion::new(Vec3::ZERO, Vec3::Z, 1.0);
+    let to = spec(Vec3::new(10.0, 0.0, 0.0), Vec3::Z, 1.0);
+    m.step(to, 1.0 / 60.0);
+    let k = 1.0 - (-FOLLOW_RATE / 60.0_f32).exp();
+    assert!((m.eye.x - 10.0 * k).abs() < 1e-4, "{}", m.eye.x);
+    for _ in 0..600 {
+        m.step(to, 1.0 / 60.0);
+        assert!(m.eye.x <= 10.0 + 1e-4);
+    }
+    assert!((m.eye.x - 10.0).abs() < 1e-3);
+}
+
+/// An ease glides from where the lens was, passes the midpoint at half
+/// time, tracks a moving subject, and lands on it exactly at the end.
+#[test]
+fn an_ease_glides_and_lands() {
+    let mut m = RigMotion::new(Vec3::ZERO, Vec3::Z, 1.0);
+    let to = spec(Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 20.0), 0.5);
+    m.start(Transition::Ease { secs: 1.0 }, to);
+    assert_eq!(m.eye, Vec3::ZERO, "an ease starts where the lens is");
+    for _ in 0..5 {
+        m.step(to, 0.1);
+    }
+    assert!((m.eye.x - 5.0).abs() < 1e-3, "midpoint {}", m.eye.x);
+    assert!((m.fov - 0.75).abs() < 1e-4);
+    // The subject moves on: the ease lands on where it is now.
+    let moved = spec(Vec3::new(12.0, 0.0, 0.0), to.target, to.fov);
+    for _ in 0..5 {
+        m.step(moved, 0.1);
+    }
+    m.step(moved, 0.01);
+    assert!(!m.blending());
+    assert_eq!(m.eye, moved.eye);
+}
+
+/// A whip pan holds the eye and swings the look-at, then cuts the eye.
+#[test]
+fn a_whip_pan_swings_then_cuts() {
+    let mut m = RigMotion::new(Vec3::ZERO, Vec3::Z, 1.0);
+    let to = spec(Vec3::new(10.0, 0.0, 0.0), Vec3::new(30.0, 0.0, 0.0), 0.5);
+    m.start(Transition::WhipPan { secs: 0.3 }, to);
+    m.step(to, 0.15);
+    assert_eq!(m.eye, Vec3::ZERO, "the eye holds during the pan");
+    assert!(
+        (m.target - Vec3::new(15.0, 0.0, 0.5)).length() < 1e-3,
+        "{}",
+        m.target
+    );
+    m.step(to, 0.2);
+    assert_eq!((m.eye, m.target, m.fov), (to.eye, to.target, to.fov));
+}
+
+/// A zero-length ease is a cut.
+#[test]
+fn a_zero_length_ease_is_a_cut() {
+    let mut m = RigMotion::new(Vec3::ZERO, Vec3::Z, 1.0);
+    let to = spec(Vec3::X, Vec3::Y, 0.5);
+    m.start(Transition::Ease { secs: 0.0 }, to);
+    assert_eq!(m.eye, Vec3::X);
+    assert!(!m.blending());
 }
