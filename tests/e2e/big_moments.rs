@@ -2,7 +2,7 @@
 //! result pause cuts to the crowd, then plays its replay, then the trot
 //! orbit; a walk-off holds the plate pile-up; a dive gets its low angle on
 //! the fielder who laid out. A press during a sequence hands straight back
-//! to the ordinary shot list, the next frame, with no replay.
+//! to the ordinary shot list, that same frame, with no replay.
 
 use crate::common;
 
@@ -182,8 +182,7 @@ fn a_press_skips_the_sequence_and_its_replay() {
         app.world().resource::<BigMomentCue>().skipped
     });
     assert!(skipped.is_some(), "the press never skipped");
-    app.update();
-    assert_eq!(shot(&app), Some(Shot::TrotOrbit), "back within a frame");
+    assert_eq!(shot(&app), Some(Shot::TrotOrbit), "back on the press frame");
     let replayed = run_until(&mut app, 600, |app| playing(app));
     assert!(replayed.is_none(), "a skipped sequence still replayed");
 }

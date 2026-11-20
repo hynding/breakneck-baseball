@@ -36,7 +36,7 @@ pub const PILE_UP_REPLAY_SECS: f32 = 1.0;
 
 /// The sequence's shot `elapsed` seconds into the result pause, or `None`
 /// once it has handed back to the ordinary shot list (the home run's trot
-/// orbit; a dive's call keeps the shot it ended on, the dive cam).
+/// orbit; after a dive, the bag the throw went to, else the ball).
 pub fn sequence_shot(moment: BigMoment, elapsed: f32) -> Option<Shot> {
     match moment {
         BigMoment::HomeRun => (elapsed < CROWD_SECS).then_some(Shot::CrowdCam),

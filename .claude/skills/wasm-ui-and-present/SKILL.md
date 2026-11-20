@@ -93,7 +93,7 @@ walk-off = `Shot::PileUp` on the plate for the whole pause, the replay inside it
 replay until the opening shot is done (the camera runs after `replay::BigMomentSystems`, so the call
 frame already shows it). The crowd shot is Stadium-only (the front yard has no stands; its homer
 goes straight to the orbit). An action press after the skip grace drops the sequence and its
-replay: the ordinary shot list is back the next frame, and a dive's shot that ended or was skipped
+replay: the ordinary shot list is back that same frame, and a dive's shot that ended or was skipped
 hands the pause to the bag the throw went to, else the ball. e2e `big_moments.rs` pins each sequence
 and the skip.
 The grounder call is made once, just after the plate hold, by `shots::PlayRead` (low and coming
