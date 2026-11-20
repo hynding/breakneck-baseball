@@ -19,6 +19,7 @@ use breakneck_baseball::game::input::{Controllers, InputSource, Intents};
 use breakneck_baseball::game::player::{Batter, RigUnitTag};
 use breakneck_baseball::game::quality::{ActiveQuality, QualityTier};
 use breakneck_baseball::game::replay::{Replay, SKIP_GRACE};
+use breakneck_baseball::game::rules::Bases;
 use breakneck_baseball::game::settings::{ReplayMode, Settings};
 use breakneck_baseball::game::ui::{ReplayTagLine, ReplayTagText, SKIP_PROMPT};
 use breakneck_baseball::game::variant::Ruleset;
@@ -27,6 +28,10 @@ use breakneck_baseball::game::{GameState, ScoreBoard, Team};
 use common::{DT, DriveGame, headless_app, run_until, start_game, tap_key};
 
 const MAX_FRAMES: u64 = 100_000;
+
+/// Spray aim for Home's swings (straight up the middle when absent).
+#[derive(Resource)]
+struct Aim(Vec2);
 
 /// Whether the drive should mash the confirm button during a replay.
 #[derive(Resource, Default)]
@@ -43,9 +48,11 @@ fn pin_classic_contact_windows(app: &mut App) {
 
 /// The `home_run_moment` script: Away strikes out looking, Home swings a
 /// dead-red uppercut for a home run.
+#[allow(clippy::too_many_arguments)]
 fn drive(
     state: Res<State<GameState>>,
     skip: Res<SkipReplays>,
+    aim: Option<Res<Aim>>,
     replay: Res<Replay>,
     mut intents: ResMut<Intents>,
     play: Option<Res<Play>>,
@@ -70,7 +77,7 @@ fn drive(
         }
         Phase::Pitch if score.batting_team() == Team::Home => {
             if let Ok((t, v)) = ball.single() {
-                intents.home.aim = Vec2::new(0.0, 1.0);
+                intents.home.aim = aim.as_ref().map_or(Vec2::new(0.0, 1.0), |a| a.0);
                 let z = bat_arrival_z(t.translation.z, v.linvel.z);
                 if (0.0..=0.45).contains(&z) {
                     intents.home.action = true;
@@ -283,10 +290,39 @@ fn a_cpu_game_with_every_replay_finishes() {
         ..Controllers::default()
     };
     app.world_mut().resource_mut::<Settings>().replays = ReplayMode::Always;
+    // Rigs that leave the field are kept, hidden, for the replay: every
+    // occupied bag must still show a runner standing on it at each pitch
+    // (a batter-runner adopted after reaching first once ran on invisibly).
+    let mut pitches = 0;
+    let mut missing = Vec::new();
+    let mut was_pre_pitch = false;
     let finished = run_until(&mut app, 600_000, |app| {
+        let pre_pitch = app.world().resource::<Play>().phase == Phase::PrePitch;
+        if pre_pitch && !was_pre_pitch {
+            pitches += 1;
+            let bases = app.world().resource::<Bases>().clone();
+            let mut q = app
+                .world_mut()
+                .query::<(&breakneck_baseball::game::runner::Runner, &Visibility)>();
+            let shown: Vec<usize> = q
+                .iter(app.world())
+                .filter(|(_, v)| **v != Visibility::Hidden)
+                .map(|(r, _)| r.base)
+                .collect();
+            for base in 0..bases.count() {
+                if bases.is_occupied(base) && !shown.contains(&base) {
+                    missing.push((pitches, base));
+                }
+            }
+        }
+        was_pre_pitch = pre_pitch;
         *app.world().resource::<State<GameState>>().get() == GameState::GameOver
     });
     assert!(finished.is_some(), "the game never finished");
+    assert!(
+        missing.is_empty(),
+        "occupied bags with no runner shown (pitch, base): {missing:?}"
+    );
     let replay = app.world().resource::<Replay>();
     assert!(
         replay.played >= 2,
@@ -398,4 +434,68 @@ fn a_runner_who_scored_is_in_the_replay() {
         app.world().get_entity(runner).is_err(),
         "the scored runner lingers"
     );
+}
+
+/// Occupied bags with no runner drawn on them, and runner rigs hidden.
+fn unshown_runners(app: &mut App) -> (Vec<usize>, usize) {
+    let bases = app.world().resource::<Bases>().clone();
+    let mut q = app
+        .world_mut()
+        .query::<(&breakneck_baseball::game::runner::Runner, &Visibility)>();
+    let mut hidden = 0;
+    let mut shown = Vec::new();
+    for (r, v) in q.iter(app.world()) {
+        if *v == Visibility::Hidden {
+            hidden += 1;
+        } else {
+            shown.push(r.base);
+        }
+    }
+    let missing = (0..bases.count())
+        .filter(|&b| bases.is_occupied(b) && !shown.contains(&b))
+        .collect();
+    (missing, hidden)
+}
+
+/// A batter-runner who reaches first before the outfield throw is kept
+/// (hidden) for the replay; when the throw's call then makes him the runner,
+/// he must come back into view and stay on his bag past the play. (These
+/// balls to left-centre do it within the first few: the check failed at
+/// once, on a single, while the adoption left him hidden.)
+#[test]
+fn a_batter_runner_on_a_ball_in_the_gap_stays_on_the_field() {
+    let mut app = app_with(ReplayMode::BigPlays, false);
+    app.insert_resource(Aim(Vec2::new(-0.5, 0.3)));
+    app.world_mut()
+        .resource_mut::<Ruleset>()
+        .batting
+        .exit_perfect = 1.0;
+    let mut in_play = 0;
+    let mut was = Phase::PrePitch;
+    let mut on_base = false;
+    let mut frames = 0u64;
+    while frames < 400_000 && in_play < 8 {
+        app.update();
+        frames += 1;
+        if *app.world().resource::<State<GameState>>().get() != GameState::Playing {
+            break;
+        }
+        let phase = app.world().resource::<Play>().phase;
+        if phase == Phase::InPlay && was != Phase::InPlay {
+            in_play += 1;
+        }
+        let (missing, hidden) = unshown_runners(&mut app);
+        assert_eq!(
+            hidden, 0,
+            "a runner rig hidden in {phase:?} (frame {frames})"
+        );
+        if phase == Phase::PrePitch && was != Phase::PrePitch {
+            assert!(missing.is_empty(), "bags with no runner: {missing:?}");
+        }
+        let bases = app.world().resource::<Bases>();
+        on_base |= (0..bases.count()).any(|b| bases.is_occupied(b));
+        was = phase;
+    }
+    assert!(in_play >= 3, "only {in_play} balls in play");
+    assert!(on_base, "no ball in the gap put the batter on");
 }

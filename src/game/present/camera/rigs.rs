@@ -13,7 +13,7 @@ use crate::game::fielding::ActivePlay;
 use crate::game::flow::{LiveBallEvent, Phase, Play, ResultBeat};
 use crate::game::player::{CatcherRole, PlateUmpire};
 use crate::game::rules;
-use crate::game::runner::BasePath;
+use crate::game::runner::{BasePath, Departed};
 use crate::game::variant::FieldSpec;
 
 use super::framing::{LENS_BRUSH_RADIUS, OCCLUSION_NEAR, OCCLUSION_RADIUS, brushes_lens, occludes};
@@ -224,6 +224,7 @@ pub(super) fn broadcast_camera(
     ball_q: BallQuery,
     rigs: Query<&Transform, (Without<Baseball>, Without<Camera3d>)>,
     paths: Query<(Entity, &BasePath)>,
+    departed: Query<(), With<Departed>>,
     mut rig: ResMut<BroadcastRig>,
     mut trot_start: Local<Option<f32>>,
     mut cam_q: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
@@ -333,10 +334,10 @@ pub(super) fn broadcast_camera(
         let thrown_bag = bag_at(base);
         // Picked once per throw, then kept (a runner on a triple races on
         // past the bag the throw went to). A subject that is gone — a
-        // runner scoring despawns at the plate — ends the runner cam
-        // rather than cutting to someone else.
+        // runner who scored leaves the field at the plate — ends the runner
+        // cam rather than cutting to someone else.
         let subject = match rig.runner_subject {
-            Some((e, dest)) => rigs.get(e).is_ok().then_some((e, dest)),
+            Some((e, dest)) => (rigs.get(e).is_ok() && !departed.contains(e)).then_some((e, dest)),
             None if rig.runner_shown => None,
             // Too little of the throw left to be worth a shot of its own:
             // release the hold and let the base cam have it.

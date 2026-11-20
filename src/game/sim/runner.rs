@@ -69,7 +69,7 @@ struct DespawnAtPathEnd;
 /// because the instant replay ([`crate::game::replay`]) of the play he scored
 /// on still has to draw him.
 #[derive(Component)]
-struct Departed;
+pub(crate) struct Departed;
 
 /// A freshly spawned run-out rig waiting (hidden) at the plate while the
 /// real batter finishes the swing follow-through — or admires the home run.
@@ -744,9 +744,9 @@ fn run_out_pending_call(
     if let Some(ghost) = ghosts.iter().next() {
         commands
             .entity(ghost)
-            .remove::<BatterGhost>()
-            .remove::<DespawnAtPathEnd>()
-            .insert(Runner { base: batter_dest });
+            .remove::<(BatterGhost, DespawnAtPathEnd, Departed)>()
+            // He may already have reached first and left the field.
+            .insert((Runner { base: batter_dest }, Visibility::Inherited));
         if batter_dest > 0 {
             // Queued behind the leg to first that's already running.
             commands.entity(ghost).insert(BasePath {
