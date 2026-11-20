@@ -1,6 +1,6 @@
 //! The game intro (graphics plan task 15): on PLAY BALL the camera flies
 //! over the park for [`INTRO_SECS`], from high over centre field round the
-//! first-base side to behind the plate, and the lineup card
+//! third-base side to behind the plate, and the lineup card
 //! (`ui::lineup`) comes up for its second half.
 //!
 //! Presentation only, the same way a replay is: while it runs the gameplay
@@ -88,9 +88,9 @@ impl Intro {
 
 /// The flyover at `t` real seconds in: eye, look-at and lens. From high
 /// beyond centre field, looking in at the plate, it swings round the
-/// first-base side (+X) and settles low behind home looking out at the
-/// mound, eased in and out. `still` (reduce motion) holds the closing
-/// frame the whole time.
+/// third-base side (+X; first base sits at -X) and settles low behind
+/// home looking out at the mound, eased in and out. `still` (reduce
+/// motion) holds the closing frame the whole time.
 pub fn flyover(t: f32, field: &FieldSpec, still: bool) -> (Vec3, Vec3, f32) {
     let f = if still {
         1.0
