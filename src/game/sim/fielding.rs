@@ -108,6 +108,12 @@ impl ActivePlay {
     // Read-only observer seams (the Coach and the debug panel read these;
     // nothing outside this module may steer the play through them).
 
+    /// The fielder holding the ball, if any (between a catch, gather or
+    /// received throw and the ball leaving his hand).
+    pub(crate) fn possessor(&self) -> Option<Entity> {
+        self.possessor
+    }
+
     /// When the live ball first touched down, on the contact clock (the
     /// fair/foul call point), if it has this play.
     pub(crate) fn landed_at(&self) -> Option<f32> {

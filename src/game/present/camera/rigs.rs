@@ -18,8 +18,8 @@ use crate::game::variant::FieldSpec;
 
 use super::framing::{LENS_BRUSH_RADIUS, OCCLUSION_NEAR, OCCLUSION_RADIUS, brushes_lens, occludes};
 use super::shots::{
-    BallState, FIELDER_CAM_MIN_HEIGHT, PlayRead, RigMotion, RunnerFrame, Shot, ShotCues,
-    ShotInputs, pick_shot, runner_cam_wanted,
+    BallState, FIELDER_CAM_MIN_HEIGHT, PlayRead, RUNNER_CAM_MIN_START_SECS, RigMotion, RunnerFrame,
+    Shot, ShotCues, ShotInputs, pick_runner_subject, pick_shot, runner_cam_wanted, throw_secs_left,
 };
 use super::{
     BALL_FOLLOW_DELAY, BROADCAST_EYE, BROADCAST_FOV, BROADCAST_HOME_TARGET, CameraMode,
@@ -302,8 +302,14 @@ pub(super) fn broadcast_camera(
             .copied()
             .unwrap_or(Vec3::ZERO)
     };
+    // (A throw already in the receiver's glove is no long throw: the base
+    // cam takes it, whatever the clock says.)
     let long_throw = match (rig.thrown_base, rig.throw_from, ball_state) {
-        (Some(base), Some(from), Some(b)) if play.phase == Phase::InPlay && !play.is_home_run() => {
+        (Some(base), Some(from), Some(b))
+            if play.phase == Phase::InPlay
+                && !play.is_home_run()
+                && active.possessor().is_none() =>
+        {
             runner_cam_wanted(
                 from,
                 bag_at(base),
@@ -316,12 +322,15 @@ pub(super) fn broadcast_camera(
         _ => false,
     };
     // Pick the subject only once the call is decided: that is when the
-    // runners are re-pathed for it (this system runs after them), so a
-    // runner aboard no longer reads his old bag.
+    // runners are re-pathed for it. Flow runs before Fielding, so it reads
+    // the throw and decides the call the frame after it; the re-path's
+    // commands are flushed before this system (it runs after
+    // `GameplayOrder::Rigs`), so the pick lands on that second frame. The
+    // one frame between holds the shot already up (ball-follow or the
+    // ground-ball shot), so nothing flashes.
     let runner_cam = if long_throw && play.pending_call().is_some() {
         let base = rig.thrown_base.expect("long_throw needs a throw");
         let thrown_bag = bag_at(base);
-        let flat = |v: Vec3| v.with_y(0.0);
         // Picked once per throw, then kept (a runner on a triple races on
         // past the bag the throw went to). A subject that is gone — a
         // runner scoring despawns at the plate — ends the runner cam
@@ -329,24 +338,24 @@ pub(super) fn broadcast_camera(
         let subject = match rig.runner_subject {
             Some((e, dest)) => rigs.get(e).is_ok().then_some((e, dest)),
             None if rig.runner_shown => None,
-            None => {
-                // Every rig still running a base path — runners aboard,
-                // the batter, a runner scoring or about to be cut down:
-                // the one bound for the thrown-to bag first, else the one
-                // nearest it (on a double the throw can go in behind the
-                // batter, to first).
-                paths
-                    .iter()
-                    .filter_map(|(e, path)| {
-                        let at = rigs.get(e).ok()?.translation;
-                        let dest = path.destination()?;
-                        let bound_elsewhere =
-                            flat(dest).distance(flat(thrown_bag)) > RUNNER_ARRIVED;
-                        Some((e, dest, bound_elsewhere, at.distance(thrown_bag)))
-                    })
-                    .min_by(|a, b| a.2.cmp(&b.2).then(a.3.total_cmp(&b.3)))
-                    .map(|(e, dest, _, _)| (e, dest))
+            // Too little of the throw left to be worth a shot of its own:
+            // release the hold and let the base cam have it.
+            None if ball_state.is_some_and(|b| {
+                throw_secs_left(thrown_bag, b.pos, b.vel) < RUNNER_CAM_MIN_START_SECS
+            }) =>
+            {
+                rig.runner_shown = true;
+                None
             }
+            // Every rig still running a base path — runners aboard, the
+            // batter, a runner scoring or about to be cut down.
+            None => pick_runner_subject(
+                paths.iter().filter_map(|(e, path)| {
+                    Some((e, rigs.get(e).ok()?.translation, path.destination()?))
+                }),
+                thrown_bag,
+                RUNNER_ARRIVED,
+            ),
         };
         if subject.is_some() {
             rig.runner_subject = subject;

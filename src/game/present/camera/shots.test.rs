@@ -164,6 +164,75 @@ fn the_runner_cam_comes_before_the_base_cam() {
     assert_eq!(pick_shot(&c, None), Shot::BallFollow);
 }
 
+/// The call never lands on the runner cam: a result reached while it is up
+/// cuts to the bag the throw went to.
+#[test]
+fn a_call_on_the_runner_cam_lands_at_the_bag() {
+    let runner = Entity::from_raw_u32(11).unwrap();
+    let mut c = cues(Phase::Result);
+    c.thrown_base = Some(2);
+    assert_eq!(
+        pick_shot(&c, Some(Shot::RunnerCam(runner))),
+        Shot::BaseCam(2)
+    );
+    c.thrown_base = None;
+    assert_eq!(
+        pick_shot(&c, Some(Shot::RunnerCam(runner))),
+        Shot::BallFollow
+    );
+    // Any other shot is still kept for the call.
+    c.thrown_base = Some(2);
+    assert_eq!(pick_shot(&c, Some(Shot::BaseCam(2))), Shot::BaseCam(2));
+}
+
+/// The runner cam's subject: the runner bound for the thrown-to bag beats
+/// a nearer one bound elsewhere; with nobody bound there, the nearest.
+#[test]
+fn the_runner_cam_picks_the_runner_bound_for_the_bag() {
+    let field = VariantId::Standard.field();
+    let (first, second, third) = (
+        field.base_positions[0],
+        field.base_positions[1],
+        field.base_positions[2],
+    );
+    let batter = Entity::from_raw_u32(1).unwrap();
+    let lead = Entity::from_raw_u32(2).unwrap();
+    // The batter, just past first, heads for second; the lead runner,
+    // nearer third than the batter is to it, is bound home.
+    let racing = [
+        (batter, first.lerp(second, 0.2), second),
+        (lead, third * 0.9, Vec3::ZERO),
+    ];
+    assert_eq!(
+        pick_runner_subject(racing, third, 1.0),
+        Some((lead, Vec3::ZERO)),
+        "nobody bound for third: the nearest"
+    );
+    assert_eq!(
+        pick_runner_subject(racing, second, 1.0),
+        Some((batter, second)),
+        "the batter is the one bound for second"
+    );
+    assert_eq!(pick_runner_subject([], second, 1.0), None);
+    // A bag at the runner's feet within `arrived` still counts as his.
+    let near = [(lead, third, third + Vec3::X * 0.5), (batter, third, first)];
+    assert_eq!(
+        pick_runner_subject(near, third, 1.0),
+        Some((lead, third + Vec3::X * 0.5))
+    );
+}
+
+/// Seconds left on a throw: distance over flat speed, a vertical or
+/// stopped ball never arrives.
+#[test]
+fn throw_secs_left_reads_flat_speed() {
+    let bag = Vec3::new(0.0, 0.0, 30.0);
+    let t = throw_secs_left(bag, Vec3::new(0.0, 3.0, 0.0), Vec3::new(0.0, -9.0, 15.0));
+    assert!((t - 2.0).abs() < 1e-5, "{t}");
+    assert!(throw_secs_left(bag, Vec3::ZERO, Vec3::Y * 5.0).is_infinite());
+    const { assert!(RUNNER_CAM_MIN_START_SECS > RUNNER_CAM_HANDOFF_SECS) };
+}
+
 /// Only a throw from the outfield takes the runner cam, only while the
 /// ball is still well out, and never back once the base cam is up.
 #[test]
